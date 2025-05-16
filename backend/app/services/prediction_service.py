@@ -1,386 +1,396 @@
 """
-Prediction Service
-
-This module provides a service for generating and managing predictions.
-It implements efficient database storage and caching to minimize API calls.
+Prediction service for managing predictions.
 """
 
-import os
-import json
 import logging
+import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
-import pandas as pd
-import numpy as np
+from typing import List, Dict, Any, Optional, Tuple
 
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
-from app.database.models.fixture import Fixture
-from app.database.models.prediction import Prediction
-from app.services.api_football_client import api_football_client
-from app.ml.football_prediction_model import football_prediction_model
-from app.config import settings
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+from app.models.prediction import Prediction
+from app.models.fixture import Fixture
+
 logger = logging.getLogger(__name__)
 
 class PredictionService:
-    """
-    Service for generating and managing predictions.
-    
-    Features:
-    - Generates predictions for today's fixtures
-    - Categorizes predictions by odds value
-    - Provides best picks for different odds categories
-    - Generates rollover predictions
-    - Implements database caching to minimize API calls and ML processing
-    """
-    
-    def __init__(self):
-        """Initialize the prediction service."""
-        self.cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), settings.CACHE_DIR)
-        os.makedirs(self.cache_dir, exist_ok=True)
-        self.last_update = None
-        self.update_interval = timedelta(hours=6)  # Longer interval to reduce API calls
-    
-    async def get_todays_fixtures(self, db: Session, force_update: bool = False) -> List[Fixture]:
-        """
-        Get today's fixtures from the database or API.
-        
-        Args:
-            db: Database session
-            force_update: Whether to force an update from the API
-        
-        Returns:
-            List of Fixture objects
-        """
-        today = datetime.now().strftime("%Y-%m-%d")
-        
-        # Check if we need to update
-        if not force_update and self.last_update and datetime.now() - self.last_update < self.update_interval:
-            # Get fixtures from database
-            fixtures = db.query(Fixture).filter(Fixture.match_date.like(f"{today}%")).all()
-            
-            if fixtures:
-                logger.info(f"Using database fixtures for {today}")
-                return fixtures
-        
-        # Fetch fixtures from API and save to database
-        logger.info(f"Fetching fixtures for {today} from API")
-        api_fixtures = await api_football_client.get_fixtures(db, date=today, force_update=force_update)
-        
-        if not api_fixtures:
-            logger.warning(f"No fixtures found for {today}")
-            return []
-        
-        # Save fixtures to database
-        fixtures = await api_football_client.save_fixtures_to_db(api_fixtures, db)
-        
-        # Update last update time
-        self.last_update = datetime.now()
-        
-        return fixtures
-    
-    async def generate_predictions(self, db: Session, force_update: bool = False) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Generate predictions for today's fixtures.
-        Prioritizes database lookup before generating new predictions.
-        
-        Args:
-            db: Database session
-            force_update: Whether to force an update
-        
-        Returns:
-            Dictionary with predictions grouped by category
-        """
-        today = datetime.now().strftime("%Y-%m-%d")
-        
-        # Check if we need to update
-        if not force_update:
-            # Try to get predictions from database first
-            db_predictions = self._get_predictions_from_db(db, today)
-            
-            if db_predictions:
-                logger.info(f"Using database predictions for {today}")
-                return db_predictions
-        
-        # Check file cache
-        cache_file = os.path.join(self.cache_dir, f"predictions_{today}.json")
-        
-        if not force_update and os.path.exists(cache_file):
-            try:
-                with open(cache_file, "r") as f:
-                    cached_predictions = json.load(f)
-                
-                logger.info(f"Using cached predictions for {today}")
-                return cached_predictions
-            except Exception as e:
-                logger.error(f"Error reading cached predictions: {str(e)}")
-        
-        # Get today's fixtures
-        fixtures = await self.get_todays_fixtures(db, force_update)
-        
-        if not fixtures:
-            logger.warning(f"No fixtures found for {today}")
-            return {
-                "2_odds": [],
-                "5_odds": [],
-                "10_odds": [],
-                "rollover": []
-            }
-        
-        # Generate predictions for each fixture
-        all_predictions = []
-        
-        for fixture in fixtures:
-            # Skip fixtures that have already started or finished
-            if fixture.status not in ["NS", "TBD", "SCHEDULED"]:
-                continue
-            
-            # Check if we already have predictions for this fixture
-            existing_predictions = db.query(Prediction).filter(Prediction.fixture_id == fixture.id).all()
-            
-            if existing_predictions and not force_update:
-                all_predictions.extend(existing_predictions)
-                continue
-            
-            # Generate prediction
-            prediction_result = football_prediction_model.predict(fixture.additional_data)
-            
-            if prediction_result["status"] != "success":
-                logger.warning(f"Error generating prediction for fixture {fixture.id}: {prediction_result.get('message')}")
-                continue
-            
-            # Create prediction objects
-            for pred_data in prediction_result["predictions"]:
-                prediction = Prediction(
-                    fixture_id=fixture.id,
-                    prediction_type=pred_data["prediction_type"],
-                    prediction=pred_data["prediction"],
-                    odds=pred_data["odds"],
-                    confidence=pred_data["confidence"],
-                    explanation=pred_data["explanation"],
-                    source="ml_model",
-                    status="pending"
-                )
-                
-                db.add(prediction)
-                all_predictions.append(prediction)
-        
-        # Commit changes
-        db.commit()
-        
-        # Categorize predictions
-        categorized = self._categorize_predictions(all_predictions)
-        
-        # Generate rollover predictions
-        rollover = self._generate_rollover_predictions(all_predictions)
-        categorized["rollover"] = rollover
-        
-        # Cache predictions
-        try:
-            with open(cache_file, "w") as f:
-                json.dump(categorized, f, default=self._json_serializer)
-            
-            logger.info(f"Cached predictions for {today}")
-        except Exception as e:
-            logger.error(f"Error caching predictions: {str(e)}")
-        
-        return categorized
-    
-    def _get_predictions_from_db(self, db: Session, date: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
-        """
-        Get predictions from the database.
-        
-        Args:
-            db: Database session
-            date: Date in format YYYY-MM-DD
-        
-        Returns:
-            Dictionary with predictions grouped by category or None if not found
-        """
-        try:
-            # Get fixtures for the date
-            fixtures = db.query(Fixture).filter(Fixture.match_date.like(f"{date}%")).all()
-            
-            if not fixtures:
-                return None
-            
-            # Get predictions for these fixtures
-            fixture_ids = [fixture.id for fixture in fixtures]
-            predictions = db.query(Prediction).filter(Prediction.fixture_id.in_(fixture_ids)).all()
-            
-            if not predictions:
-                return None
-            
-            # Categorize predictions
-            categorized = self._categorize_predictions(predictions)
-            
-            # Generate rollover predictions
-            rollover = self._generate_rollover_predictions(predictions)
-            categorized["rollover"] = rollover
-            
-            return categorized
-        
-        except Exception as e:
-            logger.error(f"Error getting predictions from database: {str(e)}")
-            return None
-    
-    def _categorize_predictions(self, predictions: List[Prediction]) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Categorize predictions by odds value.
-        
-        Args:
-            predictions: List of Prediction objects
-        
-        Returns:
-            Dictionary with predictions grouped by category
-        """
-        # Convert predictions to dictionaries
-        pred_dicts = [self._prediction_to_dict(p) for p in predictions]
-        
-        # Filter and sort predictions for each category
-        categories = {}
-        
-        # 2 odds category
-        two_odds_config = settings.ODDS_CATEGORIES["2_odds"]
-        two_odds = [p for p in pred_dicts if 
-                   two_odds_config["min_odds"] <= p["odds"] <= two_odds_config["max_odds"] and
-                   p["confidence"] >= two_odds_config["min_confidence"]]
-        two_odds.sort(key=lambda p: p["confidence"], reverse=True)
-        categories["2_odds"] = two_odds[:two_odds_config["limit"]]
-        
-        # 5 odds category
-        five_odds_config = settings.ODDS_CATEGORIES["5_odds"]
-        five_odds = [p for p in pred_dicts if 
-                    five_odds_config["min_odds"] <= p["odds"] <= five_odds_config["max_odds"] and
-                    p["confidence"] >= five_odds_config["min_confidence"]]
-        # Sort by expected value (confidence * odds)
-        five_odds.sort(key=lambda p: p["confidence"] * p["odds"], reverse=True)
-        categories["5_odds"] = five_odds[:five_odds_config["limit"]]
-        
-        # 10 odds category
-        ten_odds_config = settings.ODDS_CATEGORIES["10_odds"]
-        ten_odds = [p for p in pred_dicts if 
-                   ten_odds_config["min_odds"] <= p["odds"] <= ten_odds_config["max_odds"] and
-                   p["confidence"] >= ten_odds_config["min_confidence"]]
-        # Sort by confidence
-        ten_odds.sort(key=lambda p: p["confidence"], reverse=True)
-        categories["10_odds"] = ten_odds[:ten_odds_config["limit"]]
-        
-        return categories
-    
-    def _generate_rollover_predictions(self, predictions: List[Prediction]) -> List[Dict[str, Any]]:
-        """
-        Generate rollover predictions.
-        
-        Args:
-            predictions: List of Prediction objects
-        
-        Returns:
-            List of rollover predictions
-        """
-        rollover_config = settings.ODDS_CATEGORIES["rollover"]
-        
-        # Convert predictions to dictionaries
-        pred_dicts = [self._prediction_to_dict(p) for p in predictions]
-        
-        # Filter predictions for rollover
-        rollover_candidates = [p for p in pred_dicts if 
-                              rollover_config["min_odds"] <= p["odds"] <= rollover_config["max_odds"] and
-                              p["confidence"] >= rollover_config["min_confidence"]]
-        
-        # Sort by confidence
-        rollover_candidates.sort(key=lambda p: p["confidence"], reverse=True)
-        
-        # Get top candidates
-        top_candidates = rollover_candidates[:10]
-        
-        if len(top_candidates) < 2:
-            return []
-        
-        # Find the best combination of 2-3 predictions with combined odds close to target
-        best_combo = None
-        best_diff = float('inf')
-        target_odds = rollover_config["target_combined_odds"]
-        
-        # Try combinations of 2 predictions
-        for i in range(len(top_candidates)):
-            for j in range(i+1, len(top_candidates)):
-                # Skip if same fixture
-                if top_candidates[i]["fixture_id"] == top_candidates[j]["fixture_id"]:
-                    continue
-                
-                combined_odds = top_candidates[i]["odds"] * top_candidates[j]["odds"]
-                diff = abs(combined_odds - target_odds)
-                
-                if diff < best_diff:
-                    best_diff = diff
-                    best_combo = [top_candidates[i], top_candidates[j]]
-        
-        # Try combinations of 3 predictions
-        for i in range(len(top_candidates)):
-            for j in range(i+1, len(top_candidates)):
-                for k in range(j+1, len(top_candidates)):
-                    # Skip if same fixture
-                    if (top_candidates[i]["fixture_id"] == top_candidates[j]["fixture_id"] or
-                        top_candidates[i]["fixture_id"] == top_candidates[k]["fixture_id"] or
-                        top_candidates[j]["fixture_id"] == top_candidates[k]["fixture_id"]):
-                        continue
-                    
-                    combined_odds = top_candidates[i]["odds"] * top_candidates[j]["odds"] * top_candidates[k]["odds"]
-                    diff = abs(combined_odds - target_odds)
-                    
-                    if diff < best_diff:
-                        best_diff = diff
-                        best_combo = [top_candidates[i], top_candidates[j], top_candidates[k]]
-        
-        if best_combo:
-            # Calculate combined odds
-            combined_odds = 1
-            for p in best_combo:
-                combined_odds *= p["odds"]
-            
-            # Add combined odds to each prediction
-            for p in best_combo:
-                p["combined_odds"] = round(combined_odds, 2)
-            
-            return best_combo
-        
-        return []
-    
-    def _prediction_to_dict(self, prediction: Prediction) -> Dict[str, Any]:
-        """
-        Convert a Prediction object to a dictionary.
-        
-        Args:
-            prediction: Prediction object
-        
-        Returns:
-            Dictionary representation of the prediction
-        """
-        return {
-            "id": prediction.id,
-            "fixture_id": prediction.fixture_id,
-            "prediction_type": prediction.prediction_type,
-            "prediction": prediction.prediction,
-            "odds": prediction.odds,
-            "confidence": prediction.confidence,
-            "explanation": prediction.explanation,
-            "category": prediction.category,
-            "source": prediction.source,
-            "status": prediction.status,
-            "created_at": prediction.created_at.isoformat() if prediction.created_at else None,
-            "updated_at": prediction.updated_at.isoformat() if prediction.updated_at else None,
-            "fixture": prediction.fixture.to_dict() if prediction.fixture else None
-        }
-    
-    def _json_serializer(self, obj):
-        """JSON serializer for objects not serializable by default json code."""
-        if isinstance(obj, (datetime, pd.Timestamp)):
-            return obj.isoformat()
-        raise TypeError(f"Type {type(obj)} not serializable")
+    """Service for managing predictions."""
 
-# Create a singleton instance
-prediction_service = PredictionService()
+    def __init__(self, db: Session):
+        """Initialize the service with a database session."""
+        self.db = db
+
+    def get_prediction_by_id(self, prediction_id: int) -> Optional[Prediction]:
+        """Get a prediction by ID."""
+        return self.db.query(Prediction).filter(Prediction.id == prediction_id).first()
+
+    def get_predictions_by_fixture_id(self, fixture_id: int) -> List[Prediction]:
+        """Get predictions for a fixture."""
+        return self.db.query(Prediction).filter(Prediction.fixture_id == fixture_id).all()
+
+    def get_predictions_by_date(self, date: datetime) -> List[Prediction]:
+        """Get predictions for a specific date."""
+        start_date = datetime(date.year, date.month, date.day, 0, 0, 0)
+        end_date = start_date + timedelta(days=1)
+
+        return self.db.query(Prediction).join(Fixture).filter(
+            Fixture.date >= start_date,
+            Fixture.date < end_date
+        ).all()
+
+    def get_predictions_by_category(self, category: str) -> List[Prediction]:
+        """Get predictions by category (2_odds, 5_odds, 10_odds, rollover)."""
+        return self.db.query(Prediction).filter(Prediction.prediction_type == category).all()
+
+    def create_prediction(self, prediction_data: Dict[str, Any]) -> Prediction:
+        """Create a new prediction."""
+        # Filter out fields that might not exist in the Prediction model
+        valid_fields = {
+            "fixture_id", "match_result_pred", "home_win_pred", "draw_pred",
+            "away_win_pred", "over_under_pred", "over_2_5_pred", "under_2_5_pred",
+            "btts_pred", "btts_yes_pred", "btts_no_pred"
+        }
+
+        # Only include fields that are known to exist in the model
+        filtered_data = {k: v for k, v in prediction_data.items() if k in valid_fields}
+
+        # Create the prediction with filtered data
+        prediction = Prediction(**filtered_data)
+        self.db.add(prediction)
+        self.db.commit()
+        self.db.refresh(prediction)
+        return prediction
+
+    def create_or_update_prediction(self, prediction_data: Dict[str, Any]) -> Prediction:
+        """Create or update a prediction."""
+        fixture_id = prediction_data.get("fixture_id")
+        prediction_type = prediction_data.get("prediction_type", "")
+
+        try:
+            # Check if prediction already exists
+            existing_prediction = self.db.query(Prediction).filter(
+                Prediction.fixture_id == fixture_id,
+                Prediction.prediction_type == prediction_type
+            ).first()
+        except Exception as e:
+            # If prediction_type column doesn't exist, try without it
+            try:
+                existing_prediction = self.db.query(Prediction).filter(
+                    Prediction.fixture_id == fixture_id
+                ).first()
+            except Exception as e2:
+                # If that also fails, assume no existing prediction
+                existing_prediction = None
+
+        if existing_prediction:
+            # Update existing prediction
+            for key, value in prediction_data.items():
+                if hasattr(existing_prediction, key):
+                    setattr(existing_prediction, key, value)
+            self.db.commit()
+            self.db.refresh(existing_prediction)
+            return existing_prediction
+        else:
+            # Create new prediction
+            return self.create_prediction(prediction_data)
+
+    def create_or_update_predictions(self, predictions_data: List[Dict[str, Any]]) -> List[Prediction]:
+        """Create or update multiple predictions."""
+        predictions = []
+        for prediction_data in predictions_data:
+            prediction = self.create_or_update_prediction(prediction_data)
+            predictions.append(prediction)
+        return predictions
+
+    def categorize_predictions(self, predictions: List[Prediction]) -> Dict[str, List[Prediction]]:
+        """
+        Categorize predictions into different odds categories.
+
+        Categories:
+        - 2_odds: Predictions with odds between 1.5 and 3.0
+        - 5_odds: Predictions with odds between 3.0 and 7.0
+        - 10_odds: Predictions with odds >= 7.0
+        - rollover: Predictions with rollover_day set
+        """
+        categorized = {
+            "2_odds": [],
+            "5_odds": [],
+            "10_odds": [],
+            "rollover": []
+        }
+
+        # First, update prediction types if needed
+        for prediction in predictions:
+            # Make sure all predictions have a type and odds
+            if not prediction.prediction_type or not prediction.odds:
+                if prediction.btts_pred == 'YES' and prediction.btts_yes_pred >= 0.7:
+                    prediction.prediction_type = 'btts'
+                    prediction.odds = 1.8
+                    prediction.confidence = prediction.btts_yes_pred
+                elif prediction.over_under_pred == 'OVER' and prediction.over_2_5_pred >= 0.7:
+                    prediction.prediction_type = 'over_2_5'
+                    prediction.odds = 1.9
+                    prediction.confidence = prediction.over_2_5_pred
+                elif prediction.match_result_pred == 'HOME' and prediction.home_win_pred >= 0.7:
+                    prediction.prediction_type = 'home_win'
+                    prediction.odds = 2.0
+                    prediction.confidence = prediction.home_win_pred
+                elif prediction.match_result_pred == 'DRAW' and prediction.draw_pred >= 0.7:
+                    prediction.prediction_type = 'draw'
+                    prediction.odds = 3.5
+                    prediction.confidence = prediction.draw_pred
+                elif prediction.match_result_pred == 'AWAY' and prediction.away_win_pred >= 0.7:
+                    prediction.prediction_type = 'away_win'
+                    prediction.odds = 3.0
+                    prediction.confidence = prediction.away_win_pred
+
+            # Now categorize based on odds
+            if prediction.rollover_day:
+                categorized["rollover"].append(prediction)
+            elif prediction.odds >= 7.0:
+                categorized["10_odds"].append(prediction)
+            elif prediction.odds >= 3.0:
+                categorized["5_odds"].append(prediction)
+            elif prediction.odds >= 1.5:
+                categorized["2_odds"].append(prediction)
+
+        # Save changes to database
+        self.db.commit()
+
+        return categorized
+
+    def create_prediction_combinations(self, predictions: List[Prediction], target_odds: float) -> List[Dict[str, Any]]:
+        """
+        Create combinations of predictions to reach target odds.
+
+        Args:
+            predictions: List of predictions to combine
+            target_odds: Target odds to reach
+
+        Returns:
+            List of combinations, each with predictions and combined odds
+        """
+        if not predictions:
+            return []
+
+        # Sort predictions by confidence (highest first)
+        sorted_predictions = sorted(predictions, key=lambda p: p.confidence or 0, reverse=True)
+
+        # Make sure we have unique fixtures (don't use multiple predictions from same fixture)
+        unique_fixture_preds = []
+        seen_fixtures = set()
+        for pred in sorted_predictions:
+            if pred.fixture_id not in seen_fixtures:
+                unique_fixture_preds.append(pred)
+                seen_fixtures.add(pred.fixture_id)
+
+        # Use the unique predictions list
+        sorted_predictions = unique_fixture_preds
+
+        combinations = []
+
+        # For 2 odds category, use single best prediction
+        if abs(target_odds - 2.0) < 0.5:
+            # Just use the best single prediction
+            if sorted_predictions:
+                pred = sorted_predictions[0]
+                combo_id = str(uuid.uuid4())
+                pred.combo_id = combo_id
+                pred.combined_odds = pred.odds
+                pred.combined_confidence = pred.confidence
+
+                combinations.append({
+                    "id": combo_id,
+                    "predictions": [pred.to_dict()],
+                    "combined_odds": pred.odds,
+                    "combined_confidence": pred.confidence
+                })
+
+                # Add a few more single predictions if available
+                for i in range(1, min(3, len(sorted_predictions))):
+                    pred = sorted_predictions[i]
+                    combo_id = str(uuid.uuid4())
+                    pred.combo_id = combo_id
+                    pred.combined_odds = pred.odds
+                    pred.combined_confidence = pred.confidence
+
+                    combinations.append({
+                        "id": combo_id,
+                        "predictions": [pred.to_dict()],
+                        "combined_odds": pred.odds,
+                        "combined_confidence": pred.confidence
+                    })
+
+        # For 5 odds category, use pairs of predictions
+        elif abs(target_odds - 5.0) < 0.5:
+            # Try pairs of predictions
+            for i in range(len(sorted_predictions)):
+                for j in range(i + 1, len(sorted_predictions)):
+                    pred1 = sorted_predictions[i]
+                    pred2 = sorted_predictions[j]
+                    combined_odds = pred1.odds * pred2.odds
+
+                    if 4.0 <= combined_odds <= 6.0:
+                        combo_id = str(uuid.uuid4())
+                        pred1.combo_id = combo_id
+                        pred2.combo_id = combo_id
+
+                        # Calculate combined confidence
+                        combined_confidence = (pred1.confidence + pred2.confidence) / 2
+
+                        pred1.combined_odds = combined_odds
+                        pred2.combined_odds = combined_odds
+                        pred1.combined_confidence = combined_confidence
+                        pred2.combined_confidence = combined_confidence
+
+                        combinations.append({
+                            "id": combo_id,
+                            "predictions": [pred1.to_dict(), pred2.to_dict()],
+                            "combined_odds": combined_odds,
+                            "combined_confidence": combined_confidence
+                        })
+
+        # For 10 odds category, use 3-4 predictions
+        elif abs(target_odds - 10.0) < 1.0:
+            # Try combinations of 3-4 predictions
+            if len(sorted_predictions) >= 4:
+                # Use top 4 predictions
+                preds = sorted_predictions[:4]
+                combined_odds = preds[0].odds * preds[1].odds * preds[2].odds * preds[3].odds
+                combo_id = str(uuid.uuid4())
+
+                for pred in preds:
+                    pred.combo_id = combo_id
+                    pred.combined_odds = combined_odds
+
+                # Calculate combined confidence
+                combined_confidence = sum(p.confidence for p in preds) / len(preds)
+
+                for pred in preds:
+                    pred.combined_confidence = combined_confidence
+
+                combinations.append({
+                    "id": combo_id,
+                    "predictions": [p.to_dict() for p in preds],
+                    "combined_odds": combined_odds,
+                    "combined_confidence": combined_confidence
+                })
+            elif len(sorted_predictions) >= 3:
+                # Use top 3 predictions
+                preds = sorted_predictions[:3]
+                combined_odds = preds[0].odds * preds[1].odds * preds[2].odds
+                combo_id = str(uuid.uuid4())
+
+                for pred in preds:
+                    pred.combo_id = combo_id
+                    pred.combined_odds = combined_odds
+
+                # Calculate combined confidence
+                combined_confidence = sum(p.confidence for p in preds) / len(preds)
+
+                for pred in preds:
+                    pred.combined_confidence = combined_confidence
+
+                combinations.append({
+                    "id": combo_id,
+                    "predictions": [p.to_dict() for p in preds],
+                    "combined_odds": combined_odds,
+                    "combined_confidence": combined_confidence
+                })
+
+        # For rollover, create a 3-day rollover with one prediction per day
+        elif target_odds == 3.0 and len(sorted_predictions) >= 3:
+            # Use top 3 predictions for a 3-day rollover
+            for i, day in enumerate(range(1, 4)):
+                if i < len(sorted_predictions):
+                    pred = sorted_predictions[i]
+                    pred.rollover_day = day
+                    combo_id = f"rollover_day_{day}"
+                    pred.combo_id = combo_id
+
+                    combinations.append({
+                        "id": combo_id,
+                        "day": day,
+                        "predictions": [pred.to_dict()],
+                        "combined_odds": pred.odds,
+                        "combined_confidence": pred.confidence
+                    })
+
+        # If we still don't have combinations, try the original approach
+        if not combinations:
+            # Try combinations of 1-3 predictions
+            for i in range(len(sorted_predictions)):
+                # Single prediction
+                pred1 = sorted_predictions[i]
+                if abs(pred1.odds - target_odds) <= 0.5:
+                    combo_id = str(uuid.uuid4())
+                    pred1.combo_id = combo_id
+                    pred1.combined_odds = pred1.odds
+                    pred1.combined_confidence = pred1.confidence
+
+                    combinations.append({
+                        "id": combo_id,
+                        "predictions": [pred1.to_dict()],
+                        "combined_odds": pred1.odds,
+                        "combined_confidence": pred1.confidence
+                    })
+
+                # Try pairs
+                for j in range(i + 1, len(sorted_predictions)):
+                    pred2 = sorted_predictions[j]
+                    combined_odds = pred1.odds * pred2.odds
+
+                    if abs(combined_odds - target_odds) <= 1.0:
+                        combo_id = str(uuid.uuid4())
+                        pred1.combo_id = combo_id
+                        pred2.combo_id = combo_id
+
+                        # Calculate combined confidence
+                        combined_confidence = (pred1.confidence + pred2.confidence) / 2
+
+                        pred1.combined_odds = combined_odds
+                        pred2.combined_odds = combined_odds
+                        pred1.combined_confidence = combined_confidence
+                        pred2.combined_confidence = combined_confidence
+
+                        combinations.append({
+                            "id": combo_id,
+                            "predictions": [pred1.to_dict(), pred2.to_dict()],
+                            "combined_odds": combined_odds,
+                            "combined_confidence": combined_confidence
+                        })
+
+                    # Try triplets
+                    for k in range(j + 1, len(sorted_predictions)):
+                        pred3 = sorted_predictions[k]
+                        combined_odds = pred1.odds * pred2.odds * pred3.odds
+
+                        if abs(combined_odds - target_odds) <= 1.5:
+                            combo_id = str(uuid.uuid4())
+                            pred1.combo_id = combo_id
+                            pred2.combo_id = combo_id
+                            pred3.combo_id = combo_id
+
+                            # Calculate combined confidence
+                            combined_confidence = (pred1.confidence + pred2.confidence + pred3.confidence) / 3
+
+                            pred1.combined_odds = combined_odds
+                            pred2.combined_odds = combined_odds
+                            pred3.combined_odds = combined_odds
+                            pred1.combined_confidence = combined_confidence
+                            pred2.combined_confidence = combined_confidence
+                            pred3.combined_confidence = combined_confidence
+
+                            combinations.append({
+                                "id": combo_id,
+                                "predictions": [pred1.to_dict(), pred2.to_dict(), pred3.to_dict()],
+                                "combined_odds": combined_odds,
+                                "combined_confidence": combined_confidence
+                            })
+
+        # Save changes to database
+        self.db.commit()
+
+        # Sort combinations by combined confidence (highest first)
+        return sorted(combinations, key=lambda c: c["combined_confidence"], reverse=True)

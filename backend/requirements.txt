@@ -6,9 +6,9 @@ requests==2.31.0
 pandas==2.0.1
 numpy==1.24.3
 scikit-learn==1.2.2
-xgboost==1.7.5
-lightgbm==3.3.5
-catboost==1.2.2
+xgboost==1.7.5  # Enhanced ensemble models
+lightgbm==3.3.5  # Enhanced ensemble models
+catboost==1.2.2  # Additional gradient boosting library
 matplotlib==3.7.1
 seaborn==0.12.2
 joblib==1.2.0
