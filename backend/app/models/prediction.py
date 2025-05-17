@@ -154,21 +154,4 @@ class Prediction(Base):
             btts_no_pred=prediction_data["btts_no_pred"]
         )
 
-    def to_dict(self):
-        """Convert to dictionary."""
-        return {
-            "id": self.id,
-            "fixture_id": self.fixture_id,
-            "match_result_pred": self.match_result_pred,
-            "home_win_pred": self.home_win_pred,
-            "draw_pred": self.draw_pred,
-            "away_win_pred": self.away_win_pred,
-            "over_under_pred": self.over_under_pred,
-            "over_2_5_pred": self.over_2_5_pred,
-            "under_2_5_pred": self.under_2_5_pred,
-            "btts_pred": self.btts_pred,
-            "btts_yes_pred": self.btts_yes_pred,
-            "btts_no_pred": self.btts_no_pred,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat()
-        }
+

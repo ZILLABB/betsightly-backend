@@ -9,6 +9,7 @@ scikit-learn==1.2.2
 xgboost==1.7.5  # Enhanced ensemble models
 lightgbm==3.3.5  # Enhanced ensemble models
 catboost==1.2.2  # Additional gradient boosting library
+tensorflow==2.15.0  # Neural networks and LSTM models
 matplotlib==3.7.1
 seaborn==0.12.2
 joblib==1.2.0

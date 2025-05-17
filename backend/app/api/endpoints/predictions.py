@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.prediction import Prediction
-from app.services.prediction_service import PredictionService
+from app.services.prediction_service_improved import PredictionService
+from app.services.advanced_prediction_service import AdvancedPredictionService
 
 router = APIRouter()
 
@@ -501,4 +502,80 @@ def get_prediction(
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
 
-    return prediction.to_dict()
+    return prediction
+
+@router.get("/advanced")
+def get_advanced_predictions(
+    db: Session = Depends(get_db),
+    date: Optional[date] = None,
+    force_update: bool = Query(False, description="Force update from API instead of using cache")
+):
+    """
+    Get predictions using advanced ML models.
+
+    This endpoint uses more sophisticated ML models (XGBoost, LightGBM, Neural Networks, LSTM)
+    instead of the basic ensemble models for more accurate predictions with better confidence calibration.
+
+    Args:
+        date: Date to get predictions for (default: today)
+        force_update: Whether to force an update from the API (default: False)
+    """
+    # Initialize the advanced prediction service
+    advanced_prediction_service = AdvancedPredictionService(db)
+
+    # Get predictions for the specified date or today
+    if date:
+        date_str = date.strftime("%Y-%m-%d")
+    else:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    # Get predictions using advanced ML models
+    predictions = advanced_prediction_service.get_predictions_for_date(
+        date=date_str,
+        force_update=force_update
+    )
+
+    return predictions
+
+@router.get("/advanced/best/{category}")
+def get_advanced_best_predictions_by_category(
+    category: str,
+    db: Session = Depends(get_db),
+    date: Optional[date] = None,
+    limit: int = Query(3, description="Maximum number of predictions to return")
+):
+    """
+    Get the best predictions for a specific category using advanced ML models.
+
+    Args:
+        category: Category to get predictions for (2_odds, 5_odds, 10_odds)
+        date: Date to get predictions for (default: today)
+        limit: Maximum number of predictions to return (default: 3)
+    """
+    # Initialize the advanced prediction service
+    advanced_prediction_service = AdvancedPredictionService(db)
+
+    # Validate category
+    valid_categories = ["2_odds", "5_odds", "10_odds"]
+    if category not in valid_categories:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
+        )
+
+    # Get predictions for the specified date or today
+    if date:
+        date_str = date.strftime("%Y-%m-%d")
+    else:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    # Get predictions using advanced ML models
+    predictions = advanced_prediction_service.get_predictions_for_date(date=date_str)
+
+    # Extract the requested category
+    category_predictions = predictions.get("categories", {}).get(category, [])
+
+    # Limit the number of predictions
+    limited_predictions = category_predictions[:limit]
+
+    return limited_predictions.to_dict()

@@ -53,7 +53,7 @@ def health_check():
 def debug_predictions():
     """Debug endpoint to check predictions data."""
     from app.database import get_db
-    from app.services.prediction_service import PredictionService
+    from app.services.prediction_service_improved import PredictionService
 
     # Get database session
     db = next(get_db())
@@ -62,41 +62,18 @@ def debug_predictions():
     prediction_service = PredictionService(db)
 
     # Get all predictions by date (today)
-    today_predictions = prediction_service.get_predictions_by_date(datetime.now())
-
-    # Categorize predictions
-    categorized = prediction_service.categorize_predictions(today_predictions)
-
-    # Create combinations
-    combinations = {}
-    if categorized["2_odds"]:
-        combinations["2_odds"] = prediction_service.create_prediction_combinations(
-            categorized["2_odds"], 2.0
-        )
-    if categorized["5_odds"]:
-        combinations["5_odds"] = prediction_service.create_prediction_combinations(
-            categorized["5_odds"], 5.0
-        )
-    if categorized["10_odds"]:
-        combinations["10_odds"] = prediction_service.create_prediction_combinations(
-            categorized["10_odds"], 10.0
-        )
+    today_date = datetime.now().strftime("%Y-%m-%d")
+    predictions_data = prediction_service.get_predictions_for_date(today_date)
 
     # Return debug info
     return {
-        "today_predictions": len(today_predictions),
-        "categorized": {
-            "2_odds": len(categorized["2_odds"]),
-            "5_odds": len(categorized["5_odds"]),
-            "10_odds": len(categorized["10_odds"]),
-            "rollover": len(categorized["rollover"])
+        "status": predictions_data.get("status", "unknown"),
+        "date": predictions_data.get("date", today_date),
+        "predictions_count": len(predictions_data.get("predictions", [])),
+        "categories": {
+            category: len(predictions)
+            for category, predictions in predictions_data.get("categories", {}).items()
         },
-        "combinations": {
-            "2_odds": len(combinations.get("2_odds", [])),
-            "5_odds": len(combinations.get("5_odds", [])),
-            "10_odds": len(combinations.get("10_odds", []))
-        },
-        "sample_prediction": today_predictions[0].to_dict() if today_predictions else None,
         "endpoints": {
             "all_predictions": "/api/predictions?categorized=true",
             "category_predictions": "/api/predictions/category/{category}",

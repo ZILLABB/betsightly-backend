@@ -721,7 +721,7 @@ def save_to_database(fixtures_df, predictions_df):
 
         from app.database import get_db
         from app.services.fixture_service import FixtureService
-        from app.services.prediction_service import PredictionService
+        from app.services.prediction_service_improved import PredictionService
 
         # Get database session
         db = next(get_db())
