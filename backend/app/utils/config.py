@@ -63,6 +63,19 @@ class MLSettings(BaseSettings):
         env_prefix = "ML_"
         case_sensitive = True
 
+
+
+class PunterSettings(BaseSettings):
+    """Punter configuration settings."""
+
+    CACHE_DIR: str = Field("punter_cache", env="PUNTER_CACHE_DIR")
+    MIN_PREDICTIONS: int = Field(10, env="PUNTER_MIN_PREDICTIONS")
+    DEFAULT_CONFIDENCE: float = Field(0.5, env="PUNTER_DEFAULT_CONFIDENCE")
+
+    class Config:
+        env_prefix = "PUNTER_"
+        case_sensitive = True
+
 class OddsCategories(BaseSettings):
     """Odds categories configuration."""
 
@@ -111,6 +124,7 @@ class Settings(BaseSettings):
     api_football: APIFootballSettings = APIFootballSettings()     # Fallback data source
     database: DatabaseSettings = DatabaseSettings()
     ml: MLSettings = MLSettings()
+    punter: PunterSettings = PunterSettings()
     odds_categories: OddsCategories = OddsCategories()
 
     model_config = {
@@ -128,11 +142,13 @@ class Settings(BaseSettings):
         self.ml.MODEL_DIR = os.path.join(self.BASE_DIR, self.ml.MODEL_DIR)
         self.ml.DATA_DIR = os.path.join(self.BASE_DIR, self.ml.DATA_DIR)
         self.ml.CACHE_DIR = os.path.join(self.BASE_DIR, self.ml.CACHE_DIR)
+        self.punter.CACHE_DIR = os.path.join(self.BASE_DIR, self.punter.CACHE_DIR)
 
         # Create directories if they don't exist
         os.makedirs(self.ml.MODEL_DIR, exist_ok=True)
         os.makedirs(self.ml.DATA_DIR, exist_ok=True)
         os.makedirs(self.ml.CACHE_DIR, exist_ok=True)
+        os.makedirs(self.punter.CACHE_DIR, exist_ok=True)
 
         # Convert odds categories to dictionary format for backward compatibility
         self.ODDS_CATEGORIES = {

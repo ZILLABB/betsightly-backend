@@ -12,7 +12,7 @@ from app.database import get_db
 from app.models.fixture import Fixture
 from app.models.prediction import Prediction
 from app.services.fixture_service import FixtureService
-from app.services.prediction_service import PredictionService
+from app.services.prediction_service_improved import PredictionService
 
 router = APIRouter()
 

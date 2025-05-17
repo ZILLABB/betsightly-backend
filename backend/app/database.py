@@ -13,9 +13,12 @@ from sqlalchemy.orm import sessionmaker
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Get database URL from environment variable or use default
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./football_predictions.db")
-DB_FILE = "./football_predictions.db"
+# Import settings
+from app.utils.config import settings
+
+# Get database URL from settings
+DATABASE_URL = settings.database.URL
+DB_FILE = DATABASE_URL.replace("sqlite:///", "")
 
 # Create engine
 engine = create_engine(
@@ -135,6 +138,9 @@ def init_db():
         # Import models to register them with the Base
         from app.models.fixture import Fixture
         from app.models.prediction import Prediction
+        from app.models.punter import Punter
+        from app.models.bookmaker import Bookmaker
+        from app.models.betting_code import BettingCode
 
         # Also create tables using SQLAlchemy
         Base.metadata.create_all(bind=engine)

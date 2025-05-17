@@ -134,18 +134,30 @@ class MatchResultModel(BaseModel):
             y_pred = self.model.predict(X_scaled)
             y_proba = self.model.predict_proba(X_scaled)
 
+            # Calibrate confidence scores
+            calibrated_proba = self.calibrate_confidence(y_proba)
+
             # Map predictions to labels
             labels = ["H", "D", "A"]
             predictions = [labels[p] for p in y_pred]
 
-            # Create confidence scores
-            confidence = [float(p.max()) * 100 for p in y_proba]
+            # Create confidence scores with calibrated probabilities
+            confidence = [float(p.max()) * 100 for p in calibrated_proba]
+
+            # Add uncertainty estimates
+            if hasattr(self.confidence_calibrator, 'get_confidence_with_uncertainty'):
+                _, uncertainty = self.confidence_calibrator.get_confidence_with_uncertainty(y_proba)
+                uncertainty_percent = [float(u) * 100 for u in uncertainty]
+            else:
+                # Default uncertainty estimate
+                uncertainty_percent = [min(100 - conf, 20) for conf in confidence]
 
             return {
                 "status": "success",
                 "predictions": predictions,
                 "confidence": confidence,
-                "probabilities": y_proba.tolist()
+                "uncertainty": uncertainty_percent,
+                "probabilities": calibrated_proba.tolist()
             }
 
         except Exception as e:
@@ -259,14 +271,26 @@ class OverUnderModel(BaseModel):
             y_pred = self.model.predict(X_scaled)
             y_proba = self.model.predict_proba(X_scaled)
 
-            # Create confidence scores
-            confidence = [float(p.max()) * 100 for p in y_proba]
+            # Calibrate confidence scores
+            calibrated_proba = self.calibrate_confidence(y_proba)
+
+            # Create confidence scores with calibrated probabilities
+            confidence = [float(p.max()) * 100 for p in calibrated_proba]
+
+            # Add uncertainty estimates
+            if hasattr(self.confidence_calibrator, 'get_confidence_with_uncertainty'):
+                _, uncertainty = self.confidence_calibrator.get_confidence_with_uncertainty(y_proba)
+                uncertainty_percent = [float(u) * 100 for u in uncertainty]
+            else:
+                # Default uncertainty estimate
+                uncertainty_percent = [min(100 - conf, 20) for conf in confidence]
 
             return {
                 "status": "success",
                 "predictions": y_pred.tolist(),
                 "confidence": confidence,
-                "probabilities": y_proba.tolist()
+                "uncertainty": uncertainty_percent,
+                "probabilities": calibrated_proba.tolist()
             }
 
         except Exception as e:
@@ -380,14 +404,26 @@ class BTTSModel(BaseModel):
             y_pred = self.model.predict(X_scaled)
             y_proba = self.model.predict_proba(X_scaled)
 
-            # Create confidence scores
-            confidence = [float(p.max()) * 100 for p in y_proba]
+            # Calibrate confidence scores
+            calibrated_proba = self.calibrate_confidence(y_proba)
+
+            # Create confidence scores with calibrated probabilities
+            confidence = [float(p.max()) * 100 for p in calibrated_proba]
+
+            # Add uncertainty estimates
+            if hasattr(self.confidence_calibrator, 'get_confidence_with_uncertainty'):
+                _, uncertainty = self.confidence_calibrator.get_confidence_with_uncertainty(y_proba)
+                uncertainty_percent = [float(u) * 100 for u in uncertainty]
+            else:
+                # Default uncertainty estimate
+                uncertainty_percent = [min(100 - conf, 20) for conf in confidence]
 
             return {
                 "status": "success",
                 "predictions": y_pred.tolist(),
                 "confidence": confidence,
-                "probabilities": y_proba.tolist()
+                "uncertainty": uncertainty_percent,
+                "probabilities": calibrated_proba.tolist()
             }
 
         except Exception as e:
@@ -504,6 +540,7 @@ class ImprovedEnsembleModel:
                 "prediction_type": "Match Result",
                 "prediction": match_result_pred["predictions"][0],
                 "confidence": match_result_pred["confidence"][0],
+                "uncertainty": match_result_pred.get("uncertainty", [10])[0],
                 "explanation": self._get_match_result_explanation(
                     match_result_pred["predictions"][0],
                     match_result_pred["confidence"][0],
@@ -517,6 +554,7 @@ class ImprovedEnsembleModel:
                 "prediction_type": "Over/Under 2.5",
                 "prediction": "Over" if over_under_pred["predictions"][0] == 1 else "Under",
                 "confidence": over_under_pred["confidence"][0],
+                "uncertainty": over_under_pred.get("uncertainty", [10])[0],
                 "explanation": self._get_over_under_explanation(
                     over_under_pred["predictions"][0],
                     over_under_pred["confidence"][0],
@@ -530,6 +568,7 @@ class ImprovedEnsembleModel:
                 "prediction_type": "Both Teams To Score",
                 "prediction": "Yes" if btts_pred["predictions"][0] == 1 else "No",
                 "confidence": btts_pred["confidence"][0],
+                "uncertainty": btts_pred.get("uncertainty", [10])[0],
                 "explanation": self._get_btts_explanation(
                     btts_pred["predictions"][0],
                     btts_pred["confidence"][0],
