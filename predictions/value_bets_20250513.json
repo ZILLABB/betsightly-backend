@@ -1,0 +1,93 @@
+[
+  {
+    "fixture_id": 1234962,
+    "home_team": "Juve Stabia",
+    "away_team": "Sampdoria",
+    "league": "Serie B",
+    "country": "Italy",
+    "bet_type": "Match Result",
+    "prediction": "Home Win",
+    "our_confidence": 45.0,
+    "our_odds": 2.22,
+    "bookmaker_odds": 3.3,
+    "edge": 14.696969696969697
+  },
+  {
+    "fixture_id": 1234961,
+    "home_team": "Cittadella",
+    "away_team": "Salernitana",
+    "league": "Serie B",
+    "country": "Italy",
+    "bet_type": "Match Result",
+    "prediction": "Home Win",
+    "our_confidence": 45.0,
+    "our_odds": 2.22,
+    "bookmaker_odds": 3.1,
+    "edge": 12.74193548387097
+  },
+  {
+    "fixture_id": 1234964,
+    "home_team": "Modena",
+    "away_team": "Cesena",
+    "league": "Serie B",
+    "country": "Italy",
+    "bet_type": "Over/Under",
+    "prediction": "Over 2.5",
+    "our_confidence": 55.00000000000001,
+    "our_odds": 1.82,
+    "bookmaker_odds": 2.25,
+    "edge": 10.555555555555562
+  },
+  {
+    "fixture_id": 1234964,
+    "home_team": "Modena",
+    "away_team": "Cesena",
+    "league": "Serie B",
+    "country": "Italy",
+    "bet_type": "Match Result",
+    "prediction": "Home Win",
+    "our_confidence": 45.0,
+    "our_odds": 2.22,
+    "bookmaker_odds": 2.85,
+    "edge": 9.912280701754389
+  },
+  {
+    "fixture_id": 1234962,
+    "home_team": "Juve Stabia",
+    "away_team": "Sampdoria",
+    "league": "Serie B",
+    "country": "Italy",
+    "bet_type": "Over/Under",
+    "prediction": "Over 2.5",
+    "our_confidence": 55.00000000000001,
+    "our_odds": 1.82,
+    "bookmaker_odds": 2.2,
+    "edge": 9.545454545454552
+  },
+  {
+    "fixture_id": 1234961,
+    "home_team": "Cittadella",
+    "away_team": "Salernitana",
+    "league": "Serie B",
+    "country": "Italy",
+    "bet_type": "Over/Under",
+    "prediction": "Over 2.5",
+    "our_confidence": 55.00000000000001,
+    "our_odds": 1.82,
+    "bookmaker_odds": 2.1,
+    "edge": 7.3809523809523885
+  },
+  {
+    "fixture_id": 1208816,
+    "home_team": "Sevilla",
+    "away_team": "Las Palmas",
+    "league": "La Liga",
+    "country": "Spain",
+    "bet_type": "Over/Under",
+    "prediction": "Over 2.5",
+    "our_confidence": 55.00000000000001,
+    "our_odds": 1.82,
+    "bookmaker_odds": 2.0,
+    "edge": 5.000000000000004
+  }
+]

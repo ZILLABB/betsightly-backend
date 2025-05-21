@@ -1,0 +1,1190 @@
+[
+  {
+    "fixture_id": 1375084,
+    "home_team": "Colombia U17 W",
+    "away_team": "Peru U17 W",
+    "league": "CONMEBOL - U17 Femenino",
+    "country": "World",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1321576,
+    "home_team": "Gold Coast United",
+    "away_team": "Brisbane Roar II",
+    "league": "Queensland NPL",
+    "country": "Australia",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1372500,
+    "home_team": "TP Mazembe",
+    "away_team": "Sanga Balende",
+    "league": "Ligue 1",
+    "country": "Congo-DR",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1356392,
+    "home_team": "Andijan",
+    "away_team": "Dinamo Samarqand",
+    "league": "Cup",
+    "country": "Uzbekistan",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1356397,
+    "home_team": "Pakhtakor",
+    "away_team": "Nasaf",
+    "league": "Cup",
+    "country": "Uzbekistan",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1251881,
+    "home_team": "Weidenhausen",
+    "away_team": "Darmstadt 98 II",
+    "league": "Oberliga - Hessen",
+    "country": "Germany",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1373717,
+    "home_team": "Juventude U17",
+    "away_team": "Cruzeiro U17",
+    "league": "Brasileiro U17",
+    "country": "Brazil",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1373718,
+    "home_team": "Bahia U17",
+    "away_team": "Corinthians U17",
+    "league": "Brasileiro U17",
+    "country": "Brazil",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1234960,
+    "home_team": "Brescia",
+    "away_team": "Reggiana",
+    "league": "Serie B",
+    "country": "Italy",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1234961,
+    "home_team": "Cittadella",
+    "away_team": "Salernitana",
+    "league": "Serie B",
+    "country": "Italy",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1234962,
+    "home_team": "Juve Stabia",
+    "away_team": "Sampdoria",
+    "league": "Serie B",
+    "country": "Italy",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1234963,
+    "home_team": "Mantova",
+    "away_team": "Catanzaro",
+    "league": "Serie B",
+    "country": "Italy",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1234964,
+    "home_team": "Modena",
+    "away_team": "Cesena",
+    "league": "Serie B",
+    "country": "Italy",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1234965,
+    "home_team": "Palermo",
+    "away_team": "Carrarese",
+    "league": "Serie B",
+    "country": "Italy",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1234966,
+    "home_team": "Pisa",
+    "away_team": "Cremonese",
+    "league": "Serie B",
+    "country": "Italy",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1234967,
+    "home_team": "Sassuolo",
+    "away_team": "Frosinone",
+    "league": "Serie B",
+    "country": "Italy",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1234968,
+    "home_team": "Spezia",
+    "away_team": "Cosenza",
+    "league": "Serie B",
+    "country": "Italy",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1234969,
+    "home_team": "Sudtirol",
+    "away_team": "Bari",
+    "league": "Serie B",
+    "country": "Italy",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1334771,
+    "home_team": "Deportivo Espa\u00f1ol",
+    "away_team": "JJ Urquiza",
+    "league": "Primera C",
+    "country": "Argentina",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1334772,
+    "home_team": "Claypole",
+    "away_team": "Deportivo Mu\u00f1iz",
+    "league": "Primera C",
+    "country": "Argentina",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1372888,
+    "home_team": "FC Sion",
+    "away_team": "FC ST. Gallen",
+    "league": "Super League",
+    "country": "Switzerland",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1372889,
+    "home_team": "FC Zurich",
+    "away_team": "FC Winterthur",
+    "league": "Super League",
+    "country": "Switzerland",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1375162,
+    "home_team": "East Fife",
+    "away_team": "Annan Athletic",
+    "league": "League One",
+    "country": "Scotland",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1374860,
+    "home_team": "Cosmos",
+    "away_team": "La Fiorita",
+    "league": "Campionato",
+    "country": "San-Marino",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1374862,
+    "home_team": "Tre Fiori",
+    "away_team": "San Giovanni",
+    "league": "Campionato",
+    "country": "San-Marino",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1375031,
+    "home_team": "Partick",
+    "away_team": "Livingston",
+    "league": "Premiership",
+    "country": "Scotland",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1367885,
+    "home_team": "Shortan",
+    "away_team": "Ishtixon",
+    "league": "Cup",
+    "country": "Uzbekistan",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1373719,
+    "home_team": "Cuiaba U17",
+    "away_team": "Vasco U17",
+    "league": "Brasileiro U17",
+    "country": "Brazil",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1374044,
+    "home_team": "Sunderland",
+    "away_team": "Coventry",
+    "league": "Championship",
+    "country": "England",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1375156,
+    "home_team": "De Graafschap",
+    "away_team": "Dordrecht",
+    "league": "Eredivisie",
+    "country": "Netherlands",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1208816,
+    "home_team": "Sevilla",
+    "away_team": "Las Palmas",
+    "league": "La Liga",
+    "country": "Spain",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1350574,
+    "home_team": "Real San Andr\u00e9s W",
+    "away_team": "Millonarios W",
+    "league": "Liga Femenina",
+    "country": "Colombia",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1354630,
+    "home_team": "Ind. Juniors",
+    "away_team": "Gualaceo SC",
+    "league": "Liga Pro Serie B",
+    "country": "Ecuador",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1359091,
+    "home_team": "Botafogo U20",
+    "away_team": "Fluminense U20",
+    "league": "Brasileiro U20 A",
+    "country": "Brazil",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1336422,
+    "home_team": "Quindio",
+    "away_team": "Orsomarso",
+    "league": "Primera B",
+    "country": "Colombia",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1354062,
+    "home_team": "Talleres C\u00f3rdoba Res.",
+    "away_team": "V\u00e9lez S\u00e1rsfield Res.",
+    "league": "Reserve League",
+    "country": "Argentina",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1356393,
+    "home_team": "Mash'al",
+    "away_team": "Olympic",
+    "league": "Cup",
+    "country": "Uzbekistan",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1361979,
+    "home_team": "Deportivo Tachira FC",
+    "away_team": "Central Cordoba de Santiago",
+    "league": "CONMEBOL Libertadores",
+    "country": "World",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1362157,
+    "home_team": "Nacional Potos\u00ed",
+    "away_team": "Boston River",
+    "league": "CONMEBOL Sudamericana",
+    "country": "World",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1362162,
+    "home_team": "Gremio",
+    "away_team": "Godoy Cruz",
+    "league": "CONMEBOL Sudamericana",
+    "country": "World",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1356503,
+    "home_team": "Betim",
+    "away_team": "North Esporte",
+    "league": "Mineiro - 2",
+    "country": "Brazil",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1310534,
+    "home_team": "DC Power W",
+    "away_team": "Spokane Zephyr W",
+    "league": "USL Super League",
+    "country": "USA",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1359922,
+    "home_team": "Desportiva ES",
+    "away_team": "Rio Branco ES",
+    "league": "Copa Esp\u00edrito Santo",
+    "country": "Brazil",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  },
+  {
+    "fixture_id": 1363507,
+    "home_team": "Buffalo W",
+    "away_team": "Erie Sports Center",
+    "league": "USL W League",
+    "country": "USA",
+    "predictions": [
+      {
+        "type": "Match Result",
+        "prediction": "Home Win",
+        "confidence": 45.0,
+        "odds": 2.22
+      },
+      {
+        "type": "Over/Under",
+        "prediction": "Over 2.5",
+        "confidence": 55.00000000000001,
+        "odds": 1.82
+      },
+      {
+        "type": "BTTS",
+        "prediction": "Yes",
+        "confidence": 60.0,
+        "odds": 1.67
+      }
+    ]
+  }
+]
