@@ -2,23 +2,28 @@
 Database configuration for the application.
 """
 
-import os
 import sqlite3
 import logging
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Import settings
-from app.utils.config import settings
+# Import settings after loading environment
+from utils.config import settings
 
-# Get database URL from settings
+# Get database URL from settings (should use real_predictions.db)
 DATABASE_URL = settings.database.URL
 DB_FILE = DATABASE_URL.replace("sqlite:///", "")
+
+logger.info(f"Using database: {DB_FILE}")
 
 # Create engine
 engine = create_engine(
@@ -89,13 +94,40 @@ def init_db():
     );
     """
 
+    # SQL to create prediction combinations table
+    CREATE_PREDICTION_COMBINATIONS_TABLE = """
+    CREATE TABLE IF NOT EXISTS prediction_combinations (
+        id TEXT PRIMARY KEY,
+        category TEXT,
+        combined_odds REAL DEFAULT 0,
+        combined_confidence REAL DEFAULT 0,
+        rollover_day INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+
+    # SQL to create prediction combination items table (many-to-many)
+    CREATE_PREDICTION_COMBINATION_ITEMS_TABLE = """
+    CREATE TABLE IF NOT EXISTS prediction_combination_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        combination_id TEXT,
+        prediction_id INTEGER,
+        FOREIGN KEY (combination_id) REFERENCES prediction_combinations (id),
+        FOREIGN KEY (prediction_id) REFERENCES predictions (id)
+    );
+    """
+
     # SQL to create indexes
     CREATE_INDEXES = [
         "CREATE INDEX IF NOT EXISTS idx_fixtures_fixture_id ON fixtures (fixture_id);",
         "CREATE INDEX IF NOT EXISTS idx_fixtures_date ON fixtures (date);",
         "CREATE INDEX IF NOT EXISTS idx_fixtures_league_id ON fixtures (league_id);",
         "CREATE INDEX IF NOT EXISTS idx_predictions_fixture_id ON predictions (fixture_id);",
-        "CREATE INDEX IF NOT EXISTS idx_predictions_prediction_type ON predictions (prediction_type);"
+        "CREATE INDEX IF NOT EXISTS idx_predictions_prediction_type ON predictions (prediction_type);",
+        "CREATE INDEX IF NOT EXISTS idx_prediction_combinations_category ON prediction_combinations (category);",
+        "CREATE INDEX IF NOT EXISTS idx_prediction_combination_items_combination_id ON prediction_combination_items (combination_id);",
+        "CREATE INDEX IF NOT EXISTS idx_prediction_combination_items_prediction_id ON prediction_combination_items (prediction_id);"
     ]
 
     try:
@@ -109,6 +141,12 @@ def init_db():
 
         logger.info("Creating predictions table...")
         cursor.execute(CREATE_PREDICTIONS_TABLE)
+
+        logger.info("Creating prediction combinations table...")
+        cursor.execute(CREATE_PREDICTION_COMBINATIONS_TABLE)
+
+        logger.info("Creating prediction combination items table...")
+        cursor.execute(CREATE_PREDICTION_COMBINATION_ITEMS_TABLE)
 
         # Create indexes
         logger.info("Creating indexes...")
@@ -135,14 +173,14 @@ def init_db():
 
         logger.info("Database initialized successfully.")
 
-        # Import models to register them with the Base
-        from app.models.fixture import Fixture
-        from app.models.prediction import Prediction
-        from app.models.punter import Punter
-        from app.models.bookmaker import Bookmaker
-        from app.models.betting_code import BettingCode
+        # Import models in correct order to avoid circular dependencies
+        from punter import Punter  # noqa: F401
+        from bookmaker import Bookmaker  # noqa: F401
+        from betting_code import BettingCode  # noqa: F401
+        from fixture import Fixture  # noqa: F401
+        from prediction import Prediction  # noqa: F401
 
-        # Also create tables using SQLAlchemy
+        # Create SQLAlchemy tables
         Base.metadata.create_all(bind=engine)
         logger.info("SQLAlchemy tables created.")
 

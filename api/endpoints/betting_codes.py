@@ -5,19 +5,19 @@ This module defines the API endpoints for betting codes.
 """
 
 import logging
-from typing import List, Optional
+from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from app.database import get_db
-from app.models.betting_code import BettingCode
-from app.models.punter import Punter
-from app.models.bookmaker import Bookmaker
-from app.schemas.betting_code import BettingCodeCreate, BettingCodeUpdate, BettingCodeResponse, BettingCodeListResponse
-from app.utils.common import setup_logging
+from database import get_db
+from betting_code import BettingCode
+from punter import Punter
+from bookmaker import Bookmaker
+from schemas.betting_code import BettingCodeCreate, BettingCodeUpdate, BettingCodeResponse, BettingCodeListResponse
+from utils.common import setup_logging
 
 # Set up logging
 logger = setup_logging(__name__)
@@ -29,30 +29,71 @@ router = APIRouter()
 def get_betting_codes(
     db: Session = Depends(get_db),
     skip: int = Query(0, description="Number of codes to skip"),
-    limit: int = Query(100, description="Maximum number of codes to return")
+    limit: int = Query(100, description="Maximum number of codes to return"),
+    punter_id: Optional[int] = Query(None, description="Filter by punter ID"),
+    code: Optional[str] = Query(None, description="Filter by code value"),
+    featured: Optional[bool] = Query(None, description="Filter by featured status"),
+    bookmaker_id: Optional[int] = Query(None, description="Filter by bookmaker ID"),
+    min_odds: Optional[float] = Query(None, description="Filter by minimum odds"),
+    max_odds: Optional[float] = Query(None, description="Filter by maximum odds"),
+    status: Optional[str] = Query(None, description="Filter by status (pending, won, lost, void)")
 ):
     """
-    Get all betting codes.
+    Get betting codes with optional filtering.
 
     Args:
         skip: Number of codes to skip
         limit: Maximum number of codes to return
+        punter_id: Filter by punter ID
+        code: Filter by code value
+        featured: Filter by featured status
+        bookmaker_id: Filter by bookmaker ID
+        min_odds: Filter by minimum odds
+        max_odds: Filter by maximum odds
+        status: Filter by status
     """
     try:
-        # Get betting codes
+        # Start query
+        query = db.query(BettingCode)
+
+        # Apply filters
+        if punter_id is not None:
+            query = query.filter(BettingCode.punter_id == punter_id)
+
+        if code is not None:
+            query = query.filter(BettingCode.code == code)
+
+        if featured is not None:
+            query = query.filter(BettingCode.featured == featured)
+
+        if bookmaker_id is not None:
+            query = query.filter(BettingCode.bookmaker_id == bookmaker_id)
+
+        if min_odds is not None:
+            query = query.filter(BettingCode.odds >= min_odds)
+
+        if max_odds is not None:
+            query = query.filter(BettingCode.odds <= max_odds)
+
+        if status is not None:
+            query = query.filter(BettingCode.status == status)
+
+        # Get total count with filters
+        total = query.count()
+
+        # Get betting codes with pagination
         codes = (
-            db.query(BettingCode)
+            query
             .order_by(desc(BettingCode.created_at))
             .offset(skip)
             .limit(limit)
             .all()
         )
 
-        # Get total count
-        total = db.query(BettingCode).count()
-
         # Convert to dictionaries
         codes_dict = [code.to_dict() for code in codes]
+
+
 
         return {
             "status": "success",
@@ -125,7 +166,6 @@ def create_betting_code(
             bookmaker_id=betting_code.bookmaker_id,
             odds=betting_code.odds,
             event_date=betting_code.event_date,
-            expiry_date=betting_code.expiry_date,
             status=betting_code.status,
             confidence=betting_code.confidence,
             featured=betting_code.featured,
@@ -239,6 +279,7 @@ def delete_betting_code(
         logger.error(f"Error deleting betting code {code_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error deleting betting code: {str(e)}")
 
+@router.get("/latest", response_model=BettingCodeResponse)
 @router.get("/latest/", response_model=BettingCodeResponse)
 def get_latest_betting_code(
     db: Session = Depends(get_db)
@@ -251,6 +292,7 @@ def get_latest_betting_code(
         code = db.query(BettingCode).order_by(desc(BettingCode.created_at)).first()
 
         if not code:
+            logger.warning("No betting codes found in the database")
             raise HTTPException(status_code=404, detail="No betting codes found")
 
         return {
@@ -263,119 +305,4 @@ def get_latest_betting_code(
         logger.error(f"Error getting latest betting code: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting latest betting code: {str(e)}")
 
-@router.get("/punter/{punter_id}", response_model=BettingCodeListResponse)
-def get_betting_codes_by_punter(
-    punter_id: int,
-    db: Session = Depends(get_db),
-    skip: int = Query(0, description="Number of codes to skip"),
-    limit: int = Query(100, description="Maximum number of codes to return")
-):
-    """
-    Get betting codes by punter ID.
-
-    Args:
-        punter_id: Punter ID
-        skip: Number of codes to skip
-        limit: Maximum number of codes to return
-    """
-    try:
-        # Check if punter exists
-        punter = db.query(Punter).filter(Punter.id == punter_id).first()
-
-        if not punter:
-            raise HTTPException(status_code=404, detail=f"Punter with ID {punter_id} not found")
-
-        # Get betting codes
-        codes = (
-            db.query(BettingCode)
-            .filter(BettingCode.punter_id == punter_id)
-            .order_by(desc(BettingCode.created_at))
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
-
-        # Get total count
-        total = db.query(BettingCode).filter(BettingCode.punter_id == punter_id).count()
-
-        # Convert to dictionaries
-        codes_dict = [code.to_dict() for code in codes]
-
-        return {
-            "status": "success",
-            "betting_codes": codes_dict,
-            "total": total,
-            "skip": skip,
-            "limit": limit
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting betting codes for punter {punter_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting betting codes: {str(e)}")
-
-@router.get("/code/{code}", response_model=BettingCodeResponse)
-def get_betting_code_by_code(
-    code: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Get betting code by code value.
-
-    Args:
-        code: Betting code value
-    """
-    try:
-        # Get betting code
-        code_obj = db.query(BettingCode).filter(BettingCode.code == code).first()
-
-        if not code_obj:
-            raise HTTPException(status_code=404, detail=f"Betting code {code} not found")
-
-        return {
-            "status": "success",
-            "betting_code": code_obj.to_dict()
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting betting code {code}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting betting code: {str(e)}")
-
-@router.get("/featured/", response_model=BettingCodeListResponse)
-def get_featured_betting_codes(
-    db: Session = Depends(get_db),
-    limit: int = Query(10, description="Maximum number of codes to return")
-):
-    """
-    Get featured betting codes.
-
-    Args:
-        limit: Maximum number of codes to return
-    """
-    try:
-        # Get featured betting codes
-        codes = (
-            db.query(BettingCode)
-            .filter(BettingCode.featured == True)
-            .order_by(desc(BettingCode.created_at))
-            .limit(limit)
-            .all()
-        )
-
-        # Get total count
-        total = db.query(BettingCode).filter(BettingCode.featured == True).count()
-
-        # Convert to dictionaries
-        codes_dict = [code.to_dict() for code in codes]
-
-        return {
-            "status": "success",
-            "betting_codes": codes_dict,
-            "total": total,
-            "skip": 0,
-            "limit": limit
-        }
-    except Exception as e:
-        logger.error(f"Error getting featured betting codes: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting featured betting codes: {str(e)}")
+# Removed redundant endpoints to simplify the API

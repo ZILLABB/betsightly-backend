@@ -5,12 +5,12 @@ This module defines the BettingCode model for storing betting/booking codes.
 """
 
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 
 from sqlalchemy import Column, String, DateTime, Text, Integer, Float, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 
-from app.database import Base
+from database import Base
 
 class BettingCode(Base):
     """
@@ -23,7 +23,6 @@ class BettingCode(Base):
         bookmaker_id: ID of the bookmaker
         odds: Odds value
         event_date: Date of the event
-        expiry_date: Expiry date of the code
         status: Status of the code (pending, won, lost)
         confidence: Confidence level (1-10)
         featured: Whether the code is featured
@@ -40,7 +39,6 @@ class BettingCode(Base):
     bookmaker_id = Column(Integer, ForeignKey("bookmakers.id"), nullable=True)
     odds = Column(Float, nullable=True)
     event_date = Column(DateTime, nullable=True)
-    expiry_date = Column(DateTime, nullable=True)
     status = Column(String(20), default="pending")  # pending, won, lost
     confidence = Column(Integer, nullable=True)  # 1-10 scale
     featured = Column(Boolean, default=False)
@@ -49,8 +47,8 @@ class BettingCode(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # Relationships
-    punter = relationship("Punter")
-    bookmaker = relationship("Bookmaker")
+    punter = relationship("Punter", lazy="select")
+    bookmaker = relationship("Bookmaker", lazy="select")
 
     def __init__(
         self,
@@ -59,7 +57,6 @@ class BettingCode(Base):
         bookmaker_id: Optional[int] = None,
         odds: Optional[float] = None,
         event_date: Optional[datetime] = None,
-        expiry_date: Optional[datetime] = None,
         status: str = "pending",
         confidence: Optional[int] = None,
         featured: bool = False,
@@ -75,7 +72,6 @@ class BettingCode(Base):
             bookmaker_id: ID of the bookmaker
             odds: Odds value
             event_date: Date of the event
-            expiry_date: Expiry date of the code
             status: Status of the code (pending, won, lost)
             confidence: Confidence level (1-10)
             featured: Whether the code is featured
@@ -87,7 +83,6 @@ class BettingCode(Base):
         self.bookmaker_id = bookmaker_id
         self.odds = odds
         self.event_date = event_date
-        self.expiry_date = expiry_date
         self.status = status
         self.confidence = confidence
         self.featured = featured
@@ -111,7 +106,6 @@ class BettingCode(Base):
             "bookmaker_name": self.bookmaker.name if self.bookmaker else None,
             "odds": self.odds,
             "event_date": self.event_date.isoformat() if self.event_date else None,
-            "expiry_date": self.expiry_date.isoformat() if self.expiry_date else None,
             "status": self.status,
             "confidence": self.confidence,
             "featured": self.featured,
