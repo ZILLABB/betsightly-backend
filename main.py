@@ -6,8 +6,8 @@ from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.api import api_router
-from app.database import init_db
+from api.api import api_router
+from database import init_db
 
 # Initialize database
 init_db()
@@ -24,6 +24,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",  # Development frontend
+        "http://localhost:5182",  # Your frontend port
         "http://localhost:3000",  # Alternative development frontend
         "https://betsightly.com",  # Production frontend
     ],
@@ -56,8 +57,8 @@ def health_check():
 @app.get("/api/debug/predictions")
 def debug_predictions():
     """Debug endpoint to check predictions data."""
-    from app.database import get_db
-    from app.services.prediction_service_improved import PredictionService
+    from database import get_db
+    from services.prediction_service_improved import PredictionService
 
     # Get database session
     db = next(get_db())

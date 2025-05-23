@@ -9,14 +9,119 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models.prediction import Prediction
-from app.services.prediction_service_improved import PredictionService
-from app.services.advanced_prediction_service import AdvancedPredictionService
+from database import get_db
+from prediction import Prediction
+from services.prediction_service_improved import PredictionService
+from services.advanced_prediction_service import AdvancedPredictionService
 
 router = APIRouter()
 
-@router.get("/")
+def _format_rollover_days(rollover_combinations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Format rollover combinations by day.
+
+    Args:
+        rollover_combinations: List of rollover combinations
+
+    Returns:
+        List of rollover days with predictions
+    """
+    # Group by day
+    days_dict = {}
+
+    for combo in rollover_combinations:
+        day = combo.get("day", 1)
+        if day not in days_dict:
+            days_dict[day] = []
+        days_dict[day].append(combo)
+
+    # Format days
+    days = []
+
+    for day_num in range(1, 11):  # 10 days
+        if day_num in days_dict:
+            # Use the best combination for this day
+            best_combo = days_dict[day_num][0]
+            days.append({
+                "day": day_num,
+                "predictions": best_combo.get("predictions", []),
+                "combined_odds": best_combo.get("combined_odds", 3.0),
+                "combined_confidence": best_combo.get("combined_confidence", 0)
+            })
+        else:
+            # Empty day
+            days.append({
+                "day": day_num,
+                "predictions": [],
+                "combined_odds": 0,
+                "combined_confidence": 0
+            })
+
+    return days
+
+@router.get("/categories/", include_in_schema=True)
+@router.get("/categories", include_in_schema=False)
+def get_prediction_categories(
+    db: Session = Depends(get_db),
+    date: Optional[date] = None
+):
+    """
+    Get predictions organized by categories (2_odds, 5_odds, 10_odds, rollover).
+    This endpoint matches the frontend expectation.
+    """
+    try:
+        prediction_service = PredictionService(db)
+
+        # Get predictions by date
+        if date:
+            predictions = prediction_service.get_predictions_by_date(
+                date=datetime.combine(date, datetime.min.time())
+            )
+        else:
+            predictions = prediction_service.get_predictions_by_date(
+                date=datetime.now()
+            )
+
+        # Categorize predictions
+        categorized_predictions = prediction_service.categorize_predictions(predictions)
+
+        # Format the response to match frontend expectations
+        result = {
+            "2_odds": [],
+            "5_odds": [],
+            "10_odds": [],
+            "rollover": []
+        }
+
+        # Process each category
+        for category, category_predictions in categorized_predictions.items():
+            if category_predictions:
+                # Sort by confidence (highest first)
+                sorted_predictions = sorted(
+                    category_predictions,
+                    key=lambda p: p.confidence or 0,
+                    reverse=True
+                )
+
+                # Convert to dictionaries and add to result
+                for pred in sorted_predictions[:10]:  # Limit to top 10 per category
+                    pred_dict = pred.to_dict()
+                    pred_dict["category"] = category
+                    result[category].append(pred_dict)
+
+        return result
+
+    except Exception as e:
+        # Return empty categories if there's an error
+        return {
+            "2_odds": [],
+            "5_odds": [],
+            "10_odds": [],
+            "rollover": []
+        }
+
+@router.get("/", include_in_schema=True)
+@router.get("", include_in_schema=False)
 def get_predictions(
     db: Session = Depends(get_db),
     date: Optional[date] = None,
@@ -229,7 +334,8 @@ def get_predictions(
     # Return uncategorized predictions
     return [prediction.to_dict() for prediction in predictions]
 
-@router.get("/category/{category}")
+@router.get("/category/{category}/", include_in_schema=True)
+@router.get("/category/{category}", include_in_schema=False)
 def get_predictions_by_category(
     category: str,
     db: Session = Depends(get_db),
@@ -256,92 +362,101 @@ def get_predictions_by_category(
             detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
         )
 
-    # Get predictions by date
-    if date:
-        predictions = prediction_service.get_predictions_by_date(
-            date=datetime.combine(date, datetime.min.time())
-        )
-    else:
-        predictions = prediction_service.get_predictions_by_date(
-            date=datetime.now()
-        )
+    # Get target date
+    target_date = datetime.combine(date, datetime.min.time()) if date else datetime.now()
 
-    # Categorize predictions
-    categorized_predictions = prediction_service.categorize_predictions(predictions)
+    # Try to get cached prediction combinations from database first
+    combinations = prediction_service.get_prediction_combinations_by_category(
+        category=category,
+        date=target_date,
+        limit=limit
+    )
 
-    # Get predictions for the requested category
-    category_predictions = categorized_predictions.get(category, [])
+    # If no combinations found in database, generate them
+    if not combinations:
+        # Get predictions by date
+        predictions = prediction_service.get_predictions_by_date(date=target_date)
 
-    if best_only:
-        # Sort by confidence (highest first)
-        sorted_predictions = sorted(
-            category_predictions,
-            key=lambda p: p.confidence or 0,
-            reverse=True
-        )
+        # Categorize predictions
+        categorized_predictions = prediction_service.categorize_predictions(predictions)
 
-        # Get the best predictions
-        best_predictions = sorted_predictions[:limit]
+        # Get predictions for the requested category
+        category_predictions = categorized_predictions.get(category, [])
 
-        # Convert to dictionaries
-        result = []
-        for pred in best_predictions:
-            pred_dict = pred.to_dict()
+        if best_only:
+            # Sort by confidence (highest first)
+            sorted_predictions = sorted(
+                category_predictions,
+                key=lambda p: p.confidence or 0,
+                reverse=True
+            )
 
-            # Add category information
-            pred_dict["category"] = category
+            # Get the best predictions
+            best_predictions = sorted_predictions[:limit]
 
-            # Add a description based on the prediction type
-            if pred.prediction_type == "btts":
-                pred_dict["description"] = f"Both Teams to Score: {pred.btts_pred}"
-            elif pred.prediction_type == "over_2_5":
-                pred_dict["description"] = "Over 2.5 Goals"
-            elif pred.prediction_type == "under_2_5":
-                pred_dict["description"] = "Under 2.5 Goals"
-            elif pred.prediction_type == "home_win":
-                pred_dict["description"] = f"{pred_dict.get('homeTeam', 'Home Team')} to Win"
-            elif pred.prediction_type == "draw":
-                pred_dict["description"] = "Match to End in a Draw"
-            elif pred.prediction_type == "away_win":
-                pred_dict["description"] = f"{pred_dict.get('awayTeam', 'Away Team')} to Win"
+            # Convert to dictionaries
+            result = []
+            for pred in best_predictions:
+                pred_dict = pred.to_dict()
 
-            result.append(pred_dict)
+                # Add category information
+                pred_dict["category"] = category
 
-        return result
-    else:
-        # Create combinations
-        target_odds = {
-            "2_odds": 2.0,
-            "5_odds": 5.0,
-            "10_odds": 10.0,
-            "rollover": 3.0
-        }
+                # Add a description based on the prediction type
+                if pred.prediction_type == "btts":
+                    pred_dict["description"] = f"Both Teams to Score: {pred.btts_pred}"
+                elif pred.prediction_type == "over_2_5":
+                    pred_dict["description"] = "Over 2.5 Goals"
+                elif pred.prediction_type == "under_2_5":
+                    pred_dict["description"] = "Under 2.5 Goals"
+                elif pred.prediction_type == "home_win":
+                    pred_dict["description"] = f"{pred_dict.get('homeTeam', 'Home Team')} to Win"
+                elif pred.prediction_type == "draw":
+                    pred_dict["description"] = "Match to End in a Draw"
+                elif pred.prediction_type == "away_win":
+                    pred_dict["description"] = f"{pred_dict.get('awayTeam', 'Away Team')} to Win"
 
-        combinations = prediction_service.create_prediction_combinations(
-            category_predictions, target_odds[category]
-        )
+                result.append(pred_dict)
 
-        # Limit the number of combinations
-        combinations = combinations[:limit]
+            return result
+        else:
+            # Create combinations
+            target_odds = {
+                "2_odds": 2.0,
+                "5_odds": 5.0,
+                "10_odds": 10.0,
+                "rollover": 3.0
+            }
 
-        # Add category information to each combination
-        for combo in combinations:
-            combo["category"] = category
-            combo["target_odds"] = target_odds[category]
+            combinations = prediction_service.create_prediction_combinations(
+                category_predictions, target_odds[category]
+            )
 
-            # Add a description based on the category
-            if category == "2_odds":
-                combo["description"] = "Safe Bets (2 Odds)"
-            elif category == "5_odds":
-                combo["description"] = "Balanced Risk (5 Odds)"
-            elif category == "10_odds":
-                combo["description"] = "High Reward (10 Odds)"
-            elif category == "rollover":
-                combo["description"] = f"Rollover Day {combo.get('day', 1)}"
+            # Limit the number of combinations
+            combinations = combinations[:limit]
 
-        return combinations
+            # Add category information to each combination
+            for combo in combinations:
+                combo["category"] = category
+                combo["target_odds"] = target_odds[category]
 
-@router.get("/best/{category}")
+                # Add a description based on the category
+                if category == "2_odds":
+                    combo["description"] = "Safe Bets (2 Odds)"
+                elif category == "5_odds":
+                    combo["description"] = "Balanced Risk (5 Odds)"
+                elif category == "10_odds":
+                    combo["description"] = "High Reward (10 Odds)"
+                elif category == "rollover":
+                    combo["description"] = f"Rollover Day {combo.get('day', 1)}"
+
+            # Store combinations in database for future use
+            prediction_service.save_prediction_combinations(combinations, target_date)
+
+    return combinations
+
+@router.get("/best/{category}/", include_in_schema=True)
+@router.get("/best/{category}", include_in_schema=False)
 def get_best_predictions_by_category(
     category: str,
     db: Session = Depends(get_db),
@@ -418,7 +533,8 @@ def get_best_predictions_by_category(
 
     return result
 
-@router.get("/best")
+@router.get("/best/", include_in_schema=True)
+@router.get("/best", include_in_schema=False)
 def get_all_best_predictions(
     db: Session = Depends(get_db),
     date: Optional[date] = None,
@@ -431,64 +547,191 @@ def get_all_best_predictions(
         date: Date to get predictions for (default: today)
         limit_per_category: Maximum number of predictions per category (default: 3)
     """
+    try:
+        prediction_service = PredictionService(db)
+
+        # Get predictions by date
+        if date:
+            predictions = prediction_service.get_predictions_by_date(
+                date=datetime.combine(date, datetime.min.time())
+            )
+        else:
+            predictions = prediction_service.get_predictions_by_date(
+                date=datetime.now()
+            )
+
+        # Categorize predictions
+        categorized_predictions = prediction_service.categorize_predictions(predictions)
+
+        # Get best predictions for each category
+        result = {}
+
+        for category in ["2_odds", "5_odds", "10_odds", "rollover"]:
+            category_predictions = categorized_predictions.get(category, [])
+
+            # Sort by confidence (highest first)
+            sorted_predictions = sorted(
+                category_predictions,
+                key=lambda p: p.confidence or 0,
+                reverse=True
+            )
+
+            # Get the best predictions
+            best_predictions = sorted_predictions[:limit_per_category]
+
+            # Convert to dictionaries
+            category_result = []
+            for pred in best_predictions:
+                try:
+                    pred_dict = pred.to_dict()
+
+                    # Add category information
+                    pred_dict["category"] = category
+
+                    # Add a description based on the prediction type
+                    if pred.prediction_type == "btts":
+                        pred_dict["description"] = f"Both Teams to Score: {pred.btts_pred}"
+                    elif pred.prediction_type == "over_2_5":
+                        pred_dict["description"] = "Over 2.5 Goals"
+                    elif pred.prediction_type == "under_2_5":
+                        pred_dict["description"] = "Under 2.5 Goals"
+                    elif pred.prediction_type == "home_win":
+                        pred_dict["description"] = f"{pred_dict.get('homeTeam', 'Home Team')} to Win"
+                    elif pred.prediction_type == "draw":
+                        pred_dict["description"] = "Match to End in a Draw"
+                    elif pred.prediction_type == "away_win":
+                        pred_dict["description"] = f"{pred_dict.get('awayTeam', 'Away Team')} to Win"
+                    else:
+                        pred_dict["description"] = "Football Prediction"
+
+                    category_result.append(pred_dict)
+                except Exception as e:
+                    # Skip this prediction if there's an error converting it
+                    print(f"Error converting prediction {pred.id}: {e}")
+                    continue
+
+            result[category] = category_result
+
+        return result
+
+    except Exception as e:
+        # Return empty result if there's an error
+        print(f"Error in get_all_best_predictions: {e}")
+        return {
+            "2_odds": [],
+            "5_odds": [],
+            "10_odds": [],
+            "rollover": []
+        }
+
+@router.get("/categories")
+def get_all_prediction_categories(
+    db: Session = Depends(get_db),
+    date: Optional[date] = None,
+    limit_per_category: int = Query(5, description="Maximum number of combinations per category")
+):
+    """
+    Get all prediction categories for a specific date.
+
+    Returns a structured response with all categories and their predictions,
+    optimized for frontend rendering.
+
+    Args:
+        date: Date to get predictions for (default: today)
+        limit_per_category: Maximum number of combinations per category (default: 5)
+    """
     prediction_service = PredictionService(db)
 
-    # Get predictions by date
-    if date:
-        predictions = prediction_service.get_predictions_by_date(
-            date=datetime.combine(date, datetime.min.time())
-        )
-    else:
-        predictions = prediction_service.get_predictions_by_date(
-            date=datetime.now()
-        )
+    # Get target date
+    target_date = datetime.combine(date, datetime.min.time()) if date else datetime.now()
 
-    # Categorize predictions
-    categorized_predictions = prediction_service.categorize_predictions(predictions)
+    # Get categories
+    categories = {}
 
-    # Get best predictions for each category
-    result = {}
-
-    for category in ["2_odds", "5_odds", "10_odds", "rollover"]:
-        category_predictions = categorized_predictions.get(category, [])
-
-        # Sort by confidence (highest first)
-        sorted_predictions = sorted(
-            category_predictions,
-            key=lambda p: p.confidence or 0,
-            reverse=True
+    for category_name in ["2_odds", "5_odds", "10_odds", "rollover"]:
+        # Try to get cached prediction combinations from database first
+        combinations = prediction_service.get_prediction_combinations_by_category(
+            category=category_name,
+            date=target_date,
+            limit=limit_per_category
         )
 
-        # Get the best predictions
-        best_predictions = sorted_predictions[:limit_per_category]
+        # If no combinations found in database, generate them
+        if not combinations:
+            # Get predictions by date
+            predictions = prediction_service.get_predictions_by_date(date=target_date)
 
-        # Convert to dictionaries
-        category_result = []
-        for pred in best_predictions:
-            pred_dict = pred.to_dict()
+            # Categorize predictions
+            categorized_predictions = prediction_service.categorize_predictions(predictions)
 
-            # Add category information
-            pred_dict["category"] = category
+            # Get predictions for the requested category
+            category_predictions = categorized_predictions.get(category_name, [])
 
-            # Add a description based on the prediction type
-            if pred.prediction_type == "btts":
-                pred_dict["description"] = f"Both Teams to Score: {pred.btts_pred}"
-            elif pred.prediction_type == "over_2_5":
-                pred_dict["description"] = "Over 2.5 Goals"
-            elif pred.prediction_type == "under_2_5":
-                pred_dict["description"] = "Under 2.5 Goals"
-            elif pred.prediction_type == "home_win":
-                pred_dict["description"] = f"{pred_dict.get('homeTeam', 'Home Team')} to Win"
-            elif pred.prediction_type == "draw":
-                pred_dict["description"] = "Match to End in a Draw"
-            elif pred.prediction_type == "away_win":
-                pred_dict["description"] = f"{pred_dict.get('awayTeam', 'Away Team')} to Win"
+            # Create combinations
+            target_odds = {
+                "2_odds": 2.0,
+                "5_odds": 5.0,
+                "10_odds": 10.0,
+                "rollover": 3.0
+            }
 
-            category_result.append(pred_dict)
+            combinations = prediction_service.create_prediction_combinations(
+                category_predictions, target_odds[category_name]
+            )
 
-        result[category] = category_result
+            # Limit the number of combinations
+            combinations = combinations[:limit_per_category]
 
-    return result
+            # Add category information to each combination
+            for combo in combinations:
+                combo["category"] = category_name
+                combo["target_odds"] = target_odds[category_name]
+
+                # Add a description based on the category
+                if category_name == "2_odds":
+                    combo["description"] = "Safe Bets (2 Odds)"
+                elif category_name == "5_odds":
+                    combo["description"] = "Balanced Risk (5 Odds)"
+                elif category_name == "10_odds":
+                    combo["description"] = "High Reward (10 Odds)"
+                elif category_name == "rollover":
+                    combo["description"] = f"Rollover Day {combo.get('day', 1)}"
+
+            # Store combinations in database for future use
+            prediction_service.save_prediction_combinations(combinations, target_date)
+
+        categories[category_name] = combinations
+
+    # Format response for frontend
+    return {
+        "date": target_date.strftime("%Y-%m-%d"),
+        "categories": {
+            "safe_bets": {
+                "name": "Safe Bets",
+                "description": "Lower odds, higher confidence predictions",
+                "target_odds": 2.0,
+                "predictions": categories.get("2_odds", [])
+            },
+            "balanced_bets": {
+                "name": "Balanced Risk",
+                "description": "Medium odds, balanced risk-reward",
+                "target_odds": 5.0,
+                "predictions": categories.get("5_odds", [])
+            },
+            "high_reward": {
+                "name": "High Reward",
+                "description": "Higher odds, higher potential returns",
+                "target_odds": 10.0,
+                "predictions": categories.get("10_odds", [])
+            },
+            "rollover": {
+                "name": "10-Day Rollover",
+                "description": "Daily predictions for a 10-day rollover strategy",
+                "target_odds": 3.0,
+                "days": _format_rollover_days(categories.get("rollover", []))
+            }
+        }
+    }
 
 @router.get("/{prediction_id}")
 def get_prediction(
@@ -578,4 +821,4 @@ def get_advanced_best_predictions_by_category(
     # Limit the number of predictions
     limited_predictions = category_predictions[:limit]
 
-    return limited_predictions.to_dict()
+    return limited_predictions
