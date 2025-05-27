@@ -316,7 +316,6 @@ def check_categorization():
 
         # Helper function to check for duplicates
         def check_category_for_duplicates(category_name):
-            nonlocal fixture_ids, categorizer_duplicates
 
             for combo in categorized.get(category_name, []):
                 for prediction in combo.get("predictions", []):
