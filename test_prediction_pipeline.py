@@ -11,18 +11,17 @@ This script tests the complete prediction pipeline:
 """
 
 import os
-import sys
 import json
 import logging
-import itertools
-import uuid
 from datetime import datetime, timedelta
-import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Define utility functions needed for the test

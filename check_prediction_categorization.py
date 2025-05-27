@@ -8,12 +8,8 @@ This script checks the prediction categorization logic to ensure that:
 3. No duplicates exist across categories
 """
 
-import os
-import sys
 import logging
-import json
 from datetime import datetime
-from sqlalchemy.orm import Session
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -316,8 +312,6 @@ def check_categorization():
 
         # Helper function to check for duplicates
         def check_category_for_duplicates(category_name):
-            nonlocal fixture_ids, categorizer_duplicates
-
             for combo in categorized.get(category_name, []):
                 for prediction in combo.get("predictions", []):
                     fixture = prediction.get("fixture", {})

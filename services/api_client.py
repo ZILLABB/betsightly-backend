@@ -9,7 +9,6 @@ import requests
 import time
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-import json
 
 from utils.common import setup_logging, retry_operation
 from utils.config import settings
@@ -161,19 +160,26 @@ class APIClient:
 
         logger.debug(f"Cached response for {endpoint} (expires in {max_age} seconds)")
 
-    def request(self, method: str, endpoint: str, params: Dict[str, Any] = None,
-                data: Dict[str, Any] = None, use_cache: bool = True,
-                max_cache_age: int = 3600, max_retries: int = 3) -> Dict[str, Any]:
+    def request(
+        self,
+        method: str,
+        endpoint: str,
+        params: Dict[str, Any] = None,
+        data: Dict[str, Any] = None,
+        use_cache: bool = True,
+        max_cache_age: int = 3600,
+        max_retries: int = 3
+    ) -> Dict[str, Any]:
         """
-        Make an HTTP request.
+        Make an API request.
 
         Args:
-            method: HTTP method (GET, POST, etc.)
+            method: HTTP method
             endpoint: API endpoint
             params: Query parameters
-            data: Request body
+            data: Request body data
             use_cache: Whether to use cache
-            max_cache_age: Maximum age of cached response in seconds
+            max_cache_age: Maximum cache age in seconds
             max_retries: Maximum number of retries
 
         Returns:

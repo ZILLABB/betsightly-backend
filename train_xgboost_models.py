@@ -7,22 +7,17 @@ using the Club-Football-Match-Data-2000-2025 dataset from GitHub.
 """
 
 import os
-import sys
 import pandas as pd
-import numpy as np
 import requests
 import logging
 import joblib
 from datetime import datetime
 import argparse
-from typing import Dict, List, Tuple, Any, Union
 import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from sklearn.pipeline import Pipeline
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

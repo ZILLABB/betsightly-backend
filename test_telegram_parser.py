@@ -1,12 +1,12 @@
 """
 Test Telegram Parser
 
-This script tests the Telegram message parser to ensure it correctly extracts betting information.
+This script tests the Telegram message parser to ensure it correctly extracts
+betting information.
 """
 
 import sys
 import logging
-from datetime import datetime
 
 # Set up logging
 logging.basicConfig(

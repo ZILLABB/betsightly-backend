@@ -1,3 +1,1 @@
-"""
-Unit tests for ml module.
-""" 
+"""Unit tests for ml module.""" 

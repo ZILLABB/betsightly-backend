@@ -1,3 +1,5 @@
+"""Betsightly backend package."""
+
 app/
 ├── __init__.py
 ├── services/

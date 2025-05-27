@@ -1,0 +1,21 @@
+[flake8]
+# Slightly more permissive than default 79
+max-line-length = 100
+exclude = .git,__pycache__,build,dist
+per-file-ignores =
+    # Ignore import order in test files
+    tests/*: E402
+    # Ignore unused imports in test files
+    tests/*: F401
+    # Ignore line length in test files
+    tests/*: E501
+    # Ignore blank line issues in test files
+    tests/*: E302,E305
+    # Ignore whitespace issues in test files
+    tests/*: W293,W291
+    # Ignore f-string issues in test files
+    tests/*: F541
+    # Ignore indentation issues in test files
+    tests/*: E128
+    # Ignore undefined names in test files
+    tests/*: F821 

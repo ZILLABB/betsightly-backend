@@ -5,14 +5,15 @@ This script tests if we can load the ML models from the models directory.
 """
 
 import os
-import sys
 import logging
 import joblib
-import numpy as np
 import pandas as pd
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 def test_model_loading():

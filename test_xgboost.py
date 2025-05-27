@@ -5,10 +5,7 @@ This script tests if XGBoost is working properly with OpenMP.
 """
 
 import os
-import sys
 import logging
-import numpy as np
-import pandas as pd
 import xgboost as xgb
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split

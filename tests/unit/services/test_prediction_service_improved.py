@@ -6,10 +6,8 @@ This module contains tests for the improved prediction service.
 
 import os
 import sys
-import pytest
 import pandas as pd
-from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Add the parent directory to the path so we can import the app modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))

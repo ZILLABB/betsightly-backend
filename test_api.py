@@ -5,14 +5,16 @@ This script tests the API endpoints of the Football Betting Assistant.
 """
 
 import os
-import sys
 import json
 import logging
 import requests
 from datetime import datetime
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # API base URL

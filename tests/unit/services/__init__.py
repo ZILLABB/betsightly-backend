@@ -1,3 +1,1 @@
-"""
-Unit tests for services module.
-""" 
+"""Unit tests for services module.""" 

@@ -8,13 +8,11 @@ extracts betting information, and saves it to the database.
 import os
 import re
 import logging
-import asyncio
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any
 
-from telegram import Update, Bot
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from sqlalchemy.orm import Session
 
 # Set up logging
 logging.basicConfig(

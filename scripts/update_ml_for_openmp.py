@@ -7,9 +7,9 @@ configure XGBoost and LightGBM with OpenMP.
 
 import os
 import re
-import sys
 import shutil
 from pathlib import Path
+
 
 def backup_file(file_path):
     """Create a backup of the file."""
@@ -17,6 +17,7 @@ def backup_file(file_path):
     shutil.copy2(file_path, backup_path)
     print(f"Created backup at {backup_path}")
     return backup_path
+
 
 def find_training_script():
     """Find the ML model training script."""
@@ -26,32 +27,33 @@ def find_training_script():
         "backend/scripts/train_enhanced_github_models.py",
         "train_enhanced_github_models.py"
     ]
-    
+
     # Start from the current directory
     current_dir = Path.cwd()
-    
+
     # Check each possible path
     for path in possible_paths:
         full_path = current_dir / path
         if full_path.exists():
             return full_path
-    
+
     # If not found, search recursively (limited depth)
     for root, dirs, files in os.walk(current_dir, topdown=True, followlinks=False):
         # Limit depth to avoid excessive searching
         if root.count(os.sep) - current_dir.count(os.sep) > 3:
             dirs.clear()  # Don't go deeper
             continue
-            
+
         if "train_enhanced_github_models.py" in files:
             return Path(root) / "train_enhanced_github_models.py"
-    
+
     return None
+
 
 def update_openmp_imports(content):
     """Update the imports section to properly handle OpenMP."""
     # Define the new OpenMP handling code
-    new_openmp_code = """# Configure OpenMP for XGBoost and LightGBM
+    new_openmp_code = ("""# Configure OpenMP for XGBoost and LightGBM
 import os
 
 # Check for OpenMP environment variables
@@ -117,24 +119,31 @@ try:
 except (ImportError, Exception) as e:
     CATBOOST_AVAILABLE = False
     logger.warning(f"CatBoost not available: {str(e)}")
-    logger.warning("Ensemble models will continue without CatBoost")"""
-    
+    logger.warning("Ensemble models will continue without CatBoost")""
+    )
+
     # Find the pattern to replace
     pattern = r"# Import XGBoost and LightGBM if available.*?CATBOOST_AVAILABLE = False.*?logger\.warning\(.*?\)"
     pattern_flags = re.DOTALL
-    
+
     # Replace the pattern with the new code
     updated_content = re.sub(pattern, new_openmp_code, content, flags=pattern_flags)
-    
+
     return updated_content
+
 
 def update_xgboost_params(content):
     """Update XGBoost parameters to use OpenMP properly."""
     # Pattern to match XGBoost classifier initialization
-    pattern = r"xgb\.XGBClassifier\(\s*n_estimators=\d+,\s*max_depth=\d+,\s*learning_rate=[\d\.]+,\s*random_state=\d+,\s*n_jobs=[\d\-]+,\s*use_label_encoder=\w+,\s*eval_metric=['\w]+(?:,\s*tree_method=['\w]+)?\s*\)"
-    
+    pattern = (
+        r"xgb\.XGBClassifier\(\s*n_estimators=\d+,\s*max_depth=\d+,\s*learning_rate=[\d\.]+,"
+        r"\s*random_state=\d+,\s*n_jobs=[\d\-]+,\s*use_label_encoder=\w+,\s*eval_metric=['\w]+"
+        r"(?:,\s*tree_method=['\w]+)?\s*\)"
+    )
+
     # New XGBoost parameters
-    replacement = """xgb.XGBClassifier(
+    replacement = (
+        """xgb.XGBClassifier(
                 n_estimators=200,
                 max_depth=6,
                 learning_rate=0.1,
@@ -144,19 +153,25 @@ def update_xgboost_params(content):
                 eval_metric='mlogloss',
                 tree_method='hist'
             )"""
-    
+    )
+
     # Replace all occurrences
     updated_content = re.sub(pattern, replacement, content)
-    
+
     return updated_content
+
 
 def update_lightgbm_params(content):
     """Update LightGBM parameters to use OpenMP properly."""
     # Pattern to match LightGBM classifier initialization
-    pattern = r"lgb\.LGBMClassifier\(\s*n_estimators=\d+,\s*max_depth=\d+,\s*learning_rate=[\d\.]+,\s*random_state=\d+,\s*n_jobs=[\d\-]+(?:,\s*verbose=[\d\-]+)?(?:,\s*force_row_wise=\w+)?\s*\)"
-    
+    pattern = (
+        r"lgb\.LGBMClassifier\(\s*n_estimators=\d+,\s*max_depth=\d+,\s*learning_rate=[\d\.]+,"
+        r"\s*random_state=\d+,\s*n_jobs=[\d\-]+(?:,\s*verbose=[\d\-]+)?(?:,\s*force_row_wise=\w+)?\s*\)"
+    )
+
     # New LightGBM parameters
-    replacement = """lgb.LGBMClassifier(
+    replacement = (
+        """lgb.LGBMClassifier(
                 n_estimators=200,
                 max_depth=6,
                 learning_rate=0.1,
@@ -165,48 +180,50 @@ def update_lightgbm_params(content):
                 verbose=-1,
                 force_row_wise=openmp_path is None  # Only force row-wise when OpenMP is not available
             )"""
-    
+    )
+
     # Replace all occurrences
     updated_content = re.sub(pattern, replacement, content)
-    
+
     return updated_content
+
 
 def main():
     """Main function."""
     print("Searching for ML model training script...")
     script_path = find_training_script()
-    
+
     if not script_path:
         print("Error: Could not find the ML model training script.")
         print("Please run this script from the project root directory.")
         sys.exit(1)
-    
+
     print(f"Found ML model training script at: {script_path}")
-    
+
     # Create a backup of the file
     backup_path = backup_file(script_path)
     print(f"Created backup at: {backup_path}")
-    
+
     # Read the file content
     with open(script_path, 'r') as f:
         content = f.read()
-    
+
     # Update the imports section
     print("Updating OpenMP imports...")
     updated_content = update_openmp_imports(content)
-    
+
     # Update XGBoost parameters
     print("Updating XGBoost parameters...")
     updated_content = update_xgboost_params(updated_content)
-    
+
     # Update LightGBM parameters
     print("Updating LightGBM parameters...")
     updated_content = update_lightgbm_params(updated_content)
-    
+
     # Write the updated content back to the file
     with open(script_path, 'w') as f:
         f.write(updated_content)
-    
+
     print(f"Successfully updated {script_path} to properly use OpenMP.")
     print("\nNext steps:")
     print("1. Install OpenMP using the install_openmp_mac.sh script:")
@@ -218,6 +235,7 @@ def main():
     print("   pip install xgboost lightgbm --no-binary :all:")
     print("4. Run the updated ML model training script:")
     print("   python scripts/train_enhanced_github_models.py --ensemble --force")
+
 
 if __name__ == "__main__":
     main()

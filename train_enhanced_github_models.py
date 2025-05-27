@@ -1,34 +1,38 @@
 #!/usr/bin/env python3
 """
-Train Enhanced ML Models using GitHub Football Dataset
+Train Enhanced GitHub Models
 
-This script trains advanced machine learning models for football match prediction
-using the Club-Football-Match-Data-2000-2025 dataset from GitHub with enhanced
-features and hyperparameter tuning.
+This script trains enhanced machine learning models using the GitHub football dataset.
 """
 
 import os
-import sys
+import argparse
 import pandas as pd
-import numpy as np
 import requests
 import logging
 import joblib
 from datetime import datetime
-import argparse
-from typing import Dict, List, Tuple, Any, Union
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, VotingClassifier, StackingClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
-from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, RobustScaler
-from sklearn.compose import ColumnTransformer
+from typing import Dict, List, Tuple
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score, StratifiedKFold
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report, roc_auc_score, roc_curve
-import matplotlib.pyplot as plt
-import seaborn as sns
-from io import BytesIO
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.feature_selection import SelectFromModel
+from sklearn.model_selection import GridSearchCV
+import sys
+
+# Add the parent directory to the path so we can import the app modules
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from app.ml.ensemble_model import EnsembleModel
+from app.ml.feature_engineering import FeatureEngineer
+from app.ml.model_evaluator import ModelEvaluator
+from app.ml.model_persistence import ModelPersistence
+from app.ml.confidence_calibrator import PlattCalibrator
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
