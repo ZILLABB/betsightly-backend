@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
-from app.models.fixture import Fixture
-from app.models.prediction import Prediction
+from fixture import Fixture
+from prediction import Prediction
 
 class FixtureService:
     """Service for managing football match fixtures."""

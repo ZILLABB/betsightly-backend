@@ -6,7 +6,7 @@ This module defines the Pydantic schemas for predictions.
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class PunterPredictionBase(BaseModel):
     """Base schema for punter prediction data."""
@@ -40,9 +40,8 @@ class PunterPredictionInDB(PunterPredictionBase):
     punter_id: str = Field(..., description="ID of the punter who made the prediction")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
-    
-    class Config:
-        orm_mode = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 class PunterPredictionResponse(BaseModel):
     """Schema for punter prediction response."""

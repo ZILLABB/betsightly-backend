@@ -6,7 +6,7 @@ This module defines the Pydantic schemas for punters.
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class PunterBase(BaseModel):
     """Base schema for punter data."""
@@ -37,9 +37,8 @@ class PunterInDB(PunterBase):
     id: str = Field(..., description="Punter ID")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
-    
-    class Config:
-        orm_mode = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 class PunterResponse(BaseModel):
     """Schema for punter response."""

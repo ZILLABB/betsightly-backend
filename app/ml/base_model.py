@@ -13,8 +13,8 @@ import logging
 import joblib
 from typing import Dict, List, Tuple, Any, Union
 
-from app.utils.common import ensure_directory_exists
-from app.utils.config import settings
+from utils.common import ensure_directory_exists
+from utils.config import settings
 
 # Set up logging
 logger = logging.getLogger(__name__)

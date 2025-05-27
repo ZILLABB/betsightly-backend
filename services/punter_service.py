@@ -6,19 +6,18 @@ It handles punter creation, prediction extraction, and performance tracking.
 """
 
 import os
-import json
-import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 
-from app.utils.common import setup_logging
-from app.utils.config import settings
-from app.models.punter import Punter
-from app.models.prediction import Prediction
-from app.database import get_db
+# Import models directly
+from punter import Punter
+from prediction import Prediction
+from database import get_db
+from utils.common import setup_logging
+from utils.config import settings
 
 # Set up logging
 logger = setup_logging(__name__)
@@ -348,6 +347,52 @@ class PunterService:
             self.db.refresh(prediction)
 
             logger.info(f"Saved prediction: {prediction.id}")
+
+            # Save betting code if provided
+            if prediction_data.get("bet_code") and prediction_data.get("odds"):
+                from betting_code import BettingCode
+                from bookmaker import Bookmaker
+
+                # Get or create bookmaker if provided
+                bookmaker_id = None
+                if prediction_data.get("bookmaker"):
+                    bookmaker = self.db.query(Bookmaker).filter(Bookmaker.name == prediction_data["bookmaker"]).first()
+
+                    if not bookmaker:
+                        # Create new bookmaker
+                        bookmaker = Bookmaker(
+                            name=prediction_data["bookmaker"],
+                            created_at=datetime.now()
+                        )
+                        self.db.add(bookmaker)
+                        self.db.commit()
+                        self.db.refresh(bookmaker)
+
+                    bookmaker_id = bookmaker.id
+
+                # Check if betting code already exists
+                existing_code = self.db.query(BettingCode).filter(BettingCode.code == prediction_data["bet_code"]).first()
+
+                if not existing_code:
+                    # Create new betting code
+                    betting_code = BettingCode(
+                        code=prediction_data["bet_code"],
+                        punter_id=prediction_data["punter_id"],
+                        bookmaker_id=bookmaker_id,
+                        odds=prediction_data["odds"],
+                        event_date=prediction_data.get("match_datetime"),
+                        status="pending",
+                        confidence=int(prediction_data.get("confidence_score", 0.5) * 10),  # Convert to 1-10 scale
+                        featured=False,
+                        notes=f"Match: {prediction_data['home_team']} vs {prediction_data['away_team']}\nPrediction: {prediction_data.get('prediction')}",
+                        created_at=datetime.now()
+                    )
+
+                    self.db.add(betting_code)
+                    self.db.commit()
+                    self.db.refresh(betting_code)
+
+                    logger.info(f"Saved betting code: {betting_code.code} (ID: {betting_code.id})")
 
             return prediction.to_dict()
 

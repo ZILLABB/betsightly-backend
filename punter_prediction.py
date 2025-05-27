@@ -8,15 +8,15 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from sqlalchemy import Column, String, DateTime, Float, Text, ForeignKey
+from sqlalchemy import Column, String, DateTime, Float, Text, ForeignKey, Integer
 from sqlalchemy.orm import relationship
 
-from app.database import Base
+from database import Base
 
 class PunterPrediction(Base):
     """
     PunterPrediction model for storing predictions from punters.
-    
+
     Attributes:
         id: Unique identifier
         punter_id: ID of the punter who made the prediction
@@ -35,11 +35,11 @@ class PunterPrediction(Base):
         updated_at: Last update timestamp
         punter: Relationship to punter
     """
-    
+
     __tablename__ = "punter_predictions"
-    
+
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    punter_id = Column(String(36), ForeignKey("punters.id"), nullable=False)
+    punter_id = Column(Integer, ForeignKey("punters.id"), nullable=False)
     home_team = Column(String(100), nullable=False)
     away_team = Column(String(100), nullable=False)
     prediction_type = Column(String(50), nullable=False)
@@ -53,13 +53,13 @@ class PunterPrediction(Base):
     status = Column(String(20), default="pending")
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-    
-    # Relationships
-    punter = relationship("Punter", back_populates="predictions")
-    
+
+    # Relationships - temporarily disabled to fix startup issue
+    # punter = relationship("Punter", back_populates="predictions")
+
     def __init__(
         self,
-        punter_id: str,
+        punter_id: int,
         home_team: str,
         away_team: str,
         prediction_type: str,
@@ -75,7 +75,7 @@ class PunterPrediction(Base):
     ):
         """
         Initialize a punter prediction.
-        
+
         Args:
             punter_id: ID of the punter who made the prediction
             home_team: Home team name
@@ -105,11 +105,11 @@ class PunterPrediction(Base):
         self.status = status
         self.created_at = created_at or datetime.now()
         self.updated_at = self.created_at
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert punter prediction to dictionary.
-        
+
         Returns:
             Dictionary representation of punter prediction
         """
@@ -129,11 +129,11 @@ class PunterPrediction(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
-    
+
     def __repr__(self) -> str:
         """
         Get string representation of punter prediction.
-        
+
         Returns:
             String representation
         """

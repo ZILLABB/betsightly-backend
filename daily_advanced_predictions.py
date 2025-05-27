@@ -22,9 +22,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.ml.model_factory import model_factory
 from app.ml.advanced_feature_engineering import AdvancedFootballFeatureEngineer
-from app.services.advanced_prediction_service import AdvancedPredictionService
-from app.utils.common import setup_logging, ensure_directory_exists
-from app.utils.config import settings
+from services.advanced_prediction_service import AdvancedPredictionService
+from utils.common import setup_logging, ensure_directory_exists
+from utils.config import settings
 
 # Set up logging
 logger = setup_logging(__name__)

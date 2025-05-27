@@ -14,9 +14,9 @@ from sqlalchemy import inspect, MetaData, create_engine
 # Add the parent directory to the path so we can import from app
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.utils.common import setup_logging
-from app.utils.config import settings
-from app.database import Base, engine, init_db
+from utils.common import setup_logging
+from utils.config import settings
+from database import Base, engine, init_db
 
 # Set up logging
 logger = setup_logging(__name__)

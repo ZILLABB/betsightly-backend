@@ -19,8 +19,8 @@ from typing import Dict, List, Any, Tuple
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.ml.model_factory import model_factory
-from app.utils.common import setup_logging, ensure_directory_exists
-from app.utils.config import settings
+from utils.common import setup_logging, ensure_directory_exists
+from utils.config import settings
 
 # Set up logging
 logger = setup_logging("train_advanced_models")

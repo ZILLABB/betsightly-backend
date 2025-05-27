@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 
-from app.database import Base
+from database import Base
 
 # Forward declaration to avoid circular imports
 prediction_table = None

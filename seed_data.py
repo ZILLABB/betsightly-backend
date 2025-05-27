@@ -14,10 +14,10 @@ from datetime import datetime
 # Add the parent directory to the path so we can import from app
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.utils.common import setup_logging
-from app.database import init_db, get_db
-from app.models.punter import Punter
-from app.models.bookmaker import Bookmaker
+from utils.common import setup_logging
+from database import init_db, get_db
+from models.punter import Punter
+from models.bookmaker import Bookmaker
 
 # Set up logging
 logger = setup_logging(__name__)

@@ -6,7 +6,7 @@ This module defines the Pydantic schemas for betting codes.
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class BettingCodeBase(BaseModel):
     """Base schema for betting code data."""
@@ -44,8 +44,7 @@ class BettingCodeInDB(BettingCodeBase):
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class BettingCodeResponse(BaseModel):
     """Schema for betting code response."""

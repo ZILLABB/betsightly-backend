@@ -27,8 +27,8 @@ sys.path.append(backend_dir)
 os.chdir(backend_dir)  # Change to backend directory to ensure .env is found
 
 # Import settings module
-from app.utils.config import settings, FOOTBALL_DATA_KEY, FOOTBALL_DATA_BASE_URL, FOOTBALL_DATA_DEFAULT_COMPETITIONS
-from app.services.api_client import FootballDataClient
+from utils.config import settings, FOOTBALL_DATA_KEY, FOOTBALL_DATA_BASE_URL, FOOTBALL_DATA_DEFAULT_COMPETITIONS
+from services.api_client import FootballDataClient
 
 # Set up logging
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
@@ -211,8 +211,8 @@ def fetch_fixtures_from_api(date_str, competitions=None, api_key=None, force=Fal
 
     # Check database for fixtures
     try:
-        from app.database import SessionLocal
-        from app.models.fixture import Fixture
+        from database import SessionLocal
+        from models.fixture import Fixture
 
         db = SessionLocal()
         date_obj = datetime.strptime(date_str, "%Y-%m-%d")
@@ -873,9 +873,9 @@ def save_to_database(fixtures_df, predictions_df):
     """
     try:
         # Import database modules
-        from app.database import SessionLocal
-        from app.services.fixture_service import FixtureService
-        from app.services.prediction_service_improved import PredictionService
+        from database import SessionLocal
+        from services.fixture_service import FixtureService
+        from services.prediction_service_improved import PredictionService
 
         # Get database session
         db = SessionLocal()

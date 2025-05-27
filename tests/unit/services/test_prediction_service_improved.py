@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock
 # Add the parent directory to the path so we can import the app modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from app.services.prediction_service_improved import PredictionService
+from services.prediction_service_improved import PredictionService
 
 class TestPredictionService:
     """Tests for the PredictionService class."""

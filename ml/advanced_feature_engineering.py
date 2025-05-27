@@ -14,8 +14,8 @@ import logging
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import joblib
 
-from app.utils.common import setup_logging, ensure_directory_exists
-from app.utils.config import settings
+from utils.common import setup_logging, ensure_directory_exists
+from utils.config import settings
 
 # Set up logging
 logger = setup_logging(__name__)
