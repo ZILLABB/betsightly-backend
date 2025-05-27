@@ -26,6 +26,7 @@ pandas==2.1.4
 numpy==1.25.2
 fastparquet==2023.8.0
 joblib==1.3.2
+scikit-learn==1.3.0  # Added for ML components
 
 # Testing
 pytest==7.4.3
