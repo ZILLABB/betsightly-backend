@@ -5,11 +5,11 @@ This module provides a base API client class for making HTTP requests.
 It handles authentication, rate limiting, and error handling.
 """
 
+import json
 import requests
 import time
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-import json
 
 from utils.common import setup_logging, retry_operation
 from utils.config import settings
