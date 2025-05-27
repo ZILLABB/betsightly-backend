@@ -8,8 +8,8 @@ import os
 import sys
 import logging
 from typing import Dict, List, Any, Union
-from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic import Field, ConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from datetime import datetime
 
 # Set up logging
@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 
 class APIFootballSettings(BaseSettings):
     """API Football settings."""
+    
+    model_config = SettingsConfigDict(
+        env_prefix="API_FOOTBALL_",
+        case_sensitive=False
+    )
 
     API_KEY: str = Field(default="")
     API_HOST: str = Field(default="api-football-v1.p.rapidapi.com")
@@ -25,6 +30,11 @@ class APIFootballSettings(BaseSettings):
 
 class DatabaseSettings(BaseSettings):
     """Database settings."""
+    
+    model_config = SettingsConfigDict(
+        env_prefix="DATABASE_",
+        case_sensitive=False
+    )
 
     URL: str = Field(default="sqlite:///data/database.db")
     ECHO: bool = Field(default=False)
@@ -33,6 +43,11 @@ class DatabaseSettings(BaseSettings):
 
 class MLSettings(BaseSettings):
     """Machine learning settings."""
+    
+    model_config = SettingsConfigDict(
+        env_prefix="ML_",
+        case_sensitive=False
+    )
 
     MODEL_DIR: str = Field(default="models")
     DATA_DIR: str = Field(default="data")
@@ -41,6 +56,11 @@ class MLSettings(BaseSettings):
 
 class OddsCategories(BaseSettings):
     """Odds categories settings."""
+    
+    model_config = SettingsConfigDict(
+        env_prefix="ODDS_",
+        case_sensitive=False
+    )
 
     TWO_ODDS_MIN: float = Field(default=1.0)
     TWO_ODDS_MAX: float = Field(default=2.0)
@@ -64,6 +84,13 @@ class OddsCategories(BaseSettings):
 
 class Settings(BaseSettings):
     """Application settings."""
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore"
+    )
 
     APP_NAME: str = Field(default="BetSightly")
     APP_VERSION: str = Field(default="1.0.0")
@@ -77,12 +104,10 @@ class Settings(BaseSettings):
     odds_categories: OddsCategories = Field(default_factory=OddsCategories)
 
     # Derived settings
-    ODDS_CATEGORIES: Dict[str, Dict[str, Any]] = {}
+    ODDS_CATEGORIES: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
-    def __init__(self, **kwargs):
-        """Initialize settings."""
-        super().__init__(**kwargs)
-
+    def model_post_init(self, __context) -> None:
+        """Initialize derived settings after model creation."""
         # Create derived settings
         self.ODDS_CATEGORIES = {
             "2_odds": {
@@ -117,21 +142,4 @@ class Settings(BaseSettings):
         os.makedirs(self.ml.CACHE_DIR, exist_ok=True)
 
 # Create settings instance
-settings = Settings(
-    APP_NAME="BetSightly",
-    APP_VERSION="1.0.0",
-    DEBUG=True,
-    ENVIRONMENT="development",
-    api_football=APIFootballSettings(
-        API_KEY=os.environ.get("API_FOOTBALL_KEY", ""),
-        API_HOST=os.environ.get("API_FOOTBALL_HOST", "api-football-v1.p.rapidapi.com")
-    ),
-    database=DatabaseSettings(
-        URL=os.environ.get("DATABASE_URL", "sqlite:///data/database.db")
-    ),
-    ml=MLSettings(
-        MODEL_DIR=os.environ.get("MODEL_DIR", "models"),
-        DATA_DIR=os.environ.get("DATA_DIR", "data"),
-        CACHE_DIR=os.environ.get("CACHE_DIR", "app/ml/cache")
-    )
-)
+settings = Settings()
