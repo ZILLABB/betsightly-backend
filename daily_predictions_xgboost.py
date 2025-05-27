@@ -25,11 +25,11 @@ sys.path.append(backend_dir)
 os.chdir(backend_dir)  # Change to backend directory to ensure .env is found
 
 # Import settings module
-from app.utils.config import settings, FOOTBALL_DATA_KEY, FOOTBALL_DATA_BASE_URL
-from app.services.api_client import FootballDataClient
-from app.database import SessionLocal
-from app.models.fixture import Fixture
-from app.models.prediction import Prediction
+from utils.config import settings, FOOTBALL_DATA_KEY, FOOTBALL_DATA_BASE_URL
+from services.api_client import FootballDataClient
+from database import SessionLocal
+from models.fixture import Fixture
+from models.prediction import Prediction
 
 # Set up logging
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")

@@ -12,8 +12,8 @@ from datetime import datetime, timedelta
 import os
 import joblib
 
-from app.utils.common import setup_logging, ensure_directory_exists, safe_divide
-from app.utils.config import settings
+from utils.common import setup_logging, ensure_directory_exists, safe_divide
+from utils.config import settings
 
 # Set up logging
 logger = setup_logging(__name__)

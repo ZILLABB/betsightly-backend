@@ -16,7 +16,7 @@ from datetime import datetime
 
 from app.ml.base_model import BaseModel
 from app.ml.advanced_feature_engineering import AdvancedFootballFeatureEngineer
-from app.utils.common import setup_logging
+from utils.common import setup_logging
 
 # Set up logging
 logger = setup_logging(__name__)

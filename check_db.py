@@ -10,9 +10,9 @@ from datetime import datetime
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.database import SessionLocal
-from app.models.fixture import Fixture
-from app.models.prediction import Prediction
+from database import SessionLocal
+from models.fixture import Fixture
+from models.prediction import Prediction
 
 def check_db():
     """Check database content."""

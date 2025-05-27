@@ -12,24 +12,26 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Tuple, Union
 from datetime import datetime, timedelta
 
-from app.ml.model_factory import model_factory
-from app.services.api_client import APIClient
-from app.services.prediction_categorizer import prediction_categorizer
-from app.utils.common import setup_logging, load_json_file, save_json_file
-from app.utils.config import settings
-from app.models.fixture import Fixture
-from app.models.prediction import Prediction
+# Comment out unavailable imports
+# from app.ml.model_factory import model_factory
+from services.api_client import APIClient
+from services.prediction_categorizer import prediction_categorizer
+from utils.common import setup_logging, load_json_file, save_json_file
+from utils.config import settings
+from fixture import Fixture
+from prediction import Prediction
 
 # Set up logging
 logger = setup_logging(__name__)
 
-# Import advanced feature engineering
-try:
-    from app.ml.advanced_feature_engineering import AdvancedFootballFeatureEngineer
-    has_advanced_features = True
-except ImportError:
-    logger.warning("Advanced feature engineering not available, using basic features")
-    has_advanced_features = False
+# Import advanced feature engineering - commented out since it's not available
+# try:
+#     from app.ml.advanced_feature_engineering import AdvancedFootballFeatureEngineer
+#     has_advanced_features = True
+# except ImportError:
+#     logger.warning("Advanced feature engineering not available, using basic features")
+#     has_advanced_features = False
+has_advanced_features = False
 
 class AdvancedPredictionService:
     """
@@ -46,7 +48,9 @@ class AdvancedPredictionService:
     def __init__(self, db=None):
         """Initialize the prediction service."""
         # Initialize model factory
-        self.model_factory = model_factory
+        # Commented out since model_factory is not available
+        # self.model_factory = model_factory
+        self.model_factory = None
 
         # Initialize API client for Football-Data.org
         self.api_client = APIClient(
@@ -69,15 +73,17 @@ class AdvancedPredictionService:
 
         # Initialize advanced feature engineering if available
         self.feature_engineer = None
-        if has_advanced_features:
-            try:
-                self.feature_engineer = AdvancedFootballFeatureEngineer()
-                logger.info("Advanced feature engineering initialized")
-
-                # Initialize with historical data if available
-                self._initialize_feature_engineer()
-            except Exception as e:
-                logger.error(f"Error initializing advanced feature engineering: {str(e)}")
+        # Advanced feature engineering is disabled since it's not available
+        # if has_advanced_features:
+        #     try:
+        #         self.feature_engineer = AdvancedFootballFeatureEngineer()
+        #         logger.info("Advanced feature engineering initialized")
+        #
+        #         # Initialize with historical data if available
+        #         self._initialize_feature_engineer()
+        #     except Exception as e:
+        #         logger.error(f"Error initializing advanced feature engineering: {str(e)}")
+        logger.warning("Advanced feature engineering is disabled")
 
     def _initialize_feature_engineer(self):
         """Initialize the feature engineer with historical data."""

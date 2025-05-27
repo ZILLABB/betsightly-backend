@@ -13,8 +13,8 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import brier_score_loss
 
-from app.utils.common import setup_logging
-from app.utils.config import settings
+from utils.common import setup_logging
+from utils.config import settings
 
 # Set up logging
 logger = setup_logging(__name__)

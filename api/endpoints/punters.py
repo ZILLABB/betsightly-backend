@@ -11,13 +11,13 @@ from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.services.punter_service import punter_service
-from app.models.punter import Punter
-from app.models.punter_prediction import PunterPrediction
-from app.schemas.punter import PunterCreate, PunterUpdate, PunterResponse, PunterListResponse
-from app.schemas.prediction import PunterPredictionResponse, PunterPredictionListResponse
-from app.utils.common import setup_logging
+from database import get_db
+from services.punter_service import punter_service
+from punter import Punter
+from punter_prediction import PunterPrediction
+from schemas.punter import PunterCreate, PunterUpdate, PunterResponse, PunterListResponse
+from schemas.prediction import PunterPredictionResponse, PunterPredictionListResponse
+from utils.common import setup_logging
 
 # Set up logging
 logger = setup_logging(__name__)

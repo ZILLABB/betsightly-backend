@@ -14,8 +14,8 @@ from datetime import datetime
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 from sklearn.model_selection import train_test_split
 
-from app.utils.common import setup_logging, ensure_directory_exists
-from app.utils.config import settings
+from utils.common import setup_logging, ensure_directory_exists
+from utils.config import settings
 
 # Set up logging
 logger = setup_logging(__name__)

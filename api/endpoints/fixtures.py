@@ -8,11 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models.fixture import Fixture
-from app.models.prediction import Prediction
-from app.services.fixture_service import FixtureService
-from app.services.prediction_service_improved import PredictionService
+from database import get_db
+from fixture import Fixture
+from prediction import Prediction
+from services.fixture_service import FixtureService
+from services.prediction_service_improved import PredictionService
 
 router = APIRouter()
 

@@ -7,12 +7,12 @@ It handles authentication, rate limiting, and error handling.
 
 import requests
 import time
-from typing import Dict, List, Any, Optional, Tuple, Union
+from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 import json
 
-from app.utils.common import setup_logging, retry_operation
-from app.utils.config import settings
+from utils.common import setup_logging, retry_operation
+from utils.config import settings
 
 # Set up logging
 logger = setup_logging(__name__)
@@ -324,6 +324,30 @@ class APIClient:
         """
         return self.request("DELETE", endpoint, params=params, use_cache=False,
                            max_retries=max_retries)
+
+    def get_fixtures_improved(self, date: str = None, league: int = None, last: int = None) -> Dict[str, Any]:
+        """
+        Get fixtures with improved parameters for API Football.
+
+        Args:
+            date: Date string in YYYY-MM-DD format
+            league: League ID
+            last: Number of last fixtures to get
+
+        Returns:
+            Response data
+        """
+        endpoint = "fixtures"
+        params = {}
+
+        if date:
+            params["date"] = date
+        if league:
+            params["league"] = league
+        if last:
+            params["last"] = last
+
+        return self.get(endpoint, params=params)
 
 
 class FootballDataClient(APIClient):

@@ -28,7 +28,7 @@ def initialize_database():
     
     try:
         # Import database initialization function
-        from app.database import init_db
+        from database import init_db
         
         # Initialize database
         init_db()

@@ -6,10 +6,8 @@ It loads configuration from environment variables and configuration files.
 """
 
 import os
-import json
-from typing import Dict, Any, Optional
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 import logging
 
 # Set up logging
@@ -18,122 +16,119 @@ logger = logging.getLogger(__name__)
 class FootballDataSettings(BaseSettings):
     """Football-Data.org configuration settings."""
 
-    API_KEY: str = Field("f9ed94ba8dde4a57b742ce7075057310", env="FOOTBALL_DATA_KEY")
-    BASE_URL: str = Field("https://api.football-data.org/v4", env="FOOTBALL_DATA_BASE_URL")
-    DAILY_LIMIT: int = Field(100, env="FOOTBALL_DATA_DAILY_LIMIT")
-    DEFAULT_COMPETITIONS: str = Field("PL,PD,SA,BL1,FL1", env="FOOTBALL_DATA_DEFAULT_COMPETITIONS")
+    API_KEY: str = Field("f9ed94ba8dde4a57b742ce7075057310")
+    BASE_URL: str = Field("https://api.football-data.org/v4")
+    DAILY_LIMIT: int = Field(100)
+    DEFAULT_COMPETITIONS: str = Field("PL,PD,SA,BL1,FL1")
 
-    class Config:
-        env_prefix = "FOOTBALL_DATA_"
-        case_sensitive = True
+    model_config = SettingsConfigDict(env_prefix="FOOTBALL_DATA_", case_sensitive=True)
 
 class APIFootballSettings(BaseSettings):
     """API Football configuration settings."""
 
-    API_KEY: str = Field("", env="API_FOOTBALL_KEY")
-    API_HOST: str = Field("api-football-v1.p.rapidapi.com", env="API_FOOTBALL_HOST")
-    BASE_URL: str = Field("https://api-football-v1.p.rapidapi.com/v3", env="API_FOOTBALL_BASE_URL")
-    DAILY_LIMIT: int = Field(100, env="API_FOOTBALL_DAILY_LIMIT")
+    API_KEY: str = Field("")
+    API_HOST: str = Field("api-football-v1.p.rapidapi.com")
+    BASE_URL: str = Field("https://api-football-v1.p.rapidapi.com/v3")
+    DAILY_LIMIT: int = Field(100)
 
-    class Config:
-        env_prefix = "API_FOOTBALL_"
-        case_sensitive = True
+    model_config = SettingsConfigDict(env_prefix="API_FOOTBALL_", case_sensitive=True)
 
 class DatabaseSettings(BaseSettings):
     """Database configuration settings."""
 
-    URL: str = Field("sqlite:///./football.db", env="DATABASE_URL")
-    ECHO: bool = Field(False, env="DATABASE_ECHO")
-    POOL_SIZE: int = Field(5, env="DATABASE_POOL_SIZE")
-    MAX_OVERFLOW: int = Field(10, env="DATABASE_MAX_OVERFLOW")
+    URL: str = Field("sqlite:///./football.db")
+    ECHO: bool = Field(False)
+    POOL_SIZE: int = Field(5)
+    MAX_OVERFLOW: int = Field(10)
 
-    class Config:
-        env_prefix = "DATABASE_"
-        case_sensitive = True
+    model_config = SettingsConfigDict(env_prefix="DATABASE_", case_sensitive=True)
 
 class MLSettings(BaseSettings):
     """Machine learning configuration settings."""
 
-    MODEL_DIR: str = Field("models", env="ML_MODEL_DIR")
-    DATA_DIR: str = Field("data", env="ML_DATA_DIR")
-    CACHE_DIR: str = Field("cache", env="ML_CACHE_DIR")
-    FEATURE_CACHE_EXPIRY: int = Field(24, env="ML_FEATURE_CACHE_EXPIRY")  # hours
+    MODEL_DIR: str = Field("models")
+    DATA_DIR: str = Field("data")
+    CACHE_DIR: str = Field("cache")
+    FEATURE_CACHE_EXPIRY: int = Field(24)  # hours
 
-    class Config:
-        env_prefix = "ML_"
-        case_sensitive = True
+    model_config = SettingsConfigDict(env_prefix="ML_", case_sensitive=True)
 
+class TelegramSettings(BaseSettings):
+    """Telegram bot configuration settings."""
 
+    BOT_TOKEN: str = Field("")
+    CHAT_ID: str = Field("")
+    WEBHOOK_URL: str = Field("")
+    WEBHOOK_SECRET: str = Field("")
+
+    model_config = SettingsConfigDict(env_prefix="TELEGRAM_", case_sensitive=True)
 
 class PunterSettings(BaseSettings):
     """Punter configuration settings."""
 
-    CACHE_DIR: str = Field("punter_cache", env="PUNTER_CACHE_DIR")
-    MIN_PREDICTIONS: int = Field(10, env="PUNTER_MIN_PREDICTIONS")
-    DEFAULT_CONFIDENCE: float = Field(0.5, env="PUNTER_DEFAULT_CONFIDENCE")
+    CACHE_DIR: str = Field("punter_cache")
+    MIN_PREDICTIONS: int = Field(10)
+    DEFAULT_CONFIDENCE: float = Field(0.5)
 
-    class Config:
-        env_prefix = "PUNTER_"
-        case_sensitive = True
+    model_config = SettingsConfigDict(env_prefix="PUNTER_", case_sensitive=True)
 
 class OddsCategories(BaseSettings):
     """Odds categories configuration."""
 
-    TWO_ODDS_MIN: float = Field(1.5, env="ODDS_TWO_MIN")
-    TWO_ODDS_MAX: float = Field(2.5, env="ODDS_TWO_MAX")
-    TWO_ODDS_MIN_CONFIDENCE: float = Field(70.0, env="ODDS_TWO_MIN_CONFIDENCE")
-    TWO_ODDS_LIMIT: int = Field(5, env="ODDS_TWO_LIMIT")
-    TWO_ODDS_TARGET: float = Field(2.0, env="ODDS_TWO_TARGET")
+    TWO_ODDS_MIN: float = Field(1.5)
+    TWO_ODDS_MAX: float = Field(2.5)
+    TWO_ODDS_MIN_CONFIDENCE: float = Field(70.0)
+    TWO_ODDS_LIMIT: int = Field(5)
+    TWO_ODDS_TARGET: float = Field(2.0)
 
-    FIVE_ODDS_MIN: float = Field(2.5, env="ODDS_FIVE_MIN")
-    FIVE_ODDS_MAX: float = Field(5.0, env="ODDS_FIVE_MAX")
-    FIVE_ODDS_MIN_CONFIDENCE: float = Field(70.0, env="ODDS_FIVE_MIN_CONFIDENCE")
-    FIVE_ODDS_LIMIT: int = Field(3, env="ODDS_FIVE_LIMIT")
-    FIVE_ODDS_TARGET: float = Field(5.0, env="ODDS_FIVE_TARGET")
+    FIVE_ODDS_MIN: float = Field(2.5)
+    FIVE_ODDS_MAX: float = Field(5.0)
+    FIVE_ODDS_MIN_CONFIDENCE: float = Field(70.0)
+    FIVE_ODDS_LIMIT: int = Field(3)
+    FIVE_ODDS_TARGET: float = Field(5.0)
 
-    TEN_ODDS_MIN: float = Field(5.0, env="ODDS_TEN_MIN")
-    TEN_ODDS_MAX: float = Field(10.0, env="ODDS_TEN_MAX")
-    TEN_ODDS_MIN_CONFIDENCE: float = Field(70.0, env="ODDS_TEN_MIN_CONFIDENCE")
-    TEN_ODDS_LIMIT: int = Field(2, env="ODDS_TEN_LIMIT")
-    TEN_ODDS_TARGET: float = Field(10.0, env="ODDS_TEN_TARGET")
+    TEN_ODDS_MIN: float = Field(5.0)
+    TEN_ODDS_MAX: float = Field(10.0)
+    TEN_ODDS_MIN_CONFIDENCE: float = Field(70.0)
+    TEN_ODDS_LIMIT: int = Field(2)
+    TEN_ODDS_TARGET: float = Field(10.0)
 
-    ROLLOVER_MIN: float = Field(1.2, env="ODDS_ROLLOVER_MIN")
-    ROLLOVER_MAX: float = Field(2.0, env="ODDS_ROLLOVER_MAX")
-    ROLLOVER_MIN_CONFIDENCE: float = Field(70.0, env="ODDS_ROLLOVER_MIN_CONFIDENCE")
-    ROLLOVER_TARGET: float = Field(3.0, env="ODDS_ROLLOVER_TARGET")
-    ROLLOVER_DAYS: int = Field(10, env="ODDS_ROLLOVER_DAYS")
+    ROLLOVER_MIN: float = Field(1.2)
+    ROLLOVER_MAX: float = Field(2.0)
+    ROLLOVER_MIN_CONFIDENCE: float = Field(70.0)
+    ROLLOVER_TARGET: float = Field(3.0)
+    ROLLOVER_DAYS: int = Field(10)
 
-    class Config:
-        env_prefix = "ODDS_"
-        case_sensitive = True
+    model_config = SettingsConfigDict(env_prefix="ODDS_", case_sensitive=True)
 
 class Settings(BaseSettings):
     """Main application settings."""
 
     # Application settings
-    APP_NAME: str = Field("BetSightly", env="APP_NAME")
-    APP_VERSION: str = Field("1.0.0", env="APP_VERSION")
-    DEBUG: bool = Field(False, env="DEBUG")
-    ENVIRONMENT: str = Field("development", env="ENVIRONMENT")
+    APP_NAME: str = Field("BetSightly")
+    APP_VERSION: str = Field("1.0.0")
+    DEBUG: bool = Field(False)
+    ENVIRONMENT: str = Field("development")
 
     # Path settings
-    BASE_DIR: str = Field(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), env="BASE_DIR")
+    BASE_DIR: str = Field(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
     # Component settings
     football_data: FootballDataSettings = FootballDataSettings()  # Primary data source
     api_football: APIFootballSettings = APIFootballSettings()     # Fallback data source
     database: DatabaseSettings = DatabaseSettings()
     ml: MLSettings = MLSettings()
+    telegram: TelegramSettings = TelegramSettings()
     punter: PunterSettings = PunterSettings()
     odds_categories: OddsCategories = OddsCategories()
 
-    model_config = {
-        "extra": "allow",
-        "arbitrary_types_allowed": True,
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-        "case_sensitive": True
-    }
+    model_config = SettingsConfigDict(
+        extra="allow",
+        arbitrary_types_allowed=True,
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -181,8 +176,6 @@ class Settings(BaseSettings):
                 "days": self.odds_categories.ROLLOVER_DAYS
             }
         }
-
-
 
 # Create a singleton instance
 settings = Settings()

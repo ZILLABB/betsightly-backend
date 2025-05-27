@@ -20,7 +20,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
 from app.ml.base_model import BaseModel
-from app.utils.config import settings
+from utils.config import settings
 
 # Set up logging
 logger = logging.getLogger(__name__)
