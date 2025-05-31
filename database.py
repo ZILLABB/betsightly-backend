@@ -184,6 +184,17 @@ def init_db():
         Base.metadata.create_all(bind=engine)
         logger.info("SQLAlchemy tables created.")
 
+        # Apply database optimizations
+        try:
+            from utils.database_optimization import create_database_indexes, optimize_query_performance
+            create_database_indexes()
+            optimize_query_performance()
+            logger.info("Database optimizations applied.")
+        except ImportError:
+            logger.warning("Database optimization utilities not available")
+        except Exception as e:
+            logger.warning(f"Failed to apply database optimizations: {str(e)}")
+
         return True
 
     except Exception as e:

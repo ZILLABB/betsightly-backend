@@ -38,9 +38,24 @@ This repository contains the backend code for the BetSightly application, a spor
    # Edit .env with your API keys and configuration
    ```
 
-5. Start the development server
+   **⚠️ IMPORTANT**: You must set the following environment variables:
+   - `FOOTBALL_DATA_KEY`: Your Football-Data.org API key
+   - `API_FOOTBALL_KEY`: Your API-Football API key
+
+5. Test the installation
+
    ```bash
-   uvicorn app.main:app --reload
+   python test_fixes.py
+   ```
+
+6. Start the development server
+   ```bash
+   python start_production.py --reload
+   ```
+
+   Or use the traditional method:
+   ```bash
+   uvicorn main:app --reload
    ```
 
 ## Project Structure
@@ -67,6 +82,37 @@ When the server is running, you can access the API documentation at:
 
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+
+## Health Monitoring
+
+The application includes comprehensive health check endpoints:
+
+- Basic health: `GET /api/health/`
+- Detailed health: `GET /api/health/detailed`
+- Readiness check: `GET /api/health/ready`
+- Liveness check: `GET /api/health/live`
+
+## Security & Performance Improvements
+
+This version includes several critical fixes:
+
+### Security Fixes ✅
+- Removed all hardcoded API keys
+- Implemented secure environment variable loading
+- Restricted CORS configuration
+- Added comprehensive error handling
+
+### Performance Improvements ✅
+- Database query optimization with proper indexing
+- Caching for frequently accessed data
+- Optimized database session handling
+- N+1 query prevention
+
+### Stability Improvements ✅
+- Fixed uninitialized model factory issues
+- Proper database session lifecycle management
+- Comprehensive error handling and logging
+- Health checks for all critical components
 
 ## Development
 
