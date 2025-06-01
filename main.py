@@ -2,87 +2,125 @@
 Main application.
 """
 
+import logging
+import os
 from datetime import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from sqlalchemy.orm import Session
 
 from api.api import api_router
-from database import init_db
+from database import init_db, get_db
+from utils.config import settings
+from utils.error_handling import setup_exception_handlers
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 # Initialize database
-init_db()
+try:
+    init_db()
+    logger.info("Database initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize database: {str(e)}")
+    raise
 
-# Create FastAPI app
+# Create FastAPI app with enhanced configuration
 app = FastAPI(
-    title="Football Predictions API",
-    description="API for football match predictions",
-    version="0.1.0"
+    title="BetSightly Football Predictions API",
+    description="Advanced ML-powered football match predictions with confidence scoring",
+    version="1.0.0",
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None
 )
 
-# Add CORS middleware
+# Add security middleware (allow testserver for testing)
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["localhost", "127.0.0.1", "*.betsightly.com", "testserver"]
+)
+
+# Add compression middleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Add CORS middleware with enhanced security
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5182,http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Development frontend
-        "http://localhost:5182",  # Your frontend port
-        "http://localhost:3000",  # Alternative development frontend
-        "https://betsightly.com",  # Production frontend
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-API-Key"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
+
+# Setup exception handlers
+setup_exception_handlers(app)
 
 # Include API router
 app.include_router(api_router, prefix="/api")
 
 @app.get("/")
 def root():
-    """Root endpoint."""
+    """Root endpoint with enhanced information."""
     return {
-        "message": "Welcome to the Football Predictions API",
-        "docs_url": "/docs",
-        "redoc_url": "/redoc"
+        "service": "BetSightly Football Predictions API",
+        "version": "1.0.0",
+        "status": "operational",
+        "message": "Advanced ML-powered football predictions",
+        "docs_url": "/docs" if settings.DEBUG else "Contact admin for API documentation",
+        "health_check": "/api/health/",
+        "predictions": "/api/predictions/",
+        "timestamp": datetime.now().isoformat()
     }
 
 @app.get("/api/health")
 def health_check():
-    """Health check endpoint."""
+    """Basic health check endpoint."""
     return {
-        "status": "ok",
-        "message": "API is running",
-        "timestamp": str(datetime.now())
+        "status": "healthy",
+        "service": "BetSightly API",
+        "version": "1.0.0",
+        "timestamp": datetime.now().isoformat(),
+        "environment": settings.ENVIRONMENT
     }
 
 @app.get("/api/debug/predictions")
-def debug_predictions():
+def debug_predictions(db: Session = Depends(get_db)):
     """Debug endpoint to check predictions data."""
-    from database import get_db
     from services.prediction_service_improved import PredictionService
 
-    # Get database session
-    db = next(get_db())
+    try:
+        # Get prediction service
+        prediction_service = PredictionService(db)
 
-    # Get prediction service
-    prediction_service = PredictionService(db)
+        # Get all predictions by date (today)
+        today_date = datetime.now().strftime("%Y-%m-%d")
+        predictions_data = prediction_service.get_predictions_for_date(today_date)
 
-    # Get all predictions by date (today)
-    today_date = datetime.now().strftime("%Y-%m-%d")
-    predictions_data = prediction_service.get_predictions_for_date(today_date)
-
-    # Return debug info
-    return {
-        "status": predictions_data.get("status", "unknown"),
-        "date": predictions_data.get("date", today_date),
-        "predictions_count": len(predictions_data.get("predictions", [])),
-        "categories": {
-            category: len(predictions)
-            for category, predictions in predictions_data.get("categories", {}).items()
-        },
-        "endpoints": {
-            "all_predictions": "/api/predictions?categorized=true",
-            "category_predictions": "/api/predictions/category/{category}",
-            "best_predictions_by_category": "/api/predictions/best/{category}",
-            "all_best_predictions": "/api/predictions/best"
+        # Return debug info
+        return {
+            "status": predictions_data.get("status", "unknown"),
+            "date": predictions_data.get("date", today_date),
+            "predictions_count": len(predictions_data.get("predictions", [])),
+            "categories": {
+                category: len(predictions)
+                for category, predictions in predictions_data.get("categories", {}).items()
+            },
+            "endpoints": {
+                "all_predictions": "/api/predictions?categorized=true",
+                "category_predictions": "/api/predictions/category/{category}",
+                "best_predictions_by_category": "/api/predictions/best/{category}",
+                "all_best_predictions": "/api/predictions/best"
+            }
         }
-    }
+    except Exception as e:
+        logger.error(f"Error in debug predictions endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting debug predictions: {str(e)}")

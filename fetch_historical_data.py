@@ -6,6 +6,7 @@ The data is used to train the machine learning models for predicting match outco
 """
 
 import os
+import sys
 import json
 import logging
 import aiohttp
@@ -26,7 +27,10 @@ RESULTS_FILE = os.path.join(HISTORICAL_DIR, "results.csv")
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache")
 
 # API-Football configuration
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "f486427076msh6a88663abedebbcp15f9c4jsn3ae4c457ef73")
+API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "")
+if not API_FOOTBALL_KEY:
+    logger.error("API_FOOTBALL_KEY environment variable not set")
+    sys.exit(1)
 API_FOOTBALL_HOST = os.getenv("API_FOOTBALL_HOST", "api-football-v1.p.rapidapi.com")
 API_FOOTBALL_BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
 

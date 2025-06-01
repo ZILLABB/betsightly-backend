@@ -9,9 +9,8 @@ using the trained machine learning models.
 import os
 import sys
 import json
-import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 import time
 import traceback
@@ -40,7 +39,10 @@ logger = logging.getLogger(__name__)
 
 # Football-Data.org constants
 FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4"
-FOOTBALL_DATA_KEY = "f9ed94ba8dde4a57b742ce7075057310"
+FOOTBALL_DATA_KEY = os.getenv("FOOTBALL_DATA_KEY", "")
+if not FOOTBALL_DATA_KEY:
+    logger.error("FOOTBALL_DATA_KEY environment variable not set")
+    sys.exit(1)
 FOOTBALL_DATA_HEADERS = {
     "X-Auth-Token": FOOTBALL_DATA_KEY
 }

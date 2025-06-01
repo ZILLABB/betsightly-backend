@@ -12,7 +12,6 @@ from database import get_db
 from fixture import Fixture
 from prediction import Prediction
 from services.fixture_service import FixtureService
-from services.prediction_service_improved import PredictionService
 
 router = APIRouter()
 
@@ -67,8 +66,8 @@ def get_fixture_prediction(
     db: Session = Depends(get_db)
 ):
     """Get prediction for fixture."""
-    prediction_service = PredictionService(db)
-    prediction = prediction_service.get_prediction_by_fixture_id(fixture_id)
+    # Query prediction directly from database
+    prediction = db.query(Prediction).filter(Prediction.fixture_id == fixture_id).first()
 
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
