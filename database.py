@@ -94,6 +94,36 @@ def init_db():
     );
     """
 
+    # SQL to create cached predictions table for fast API responses
+    CREATE_CACHED_PREDICTIONS_TABLE = """
+    CREATE TABLE IF NOT EXISTS cached_predictions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prediction_date DATE NOT NULL,
+        category TEXT NOT NULL,
+        prediction_data TEXT NOT NULL,  -- JSON data
+        fixture_count INTEGER DEFAULT 0,
+        generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NOT NULL,
+        is_stale BOOLEAN DEFAULT 0,
+        UNIQUE(prediction_date, category)
+    );
+    """
+
+    # SQL to create prediction generation log
+    CREATE_PREDICTION_LOG_TABLE = """
+    CREATE TABLE IF NOT EXISTS prediction_generation_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prediction_date DATE NOT NULL,
+        status TEXT NOT NULL,  -- 'success', 'error', 'partial'
+        fixtures_fetched INTEGER DEFAULT 0,
+        predictions_generated INTEGER DEFAULT 0,
+        generation_time_seconds REAL DEFAULT 0,
+        error_message TEXT,
+        api_source TEXT,  -- 'football-data', 'api-football', 'cache'
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+
     # SQL to create prediction combinations table
     CREATE_PREDICTION_COMBINATIONS_TABLE = """
     CREATE TABLE IF NOT EXISTS prediction_combinations (
@@ -142,6 +172,12 @@ def init_db():
         logger.info("Creating predictions table...")
         cursor.execute(CREATE_PREDICTIONS_TABLE)
 
+        logger.info("Creating cached predictions table...")
+        cursor.execute(CREATE_CACHED_PREDICTIONS_TABLE)
+
+        logger.info("Creating prediction generation log table...")
+        cursor.execute(CREATE_PREDICTION_LOG_TABLE)
+
         logger.info("Creating prediction combinations table...")
         cursor.execute(CREATE_PREDICTION_COMBINATIONS_TABLE)
 
@@ -183,6 +219,17 @@ def init_db():
         # Create SQLAlchemy tables
         Base.metadata.create_all(bind=engine)
         logger.info("SQLAlchemy tables created.")
+
+        # Apply database optimizations
+        try:
+            from utils.database_optimization import create_database_indexes, optimize_query_performance
+            create_database_indexes()
+            optimize_query_performance()
+            logger.info("Database optimizations applied.")
+        except ImportError:
+            logger.warning("Database optimization utilities not available")
+        except Exception as e:
+            logger.warning(f"Failed to apply database optimizations: {str(e)}")
 
         return True
 

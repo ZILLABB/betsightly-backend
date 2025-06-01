@@ -1,8 +1,8 @@
 """
-Configuration Module
+Streamlined Configuration Module
 
-This module provides centralized configuration management for the application.
-It loads configuration from environment variables and configuration files.
+Centralized configuration for the production-ready ML prediction pipeline.
+Focuses on essential settings for data sources, API integration, and ML models.
 """
 
 import os
@@ -13,10 +13,26 @@ import logging
 # Set up logging
 logger = logging.getLogger(__name__)
 
-class FootballDataSettings(BaseSettings):
-    """Football-Data.org configuration settings."""
+class DataSourceSettings(BaseSettings):
+    """Data source configuration for training and live predictions."""
 
-    API_KEY: str = Field("f9ed94ba8dde4a57b742ce7075057310")
+    # GitHub dataset for training (primary data source)
+    GITHUB_DATASET_URL: str = Field(
+        "https://raw.githubusercontent.com/xgabora/Club-Football-Match-Data-2000-2025/main/data/Matches.csv",
+        description="GitHub football dataset URL for model training"
+    )
+
+    # Local data directories
+    DATA_DIR: str = Field("data", description="Local data directory")
+    MODELS_DIR: str = Field("models", description="ML models directory")
+    CACHE_DIR: str = Field("cache", description="Cache directory")
+
+    model_config = SettingsConfigDict(env_prefix="DATA_", case_sensitive=True)
+
+class FootballDataSettings(BaseSettings):
+    """Football-Data.org API configuration for live fixtures."""
+
+    API_KEY: str = Field(default="", description="Football-Data.org API key")
     BASE_URL: str = Field("https://api.football-data.org/v4")
     DAILY_LIMIT: int = Field(100)
     DEFAULT_COMPETITIONS: str = Field("PL,PD,SA,BL1,FL1")
@@ -44,14 +60,66 @@ class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DATABASE_", case_sensitive=True)
 
 class MLSettings(BaseSettings):
-    """Machine learning configuration settings."""
+    """Advanced ML configuration for production pipeline."""
 
+    # Directories
     MODEL_DIR: str = Field("models")
     DATA_DIR: str = Field("data")
     CACHE_DIR: str = Field("cache")
-    FEATURE_CACHE_EXPIRY: int = Field(24)  # hours
+
+    # Model priorities (advanced models first)
+    PREFERRED_MODELS: str = Field(
+        "xgboost,lightgbm,neural_network,lstm,ensemble",
+        description="Comma-separated list of models in priority order"
+    )
+
+    # Training configuration
+    TRAIN_TEST_SPLIT: float = Field(0.2, description="Test set ratio")
+    CROSS_VALIDATION_FOLDS: int = Field(5, description="CV folds for model evaluation")
+    HYPERPARAMETER_OPTIMIZATION: bool = Field(True, description="Enable hyperparameter tuning")
+
+    # Feature engineering
+    FEATURE_SELECTION: bool = Field(True, description="Enable automatic feature selection")
+    MIN_FEATURE_IMPORTANCE: float = Field(0.01, description="Minimum feature importance threshold")
+
+    # Prediction filtering
+    MIN_CONFIDENCE_THRESHOLD: float = Field(0.65, description="Minimum confidence for predictions")
+    MAX_PREDICTIONS_PER_CATEGORY: int = Field(10, description="Maximum predictions per category")
+
+    # Caching
+    FEATURE_CACHE_EXPIRY: int = Field(24, description="Feature cache expiry in hours")
+    PREDICTION_CACHE_TTL: int = Field(1800, description="Prediction cache TTL in seconds")
 
     model_config = SettingsConfigDict(env_prefix="ML_", case_sensitive=True)
+
+class BasketballSettings(BaseSettings):
+    """Basketball prediction configuration settings."""
+
+    # NBA API settings (free)
+    NBA_API_ENABLED: bool = Field(True, description="Enable NBA API data fetching")
+    NBA_API_BASE_URL: str = Field("https://stats.nba.com/stats", description="NBA Stats API base URL")
+
+    # Data sources
+    KAGGLE_DATASET_URL: str = Field(
+        "https://www.kaggle.com/datasets/nathanlauga/nba-games",
+        description="Kaggle NBA dataset URL for training"
+    )
+
+    # Prediction settings
+    MIN_CONFIDENCE_THRESHOLD: float = Field(0.60, description="Minimum confidence for basketball predictions")
+    MAX_PREDICTIONS_PER_CATEGORY: int = Field(8, description="Maximum basketball predictions per category")
+
+    # Feature engineering
+    TEAM_FORM_GAMES: int = Field(5, description="Number of recent games for form calculation")
+    SEASON_START_MONTH: int = Field(10, description="NBA season start month (October)")
+
+    # Model settings
+    PREFERRED_MODELS: str = Field(
+        "xgboost,lightgbm,neural_network",
+        description="Preferred basketball models in priority order"
+    )
+
+    model_config = SettingsConfigDict(env_prefix="BASKETBALL_", case_sensitive=True)
 
 class TelegramSettings(BaseSettings):
     """Telegram bot configuration settings."""
@@ -114,8 +182,10 @@ class Settings(BaseSettings):
     BASE_DIR: str = Field(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
     # Component settings
-    football_data: FootballDataSettings = FootballDataSettings()  # Primary data source
-    api_football: APIFootballSettings = APIFootballSettings()     # Fallback data source
+    data_source: DataSourceSettings = DataSourceSettings()       # GitHub dataset for training
+    football_data: FootballDataSettings = FootballDataSettings() # Live fixtures API
+    api_football: APIFootballSettings = APIFootballSettings()    # Alternative live fixtures API
+    basketball: BasketballSettings = BasketballSettings()        # Basketball prediction settings
     database: DatabaseSettings = DatabaseSettings()
     ml: MLSettings = MLSettings()
     telegram: TelegramSettings = TelegramSettings()

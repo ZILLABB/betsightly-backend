@@ -9,9 +9,8 @@ using the trained machine learning models.
 import os
 import sys
 import json
-import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 import time
 import traceback
@@ -39,7 +38,10 @@ logger = logging.getLogger(__name__)
 
 # API-Football constants
 API_FOOTBALL_BASE_URL = "https://v3.football.api-sports.io"
-API_FOOTBALL_KEY = "bbfc08f4961fb2ef3476a129b8cb1cd9"
+API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "")
+if not API_FOOTBALL_KEY:
+    logger.error("API_FOOTBALL_KEY environment variable not set")
+    sys.exit(1)
 API_FOOTBALL_HEADERS = {
     "x-rapidapi-host": "v3.football.api-sports.io",
     "x-rapidapi-key": API_FOOTBALL_KEY
