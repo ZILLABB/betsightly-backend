@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 from database import get_db
 from services.quick_prediction_service import quick_prediction_service
+from services.cached_prediction_service import cached_prediction_service
 # Using quick prediction service with trained models
 from utils.error_handling import handle_database_error, BetSightlyError, ValidationError
 from utils.database_optimization import query_performance_monitor
@@ -143,11 +144,11 @@ def get_predictions(
         # Log request for monitoring
         logger.info(f"Predictions request: category={category}, date={date}, limit={limit}")
 
-        # Always use advanced ML prediction service
+        # Use cached prediction service for fast responses
         date_str = date.strftime("%Y-%m-%d") if date else datetime.now().strftime("%Y-%m-%d")
 
-        # Get predictions using advanced ML models
-        predictions_data = quick_prediction_service.get_predictions_for_date(date_str)
+        # Get predictions using cached service (sub-500ms response)
+        predictions_data = cached_prediction_service.get_predictions_for_date(date_str)
 
         # Process the predictions data
         if predictions_data.get("status") != "success":
@@ -213,7 +214,7 @@ def get_predictions(
 # Legacy endpoint for backward compatibility
 @router.get("/categories")
 def get_prediction_categories_legacy(
-    db: Session = Depends(get_db),
+    request: Request,
     date: Optional[date] = None
 ):
     """
@@ -223,20 +224,19 @@ def get_prediction_categories_legacy(
     """
     # Redirect to the new consolidated endpoint
     return get_predictions(
-        db=db,
+        request=request,
         date=date,
         category=None,
         limit=10,
         format=ResponseFormat.SIMPLE,
-        best_only=False,
-        advanced=False
+        best_only=False
     )
 
 # Legacy endpoint for backward compatibility
 @router.get("/category/{category}")
 def get_predictions_by_category_legacy(
     category: str,
-    db: Session = Depends(get_db),
+    request: Request,
     date: Optional[date] = None,
     limit: int = Query(10, description="Maximum number of predictions to return"),
     best_only: bool = Query(True, description="Return only the best predictions")
@@ -257,20 +257,19 @@ def get_predictions_by_category_legacy(
 
     # Redirect to the new consolidated endpoint
     return get_predictions(
-        db=db,
+        request=request,
         date=date,
         category=category_enum,
         limit=limit,
         format=ResponseFormat.SIMPLE,
-        best_only=best_only,
-        advanced=False
+        best_only=best_only
     )
 
 # Legacy endpoint for backward compatibility
 @router.get("/best/{category}")
 def get_best_predictions_by_category_legacy(
     category: str,
-    db: Session = Depends(get_db),
+    request: Request,
     date: Optional[date] = None,
     limit: int = Query(3, description="Maximum number of predictions to return")
 ):
@@ -286,19 +285,18 @@ def get_best_predictions_by_category_legacy(
         )
 
     return get_predictions(
-        db=db,
+        request=request,
         date=date,
         category=category_enum,
         limit=limit,
         format=ResponseFormat.SIMPLE,
-        best_only=True,
-        advanced=False
+        best_only=True
     )
 
 # Legacy endpoint for backward compatibility
 @router.get("/best")
 def get_all_best_predictions_legacy(
-    db: Session = Depends(get_db),
+    request: Request,
     date: Optional[date] = None,
     limit_per_category: int = Query(3, description="Maximum number of predictions per category")
 ):
@@ -306,13 +304,12 @@ def get_all_best_predictions_legacy(
     **Legacy endpoint** - Use `/api/predictions/?best_only=true` instead.
     """
     return get_predictions(
-        db=db,
+        request=request,
         date=date,
         category=None,
         limit=limit_per_category,
         format=ResponseFormat.SIMPLE,
-        best_only=True,
-        advanced=False
+        best_only=True
     )
 
 # Keep essential endpoints only
@@ -446,4 +443,81 @@ def get_enhanced_predictions(
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
+        )
+
+
+@router.get("/cache/status")
+def get_cache_status(request: Request):
+    """
+    **Cache Status Endpoint**
+
+    Get detailed information about the prediction cache status and performance.
+
+    **Returns:**
+    - Cache entries with expiration status
+    - Generation statistics for last 24 hours
+    - Background refresh configuration
+    - Performance metrics
+    """
+    try:
+        # Apply rate limiting
+        check_rate_limit(request)
+
+        # Get cache status from cached service
+        cache_status = cached_prediction_service.get_cache_status()
+
+        return {
+            "status": "success",
+            "cache_status": cache_status,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Cache status endpoint error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting cache status: {str(e)}"
+        )
+
+
+@router.post("/cache/refresh")
+def force_cache_refresh(
+    request: Request,
+    date: Optional[date] = Query(None, description="Date to refresh (YYYY-MM-DD)")
+):
+    """
+    **Force Cache Refresh**
+
+    Manually trigger cache refresh for a specific date.
+    Useful for cache invalidation or immediate updates.
+
+    **Parameters:**
+    - date: Optional date to refresh (default: today)
+
+    **Returns:**
+    - Fresh predictions with generation metrics
+    """
+    try:
+        # Apply rate limiting (stricter for refresh operations)
+        check_rate_limit(request)
+
+        # Convert date
+        date_str = date.strftime("%Y-%m-%d") if date else None
+
+        # Force refresh
+        logger.info(f"Manual cache refresh requested for {date_str or 'today'}")
+        result = cached_prediction_service.force_refresh(date_str)
+
+        return {
+            "status": "success",
+            "message": f"Cache refreshed for {date_str or 'today'}",
+            "predictions": result,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Cache refresh endpoint error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error refreshing cache: {str(e)}"
         )
