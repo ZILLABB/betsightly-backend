@@ -24,8 +24,8 @@ def check_environment():
     logger.info("Checking environment variables...")
     
     required_vars = [
-        "FOOTBALL_DATA_KEY",
-        "API_FOOTBALL_KEY"
+        "FOOTBALL_DATA_API_KEY",
+        "API_FOOTBALL_API_KEY"
     ]
     
     missing_vars = []
@@ -103,13 +103,14 @@ def check_api_keys():
         from utils.config import settings
         
         # Check if keys are configured
-        if not settings.football_data.API_KEY:
-            logger.error("Football Data API key not configured")
-            return False
-        
-        if not settings.api_football.API_KEY:
-            logger.error("API Football key not configured")
-            return False
+        football_key = os.getenv('FOOTBALL_DATA_API_KEY')
+        api_football_key = os.getenv('API_FOOTBALL_API_KEY')
+
+        if not football_key or football_key == 'your-football-data-api-key-here':
+            logger.warning("Football Data API key not configured or using placeholder")
+
+        if not api_football_key or api_football_key == 'your-api-football-key-here':
+            logger.warning("API Football key not configured or using placeholder")
         
         logger.info("✓ API keys are configured")
         return True

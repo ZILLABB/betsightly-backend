@@ -37,7 +37,7 @@ class Prediction(Base):
     rollover_day = Column(Integer)
 
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Removed due to migration issues
 
     # Relationships
     fixture = relationship("Fixture")

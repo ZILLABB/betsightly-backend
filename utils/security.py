@@ -102,7 +102,13 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         response.headers["Content-Security-Policy"] = "default-src 'self'"
         
         # Remove server information
-        response.headers.pop("Server", None)
+        if hasattr(response.headers, 'pop'):
+            response.headers.pop("Server", None)
+        elif hasattr(response.headers, '__delitem__'):
+            try:
+                del response.headers["Server"]
+            except KeyError:
+                pass
         
         return response
 
