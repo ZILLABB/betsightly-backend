@@ -1,11 +1,7 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
-  "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "pip install --upgrade pip setuptools wheel && pip install -r requirements-minimal.txt"
-  },
   "deploy": {
-    "startCommand": "gunicorn main:app --host 0.0.0.0 --port $PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --keep-alive 2",
+    "startCommand": "gunicorn main:app --host 0.0.0.0 --port $PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 120",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",
