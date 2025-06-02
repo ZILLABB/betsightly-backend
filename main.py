@@ -15,6 +15,7 @@ from api.api import api_router
 from database import init_db, get_db
 from utils.config import settings
 from utils.error_handling import setup_exception_handlers
+from utils.security import SecurityMiddleware
 
 # Set up logging
 logging.basicConfig(
@@ -49,6 +50,9 @@ app.add_middleware(
 
 # Add compression middleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Add security middleware for production
+app.add_middleware(SecurityMiddleware)
 
 # Add CORS middleware with enhanced security
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5182,http://localhost:3000").split(",")

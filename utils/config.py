@@ -6,6 +6,7 @@ Focuses on essential settings for data sources, API integration, and ML models.
 """
 
 import os
+from typing import List
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import logging
@@ -177,6 +178,15 @@ class Settings(BaseSettings):
     APP_VERSION: str = Field("1.0.0")
     DEBUG: bool = Field(False)
     ENVIRONMENT: str = Field("development")
+
+    # Security settings
+    SECRET_KEY: str = Field("", description="Secret key for JWT tokens and encryption")
+    API_KEY_HEADER: str = Field("X-API-Key", description="Header name for API key authentication")
+    ALLOWED_HOSTS: str = Field("localhost,127.0.0.1", description="Comma-separated allowed hosts")
+
+    # Rate limiting
+    RATE_LIMIT_REQUESTS: int = Field(100, description="Number of requests per minute per IP")
+    RATE_LIMIT_WINDOW: int = Field(60, description="Rate limit window in seconds")
 
     # Path settings
     BASE_DIR: str = Field(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))

@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ['python312', 'pip', 'gcc', 'pkg-config']
+
+[phases.install]
+cmds = [
+    'pip install --upgrade pip setuptools wheel',
+    'pip install -r requirements.txt'
+]
+
+[start]
+cmd = 'gunicorn main:app --host 0.0.0.0 --port $PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 120'
