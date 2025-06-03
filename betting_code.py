@@ -97,13 +97,23 @@ class BettingCode(Base):
         Returns:
             Dictionary representation of betting code
         """
+        try:
+            punter_name = self.punter.name if hasattr(self, 'punter') and self.punter else None
+        except:
+            punter_name = None
+
+        try:
+            bookmaker_name = self.bookmaker.name if hasattr(self, 'bookmaker') and self.bookmaker else None
+        except:
+            bookmaker_name = None
+
         return {
             "id": self.id,
             "code": self.code,
             "punter_id": self.punter_id,
-            "punter_name": self.punter.name if self.punter else None,
+            "punter_name": punter_name,
             "bookmaker_id": self.bookmaker_id,
-            "bookmaker_name": self.bookmaker.name if self.bookmaker else None,
+            "bookmaker_name": bookmaker_name,
             "odds": self.odds,
             "event_date": self.event_date.isoformat() if self.event_date else None,
             "status": self.status,
