@@ -16,12 +16,14 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 from database import get_db
-# Temporarily disabled for Railway deployment
+# Phase 1: Using basic prediction service for stable deployment
+from services.basic_prediction_service import basic_prediction_service
+# Phase 2: Will re-enable advanced services
 # from services.quick_prediction_service import quick_prediction_service
 # from services.cached_prediction_service import cached_prediction_service
 from utils.error_handling import handle_database_error, BetSightlyError, ValidationError
-# from utils.database_optimization import query_performance_monitor  # Temporarily disabled
-# from utils.security import check_rate_limit  # Temporarily disabled
+from utils.database_optimization import query_performance_monitor
+from utils.security import check_rate_limit
 
 router = APIRouter()
 
@@ -109,7 +111,9 @@ def _standardize_prediction_response(
 # Consolidated prediction endpoints - all functionality moved to main endpoint
 
 @router.get("/")
+@query_performance_monitor
 def get_predictions(
+    request: Request,
     date: Optional[date] = Query(None, description="Date to get predictions for (YYYY-MM-DD)"),
     category: Optional[PredictionCategory] = Query(None, description="Filter by specific category"),
     limit: int = Query(10, ge=1, le=100, description="Maximum number of predictions per category"),
@@ -129,44 +133,23 @@ def get_predictions(
     - `/api/predictions/?advanced=true` - Use advanced ML models
     """
     try:
-        # Simplified for Railway deployment
+        # Apply rate limiting
+        check_rate_limit(request)
+
+        # Log request for monitoring
         logger.info(f"Predictions request: category={category}, date={date}, limit={limit}")
 
-        # Return mock data for Railway deployment
+        # Use basic prediction service with real football data
         date_str = date.strftime("%Y-%m-%d") if date else datetime.now().strftime("%Y-%m-%d")
 
-        # Mock predictions data for Railway deployment
-        mock_predictions = [
-            {
-                "id": 1,
-                "home_team": "Arsenal",
-                "away_team": "Chelsea",
-                "league": "Premier League",
-                "bet_type": "Match Result",
-                "prediction": "Arsenal Win",
-                "confidence": 0.75,
-                "odds": 2.1,
-                "date": date_str
-            },
-            {
-                "id": 2,
-                "home_team": "Manchester City",
-                "away_team": "Liverpool",
-                "league": "Premier League",
-                "bet_type": "Over 2.5 Goals",
-                "prediction": "Over 2.5",
-                "confidence": 0.68,
-                "odds": 1.8,
-                "date": date_str
-            }
-        ]
+        # Get predictions using basic prediction service
+        predictions_data = basic_prediction_service.get_predictions_for_date(date_str)
 
-        categorized_predictions = {
-            "2_odds": mock_predictions[:1],
-            "5_odds": mock_predictions[1:2],
-            "10_odds": [],
-            "rollover": mock_predictions
-        }
+        # Process the predictions data
+        if predictions_data.get("status") != "success":
+            raise BetSightlyError(f"Failed to get predictions: {predictions_data.get('message', 'Unknown error')}")
+
+        categorized_predictions = predictions_data.get("categories", {})
 
         if category:
             # Return specific category
