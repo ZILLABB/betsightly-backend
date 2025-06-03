@@ -16,8 +16,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.common import setup_logging
 from database import init_db, get_db
-from models.punter import Punter
-from models.bookmaker import Bookmaker
+from punter import Punter
+from bookmaker import Bookmaker
 
 # Set up logging
 logger = setup_logging(__name__)
@@ -413,12 +413,7 @@ def seed_punters(db):
                 name=punter_data["name"],
                 nickname=punter_data["nickname"],
                 country=punter_data["country"],
-                popularity=punter_data["popularity"],
                 specialty=punter_data["specialty"],
-                success_rate=punter_data["success_rate"],
-                image_url=punter_data["image_url"],
-                social_media=punter_data["social_media"],
-                bio=punter_data["bio"],
                 verified=punter_data["verified"]
             )
             
@@ -453,10 +448,7 @@ def seed_bookmakers(db):
         # Add bookmakers
         for bookmaker_data in BOOKMAKERS:
             bookmaker = Bookmaker(
-                name=bookmaker_data["name"],
-                logo_url=bookmaker_data["logo_url"],
-                website=bookmaker_data["website"],
-                country=bookmaker_data["country"]
+                name=bookmaker_data["name"]
             )
             
             db.add(bookmaker)
