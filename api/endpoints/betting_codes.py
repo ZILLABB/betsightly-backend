@@ -9,7 +9,7 @@ from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 
 from database import get_db
@@ -81,9 +81,13 @@ def get_betting_codes(
         # Get total count with filters
         total = query.count()
 
-        # Get betting codes with pagination
+        # Get betting codes with pagination and load relationships
         codes = (
             query
+            .options(
+                joinedload(BettingCode.punter),
+                joinedload(BettingCode.bookmaker)
+            )
             .order_by(desc(BettingCode.created_at))
             .offset(skip)
             .limit(limit)
