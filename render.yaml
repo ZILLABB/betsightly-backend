@@ -2,7 +2,7 @@ services:
   - type: web
     name: betsightly-backend
     env: python
-    buildCommand: "pip install --upgrade pip setuptools wheel && pip install fastapi uvicorn gunicorn pydantic pydantic-settings requests python-dotenv sqlalchemy psycopg2-binary pandas numpy python-jose passlib bcrypt alembic python-multipart httpx aiohttp scikit-learn==1.2.2 joblib xgboost==1.7.6 lightgbm==4.1.0 catboost==1.2 shap==0.42.1 lime==0.2.0.1"
+    buildCommand: "pip install --upgrade pip setuptools wheel && pip install fastapi uvicorn gunicorn pydantic pydantic-settings requests python-dotenv sqlalchemy psycopg2-binary pandas 'numpy<2.0' python-jose passlib bcrypt alembic python-multipart httpx aiohttp 'scikit-learn>=1.3.0,<1.6.0' joblib xgboost lightgbm catboost shap lime"
     startCommand: "gunicorn main:app --bind 0.0.0.0:$PORT --workers 1 --worker-class uvicorn.workers.UvicornWorker"
     healthCheckPath: "/api/health"
     envVars:
