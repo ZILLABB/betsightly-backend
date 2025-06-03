@@ -72,8 +72,8 @@ app.add_middleware(
 # Temporarily disable complex exception handlers for Render deployment
 # setup_exception_handlers(app)
 
-# Include API router (temporarily disable for Phase 2)
-# app.include_router(api_router, prefix="/api")
+# Include API router
+app.include_router(api_router, prefix="/api")
 
 @app.get("/")
 def root():
