@@ -57,19 +57,13 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(SecurityMiddleware)
 
-# Add CORS middleware with enhanced security
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "*")
-if allowed_origins == "*":
-    allowed_origins = ["*"]
-else:
-    allowed_origins = allowed_origins.split(",")
-
+# Add CORS middleware with enhanced security - allow all origins for now
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,  # Must be False when allow_origins=["*"]
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-API-Key"],
+    allow_headers=["*"],
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
