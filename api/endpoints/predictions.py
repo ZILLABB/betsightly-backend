@@ -441,9 +441,10 @@ def get_enhanced_predictions(
         )
 
 
-# Temporarily disabled for Railway deployment
-# @router.get("/cache/status")
-def get_cache_status_disabled():
+# Phase 5: Re-enabling cache management
+@router.get("/cache/status")
+@query_performance_monitor
+def get_cache_status(request: Request):
     """
     **Cache Status Endpoint**
 
@@ -456,13 +457,31 @@ def get_cache_status_disabled():
     - Performance metrics
     """
     try:
-        # Temporarily disabled for Railway deployment
-        logger.info("Cache status request - temporarily disabled for Railway deployment")
+        # Apply rate limiting
+        check_rate_limit(request)
+
+        logger.info("Cache status request")
+
+        if CACHED_PREDICTION_AVAILABLE:
+            # Get cache status from cached service
+            cache_status = cached_prediction_service.get_cache_status()
+        else:
+            # Return basic cache status
+            cache_status = {
+                "status": "basic_mode",
+                "cached_prediction_service": "not_available",
+                "basic_prediction_service": "available",
+                "real_time_predictions": True
+            }
 
         return {
             "status": "success",
-            "message": "Cache status temporarily disabled for Railway deployment",
-            "cache_status": {"status": "disabled"},
+            "cache_status": cache_status,
+            "services_available": {
+                "basic_prediction": True,
+                "quick_prediction": QUICK_PREDICTION_AVAILABLE,
+                "cached_prediction": CACHED_PREDICTION_AVAILABLE
+            },
             "timestamp": datetime.now().isoformat()
         }
 
@@ -474,9 +493,11 @@ def get_cache_status_disabled():
         )
 
 
-# Temporarily disabled for Railway deployment
-# @router.post("/cache/refresh")
-def force_cache_refresh_disabled(
+# Phase 5: Re-enabling cache refresh
+@router.post("/cache/refresh")
+@query_performance_monitor
+def force_cache_refresh(
+    request: Request,
     date: Optional[date] = Query(None, description="Date to refresh (YYYY-MM-DD)")
 ):
     """
@@ -492,15 +513,31 @@ def force_cache_refresh_disabled(
     - Fresh predictions with generation metrics
     """
     try:
-        # Temporarily disabled for Railway deployment
+        # Apply rate limiting (stricter for refresh operations)
+        check_rate_limit(request)
+
         date_str = date.strftime("%Y-%m-%d") if date else None
-        logger.info(f"Manual cache refresh requested for {date_str or 'today'} - temporarily disabled for Railway deployment")
+        logger.info(f"Manual cache refresh requested for {date_str or 'today'}")
+
+        if CACHED_PREDICTION_AVAILABLE:
+            # Force refresh using cached service
+            result = cached_prediction_service.force_refresh(date_str)
+            message = f"Cache refreshed successfully for {date_str or 'today'}"
+        else:
+            # Trigger fresh predictions from basic service
+            result = basic_prediction_service.get_predictions_for_date(date_str)
+            message = f"Fresh predictions generated for {date_str or 'today'} (no cache service)"
 
         return {
             "status": "success",
-            "message": f"Cache refresh temporarily disabled for Railway deployment",
+            "message": message,
             "date": date_str or "today",
-            "timestamp": datetime.now().isoformat()
+            "refresh_time": datetime.now().isoformat(),
+            "service_used": "cached_prediction" if CACHED_PREDICTION_AVAILABLE else "basic_prediction",
+            "result_summary": {
+                "total_predictions": len(result.get("categories", {}).get("rollover", [])),
+                "data_source": result.get("data_source", "unknown")
+            }
         }
 
     except Exception as e:
