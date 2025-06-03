@@ -2,7 +2,6 @@ services:
   - type: web
     name: betsightly-backend
     env: python
-    runtime: python-3.11.7
     buildCommand: "pip install --upgrade pip setuptools wheel && pip install -r requirements-render.txt"
     startCommand: "gunicorn main:app --host 0.0.0.0 --port $PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker"
     healthCheckPath: "/api/health"
