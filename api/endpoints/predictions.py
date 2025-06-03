@@ -45,6 +45,24 @@ try:
 except ImportError:
     CACHED_PREDICTION_AVAILABLE = False
     logger.warning("❌ Cached prediction service not available")
+
+# Import daily prediction cache service
+try:
+    from services.daily_prediction_cache import daily_prediction_cache
+    DAILY_CACHE_AVAILABLE = True
+    logger.info("✅ Daily prediction cache service loaded")
+except ImportError:
+    DAILY_CACHE_AVAILABLE = False
+    logger.warning("❌ Daily prediction cache service not available")
+
+# Import training pipeline service
+try:
+    from services.training_pipeline_service import training_pipeline_service
+    TRAINING_PIPELINE_AVAILABLE = True
+    logger.info("✅ Training pipeline service loaded")
+except ImportError:
+    TRAINING_PIPELINE_AVAILABLE = False
+    logger.warning("❌ Training pipeline service not available")
 from utils.error_handling import handle_database_error, BetSightlyError, ValidationError
 from utils.database_optimization import query_performance_monitor
 from utils.security import check_rate_limit
@@ -167,19 +185,30 @@ def get_predictions(
         date_str = date.strftime("%Y-%m-%d") if date else datetime.now().strftime("%Y-%m-%d")
 
         try:
-            # Priority 1: Use Advanced ML Service (XGBoost + Ensemble)
-            if ADVANCED_PREDICTION_AVAILABLE:
+            # Priority 1: Use Daily Prediction Cache (Fastest)
+            if DAILY_CACHE_AVAILABLE:
+                logger.info("💾 Using Daily Prediction Cache")
+                predictions_data = daily_prediction_cache.get_cached_predictions(date_str, category.value if category else None)
+                service_used = "daily_prediction_cache"
+
+                # If cache miss, fall through to real-time generation
+                if predictions_data.get('source') != 'cache':
+                    logger.info("🔄 Cache miss - falling through to real-time generation")
+                    raise Exception("Cache miss")
+
+            # Priority 2: Use Advanced ML Service (XGBoost + Ensemble)
+            elif ADVANCED_PREDICTION_AVAILABLE:
                 logger.info("🚀 Using Advanced ML Prediction Service")
                 predictions_data = advanced_prediction_service.get_predictions_for_date(date_str)
                 service_used = "advanced_prediction_service"
 
-            # Priority 2: Use Quick Prediction Service (Pre-trained models)
+            # Priority 3: Use Quick Prediction Service (Pre-trained models)
             elif QUICK_PREDICTION_AVAILABLE:
                 logger.info("⚡ Using Quick Prediction Service")
                 predictions_data = quick_prediction_service.get_predictions_for_date(date_str)
                 service_used = "quick_prediction_service"
 
-            # Priority 3: Use Cached Prediction Service
+            # Priority 4: Use Cached Prediction Service
             elif CACHED_PREDICTION_AVAILABLE:
                 logger.info("💾 Using Cached Prediction Service")
                 predictions_data = cached_prediction_service.get_predictions_for_date(date_str)
@@ -499,12 +528,318 @@ def get_enhanced_predictions(
         logger.error(f"Enhanced predictions error: {e.message}")
         raise HTTPException(status_code=500, detail=e.message)
 
-    except Exception as e:
-        logger.error(f"Enhanced predictions endpoint error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
+
+# ============================================================================
+# TRAINING PIPELINE & CACHING ENDPOINTS
+# ============================================================================
+
+@router.post("/models/retrain")
+def trigger_model_retraining(
+    request: Request,
+    force_retrain: bool = Query(False, description="Force retraining even if not needed"),
+    training_type: str = Query("manual", description="Type of training (manual/scheduled/triggered)")
+):
+    """
+    **Trigger Model Retraining**
+
+    Manually trigger the training pipeline to retrain ML models with new data.
+
+    **Features:**
+    - Continuous learning from new match results
+    - Performance monitoring and validation
+    - Automatic deployment of improved models
+    - Training progress tracking
+
+    **Examples:**
+    - `POST /api/predictions/models/retrain` - Standard retraining
+    - `POST /api/predictions/models/retrain?force_retrain=true` - Force retraining
+    """
+    try:
+        # Apply rate limiting for training requests
+        check_rate_limit(request)
+
+        if not TRAINING_PIPELINE_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Training pipeline service not available"
+            )
+
+        logger.info(f"🚀 Manual training request: force={force_retrain}, type={training_type}")
+
+        # Trigger training pipeline
+        training_result = training_pipeline_service.trigger_training(
+            training_type=training_type,
+            trigger_reason="manual_request",
+            force_retrain=force_retrain
         )
+
+        if training_result.get('status') == 'success':
+            return {
+                "status": "success",
+                "message": "Training pipeline started successfully",
+                "training_run_id": training_result.get('training_run_id'),
+                "estimated_completion_time": "15-30 minutes",
+                "training_details": training_result
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Training failed: {training_result.get('error', 'Unknown error')}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error triggering training: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Training request failed: {str(e)}")
+
+
+@router.get("/models/training/status")
+def get_training_status():
+    """
+    **Get Training Status**
+
+    Check the status of current and recent training runs.
+
+    **Returns:**
+    - Current training status
+    - Recent training history
+    - Model performance metrics
+    - Next scheduled training
+    """
+    try:
+        if not TRAINING_PIPELINE_AVAILABLE:
+            return {
+                "status": "unavailable",
+                "message": "Training pipeline service not available"
+            }
+
+        # Get training status from database
+        from database import SessionLocal
+        from models.training_models import ModelTrainingRun
+
+        db = SessionLocal()
+
+        try:
+            # Get current running training
+            current_training = db.query(ModelTrainingRun).filter(
+                ModelTrainingRun.status == 'running'
+            ).first()
+
+            # Get recent training runs
+            recent_trainings = db.query(ModelTrainingRun).order_by(
+                ModelTrainingRun.started_at.desc()
+            ).limit(5).all()
+
+            return {
+                "status": "success",
+                "current_training": current_training.to_dict() if current_training else None,
+                "recent_trainings": [training.to_dict() for training in recent_trainings],
+                "training_pipeline_available": TRAINING_PIPELINE_AVAILABLE,
+                "next_scheduled_training": "Weekly (Sundays at 2 AM UTC)"
+            }
+
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Error getting training status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get training status: {str(e)}")
+
+
+@router.post("/cache/generate")
+def generate_daily_cache(
+    request: Request,
+    date: Optional[date] = Query(None, description="Date to generate cache for (default: today)"),
+    force_refresh: bool = Query(False, description="Force refresh even if cache exists")
+):
+    """
+    **Generate Daily Prediction Cache**
+
+    Generate and cache predictions for a specific date to optimize API performance.
+
+    **Features:**
+    - Batch ML prediction generation
+    - Database caching with expiration
+    - Performance optimization
+    - Cache status tracking
+
+    **Examples:**
+    - `POST /api/predictions/cache/generate` - Generate cache for today
+    - `POST /api/predictions/cache/generate?date=2025-06-07` - Generate for specific date
+    """
+    try:
+        # Apply rate limiting
+        check_rate_limit(request)
+
+        if not DAILY_CACHE_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Daily prediction cache service not available"
+            )
+
+        date_str = date.strftime("%Y-%m-%d") if date else datetime.now().strftime("%Y-%m-%d")
+
+        logger.info(f"🔄 Manual cache generation request for {date_str}")
+
+        # Check if cache already exists and is fresh
+        if not force_refresh:
+            existing_cache = daily_prediction_cache.get_cached_predictions(date_str)
+            if existing_cache.get('source') == 'cache':
+                return {
+                    "status": "success",
+                    "message": f"Cache for {date_str} already exists and is fresh",
+                    "cache_details": existing_cache.get('metadata', {}),
+                    "action": "no_action_needed"
+                }
+
+        # Generate new cache
+        cache_result = daily_prediction_cache.generate_daily_predictions(date_str)
+
+        if cache_result.get('status') == 'success':
+            return {
+                "status": "success",
+                "message": f"Daily cache generated successfully for {date_str}",
+                "cache_details": cache_result,
+                "estimated_generation_time": f"{cache_result.get('generation_time_seconds', 0):.2f} seconds"
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Cache generation failed: {cache_result.get('error', 'Unknown error')}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Cache generation failed: {str(e)}")
+
+
+@router.get("/cache/status")
+def get_cache_status(
+    date: Optional[date] = Query(None, description="Date to check cache status for")
+):
+    """
+    **Get Cache Status**
+
+    Check the status and health of the prediction cache system.
+
+    **Returns:**
+    - Cache freshness and expiration
+    - Performance metrics
+    - Cache hit rates
+    - Health indicators
+    """
+    try:
+        date_str = date.strftime("%Y-%m-%d") if date else datetime.now().strftime("%Y-%m-%d")
+
+        from database import SessionLocal
+        from models.training_models import CacheStatus, PredictionBatch
+
+        db = SessionLocal()
+
+        try:
+            # Get cache status
+            cache_status = db.query(CacheStatus).filter(
+                CacheStatus.cache_date == date_str
+            ).first()
+
+            # Get batch info
+            batch_info = db.query(PredictionBatch).filter(
+                PredictionBatch.batch_date == date_str
+            ).first()
+
+            # Check if cached predictions exist
+            cached_predictions = daily_prediction_cache.get_cached_predictions(date_str) if DAILY_CACHE_AVAILABLE else None
+
+            return {
+                "status": "success",
+                "date": date_str,
+                "cache_status": cache_status.to_dict() if cache_status else None,
+                "batch_info": batch_info.to_dict() if batch_info else None,
+                "cache_available": cached_predictions.get('source') == 'cache' if cached_predictions else False,
+                "daily_cache_service_available": DAILY_CACHE_AVAILABLE,
+                "cache_health": "healthy" if cache_status and not cache_status.is_stale else "stale_or_missing"
+            }
+
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Error getting cache status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get cache status: {str(e)}")
+
+
+@router.delete("/cache/clear")
+def clear_cache(
+    request: Request,
+    date: Optional[date] = Query(None, description="Date to clear cache for (default: all)")
+):
+    """
+    **Clear Prediction Cache**
+
+    Clear cached predictions for a specific date or all dates.
+
+    **Use Cases:**
+    - Clear stale cache data
+    - Force cache regeneration
+    - Maintenance operations
+    """
+    try:
+        # Apply rate limiting
+        check_rate_limit(request)
+
+        from database import SessionLocal
+        from models.training_models import CachedPrediction, CacheStatus
+
+        db = SessionLocal()
+
+        try:
+            if date:
+                date_str = date.strftime("%Y-%m-%d")
+
+                # Clear specific date
+                deleted_predictions = db.query(CachedPrediction).filter(
+                    CachedPrediction.prediction_date == date_str
+                ).delete()
+
+                # Update cache status
+                cache_status = db.query(CacheStatus).filter(
+                    CacheStatus.cache_date == date_str
+                ).first()
+
+                if cache_status:
+                    cache_status.is_stale = True
+                    cache_status.health_status = 'cleared'
+
+                db.commit()
+
+                return {
+                    "status": "success",
+                    "message": f"Cache cleared for {date_str}",
+                    "predictions_deleted": deleted_predictions
+                }
+            else:
+                # Clear all cache
+                deleted_predictions = db.query(CachedPrediction).delete()
+                deleted_status = db.query(CacheStatus).delete()
+
+                db.commit()
+
+                return {
+                    "status": "success",
+                    "message": "All cache cleared",
+                    "predictions_deleted": deleted_predictions,
+                    "status_records_deleted": deleted_status
+                }
+
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Error clearing cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}")
 
 
 @router.get("/models/info")
