@@ -58,7 +58,12 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(SecurityMiddleware)
 
 # Add CORS middleware with enhanced security
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5182,http://localhost:3000").split(",")
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "*")
+if allowed_origins == "*":
+    allowed_origins = ["*"]
+else:
+    allowed_origins = allowed_origins.split(",")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
