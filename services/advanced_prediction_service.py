@@ -36,14 +36,22 @@ load_dotenv()
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# Import ML components
+# Import ML components with robust error handling
 try:
     from ml.feature_engineering import AdvancedFootballFeatureEngineer
-    from ml.model_factory import ModelFactory
-    ADVANCED_ML_AVAILABLE = True
+    FEATURE_ENGINEERING_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f"Advanced ML components not available: {str(e)}")
-    ADVANCED_ML_AVAILABLE = False
+    logger.warning(f"Advanced feature engineering not available: {str(e)}")
+    FEATURE_ENGINEERING_AVAILABLE = False
+
+try:
+    from ml.model_factory import ModelFactory
+    MODEL_FACTORY_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Model factory not available: {str(e)}")
+    MODEL_FACTORY_AVAILABLE = False
+
+ADVANCED_ML_AVAILABLE = FEATURE_ENGINEERING_AVAILABLE and MODEL_FACTORY_AVAILABLE
 
 # Import SHAP for explanations
 try:
@@ -97,13 +105,24 @@ class AdvancedPredictionService:
     
     def _initialize_ml_components(self):
         """Initialize ML components if available."""
-        if ADVANCED_ML_AVAILABLE:
+        if FEATURE_ENGINEERING_AVAILABLE:
             try:
                 self.feature_engineer = AdvancedFootballFeatureEngineer()
-                self.model_factory = ModelFactory()
-                logger.info("✅ Advanced ML components initialized")
+                logger.info("✅ Advanced feature engineering initialized")
             except Exception as e:
-                logger.error(f"❌ Failed to initialize ML components: {str(e)}")
+                logger.error(f"❌ Failed to initialize feature engineering: {str(e)}")
+
+        if MODEL_FACTORY_AVAILABLE:
+            try:
+                self.model_factory = ModelFactory()
+                logger.info("✅ Model factory initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize model factory: {str(e)}")
+
+        if ADVANCED_ML_AVAILABLE:
+            logger.info("✅ Advanced ML components fully initialized")
+        else:
+            logger.warning("⚠️ Advanced ML components partially available - using fallbacks")
     
     def _load_advanced_models(self):
         """Load all available advanced models."""
