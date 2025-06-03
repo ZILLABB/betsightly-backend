@@ -5,7 +5,7 @@ API router.
 from fastapi import APIRouter
 
 # Import all endpoints (basketball temporarily disabled for Railway deployment)
-from api.endpoints import betting_codes, predictions, fixtures, punters, bookmakers, dashboard, health, admin
+from api.endpoints import betting_codes, predictions, fixtures, punters, bookmakers, dashboard, health
 # from api.endpoints import basketball_predictions  # Temporarily disabled for Railway
 
 api_router = APIRouter()
