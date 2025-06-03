@@ -20,8 +20,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Get database URL from environment variable or use default
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///real_predictions.db")
+# Get database URL from environment variable or use default (same as main API)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./football.db")
 
 # Create engine
 engine = create_engine(
