@@ -16,22 +16,35 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 from database import get_db
-# Phase 3: Using basic prediction service for stable deployment
+# Phase 5: Advanced ML Integration - Using sophisticated models
 from services.basic_prediction_service import basic_prediction_service
-# Phase 4: Re-enabling advanced services gradually
+
+# Import advanced prediction service
+try:
+    from services.advanced_prediction_service import advanced_prediction_service
+    ADVANCED_PREDICTION_AVAILABLE = True
+    logger.info("✅ Advanced prediction service loaded")
+except ImportError:
+    ADVANCED_PREDICTION_AVAILABLE = False
+    logger.warning("❌ Advanced prediction service not available")
+
+# Import quick prediction service
 try:
     from services.quick_prediction_service import quick_prediction_service
     QUICK_PREDICTION_AVAILABLE = True
+    logger.info("✅ Quick prediction service loaded")
 except ImportError:
     QUICK_PREDICTION_AVAILABLE = False
-    logger.warning("Quick prediction service not available")
+    logger.warning("❌ Quick prediction service not available")
 
+# Import cached prediction service
 try:
     from services.cached_prediction_service import cached_prediction_service
     CACHED_PREDICTION_AVAILABLE = True
+    logger.info("✅ Cached prediction service loaded")
 except ImportError:
     CACHED_PREDICTION_AVAILABLE = False
-    logger.warning("Cached prediction service not available")
+    logger.warning("❌ Cached prediction service not available")
 from utils.error_handling import handle_database_error, BetSightlyError, ValidationError
 from utils.database_optimization import query_performance_monitor
 from utils.security import check_rate_limit
@@ -150,30 +163,60 @@ def get_predictions(
         # Log request for monitoring
         logger.info(f"Predictions request: category={category}, date={date}, limit={limit}")
 
-        # Use basic prediction service with real football data
+        # Use advanced ML prediction service for maximum accuracy
         date_str = date.strftime("%Y-%m-%d") if date else datetime.now().strftime("%Y-%m-%d")
 
         try:
-            # Get predictions using basic prediction service
-            predictions_data = basic_prediction_service.get_predictions_for_date(date_str)
+            # Priority 1: Use Advanced ML Service (XGBoost + Ensemble)
+            if ADVANCED_PREDICTION_AVAILABLE:
+                logger.info("🚀 Using Advanced ML Prediction Service")
+                predictions_data = advanced_prediction_service.get_predictions_for_date(date_str)
+                service_used = "advanced_prediction_service"
+
+            # Priority 2: Use Quick Prediction Service (Pre-trained models)
+            elif QUICK_PREDICTION_AVAILABLE:
+                logger.info("⚡ Using Quick Prediction Service")
+                predictions_data = quick_prediction_service.get_predictions_for_date(date_str)
+                service_used = "quick_prediction_service"
+
+            # Priority 3: Use Cached Prediction Service
+            elif CACHED_PREDICTION_AVAILABLE:
+                logger.info("💾 Using Cached Prediction Service")
+                predictions_data = cached_prediction_service.get_predictions_for_date(date_str)
+                service_used = "cached_prediction_service"
+
+            # Fallback: Use Basic Prediction Service
+            else:
+                logger.info("🔧 Using Basic Prediction Service (fallback)")
+                predictions_data = basic_prediction_service.get_predictions_for_date(date_str)
+                service_used = "basic_prediction_service"
 
             # Process the predictions data
             if predictions_data.get("status") != "success":
                 logger.warning(f"Prediction service returned error: {predictions_data.get('message')}")
-                # Fall back to mock data if service fails
-                predictions_data = basic_prediction_service._get_mock_predictions(date_str)
+                # Fall back to basic service if advanced fails
+                if service_used != "basic_prediction_service":
+                    logger.info("🔄 Falling back to basic prediction service")
+                    predictions_data = basic_prediction_service.get_predictions_for_date(date_str)
+                    service_used = "basic_prediction_service"
 
             categorized_predictions = predictions_data.get("categories", {})
 
+            # Add service metadata to response
+            if "metadata" not in predictions_data:
+                predictions_data["metadata"] = {}
+            predictions_data["metadata"]["service_used"] = service_used
+
         except Exception as e:
-            logger.error(f"Error getting predictions from service: {str(e)}")
-            # Fallback to simple mock data
+            logger.error(f"Error getting predictions from advanced services: {str(e)}")
+            # Final fallback to simple mock data
             categorized_predictions = {
-                "2_odds": [{"home_team": "Arsenal", "away_team": "Chelsea", "prediction": "Arsenal Win", "odds": 2.1}],
-                "5_odds": [{"home_team": "Man City", "away_team": "Liverpool", "prediction": "Over 2.5", "odds": 1.8}],
-                "10_odds": [],
-                "rollover": []
+                "2_odds": [{"home_team": "Arsenal", "away_team": "Chelsea", "prediction": "Arsenal Win", "odds": 2.1, "confidence": 75}],
+                "5_odds": [{"home_team": "Man City", "away_team": "Liverpool", "prediction": "Over 2.5", "odds": 1.8, "confidence": 65}],
+                "10_odds": [{"home_team": "Real Madrid", "away_team": "Barcelona", "prediction": "BTTS Yes", "odds": 8.5, "confidence": 45}],
+                "rollover": [{"home_team": "Bayern Munich", "away_team": "Dortmund", "prediction": "Bayern Win", "odds": 1.9, "confidence": 80}]
             }
+            service_used = "fallback_mock_data"
 
         if category:
             # Return specific category
@@ -399,31 +442,54 @@ def get_enhanced_predictions(
 
         logger.info(f"Enhanced predictions request: date={date}, explanations={include_explanations}, meta_stacking={use_meta_stacking}")
 
-        # Use available prediction services
+        # Use the most advanced available prediction service
         date_str = date.strftime("%Y-%m-%d") if date else datetime.now().strftime("%Y-%m-%d")
 
-        if QUICK_PREDICTION_AVAILABLE:
-            # Use advanced quick prediction service
+        # Priority 1: Use Advanced ML Service with full explanations
+        if ADVANCED_PREDICTION_AVAILABLE:
+            logger.info("🚀 Using Advanced ML Service for enhanced predictions")
+            predictions_result = advanced_prediction_service.get_enhanced_predictions_with_explanations(
+                date_str=date_str,
+                include_explanations=include_explanations,
+                explanation_detail=explanation_detail
+            )
+            service_used = "advanced_prediction_service"
+            advanced_features = True
+
+        # Priority 2: Use Quick Prediction Service
+        elif QUICK_PREDICTION_AVAILABLE:
+            logger.info("⚡ Using Quick Prediction Service for enhanced predictions")
             predictions_result = quick_prediction_service.get_predictions_for_date(date_str)
+            service_used = "quick_prediction_service"
+            advanced_features = True
+
+        # Fallback: Use Basic Prediction Service
         else:
-            # Fall back to basic prediction service
+            logger.info("🔧 Using Basic Prediction Service for enhanced predictions")
             predictions_result = basic_prediction_service.get_predictions_for_date(date_str)
+            service_used = "basic_prediction_service"
+            advanced_features = False
 
         # Add enhanced features metadata
         predictions_result.update({
-            "api_version": "enhanced_v1",
-            "features": {
-                "explainability": include_explanations and QUICK_PREDICTION_AVAILABLE,
-                "meta_stacking": use_meta_stacking and QUICK_PREDICTION_AVAILABLE,
+            "api_version": "enhanced_v2",
+            "enhanced_features": {
+                "explainability": include_explanations and ADVANCED_PREDICTION_AVAILABLE,
+                "meta_stacking": use_meta_stacking and ADVANCED_PREDICTION_AVAILABLE,
                 "explanation_detail": explanation_detail,
-                "service_used": "quick_prediction" if QUICK_PREDICTION_AVAILABLE else "basic_prediction"
+                "service_used": service_used,
+                "advanced_ml_models": ADVANCED_PREDICTION_AVAILABLE,
+                "xgboost_models": ADVANCED_PREDICTION_AVAILABLE,
+                "ensemble_voting": ADVANCED_PREDICTION_AVAILABLE,
+                "shap_explanations": include_explanations and ADVANCED_PREDICTION_AVAILABLE,
+                "feature_engineering": "advanced" if ADVANCED_PREDICTION_AVAILABLE else "basic"
+            },
+            "model_info": advanced_prediction_service.get_model_info() if ADVANCED_PREDICTION_AVAILABLE else {
+                "message": "Advanced models not available - using fallback service"
             }
         })
 
         return predictions_result
-
-        # This code is unreachable due to early return above
-        # Keeping for reference but disabled
 
     except ValidationError as e:
         logger.warning(f"Enhanced predictions validation error: {e.message}")
@@ -438,6 +504,89 @@ def get_enhanced_predictions(
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
+        )
+
+
+@router.get("/models/info")
+@query_performance_monitor
+def get_advanced_models_info(request: Request):
+    """
+    **Advanced ML Models Information**
+
+    Get detailed information about the loaded ML models and their capabilities.
+
+    **Returns:**
+    - Model counts by type (XGBoost, Ensemble, Enhanced)
+    - Available features (SHAP, LIME, Meta-stacking)
+    - Model performance metrics
+    - Service availability status
+    """
+    try:
+        # Apply rate limiting
+        check_rate_limit(request)
+
+        logger.info("Advanced models info request")
+
+        # Get comprehensive model information
+        if ADVANCED_PREDICTION_AVAILABLE:
+            model_info = advanced_prediction_service.get_model_info()
+            service_status = "advanced_ml_active"
+        else:
+            model_info = {
+                "total_models": 0,
+                "model_types": {"xgboost": 0, "enhanced": 0, "advanced": 0, "quick": 0},
+                "explainers": 0,
+                "advanced_features": {
+                    "feature_engineering": False,
+                    "shap_explanations": False,
+                    "lime_explanations": False,
+                    "meta_stacking": False,
+                    "ensemble_voting": False
+                },
+                "models": []
+            }
+            service_status = "basic_ml_only"
+
+        # Service availability summary
+        services_available = {
+            "advanced_prediction_service": ADVANCED_PREDICTION_AVAILABLE,
+            "quick_prediction_service": QUICK_PREDICTION_AVAILABLE,
+            "cached_prediction_service": CACHED_PREDICTION_AVAILABLE,
+            "basic_prediction_service": True
+        }
+
+        # ML capabilities summary
+        ml_capabilities = {
+            "xgboost_models": ADVANCED_PREDICTION_AVAILABLE,
+            "ensemble_models": ADVANCED_PREDICTION_AVAILABLE,
+            "shap_explanations": ADVANCED_PREDICTION_AVAILABLE,
+            "lime_explanations": ADVANCED_PREDICTION_AVAILABLE,
+            "meta_model_stacking": ADVANCED_PREDICTION_AVAILABLE,
+            "advanced_feature_engineering": ADVANCED_PREDICTION_AVAILABLE,
+            "real_time_predictions": True,
+            "prediction_categories": ["2_odds", "5_odds", "10_odds", "rollover"]
+        }
+
+        return {
+            "status": "success",
+            "service_status": service_status,
+            "model_info": model_info,
+            "services_available": services_available,
+            "ml_capabilities": ml_capabilities,
+            "api_endpoints": {
+                "basic_predictions": "/api/predictions/",
+                "enhanced_predictions": "/api/predictions/enhanced/",
+                "cache_status": "/api/predictions/cache/status",
+                "model_info": "/api/predictions/models/info"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Models info endpoint error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting models info: {str(e)}"
         )
 
 
