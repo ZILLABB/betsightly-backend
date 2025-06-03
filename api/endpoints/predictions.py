@@ -16,11 +16,22 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 from database import get_db
-# Phase 1: Using basic prediction service for stable deployment
+# Phase 3: Using basic prediction service for stable deployment
 from services.basic_prediction_service import basic_prediction_service
-# Phase 2: Will re-enable advanced services
-# from services.quick_prediction_service import quick_prediction_service
-# from services.cached_prediction_service import cached_prediction_service
+# Phase 4: Re-enabling advanced services gradually
+try:
+    from services.quick_prediction_service import quick_prediction_service
+    QUICK_PREDICTION_AVAILABLE = True
+except ImportError:
+    QUICK_PREDICTION_AVAILABLE = False
+    logger.warning("Quick prediction service not available")
+
+try:
+    from services.cached_prediction_service import cached_prediction_service
+    CACHED_PREDICTION_AVAILABLE = True
+except ImportError:
+    CACHED_PREDICTION_AVAILABLE = False
+    logger.warning("Cached prediction service not available")
 from utils.error_handling import handle_database_error, BetSightlyError, ValidationError
 from utils.database_optimization import query_performance_monitor
 from utils.security import check_rate_limit
@@ -355,9 +366,11 @@ def get_prediction_by_id(
 # Legacy endpoints removed to eliminate redundancy
 
 
-# Temporarily disabled for Railway deployment
-# @router.get("/enhanced/")
-def get_enhanced_predictions_disabled(
+# Phase 4: Re-enabling enhanced predictions
+@router.get("/enhanced/")
+@query_performance_monitor
+def get_enhanced_predictions(
+    request: Request,
     date: Optional[date] = Query(None, description="Date to get predictions for (YYYY-MM-DD)"),
     include_explanations: bool = Query(True, description="Include SHAP/LIME explanations"),
     use_meta_stacking: bool = Query(True, description="Use meta-model stacking"),
@@ -381,21 +394,33 @@ def get_enhanced_predictions_disabled(
     - `/api/predictions/enhanced/?explanation_detail=technical` - Technical explanations only
     """
     try:
-        # Temporarily disabled for Railway deployment
+        # Apply rate limiting
+        check_rate_limit(request)
+
         logger.info(f"Enhanced predictions request: date={date}, explanations={include_explanations}, meta_stacking={use_meta_stacking}")
 
-        # Return mock enhanced predictions for Railway deployment
-        return {
-            "status": "success",
-            "message": "Enhanced predictions temporarily disabled for Railway deployment",
-            "predictions": [],
+        # Use available prediction services
+        date_str = date.strftime("%Y-%m-%d") if date else datetime.now().strftime("%Y-%m-%d")
+
+        if QUICK_PREDICTION_AVAILABLE:
+            # Use advanced quick prediction service
+            predictions_result = quick_prediction_service.get_predictions_for_date(date_str)
+        else:
+            # Fall back to basic prediction service
+            predictions_result = basic_prediction_service.get_predictions_for_date(date_str)
+
+        # Add enhanced features metadata
+        predictions_result.update({
             "api_version": "enhanced_v1",
             "features": {
-                "explainability": include_explanations,
-                "meta_stacking": use_meta_stacking,
-                "explanation_detail": explanation_detail
+                "explainability": include_explanations and QUICK_PREDICTION_AVAILABLE,
+                "meta_stacking": use_meta_stacking and QUICK_PREDICTION_AVAILABLE,
+                "explanation_detail": explanation_detail,
+                "service_used": "quick_prediction" if QUICK_PREDICTION_AVAILABLE else "basic_prediction"
             }
-        }
+        })
+
+        return predictions_result
 
         # This code is unreachable due to early return above
         # Keeping for reference but disabled
