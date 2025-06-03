@@ -48,15 +48,14 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.DEBUG else None
 )
 
-# Temporarily disable complex middleware for Render deployment
-# Add basic CORS only for now
-# app.add_middleware(
-#     TrustedHostMiddleware,
-#     allowed_hosts=["localhost", "127.0.0.1", "*.betsightly.com", "*.onrender.com", "*.railway.app", "testserver"]
-# )
+# Phase 5: Re-enable production middleware
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["localhost", "127.0.0.1", "*.betsightly.com", "*.onrender.com", "*.railway.app", "testserver"]
+)
 
-# app.add_middleware(GZipMiddleware, minimum_size=1000)
-# app.add_middleware(SecurityMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(SecurityMiddleware)
 
 # Add CORS middleware with enhanced security
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5182,http://localhost:3000").split(",")
@@ -69,8 +68,8 @@ app.add_middleware(
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
-# Temporarily disable complex exception handlers for Render deployment
-# setup_exception_handlers(app)
+# Phase 5: Re-enable exception handlers
+setup_exception_handlers(app)
 
 # Include API router
 app.include_router(api_router, prefix="/api")
