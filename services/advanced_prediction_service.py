@@ -61,22 +61,13 @@ except ImportError as e:
 
 ADVANCED_ML_AVAILABLE = FEATURE_ENGINEERING_AVAILABLE and MODEL_FACTORY_AVAILABLE
 
-# Import SHAP for explanations
-try:
-    import shap
-    SHAP_AVAILABLE = True
-except ImportError:
-    SHAP_AVAILABLE = False
-    logger.warning("SHAP not available - explanations disabled")
+# Disable SHAP temporarily for memory optimization on Render
+SHAP_AVAILABLE = False
+logger.info("ℹ️ SHAP disabled for memory optimization")
 
-# Import LIME for explanations
-try:
-    import lime
-    import lime.tabular
-    LIME_AVAILABLE = True
-except ImportError:
-    LIME_AVAILABLE = False
-    logger.warning("LIME not available - explanations disabled")
+# Disable LIME temporarily for memory optimization
+LIME_AVAILABLE = False
+logger.info("ℹ️ LIME disabled for memory optimization")
 
 
 class AdvancedPredictionService:
@@ -138,12 +129,10 @@ class AdvancedPredictionService:
     
     def _load_advanced_models(self):
         """Load all available advanced models."""
-        # Prioritized model loading for memory efficiency (Render 512MB limit)
+        # Optimized model loading for Render 512MB limit - Load only essential models
         model_directories = [
-            ("xgboost", "models/xgboost"),      # Priority 1: Core XGBoost models
-            ("advanced", "models/advanced"),    # Priority 2: Advanced models
-            ("quick", "models/quick")           # Priority 3: Quick fallbacks
-            # Skip enhanced models to save memory
+            ("xgboost", "models/xgboost"),      # Priority 1: Core XGBoost models (10 models)
+            # Skip other models to stay under memory limit
         ]
 
         for model_type, model_dir in model_directories:
