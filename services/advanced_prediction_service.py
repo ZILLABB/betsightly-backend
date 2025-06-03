@@ -104,12 +104,16 @@ class AdvancedPredictionService:
         self.models = {}
         self.explainers = {}
         
+        # Memory optimization for Render (512MB limit)
+        self.memory_limit_mb = 400  # Leave 112MB buffer
+        self.models_loaded = 0
+
         # Load models and setup
         self._initialize_ml_components()
         self._load_advanced_models()
         self._setup_explainers()
-        
-        logger.info("Advanced Prediction Service initialized")
+
+        logger.info(f"Advanced Prediction Service initialized with {self.models_loaded} models")
     
     def _initialize_ml_components(self):
         """Initialize ML components if available."""
@@ -134,13 +138,14 @@ class AdvancedPredictionService:
     
     def _load_advanced_models(self):
         """Load all available advanced models."""
+        # Prioritized model loading for memory efficiency (Render 512MB limit)
         model_directories = [
-            ("xgboost", "models/xgboost"),
-            ("enhanced", "models/enhanced"), 
-            ("advanced", "models/advanced"),
-            ("quick", "models/quick")
+            ("xgboost", "models/xgboost"),      # Priority 1: Core XGBoost models
+            ("advanced", "models/advanced"),    # Priority 2: Advanced models
+            ("quick", "models/quick")           # Priority 3: Quick fallbacks
+            # Skip enhanced models to save memory
         ]
-        
+
         for model_type, model_dir in model_directories:
             self._load_models_from_directory(model_type, model_dir)
     
@@ -175,6 +180,7 @@ class AdvancedPredictionService:
                         "compatibility_status": "success" if success else "fallback"
                     }
                     loaded_count += 1
+                    self.models_loaded += 1
 
             else:
                 # Fallback to direct loading
