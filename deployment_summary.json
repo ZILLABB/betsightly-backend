@@ -1,0 +1,19 @@
+{
+  "platform": "Render",
+  "app_name": "betsightly-backend",
+  "python_version": "3.11.7",
+  "start_command": "gunicorn main:app --host 0.0.0.0 --port $PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker",
+  "health_check": "/api/health",
+  "database": "PostgreSQL (free tier)",
+  "environment_variables": [
+    "ENVIRONMENT=production",
+    "DEBUG=false",
+    "DATABASE_URL (auto-generated)",
+    "SECRET_KEY (auto-generated)",
+    "FOOTBALL_DATA_API_KEY (manual)",
+    "API_FOOTBALL_API_KEY (manual)",
+    "TELEGRAM_BOT_TOKEN (manual)"
+  ],
+  "estimated_cost": "$0/month (free tier)",
+  "deployment_time": "5-10 minutes"
+}
