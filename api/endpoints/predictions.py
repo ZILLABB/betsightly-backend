@@ -16,12 +16,12 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 from database import get_db
-from services.quick_prediction_service import quick_prediction_service
-from services.cached_prediction_service import cached_prediction_service
-# Using quick prediction service with trained models
+# Temporarily disabled for Railway deployment
+# from services.quick_prediction_service import quick_prediction_service
+# from services.cached_prediction_service import cached_prediction_service
 from utils.error_handling import handle_database_error, BetSightlyError, ValidationError
-from utils.database_optimization import query_performance_monitor
-from utils.security import check_rate_limit
+# from utils.database_optimization import query_performance_monitor  # Temporarily disabled
+# from utils.security import check_rate_limit  # Temporarily disabled
 
 router = APIRouter()
 
@@ -109,7 +109,6 @@ def _standardize_prediction_response(
 # Consolidated prediction endpoints - all functionality moved to main endpoint
 
 @router.get("/")
-@query_performance_monitor
 def get_predictions(
     request: Request,
     date: Optional[date] = Query(None, description="Date to get predictions for (YYYY-MM-DD)"),
@@ -131,30 +130,44 @@ def get_predictions(
     - `/api/predictions/?advanced=true` - Use advanced ML models
     """
     try:
-        # Apply rate limiting
-        check_rate_limit(request)
-
-        # Input validation and sanitization
-        if date and date > datetime.now().date() + timedelta(days=7):
-            raise ValidationError("Date cannot be more than 7 days in the future")
-
-        if limit > 100:
-            raise ValidationError("Limit cannot exceed 100")
-
-        # Log request for monitoring
+        # Simplified for Railway deployment
         logger.info(f"Predictions request: category={category}, date={date}, limit={limit}")
 
-        # Use cached prediction service for fast responses
+        # Return mock data for Railway deployment
         date_str = date.strftime("%Y-%m-%d") if date else datetime.now().strftime("%Y-%m-%d")
 
-        # Get predictions using cached service (sub-500ms response)
-        predictions_data = cached_prediction_service.get_predictions_for_date(date_str)
+        # Mock predictions data for Railway deployment
+        mock_predictions = [
+            {
+                "id": 1,
+                "home_team": "Arsenal",
+                "away_team": "Chelsea",
+                "league": "Premier League",
+                "bet_type": "Match Result",
+                "prediction": "Arsenal Win",
+                "confidence": 0.75,
+                "odds": 2.1,
+                "date": date_str
+            },
+            {
+                "id": 2,
+                "home_team": "Manchester City",
+                "away_team": "Liverpool",
+                "league": "Premier League",
+                "bet_type": "Over 2.5 Goals",
+                "prediction": "Over 2.5",
+                "confidence": 0.68,
+                "odds": 1.8,
+                "date": date_str
+            }
+        ]
 
-        # Process the predictions data
-        if predictions_data.get("status") != "success":
-            raise BetSightlyError(f"Failed to get predictions: {predictions_data.get('message', 'Unknown error')}")
-
-        categorized_predictions = predictions_data.get("categories", {})
+        categorized_predictions = {
+            "2_odds": mock_predictions[:1],
+            "5_odds": mock_predictions[1:2],
+            "10_odds": [],
+            "rollover": mock_predictions
+        }
 
         if category:
             # Return specific category
@@ -347,9 +360,9 @@ def get_prediction_by_id(
 # Legacy endpoints removed to eliminate redundancy
 
 
-@router.get("/enhanced/")
-@query_performance_monitor
-def get_enhanced_predictions(
+# Temporarily disabled for Railway deployment
+# @router.get("/enhanced/")
+def get_enhanced_predictions_disabled(
     request: Request,
     date: Optional[date] = Query(None, description="Date to get predictions for (YYYY-MM-DD)"),
     include_explanations: bool = Query(True, description="Include SHAP/LIME explanations"),
@@ -446,8 +459,9 @@ def get_enhanced_predictions(
         )
 
 
-@router.get("/cache/status")
-def get_cache_status(request: Request):
+# Temporarily disabled for Railway deployment
+# @router.get("/cache/status")
+def get_cache_status_disabled(request: Request):
     """
     **Cache Status Endpoint**
 
@@ -480,8 +494,9 @@ def get_cache_status(request: Request):
         )
 
 
-@router.post("/cache/refresh")
-def force_cache_refresh(
+# Temporarily disabled for Railway deployment
+# @router.post("/cache/refresh")
+def force_cache_refresh_disabled(
     request: Request,
     date: Optional[date] = Query(None, description="Date to refresh (YYYY-MM-DD)")
 ):

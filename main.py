@@ -24,13 +24,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize database
+# Initialize database (skip for Railway deployment if no DATABASE_URL)
 try:
-    init_db()
-    logger.info("Database initialized successfully")
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        init_db()
+        logger.info("Database initialized successfully")
+    else:
+        logger.warning("No DATABASE_URL found - skipping database initialization for Railway deployment")
 except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
-    raise
+    # Don't raise in Railway deployment - let app start without DB for now
+    if os.getenv("ENVIRONMENT") != "production":
+        raise
 
 # Create FastAPI app with enhanced configuration
 app = FastAPI(
@@ -97,7 +103,7 @@ def health_check():
     }
 
 @app.get("/api/debug/predictions")
-def debug_predictions(db: Session = Depends(get_db)):
+def debug_predictions():
     """Debug endpoint to check predictions data."""
     try:
         # Simple debug endpoint for Railway deployment
