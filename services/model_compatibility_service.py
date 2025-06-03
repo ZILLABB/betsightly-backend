@@ -36,50 +36,61 @@ class ModelCompatibilityService:
         
     def load_model_safely(self, model_path: str, model_name: str) -> Tuple[Any, bool]:
         """
-        Load a model with compatibility handling.
-        
+        Load a model with compatibility handling and memory optimization.
+
         Args:
             model_path: Path to the model file
             model_name: Name of the model for logging
-            
+
         Returns:
             Tuple of (model, success_flag)
         """
         try:
+            # Check file size for memory management
+            file_size_mb = Path(model_path).stat().st_size / (1024 * 1024)
+            if file_size_mb > 50:  # Skip very large models on Render
+                logger.warning(f"⚠️  Skipping large model {model_name} ({file_size_mb:.1f}MB) to save memory")
+                return self._create_fallback_model(model_name), False
+
             # Suppress specific warnings during model loading
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
                 warnings.filterwarnings("ignore", message=".*InconsistentVersionWarning.*")
                 warnings.filterwarnings("ignore", message=".*numpy.dtype size changed.*")
-                
+
                 # Try to load the model
                 model = joblib.load(model_path)
-                
+
                 # Validate the model
                 if self._validate_model(model, model_name):
                     self.successful_models.append(model_name)
-                    logger.info(f"✅ Successfully loaded {model_name}")
+                    logger.info(f"✅ Successfully loaded {model_name} ({file_size_mb:.1f}MB)")
                     return model, True
                 else:
                     logger.warning(f"⚠️  Model {model_name} loaded but failed validation")
                     return self._create_fallback_model(model_name), False
-                    
+
         except Exception as e:
             error_msg = str(e)
-            
+
+            # Handle memory issues
+            if "MemoryError" in error_msg or "out of memory" in error_msg.lower():
+                logger.warning(f"⚠️  Memory issue loading {model_name} - using fallback")
+                return self._create_fallback_model(model_name), False
+
             # Handle specific compatibility issues
-            if "numpy.random._mt19937.MT19937" in error_msg:
+            elif "numpy.random._mt19937.MT19937" in error_msg:
                 logger.warning(f"⚠️  NumPy random state compatibility issue in {model_name}")
                 return self._fix_numpy_random_state(model_path, model_name)
-                
+
             elif "node array from the pickle has an incompatible dtype" in error_msg:
                 logger.warning(f"⚠️  Scikit-learn dtype compatibility issue in {model_name}")
                 return self._fix_sklearn_dtype_issue(model_path, model_name)
-                
+
             elif "InconsistentVersionWarning" in error_msg:
                 logger.warning(f"⚠️  Scikit-learn version mismatch in {model_name}")
                 return self._handle_version_mismatch(model_path, model_name)
-                
+
             else:
                 logger.error(f"❌ Failed to load {model_name}: {error_msg}")
                 self.failed_models.append((model_name, error_msg))
