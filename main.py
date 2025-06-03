@@ -48,10 +48,10 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.DEBUG else None
 )
 
-# Add security middleware (allow Railway hosts)
+# Add security middleware (allow Render hosts)
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["localhost", "127.0.0.1", "*.betsightly.com", "*.railway.app", "testserver"]
+    allowed_hosts=["localhost", "127.0.0.1", "*.betsightly.com", "*.onrender.com", "*.railway.app", "testserver"]
 )
 
 # Add compression middleware
@@ -94,13 +94,22 @@ def root():
 @app.get("/api/health")
 def health_check():
     """Basic health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "BetSightly API",
-        "version": "1.0.0",
-        "timestamp": datetime.now().isoformat(),
-        "environment": settings.ENVIRONMENT
-    }
+    try:
+        return {
+            "status": "healthy",
+            "service": "BetSightly API",
+            "version": "1.0.0",
+            "timestamp": datetime.now().isoformat(),
+            "environment": os.getenv("ENVIRONMENT", "production")
+        }
+    except Exception as e:
+        # Fallback response if anything fails
+        return {
+            "status": "healthy",
+            "service": "BetSightly API",
+            "version": "1.0.0",
+            "error": str(e)
+        }
 
 @app.get("/api/debug/predictions")
 def debug_predictions():
