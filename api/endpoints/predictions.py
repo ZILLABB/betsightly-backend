@@ -6,7 +6,7 @@ Enhanced prediction endpoints with security, caching, and comprehensive error ha
 
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from enum import Enum
 
@@ -110,7 +110,6 @@ def _standardize_prediction_response(
 
 @router.get("/")
 def get_predictions(
-    request: Request,
     date: Optional[date] = Query(None, description="Date to get predictions for (YYYY-MM-DD)"),
     category: Optional[PredictionCategory] = Query(None, description="Filter by specific category"),
     limit: int = Query(10, ge=1, le=100, description="Maximum number of predictions per category"),
@@ -363,7 +362,6 @@ def get_prediction_by_id(
 # Temporarily disabled for Railway deployment
 # @router.get("/enhanced/")
 def get_enhanced_predictions_disabled(
-    request: Request,
     date: Optional[date] = Query(None, description="Date to get predictions for (YYYY-MM-DD)"),
     include_explanations: bool = Query(True, description="Include SHAP/LIME explanations"),
     use_meta_stacking: bool = Query(True, description="Use meta-model stacking"),
@@ -387,61 +385,24 @@ def get_enhanced_predictions_disabled(
     - `/api/predictions/enhanced/?explanation_detail=technical` - Technical explanations only
     """
     try:
-        # Apply rate limiting
-        check_rate_limit(request)
-
-        # Input validation
-        if date and date > datetime.now().date() + timedelta(days=7):
-            raise ValidationError("Date cannot be more than 7 days in the future")
-
-        if explanation_detail not in ["human", "technical", "both"]:
-            raise ValidationError("explanation_detail must be 'human', 'technical', or 'both'")
-
-        # Log request for monitoring
+        # Temporarily disabled for Railway deployment
         logger.info(f"Enhanced predictions request: date={date}, explanations={include_explanations}, meta_stacking={use_meta_stacking}")
 
-        # Get enhanced predictions
-        date_str = date.strftime("%Y-%m-%d") if date else None
-
-        predictions_result = quick_prediction_service.get_predictions_for_date(date_str)
-
-        if predictions_result.get("status") == "error":
-            raise BetSightlyError(
-                message=predictions_result.get("message", "Enhanced prediction failed"),
-                error_code="ENHANCED_PREDICTION_ERROR"
-            )
-
-        # Filter explanations based on detail level
-        if include_explanations and explanation_detail != "both":
-            for prediction in predictions_result.get("predictions", []):
-                explanations = prediction.get("explanations", {})
-                for pred_type, explanation_data in explanations.items():
-                    if explanation_detail == "human":
-                        # Keep only human-readable explanations
-                        explanations[pred_type] = {
-                            "human_readable": explanation_data.get("human_readable", "")
-                        }
-                    elif explanation_detail == "technical":
-                        # Keep only technical explanations
-                        explanations[pred_type] = {
-                            "technical": explanation_data.get("technical", {})
-                        }
-
-        # Add metadata
-        predictions_result.update({
+        # Return mock enhanced predictions for Railway deployment
+        return {
+            "status": "success",
+            "message": "Enhanced predictions temporarily disabled for Railway deployment",
+            "predictions": [],
             "api_version": "enhanced_v1",
             "features": {
                 "explainability": include_explanations,
                 "meta_stacking": use_meta_stacking,
                 "explanation_detail": explanation_detail
-            },
-            "performance": {
-                "models_available": predictions_result.get("models_available", False),
-                "explainers_available": predictions_result.get("explainers_available", False)
             }
-        })
+        }
 
-        return predictions_result
+        # This code is unreachable due to early return above
+        # Keeping for reference but disabled
 
     except ValidationError as e:
         logger.warning(f"Enhanced predictions validation error: {e.message}")
@@ -461,7 +422,7 @@ def get_enhanced_predictions_disabled(
 
 # Temporarily disabled for Railway deployment
 # @router.get("/cache/status")
-def get_cache_status_disabled(request: Request):
+def get_cache_status_disabled():
     """
     **Cache Status Endpoint**
 
@@ -474,15 +435,13 @@ def get_cache_status_disabled(request: Request):
     - Performance metrics
     """
     try:
-        # Apply rate limiting
-        check_rate_limit(request)
-
-        # Get cache status from cached service
-        cache_status = cached_prediction_service.get_cache_status()
+        # Temporarily disabled for Railway deployment
+        logger.info("Cache status request - temporarily disabled for Railway deployment")
 
         return {
             "status": "success",
-            "cache_status": cache_status,
+            "message": "Cache status temporarily disabled for Railway deployment",
+            "cache_status": {"status": "disabled"},
             "timestamp": datetime.now().isoformat()
         }
 
@@ -497,7 +456,6 @@ def get_cache_status_disabled(request: Request):
 # Temporarily disabled for Railway deployment
 # @router.post("/cache/refresh")
 def force_cache_refresh_disabled(
-    request: Request,
     date: Optional[date] = Query(None, description="Date to refresh (YYYY-MM-DD)")
 ):
     """
@@ -513,20 +471,14 @@ def force_cache_refresh_disabled(
     - Fresh predictions with generation metrics
     """
     try:
-        # Apply rate limiting (stricter for refresh operations)
-        check_rate_limit(request)
-
-        # Convert date
+        # Temporarily disabled for Railway deployment
         date_str = date.strftime("%Y-%m-%d") if date else None
-
-        # Force refresh
-        logger.info(f"Manual cache refresh requested for {date_str or 'today'}")
-        result = cached_prediction_service.force_refresh(date_str)
+        logger.info(f"Manual cache refresh requested for {date_str or 'today'} - temporarily disabled for Railway deployment")
 
         return {
             "status": "success",
-            "message": f"Cache refreshed for {date_str or 'today'}",
-            "predictions": result,
+            "message": f"Cache refresh temporarily disabled for Railway deployment",
+            "date": date_str or "today",
             "timestamp": datetime.now().isoformat()
         }
 
