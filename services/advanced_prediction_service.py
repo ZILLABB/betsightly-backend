@@ -51,6 +51,14 @@ except ImportError as e:
     logger.warning(f"Model factory not available: {str(e)}")
     MODEL_FACTORY_AVAILABLE = False
 
+# Import model compatibility service
+try:
+    from services.model_compatibility_service import model_compatibility_service
+    MODEL_COMPATIBILITY_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Model compatibility service not available: {str(e)}")
+    MODEL_COMPATIBILITY_AVAILABLE = False
+
 ADVANCED_ML_AVAILABLE = FEATURE_ENGINEERING_AVAILABLE and MODEL_FACTORY_AVAILABLE
 
 # Import SHAP for explanations
@@ -148,27 +156,44 @@ class AdvancedPredictionService:
         loaded_count = 0
         
         for model_file in model_files:
-            try:
-                # Load model
-                model = joblib.load(model_file)
-                
-                # Extract model name (remove .joblib extension)
-                model_name = model_file.stem
-                
-                # Store model with type prefix
-                full_model_name = f"{model_type}_{model_name}"
-                self.models[full_model_name] = {
-                    "model": model,
-                    "type": model_type,
-                    "name": model_name,
-                    "path": str(model_file)
-                }
-                
-                loaded_count += 1
-                logger.info(f"✅ Loaded {full_model_name}")
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to load {model_file}: {str(e)}")
+            # Extract model name (remove .joblib extension)
+            model_name = model_file.stem
+            full_model_name = f"{model_type}_{model_name}"
+
+            if MODEL_COMPATIBILITY_AVAILABLE:
+                # Use compatibility service for safe loading
+                model, success = model_compatibility_service.load_model_safely(
+                    str(model_file), full_model_name
+                )
+
+                if model is not None:
+                    self.models[full_model_name] = {
+                        "model": model,
+                        "type": model_type,
+                        "name": model_name,
+                        "path": str(model_file),
+                        "compatibility_status": "success" if success else "fallback"
+                    }
+                    loaded_count += 1
+
+            else:
+                # Fallback to direct loading
+                try:
+                    model = joblib.load(model_file)
+
+                    self.models[full_model_name] = {
+                        "model": model,
+                        "type": model_type,
+                        "name": model_name,
+                        "path": str(model_file),
+                        "compatibility_status": "direct_load"
+                    }
+
+                    loaded_count += 1
+                    logger.info(f"✅ Loaded {full_model_name}")
+
+                except Exception as e:
+                    logger.error(f"❌ Failed to load {model_file}: {str(e)}")
         
         logger.info(f"✅ Loaded {loaded_count} models from {model_dir}")
     
@@ -181,16 +206,29 @@ class AdvancedPredictionService:
         # Setup explainers for XGBoost models
         for model_name, model_info in self.models.items():
             if "xgboost" in model_name and SHAP_AVAILABLE:
-                try:
-                    # Create SHAP explainer for XGBoost
-                    explainer = shap.TreeExplainer(model_info["model"])
-                    self.explainers[model_name] = {
-                        "type": "shap",
-                        "explainer": explainer
-                    }
-                    logger.info(f"✅ SHAP explainer ready for {model_name}")
-                except Exception as e:
-                    logger.error(f"❌ Failed to setup SHAP for {model_name}: {str(e)}")
+                if MODEL_COMPATIBILITY_AVAILABLE:
+                    # Use compatibility service for SHAP setup
+                    explainer = model_compatibility_service.setup_shap_safely(
+                        model_info["model"], model_name
+                    )
+
+                    if explainer is not None:
+                        self.explainers[model_name] = {
+                            "type": "shap",
+                            "explainer": explainer
+                        }
+                        logger.info(f"✅ SHAP explainer ready for {model_name}")
+                else:
+                    # Fallback to direct SHAP setup
+                    try:
+                        explainer = shap.TreeExplainer(model_info["model"])
+                        self.explainers[model_name] = {
+                            "type": "shap",
+                            "explainer": explainer
+                        }
+                        logger.info(f"✅ SHAP explainer ready for {model_name}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to setup SHAP for {model_name}: {str(e)}")
     
     def get_predictions_for_date(self, date_str: Optional[str] = None) -> Dict[str, Any]:
         """
