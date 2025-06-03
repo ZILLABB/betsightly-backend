@@ -42,10 +42,10 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.DEBUG else None
 )
 
-# Add security middleware (allow testserver for testing)
+# Add security middleware (allow Railway hosts)
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["localhost", "127.0.0.1", "*.betsightly.com", "testserver"]
+    allowed_hosts=["localhost", "127.0.0.1", "*.betsightly.com", "*.railway.app", "testserver"]
 )
 
 # Add compression middleware
@@ -99,31 +99,19 @@ def health_check():
 @app.get("/api/debug/predictions")
 def debug_predictions(db: Session = Depends(get_db)):
     """Debug endpoint to check predictions data."""
-    from services.prediction_service_improved import PredictionService
-
     try:
-        # Get prediction service
-        prediction_service = PredictionService(db)
-
-        # Get all predictions by date (today)
-        today_date = datetime.now().strftime("%Y-%m-%d")
-        predictions_data = prediction_service.get_predictions_for_date(today_date)
-
-        # Return debug info
+        # Simple debug endpoint for Railway deployment
         return {
-            "status": predictions_data.get("status", "unknown"),
-            "date": predictions_data.get("date", today_date),
-            "predictions_count": len(predictions_data.get("predictions", [])),
-            "categories": {
-                category: len(predictions)
-                for category, predictions in predictions_data.get("categories", {}).items()
-            },
+            "status": "operational",
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "message": "Minimal deployment - ML services loading",
             "endpoints": {
-                "all_predictions": "/api/predictions?categorized=true",
-                "category_predictions": "/api/predictions/category/{category}",
-                "best_predictions_by_category": "/api/predictions/best/{category}",
-                "all_best_predictions": "/api/predictions/best"
-            }
+                "health": "/api/health",
+                "predictions": "/api/predictions/",
+                "betting_codes": "/api/betting-codes/",
+                "punters": "/api/punters/"
+            },
+            "deployment": "railway-minimal"
         }
     except Exception as e:
         logger.error(f"Error in debug predictions endpoint: {str(e)}")
