@@ -2,8 +2,8 @@ services:
   - type: web
     name: betsightly-backend
     env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn main:app --host 0.0.0.0 --port $PORT --workers 4 --worker-class uvicorn.workers.UvicornWorker"
+    buildCommand: "pip install --upgrade pip && pip install -r requirements-render.txt"
+    startCommand: "gunicorn main:app --host 0.0.0.0 --port $PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker"
     healthCheckPath: "/api/health"
     envVars:
       - key: ENVIRONMENT
@@ -22,8 +22,11 @@ services:
         sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
+      - key: ALLOWED_ORIGINS
+        value: "http://localhost:5182,https://your-frontend-domain.com"
 
 databases:
   - name: betsightly-db
     databaseName: betsightly
     user: betsightly
+    plan: free
