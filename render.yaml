@@ -25,7 +25,7 @@ services:
       - key: TELEGRAM_GROUP_ID
         sync: false
       - key: ALLOWED_ORIGINS
-        value: "http://localhost:5182,https://your-frontend-domain.com"
+        value: "*"
 
 databases:
   - name: betsightly-db
