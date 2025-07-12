@@ -1,0 +1,35 @@
+{
+  "training_date": "2025-07-12T12:35:21.245426",
+  "total_matches": 228377,
+  "training_samples": 128031,
+  "features": [
+    "division_encoded",
+    "HomeElo",
+    "AwayElo",
+    "elo_diff",
+    "Form3Home",
+    "Form3Away",
+    "form_diff",
+    "prob_home",
+    "prob_draw",
+    "prob_away"
+  ],
+  "feature_count": 10,
+  "models_trained": [
+    "xgboost_match_result",
+    "xgboost_over_2_5",
+    "xgboost_btts",
+    "lightgbm_btts",
+    "rf_match_result",
+    "rf_over_2_5"
+  ],
+  "model_accuracies": {
+    "xgboost_match_result": 0.5111102432928496,
+    "xgboost_over_2_5": 0.5640254617877924,
+    "xgboost_btts": 0.5311438278595696,
+    "lightgbm_btts": 0.5346975436404108,
+    "rf_match_result": 0.5106416214316398,
+    "rf_over_2_5": 0.5669152965985863
+  },
+  "data_source": "GitHub Football Dataset (Cleaned)"
+}

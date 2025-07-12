@@ -12,35 +12,46 @@ from typing import Dict, Any, List, Optional, Union, Type
 logger = logging.getLogger(__name__)
 
 # Import base model
-from app.ml.base_model import BaseModel
+from ml.base_model import BaseModel
 
 # Import model implementations
-from app.ml.ensemble_model_improved import MatchResultModel, OverUnderModel, BTTSModel
+from ml.ensemble_model_improved import MatchResultModel, OverUnderModel, BTTSModel
 
 # Import advanced models
 try:
-    from app.ml.xgboost_model import XGBoostMatchResultModel
+    from ml.xgboost_model import XGBoostMatchResultModel
 except ImportError:
     logger.warning("XGBoost model not available")
     XGBoostMatchResultModel = None
 
 try:
-    from app.ml.lightgbm_models import LightGBMBTTSModel
+    from ml.lightgbm_models import LightGBMBTTSModel
 except ImportError:
     logger.warning("LightGBM model not available")
     LightGBMBTTSModel = None
 
 try:
-    from app.ml.neural_network_models import NeuralNetworkOverUnderModel
+    from ml.neural_network_models import NeuralNetworkOverUnderModel
 except ImportError:
     logger.warning("Neural Network model not available")
     NeuralNetworkOverUnderModel = None
 
 try:
-    from app.ml.lstm_models import LSTMTeamFormModel
+    from ml.lstm_models import LSTMTeamFormModel
 except ImportError:
     logger.warning("LSTM model not available")
     LSTMTeamFormModel = None
+
+# Import PyTorch models
+try:
+    from ml.pytorch_models import PyTorchOverUnderModel, PyTorchLSTMModel, create_pytorch_models
+    PYTORCH_AVAILABLE = True
+    logger.info("✅ PyTorch models available")
+except ImportError:
+    logger.warning("⚠️ PyTorch models not available")
+    PyTorchOverUnderModel = None
+    PyTorchLSTMModel = None
+    PYTORCH_AVAILABLE = False
 
 
 
@@ -84,6 +95,20 @@ class ModelFactory:
             self.register_model("lstm_btts", lambda: LSTMTeamFormModel(prediction_type="btts"))
             self.register_model("lstm_over_under", lambda: LSTMTeamFormModel(prediction_type="over_under"))
             logger.info("Registered LSTM team form models")
+
+        # Register PyTorch models if available
+        if PYTORCH_AVAILABLE:
+            # PyTorch Over/Under models
+            self.register_model("pytorch_over_under_1_5", lambda: PyTorchOverUnderModel(threshold=1.5))
+            self.register_model("pytorch_over_under_2_5", lambda: PyTorchOverUnderModel(threshold=2.5))
+            self.register_model("pytorch_over_under_3_5", lambda: PyTorchOverUnderModel(threshold=3.5))
+
+            # PyTorch LSTM models
+            self.register_model("pytorch_lstm_match_result", lambda: PyTorchLSTMModel(prediction_type="match_result"))
+            self.register_model("pytorch_lstm_btts", lambda: PyTorchLSTMModel(prediction_type="btts"))
+            self.register_model("pytorch_lstm_over_under", lambda: PyTorchLSTMModel(prediction_type="over_under"))
+
+            logger.info("✅ Registered 6 PyTorch models (3 Neural Networks + 3 LSTM)")
 
     def register_model(self, model_type: str, model_class: Union[Type[BaseModel], callable]):
         """

@@ -15,7 +15,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
-from app.ml.base_model import BaseModel
+from ml.base_model import BaseModel
 from utils.config import settings
 
 # Set up logging

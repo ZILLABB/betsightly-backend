@@ -7,11 +7,22 @@ Neural networks are particularly good at capturing complex patterns in data.
 
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+
+# Try to import TensorFlow, but make it optional
+try:
+    import tensorflow as tf
+    from tensorflow.keras.models import Sequential, load_model
+    from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
+    from tensorflow.keras.optimizers import Adam
+    from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+    TENSORFLOW_AVAILABLE = True
+except ImportError:
+    TENSORFLOW_AVAILABLE = False
+    # Create dummy classes for when TensorFlow is not available
+    class Sequential:
+        pass
+    class load_model:
+        pass
 from typing import Dict, List, Any, Tuple
 import logging
 import os
@@ -19,7 +30,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
-from app.ml.base_model import BaseModel
+from ml.base_model import BaseModel
 from utils.config import settings
 
 # Set up logging
@@ -29,11 +40,11 @@ class NeuralNetworkOverUnderModel(BaseModel):
     """
     Neural Network model for predicting over/under goals.
     """
-    
+
     def __init__(self, threshold=2.5):
         """
         Initialize the model.
-        
+
         Args:
             threshold: Goal threshold for over/under prediction (default: 2.5)
         """
@@ -42,6 +53,12 @@ class NeuralNetworkOverUnderModel(BaseModel):
         self.feature_scaler = None
         self.feature_names = None
         self.threshold = threshold
+
+        if not TENSORFLOW_AVAILABLE:
+            logger.info("TensorFlow not available - Using PyTorch alternative for Neural Network models")
+            self.available = False
+        else:
+            self.available = True
         
     def train(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
         """

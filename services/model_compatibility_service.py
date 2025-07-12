@@ -46,9 +46,9 @@ class ModelCompatibilityService:
             Tuple of (model, success_flag)
         """
         try:
-            # Check file size for memory management
+            # Check file size for memory management (increased threshold for local development)
             file_size_mb = Path(model_path).stat().st_size / (1024 * 1024)
-            if file_size_mb > 50:  # Skip very large models on Render
+            if file_size_mb > 100:  # Increased from 50MB to 100MB for better performance
                 logger.warning(f"⚠️  Skipping large model {model_name} ({file_size_mb:.1f}MB) to save memory")
                 return self._create_fallback_model(model_name), False
 

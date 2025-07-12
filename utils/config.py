@@ -142,29 +142,33 @@ class PunterSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="PUNTER_", case_sensitive=True)
 
 class OddsCategories(BaseSettings):
-    """Odds categories configuration."""
+    """High-confidence odds categories configuration - ALL categories have high confidence and low risk."""
 
-    TWO_ODDS_MIN: float = Field(1.5)
-    TWO_ODDS_MAX: float = Field(2.5)
-    TWO_ODDS_MIN_CONFIDENCE: float = Field(70.0)
-    TWO_ODDS_LIMIT: int = Field(5)
+    # 2_ODDS: High-confidence match results (Very Low Risk)
+    TWO_ODDS_MIN: float = Field(1.3)
+    TWO_ODDS_MAX: float = Field(1.8)
+    TWO_ODDS_MIN_CONFIDENCE: float = Field(85.0)  # High confidence required
+    TWO_ODDS_LIMIT: int = Field(8)  # More predictions allowed
     TWO_ODDS_TARGET: float = Field(2.0)
 
-    FIVE_ODDS_MIN: float = Field(2.5)
-    FIVE_ODDS_MAX: float = Field(5.0)
-    FIVE_ODDS_MIN_CONFIDENCE: float = Field(70.0)
-    FIVE_ODDS_LIMIT: int = Field(3)
+    # 5_ODDS: High-confidence goal-based doubles (Very Low Risk)
+    FIVE_ODDS_MIN: float = Field(1.2)
+    FIVE_ODDS_MAX: float = Field(1.6)
+    FIVE_ODDS_MIN_CONFIDENCE: float = Field(85.0)  # High confidence required
+    FIVE_ODDS_LIMIT: int = Field(6)  # More predictions allowed
     FIVE_ODDS_TARGET: float = Field(5.0)
 
-    TEN_ODDS_MIN: float = Field(5.0)
-    TEN_ODDS_MAX: float = Field(10.0)
-    TEN_ODDS_MIN_CONFIDENCE: float = Field(70.0)
-    TEN_ODDS_LIMIT: int = Field(2)
+    # 10_ODDS: High-confidence specialized trebles (Very Low Risk)
+    TEN_ODDS_MIN: float = Field(1.15)
+    TEN_ODDS_MAX: float = Field(1.4)
+    TEN_ODDS_MIN_CONFIDENCE: float = Field(85.0)  # High confidence required
+    TEN_ODDS_LIMIT: int = Field(4)  # More predictions allowed
     TEN_ODDS_TARGET: float = Field(10.0)
 
-    ROLLOVER_MIN: float = Field(1.2)
-    ROLLOVER_MAX: float = Field(2.0)
-    ROLLOVER_MIN_CONFIDENCE: float = Field(70.0)
+    # ROLLOVER: Ultra-safe daily compound betting (Ultra Low Risk)
+    ROLLOVER_MIN: float = Field(1.1)
+    ROLLOVER_MAX: float = Field(1.3)
+    ROLLOVER_MIN_CONFIDENCE: float = Field(90.0)  # Highest confidence required
     ROLLOVER_TARGET: float = Field(3.0)
     ROLLOVER_DAYS: int = Field(10)
 

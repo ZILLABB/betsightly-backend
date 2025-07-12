@@ -1,0 +1,37 @@
+{
+  "report_type": "weekly_performance",
+  "period": "1 week(s)",
+  "generated_at": "2025-07-12T14:48:38.169380",
+  "dashboard_data": {
+    "status": "no_data",
+    "message": "No accuracy data found for last 7 days"
+  },
+  "weekly_summary": {
+    "status": "error",
+    "error": "'NoneType' object has no attribute 'query'"
+  },
+  "insights": {
+    "performance_trend": "stable",
+    "accuracy_status": "poor",
+    "volume_status": "low",
+    "model_performance": {},
+    "category_analysis": {},
+    "alerts": [
+      "Low overall accuracy detected",
+      "Low prediction volume"
+    ]
+  },
+  "recommendations": [
+    "\ud83d\udd27 Consider retraining models with recent data",
+    "\ud83d\udcca Review feature engineering and data quality",
+    "\ud83c\udfaf Adjust confidence thresholds for better precision",
+    "\ud83d\udcc5 Increase prediction frequency",
+    "\ud83c\udf0d Consider expanding to more leagues",
+    "\ud83d\udea8 URGENT: Review and retrain all models",
+    "\ud83d\udcca Investigate data source issues",
+    "\ud83d\udcc8 Continue monitoring daily performance metrics",
+    "\ud83d\udd04 Schedule regular model retraining",
+    "\ud83d\udccb Review prediction categories for optimization",
+    "\ud83c\udfaf Maintain confidence threshold balance"
+  ]
+}

@@ -8,11 +8,22 @@ team performance over time.
 
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+
+# Try to import TensorFlow, but make it optional
+try:
+    import tensorflow as tf
+    from tensorflow.keras.models import Sequential, load_model
+    from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
+    from tensorflow.keras.optimizers import Adam
+    from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+    TENSORFLOW_AVAILABLE = True
+except ImportError:
+    TENSORFLOW_AVAILABLE = False
+    # Create dummy classes for when TensorFlow is not available
+    class Sequential:
+        pass
+    class load_model:
+        pass
 from typing import Dict, List, Any, Tuple
 import logging
 import os
@@ -20,7 +31,7 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
-from app.ml.base_model import BaseModel
+from ml.base_model import BaseModel
 from utils.config import settings
 
 # Set up logging
@@ -46,6 +57,12 @@ class LSTMTeamFormModel(BaseModel):
         self.feature_names = None
         self.prediction_type = prediction_type
         self.sequence_length = sequence_length
+
+        if not TENSORFLOW_AVAILABLE:
+            logger.info("TensorFlow not available - Using PyTorch alternative for LSTM models")
+            self.available = False
+        else:
+            self.available = True
         
     def _prepare_sequences(self, df: pd.DataFrame, team_id_col: str, date_col: str, 
                           feature_cols: List[str], target_col: str) -> Tuple[np.ndarray, np.ndarray]:

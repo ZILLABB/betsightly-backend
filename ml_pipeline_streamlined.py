@@ -720,18 +720,28 @@ class StreamlinedMLPipeline:
 
         return round(odds, 2)
 
-    def _categorize_prediction(self, confidence: float) -> str:
-        """Categorize prediction based on confidence and calculated odds."""
-        odds = self._calculate_odds_from_confidence(confidence)
+    def _categorize_prediction(self, confidence: float, bet_type: str = "match_result") -> str:
+        """
+        Categorize prediction based on confidence, bet type, and equal distribution strategy.
+        ALL categories now require high confidence (85%+) and have low risk.
+        """
+        # Require minimum 85% confidence for any category
+        if confidence < 0.85:
+            return None  # Don't categorize low confidence predictions
 
-        if odds <= 2.5:
-            return "2_odds"  # Safe bets
-        elif odds <= 6.0:
-            return "5_odds"  # Balanced risk
-        elif odds <= 12.0:
-            return "10_odds"  # High reward
+        # Ultra-high confidence (90%+) can go to rollover regardless of bet type
+        if confidence >= 0.90:
+            return "rollover"  # Ultra-safe compound betting
+
+        # High confidence (85-90%) distributed by bet type for equal distribution
+        if bet_type in ["match_result", "home_win", "away_win"]:
+            return "2_odds"  # High-confidence match results
+        elif bet_type in ["over_under", "btts", "goals"]:
+            return "5_odds"  # High-confidence goal-based bets
+        elif bet_type in ["clean_sheet", "win_to_nil", "both_teams_score"]:
+            return "10_odds"  # High-confidence specialized bets
         else:
-            return "rollover"  # Very high risk
+            return "2_odds"  # Default to safest category
 
     def _filter_and_rank_predictions(self, predictions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """

@@ -33,6 +33,19 @@ sys.path.append(str(project_root))
 # Load environment variables
 load_dotenv()
 
+# Set up logging first
+logger = logging.getLogger(__name__)
+
+# Import intelligent caching
+try:
+    from services.intelligent_cache_service import cache_service
+    CACHE_AVAILABLE = True
+    logger.info("✅ Intelligent cache service available")
+except ImportError:
+    CACHE_AVAILABLE = False
+    cache_service = None
+    logger.warning("⚠️ Intelligent cache service not available")
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -95,9 +108,19 @@ class AdvancedPredictionService:
         self.models = {}
         self.explainers = {}
         
-        # Memory optimization for Render (512MB limit)
-        self.memory_limit_mb = 400  # Leave 112MB buffer
+        # Enhanced memory optimization (increased for local development)
+        self.memory_limit_mb = 2048  # 2GB limit for better performance
         self.models_loaded = 0
+
+        # Initialize optimization system
+        try:
+            from config.model_optimization import apply_system_optimizations, model_memory_manager
+            self.memory_manager = model_memory_manager
+            optimizations = apply_system_optimizations()
+            logger.info(f"✅ System optimizations applied: {optimizations}")
+        except ImportError:
+            logger.warning("⚠️ Model optimization system not available")
+            self.memory_manager = None
 
         # Load models and setup
         self._initialize_ml_components()
@@ -128,16 +151,58 @@ class AdvancedPredictionService:
             logger.warning("⚠️ Advanced ML components partially available - using fallbacks")
     
     def _load_advanced_models(self):
-        """Load all available advanced models."""
-        # Optimized model loading for Render 512MB limit - Load only essential models
+        """Load all available advanced models with intelligent prioritization."""
+        # Optimized model loading strategy - Load by priority and performance impact
         model_directories = [
-            ("xgboost", "models/xgboost"),      # Priority 1: Core XGBoost models (10 models)
-            # Skip other models to stay under memory limit
+            ("xgboost", "models/xgboost", 1),      # Priority 1: Highest accuracy, fast inference
+            ("advanced", "models/advanced", 2),    # Priority 2: Good accuracy, medium speed
+            ("quick", "models/quick", 3),          # Priority 3: Fast inference, good for real-time
+            ("enhanced", "models/enhanced", 4),    # Priority 4: High accuracy but memory intensive
         ]
 
-        for model_type, model_dir in model_directories:
+        # Sort by priority and load
+        for model_type, model_dir, priority in sorted(model_directories, key=lambda x: x[2]):
+            logger.info(f"Loading {model_type} models (Priority {priority})")
             self._load_models_from_directory(model_type, model_dir)
-    
+
+        # Load ML algorithm-based models from model factory
+        self._load_ml_algorithm_models()
+
+    def _load_ml_algorithm_models(self):
+        """Load ML algorithm-based models (LightGBM, Neural Networks, LSTM, etc.)."""
+        try:
+            from ml.model_factory import model_factory
+
+            # Get available models from factory
+            available_models = model_factory.get_available_models()
+            logger.info(f"Available ML algorithm models: {available_models}")
+
+            # Load each available model type
+            for model_type in available_models:
+                try:
+                    model = model_factory.create_model(model_type)
+                    if model is not None:
+                        # Try to load the model if it exists
+                        if hasattr(model, 'load_model'):
+                            try:
+                                model.load_model()
+                                self.models[f"ml_algo_{model_type}"] = model
+                                logger.info(f"✅ Loaded ML algorithm model: {model_type}")
+                            except Exception as e:
+                                logger.warning(f"⚠️  Could not load saved model for {model_type}: {str(e)}")
+                                # Keep the model for potential training/prediction
+                                self.models[f"ml_algo_{model_type}"] = model
+                        else:
+                            self.models[f"ml_algo_{model_type}"] = model
+                            logger.info(f"✅ Registered ML algorithm model: {model_type}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to create model {model_type}: {str(e)}")
+
+        except ImportError as e:
+            logger.warning(f"⚠️  Model factory not available: {str(e)}")
+        except Exception as e:
+            logger.error(f"❌ Error loading ML algorithm models: {str(e)}")
+
     def _load_models_from_directory(self, model_type: str, model_dir: str):
         """Load models from a specific directory."""
         model_path = Path(model_dir)
@@ -476,44 +541,99 @@ class AdvancedPredictionService:
 
         for model_name, model_info in self.models.items():
             try:
-                model = model_info["model"]
-
-                # Get prediction based on model type
-                if hasattr(model, 'predict_proba'):
-                    # Classification model
-                    probabilities = model.predict_proba(features_array)[0]
-                    prediction_class = model.predict(features_array)[0]
-
-                    # Map prediction to readable format
-                    if "match_result" in model_name:
-                        classes = ["Away Win", "Draw", "Home Win"]
-                        prediction = classes[prediction_class] if prediction_class < len(classes) else "Home Win"
-                    elif "over_under" in model_name:
-                        prediction = "Over 2.5" if prediction_class == 1 else "Under 2.5"
-                    elif "btts" in model_name:
-                        prediction = "BTTS Yes" if prediction_class == 1 else "BTTS No"
-                    else:
-                        prediction = f"Class {prediction_class}"
-
-                    confidence = max(probabilities) * 100
-
+                # Handle different model types
+                if model_name.startswith("ml_algo_"):
+                    # ML algorithm models from model factory
+                    model = model_info
+                    prediction_result = self._predict_with_ml_algo_model(model, features_array, model_name)
+                    if prediction_result:
+                        predictions[model_name] = prediction_result
                 else:
-                    # Regression model
-                    prediction_value = model.predict(features_array)[0]
-                    prediction = f"Score: {prediction_value:.1f}"
-                    confidence = 70.0  # Default confidence for regression
+                    # Traditional joblib models
+                    model = model_info["model"]
 
-                predictions[model_name] = {
-                    "prediction": prediction,
-                    "confidence": round(confidence, 1),
-                    "model_type": model_info["type"]
-                }
+                    # Get prediction based on model type
+                    if hasattr(model, 'predict_proba'):
+                        # Classification model
+                        probabilities = model.predict_proba(features_array)[0]
+                        prediction_class = model.predict(features_array)[0]
+
+                        # Map prediction to readable format
+                        if "match_result" in model_name:
+                            classes = ["Away Win", "Draw", "Home Win"]
+                            prediction = classes[prediction_class] if prediction_class < len(classes) else "Home Win"
+                        elif "over_under" in model_name:
+                            prediction = "Over 2.5" if prediction_class == 1 else "Under 2.5"
+                        elif "btts" in model_name:
+                            prediction = "BTTS Yes" if prediction_class == 1 else "BTTS No"
+                        else:
+                            prediction = f"Class {prediction_class}"
+
+                        confidence = max(probabilities) * 100
+
+                    else:
+                        # Regression model
+                        prediction_value = model.predict(features_array)[0]
+                        prediction = f"Score: {prediction_value:.1f}"
+                        confidence = 70.0  # Default confidence for regression
+
+                    predictions[model_name] = {
+                        "prediction": prediction,
+                        "confidence": round(confidence, 1),
+                        "model_type": model_info["type"]
+                    }
 
             except Exception as e:
                 logger.error(f"❌ Error with model {model_name}: {str(e)}")
                 continue
 
         return predictions
+
+    def _predict_with_ml_algo_model(self, model, features_array: np.ndarray, model_name: str) -> Optional[Dict[str, Any]]:
+        """Make prediction with ML algorithm model from model factory."""
+        try:
+            # Convert features to DataFrame if the model expects it
+            if hasattr(model, 'predict'):
+                # Try to use the model's predict method
+                if hasattr(model, 'feature_names') and model.feature_names:
+                    # Create DataFrame with proper feature names
+                    features_df = pd.DataFrame(features_array, columns=model.feature_names)
+                    prediction_result = model.predict(features_df)
+                else:
+                    # Use numpy array directly
+                    prediction_result = model.predict(features_array)
+
+                # Extract prediction and confidence from result
+                if isinstance(prediction_result, dict):
+                    prediction = prediction_result.get('prediction', 'Unknown')
+                    confidence = prediction_result.get('confidence', 70.0)
+                    model_type = prediction_result.get('model_type', 'ml_algorithm')
+                else:
+                    # Handle simple prediction values
+                    if "match_result" in model_name:
+                        prediction = f"Result: {prediction_result}"
+                    elif "over_under" in model_name:
+                        prediction = f"Over/Under: {prediction_result}"
+                    elif "btts" in model_name:
+                        prediction = f"BTTS: {prediction_result}"
+                    else:
+                        prediction = f"Prediction: {prediction_result}"
+
+                    confidence = 75.0  # Default confidence for ML algorithm models
+                    model_type = "ml_algorithm"
+
+                return {
+                    "prediction": prediction,
+                    "confidence": round(confidence, 1),
+                    "model_type": model_type
+                }
+            else:
+                logger.warning(f"Model {model_name} does not have predict method")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error predicting with ML algorithm model {model_name}: {str(e)}")
+            return None
 
     def _apply_meta_stacking(self, model_predictions: Dict[str, Any], features: List[float]) -> Dict[str, Any]:
         """Apply meta-model stacking to combine predictions."""
@@ -660,7 +780,11 @@ class AdvancedPredictionService:
                 "xgboost": len([m for m in self.models.keys() if "xgboost" in m]),
                 "enhanced": len([m for m in self.models.keys() if "enhanced" in m]),
                 "advanced": len([m for m in self.models.keys() if "advanced" in m]),
-                "quick": len([m for m in self.models.keys() if "quick" in m])
+                "quick": len([m for m in self.models.keys() if "quick" in m]),
+                "lightgbm": len([m for m in self.models.keys() if "lightgbm" in m]),
+                "neural_network": len([m for m in self.models.keys() if "nn_" in m or "neural" in m]),
+                "lstm": len([m for m in self.models.keys() if "lstm" in m]),
+                "ml_algorithms": len([m for m in self.models.keys() if "ml_algo_" in m])
             },
             "explainers": len(self.explainers),
             "advanced_features": {
@@ -668,7 +792,11 @@ class AdvancedPredictionService:
                 "shap_explanations": SHAP_AVAILABLE,
                 "lime_explanations": LIME_AVAILABLE,
                 "meta_stacking": True,
-                "ensemble_voting": True
+                "ensemble_voting": True,
+                "multi_algorithm_support": True,
+                "lightgbm_models": True,
+                "neural_network_models": True,
+                "lstm_models": True
             },
             "models": list(self.models.keys())
         }

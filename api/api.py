@@ -4,9 +4,10 @@ API router.
 
 from fastapi import APIRouter
 
-# Import all endpoints (basketball temporarily disabled for Railway deployment)
+# Import all endpoints (basketball temporarily disabled)
 from api.endpoints import betting_codes, predictions, fixtures, punters, bookmakers, dashboard, health
-# from api.endpoints import basketball_predictions  # Temporarily disabled for Railway
+# from api.endpoints import basketball_predictions  # Temporarily disabled
+from api import n8n_endpoints, analytics_endpoints
 
 api_router = APIRouter()
 api_router.include_router(health.router, prefix="/health", tags=["health"])
@@ -17,3 +18,5 @@ api_router.include_router(fixtures.router, prefix="/fixtures", tags=["fixtures"]
 api_router.include_router(punters.router, prefix="/punters", tags=["punters"])
 api_router.include_router(bookmakers.router, prefix="/bookmakers", tags=["bookmakers"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(n8n_endpoints.router, tags=["N8N Integration"])
+api_router.include_router(analytics_endpoints.router, tags=["Analytics"])

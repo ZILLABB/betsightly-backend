@@ -21,7 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
-from app.ml.base_model import BaseModel
+from ml.base_model import BaseModel
 from utils.common import ensure_directory_exists
 from utils.config import settings
 

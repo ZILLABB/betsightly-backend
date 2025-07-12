@@ -1,0 +1,203 @@
+{
+  "name": "BetSightly Performance Alerts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * *"
+            }
+          ]
+        }
+      },
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/api/n8n/performance-check",
+        "options": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "hours",
+                "value": "24"
+              },
+              {
+                "name": "threshold",
+                "value": "80"
+              }
+            ]
+          }
+        }
+      },
+      "name": "Check Performance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.has_alerts }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Has Performance Issues",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-4971231188",
+        "text": "🚨 PERFORMANCE ALERT {{ DateTime.now().toFormat('yyyy-MM-dd HH:mm:ss') }}\n\nAlert: {{ $json.alert_type }}\nAccuracy: {{ ($json.current_accuracy || 0).toFixed(1) }}%\nThreshold: {{ ($json.threshold || 80).toFixed(1) }}%\nSample: {{ $json.sample_size || 0 }} predictions\n\nWorst Model: {{ $json.worst_model || 'Unknown' }} ({{ ($json.worst_accuracy || 0).toFixed(1) }}%)\nBest Model: {{ $json.best_model || 'Unknown' }} ({{ ($json.best_accuracy || 0).toFixed(1) }}%)\nTrend: {{ $json.trend || 'Unknown' }}\n\nActions: Check data quality, review models, consider retraining\nHealth: http://127.0.0.1:8000/api/health"
+      },
+      "name": "Send Performance Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "BetSightly Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.current_accuracy }}",
+              "operation": "smaller",
+              "value2": 70
+            }
+          ]
+        }
+      },
+      "name": "Critical Performance",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        680,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-4971231188",
+        "text": "🔴 CRITICAL ALERT {{ DateTime.now().toFormat('yyyy-MM-dd HH:mm:ss') }}\n\nACCURACY: {{ ($json.current_accuracy || 0).toFixed(1) }}% (CRITICAL)\nSTATUS: System performance severely degraded\n\nURGENT ACTIONS:\n1. Stop automated betting\n2. Review all models\n3. Check data pipeline\n4. Consider emergency retraining\n\nEscalation: Manual intervention required\nDashboard: http://127.0.0.1:8000/api/health"
+      },
+      "name": "Send Critical Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        900,
+        500
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "BetSightly Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/api/health",
+        "method": "POST",
+        "body": {
+          "mode": "json",
+          "jsonBody": "{\n  \"enabled\": true,\n  \"reason\": \"Critical performance degradation\",\n  \"accuracy\": {{ $json.current_accuracy }},\n  \"timestamp\": \"{{ DateTime.now().toISO() }}\"\n}"
+        }
+      },
+      "name": "Enable Emergency Mode",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        900,
+        700
+      ]
+    }
+  ],
+  "connections": {
+    "Every Hour": {
+      "main": [
+        [
+          {
+            "node": "Check Performance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Performance": {
+      "main": [
+        [
+          {
+            "node": "Has Performance Issues",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Critical Performance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Performance Issues": {
+      "main": [
+        [
+          {
+            "node": "Send Performance Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Critical Performance": {
+      "main": [
+        [
+          {
+            "node": "Send Critical Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Enable Emergency Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "id": "2"
+}

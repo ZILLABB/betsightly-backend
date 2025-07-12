@@ -1,0 +1,147 @@
+{
+  "name": "BetSightly Daily Summary",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily at 8 AM",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/api/n8n/dashboard",
+        "options": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "days",
+                "value": "1"
+              }
+            ]
+          }
+        }
+      },
+      "name": "Get Daily Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-4971231188",
+        "text": "🎯 BetSightly Daily Summary {{ DateTime.now().toFormat('yyyy-MM-dd') }}\n\nPredictions: {{ $json.total_predictions || 0 }}\nAccuracy: {{ ($json.overall_accuracy || 0).toFixed(1) }}%\nSuccessful: {{ $json.successful_predictions || 0 }}\nFailed: {{ $json.failed_predictions || 0 }}\n\nBest Model: {{ $json.best_model || 'N/A' }}\nModel Accuracy: {{ ($json.best_model_accuracy || 0).toFixed(1) }}%\n\nTrend: {{ $json.performance_trend || 'Stable' }}\nROI: {{ ($json.potential_roi || 0).toFixed(2) }}%\nRisk: {{ $json.risk_level || 'Medium' }}\n\nDashboard: http://127.0.0.1:8000/api/health"
+      },
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "BetSightly Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.total_predictions }}",
+              "operation": "equal",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Check if No Predictions",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        460,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-4971231188",
+        "text": "⚠️ **No Predictions Today**\n📅 Date: {{ DateTime.now().toFormat('yyyy-MM-dd') }}\n\n🔍 **Possible Reasons:**\n• No matches scheduled today\n• Data fetching issues\n• System maintenance\n\n🔧 **Action Required:**\nPlease check the system logs and ensure data sources are working properly.\n\n🔗 Check System: http://127.0.0.1:8000/api/health"
+      },
+      "name": "Send No Predictions Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        680,
+        500
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "BetSightly Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily at 8 AM": {
+      "main": [
+        [
+          {
+            "node": "Get Daily Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Daily Analytics": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check if No Predictions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if No Predictions": {
+      "main": [
+        [
+          {
+            "node": "Send No Predictions Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "id": "1"
+}

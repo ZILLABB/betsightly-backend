@@ -1,0 +1,291 @@
+{
+  "name": "BetSightly System Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      },
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/api/health",
+        "options": {
+          "timeout": 15000,
+          "retry": {
+            "enabled": true,
+            "maxTries": 5
+          },
+          "headers": {
+            "User-Agent": "N8N-BetSightly-Monitor"
+          }
+        }
+      },
+      "name": "Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "notEqual",
+              "value2": "healthy"
+            }
+          ]
+        }
+      },
+      "name": "System Unhealthy",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-4971231188",
+        "text": "🔴 SYSTEM FAILURE {{ DateTime.now().toFormat('yyyy-MM-dd HH:mm:ss') }}\n\nBetSightly API is DOWN\nStatus: {{ $json.status || 'Unknown' }}\nError: {{ $json.error || 'System not responding' }}\n\nDatabase: {{ $json.database || 'Unknown' }}\nPredictions: {{ $json.recent_predictions || 'N/A' }}\nUptime: {{ $json.uptime || 'Unknown' }}\n\nACTIONS REQUIRED:\n1. Check server status\n2. Verify database\n3. Review logs\n4. Restart services\n\nEscalation: HIGH\nAccess: SSH to production server"
+      },
+      "name": "Send System Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "BetSightly Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/predictions/recent",
+        "options": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "hours",
+                "value": "1"
+              }
+            ]
+          }
+        }
+      },
+      "name": "Check Recent Activity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        460,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.length }}",
+              "operation": "equal",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "No Recent Activity",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        680,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-4971231188",
+        "text": "⚠️ No Recent Activity {{ DateTime.now().toFormat('yyyy-MM-dd HH:mm:ss') }}\n\nIssue: No predictions in last hour\n\nPossible Causes:\n- No scheduled matches\n- Data fetching issues\n- Pipeline stopped\n- Model errors\n\nActions:\n- Check match schedule\n- Verify data sources\n- Review logs\n- Restart service\n\nStatus: Monitoring\nHealth: http://127.0.0.1:8000/api/health"
+      },
+      "name": "Send Activity Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        900,
+        500
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "BetSightly Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/system/resources",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "name": "Check Resources",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        460,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.cpu_usage > 90 || $json.memory_usage > 90 || $json.disk_usage > 90 }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "High Resource Usage",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        680,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-4971231188",
+        "text": "⚠️ HIGH RESOURCE USAGE {{ DateTime.now().toFormat('yyyy-MM-dd HH:mm:ss') }}\n\nSystem Performance Warning\n\nCPU: {{ ($json.cpu_usage || 0).toFixed(1) }}%\nMemory: {{ ($json.memory_usage || 0).toFixed(1) }}%\nDisk: {{ ($json.disk_usage || 0).toFixed(1) }}%\nLoad: {{ $json.load_average || 'N/A' }}\n\nActions:\n- Monitor performance\n- Check heavy processes\n- Consider scaling\n- Review changes\n\nImpact: May affect predictions\nMonitor: http://127.0.0.1:8000/api/health"
+      },
+      "name": "Send Resource Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        900,
+        700
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "BetSightly Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Health Check",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check Recent Activity",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check Resources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Health Check": {
+      "main": [
+        [
+          {
+            "node": "System Unhealthy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "System Unhealthy": {
+      "main": [
+        [
+          {
+            "node": "Send System Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Recent Activity": {
+      "main": [
+        [
+          {
+            "node": "No Recent Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Recent Activity": {
+      "main": [
+        [
+          {
+            "node": "Send Activity Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Resources": {
+      "main": [
+        [
+          {
+            "node": "High Resource Usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "High Resource Usage": {
+      "main": [
+        [
+          {
+            "node": "Send Resource Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "id": "3"
+}

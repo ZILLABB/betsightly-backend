@@ -1,0 +1,79 @@
+{
+  "name": "BetSightly Connection Test",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/api/health",
+        "options": {
+          "timeout": 15000,
+          "headers": {
+            "User-Agent": "N8N-Test"
+          }
+        }
+      },
+      "name": "Test API Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-4971231188",
+        "text": "🧪 **N8N Connection Test**\n\n✅ **API Connection**: Working!\n📊 **API Status**: {{ $json.status }}\n🔗 **Service**: {{ $json.service }}\n⏰ **Time**: {{ $json.timestamp }}\n\n🎉 **N8N can successfully connect to BetSightly API!**\n\nYour workflows are ready to be activated! 🚀"
+      },
+      "name": "Send Success Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "BetSightly Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Test API Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test API Health": {
+      "main": [
+        [
+          {
+            "node": "Send Success Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+}
