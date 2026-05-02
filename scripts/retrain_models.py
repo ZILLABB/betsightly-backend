@@ -6,7 +6,7 @@ engineers features, trains XGBoost + LightGBM models, and writes
 the .joblib files to models/.
 
 The feature vector is defined ONCE here and mirrored exactly in
-services/advanced_prediction_service.py — that's what makes
+services/advanced_prediction_service.py ? that's what makes
 predictions consistent with training.
 
 Usage:
@@ -166,7 +166,7 @@ FEATURE_COLUMNS = [
 
 def compute_features(home: str, away: str, date, df_past: pd.DataFrame,
                      league_tier: int = 1) -> list:
-    """Build feature vector — must mirror advanced_prediction_service._compute_api_features()."""
+    """Build feature vector ? must mirror advanced_prediction_service._compute_api_features()."""
     h5  = _team_stats(df_past, home, 5)
     h10 = _team_stats(df_past, home, 10)
     hh5 = _team_home_stats(df_past, home, 5)
@@ -252,7 +252,7 @@ def train_xgboost(X_train, y_train, label: str):
     try:
         from xgboost import XGBClassifier
     except ImportError:
-        print("  xgboost not installed — skipping XGBoost")
+        print("  xgboost not installed ? skipping XGBoost")
         return None
 
     n_classes = len(np.unique(y_train))
@@ -279,7 +279,7 @@ def train_lightgbm(X_train, y_train, label: str):
     try:
         import lightgbm as lgb
     except ImportError:
-        print("  lightgbm not installed — skipping LightGBM")
+        print("  lightgbm not installed ? skipping LightGBM")
         return None
 
     n_classes = len(np.unique(y_train))
@@ -327,7 +327,7 @@ def train_and_save(X, y, label: str, out_dir: Path):
         evaluate(model, X_test, y_test, name)
         path = out_dir / f"{label}_{name}.joblib"
         joblib.dump(model, path)
-        print(f"    Saved → {path}")
+        print(f"    Saved ? {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -379,9 +379,9 @@ def main():
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
 
-    print(f"\n✅  All models saved to {MODELS_DIR}/")
+    print(f"\n?  All models saved to {MODELS_DIR}/")
     print(f"   Feature columns: {len(FEATURE_COLUMNS)}")
-    print(f"\nNext step: restart the server — predictions will use the new models automatically.")
+    print(f"\nNext step: restart the server ? predictions will use the new models automatically.")
 
 
 if __name__ == "__main__":
