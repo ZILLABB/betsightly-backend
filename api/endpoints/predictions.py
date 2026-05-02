@@ -1,154 +1,69 @@
 """
 API endpoints for predictions.
-
-Enhanced prediction endpoints with security, caching, and comprehensive error handling.
 """
 
 import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from enum import Enum
 
 from sqlalchemy.orm import Session
 
-# Set up logging
 logger = logging.getLogger(__name__)
 
 from database import get_db
-# Phase 5: Advanced ML Integration - Using sophisticated models
-from services.basic_prediction_service import basic_prediction_service
+from services import prediction_engine
+from utils.error_handling import handle_database_error
+from utils.database_optimization import query_performance_monitor
+from utils.security import check_rate_limit
+from api.endpoints.prediction_types import (
+    PredictionCategory,
+    ResponseFormat,
+    get_category_metadata,
+    standardize_prediction_response,
+)
 
-# Import advanced prediction service
-try:
-    from services.advanced_prediction_service import advanced_prediction_service
-    ADVANCED_PREDICTION_AVAILABLE = True
-    logger.info("✅ Advanced prediction service loaded")
-except ImportError:
-    ADVANCED_PREDICTION_AVAILABLE = False
-    logger.warning("❌ Advanced prediction service not available")
-
-# Import quick prediction service
-try:
-    from services.quick_prediction_service import quick_prediction_service
-    QUICK_PREDICTION_AVAILABLE = True
-    logger.info("✅ Quick prediction service loaded")
-except ImportError:
-    QUICK_PREDICTION_AVAILABLE = False
-    logger.warning("❌ Quick prediction service not available")
-
-# Import cached prediction service
-try:
-    from services.cached_prediction_service import cached_prediction_service
-    CACHED_PREDICTION_AVAILABLE = True
-    logger.info("✅ Cached prediction service loaded")
-except ImportError:
-    CACHED_PREDICTION_AVAILABLE = False
-    logger.warning("❌ Cached prediction service not available")
-
-# Import daily prediction cache service
-try:
-    from services.daily_prediction_cache import daily_prediction_cache
-    DAILY_CACHE_AVAILABLE = True
-    logger.info("✅ Daily prediction cache service loaded")
-except ImportError:
-    DAILY_CACHE_AVAILABLE = False
-    logger.warning("❌ Daily prediction cache service not available")
-
-# Import training pipeline service
+# Training pipeline — optional heavy dependency
 try:
     from services.training_pipeline_service import training_pipeline_service
     TRAINING_PIPELINE_AVAILABLE = True
-    logger.info("✅ Training pipeline service loaded")
 except ImportError:
     TRAINING_PIPELINE_AVAILABLE = False
-    logger.warning("❌ Training pipeline service not available")
-from utils.error_handling import handle_database_error, BetSightlyError, ValidationError
-from utils.database_optimization import query_performance_monitor
-from utils.security import check_rate_limit
 
 router = APIRouter()
 
-# Enums for better type safety
-class PredictionCategory(str, Enum):
-    SAFE_BETS = "2_odds"
-    BALANCED_RISK = "5_odds"
-    HIGH_REWARD = "10_odds"
-    ROLLOVER = "rollover"
+# ---------------------------------------------------------------------------
+# Compatibility shims — old handler code referenced these booleans directly.
+# Route through prediction_engine instead of keeping separate service imports.
+# ---------------------------------------------------------------------------
+def _try_advanced():
+    svc = prediction_engine._get_advanced()
+    return svc
 
-class ResponseFormat(str, Enum):
-    SIMPLE = "simple"
-    DETAILED = "detailed"
-    COMBINATIONS = "combinations"
+def _try_quick():
+    return prediction_engine._get_quick()
 
-def _get_category_metadata(category: str) -> Dict[str, Any]:
-    """Get metadata for a prediction category."""
-    metadata = {
-        "2_odds": {
-            "name": "Safe Bets",
-            "description": "Lower odds, higher confidence predictions",
-            "target_odds": 2.0,
-            "risk_level": "low"
-        },
-        "5_odds": {
-            "name": "Balanced Risk",
-            "description": "Medium odds, balanced risk-reward",
-            "target_odds": 5.0,
-            "risk_level": "medium"
-        },
-        "10_odds": {
-            "name": "High Reward",
-            "description": "Higher odds, higher potential returns",
-            "target_odds": 10.0,
-            "risk_level": "high"
-        },
-        "rollover": {
-            "name": "10-Day Rollover",
-            "description": "Daily predictions for a 10-day rollover strategy",
-            "target_odds": 3.0,
-            "risk_level": "medium"
-        }
-    }
-    return metadata.get(category, {})
+def _try_cached():
+    return prediction_engine._get_cached()
 
-def _standardize_prediction_response(
-    predictions: List[Any],
-    category: Optional[str] = None,
-    format_type: ResponseFormat = ResponseFormat.SIMPLE
-) -> Dict[str, Any]:
-    """
-    Standardize prediction response format.
+def _try_daily():
+    return prediction_engine._get_daily()
 
-    Args:
-        predictions: List of predictions
-        category: Category name (optional)
-        format_type: Response format type
+ADVANCED_PREDICTION_AVAILABLE = _try_advanced() is not None
+QUICK_PREDICTION_AVAILABLE = _try_quick() is not None
+CACHED_PREDICTION_AVAILABLE = _try_cached() is not None
+DAILY_CACHE_AVAILABLE = _try_daily() is not None
 
-    Returns:
-        Standardized response dictionary
-    """
-    if not predictions:
-        return {
-            "count": 0,
-            "predictions": [],
-            "metadata": _get_category_metadata(category) if category else {}
-        }
+# Alias service singletons so existing handler code still resolves
+advanced_prediction_service = prediction_engine._get_advanced()
+quick_prediction_service = prediction_engine._get_quick()
+cached_prediction_service = prediction_engine._get_cached()
+daily_prediction_cache = prediction_engine._get_daily()
+basic_prediction_service = prediction_engine._get_basic()
 
-    response = {
-        "count": len(predictions),
-        "predictions": [p.to_dict() if hasattr(p, 'to_dict') else p for p in predictions]
-    }
-
-    if category:
-        response["metadata"] = _get_category_metadata(category)
-
-    if format_type == ResponseFormat.DETAILED:
-        response["statistics"] = {
-            "avg_confidence": sum(p.confidence or 0 for p in predictions if hasattr(p, 'confidence')) / len(predictions),
-            "avg_odds": sum(p.odds or 0 for p in predictions if hasattr(p, 'odds')) / len(predictions)
-        }
-
-    return response
+# Helpers re-exported from prediction_types for any legacy local callers
+_get_category_metadata = get_category_metadata
+_standardize_prediction_response = standardize_prediction_response
 
 # Consolidated prediction endpoints - all functionality moved to main endpoint
 
@@ -184,68 +99,12 @@ def get_predictions(
         # Use advanced ML prediction service for maximum accuracy
         date_str = date.strftime("%Y-%m-%d") if date else datetime.now().strftime("%Y-%m-%d")
 
-        try:
-            # Priority 1: Use Daily Prediction Cache (Fastest)
-            if DAILY_CACHE_AVAILABLE:
-                logger.info("💾 Using Daily Prediction Cache")
-                predictions_data = daily_prediction_cache.get_cached_predictions(date_str, category.value if category else None)
-                service_used = "daily_prediction_cache"
+        predictions_data = prediction_engine.get_predictions(date_str, mode="advanced")
+        if predictions_data.get("status") != "success":
+            logger.warning("Advanced mode failed, falling back to basic")
+            predictions_data = prediction_engine.get_predictions(date_str, mode="basic")
 
-                # If cache miss, fall through to real-time generation
-                if predictions_data.get('source') != 'cache':
-                    logger.info("🔄 Cache miss - falling through to real-time generation")
-                    raise Exception("Cache miss")
-
-            # Priority 2: Use Advanced ML Service (XGBoost + Ensemble)
-            elif ADVANCED_PREDICTION_AVAILABLE:
-                logger.info("🚀 Using Advanced ML Prediction Service")
-                predictions_data = advanced_prediction_service.get_predictions_for_date(date_str)
-                service_used = "advanced_prediction_service"
-
-            # Priority 3: Use Quick Prediction Service (Pre-trained models)
-            elif QUICK_PREDICTION_AVAILABLE:
-                logger.info("⚡ Using Quick Prediction Service")
-                predictions_data = quick_prediction_service.get_predictions_for_date(date_str)
-                service_used = "quick_prediction_service"
-
-            # Priority 4: Use Cached Prediction Service
-            elif CACHED_PREDICTION_AVAILABLE:
-                logger.info("💾 Using Cached Prediction Service")
-                predictions_data = cached_prediction_service.get_predictions_for_date(date_str)
-                service_used = "cached_prediction_service"
-
-            # Fallback: Use Basic Prediction Service
-            else:
-                logger.info("🔧 Using Basic Prediction Service (fallback)")
-                predictions_data = basic_prediction_service.get_predictions_for_date(date_str)
-                service_used = "basic_prediction_service"
-
-            # Process the predictions data
-            if predictions_data.get("status") != "success":
-                logger.warning(f"Prediction service returned error: {predictions_data.get('message')}")
-                # Fall back to basic service if advanced fails
-                if service_used != "basic_prediction_service":
-                    logger.info("🔄 Falling back to basic prediction service")
-                    predictions_data = basic_prediction_service.get_predictions_for_date(date_str)
-                    service_used = "basic_prediction_service"
-
-            categorized_predictions = predictions_data.get("categories", {})
-
-            # Add service metadata to response
-            if "metadata" not in predictions_data:
-                predictions_data["metadata"] = {}
-            predictions_data["metadata"]["service_used"] = service_used
-
-        except Exception as e:
-            logger.error(f"Error getting predictions from advanced services: {str(e)}")
-            # Final fallback to simple mock data
-            categorized_predictions = {
-                "2_odds": [{"home_team": "Arsenal", "away_team": "Chelsea", "prediction": "Arsenal Win", "odds": 2.1, "confidence": 75}],
-                "5_odds": [{"home_team": "Man City", "away_team": "Liverpool", "prediction": "Over 2.5", "odds": 1.8, "confidence": 65}],
-                "10_odds": [{"home_team": "Real Madrid", "away_team": "Barcelona", "prediction": "BTTS Yes", "odds": 8.5, "confidence": 45}],
-                "rollover": [{"home_team": "Bayern Munich", "away_team": "Dortmund", "prediction": "Bayern Win", "odds": 1.9, "confidence": 80}]
-            }
-            service_used = "fallback_mock_data"
+        categorized_predictions = predictions_data.get("categories", {})
 
         if category:
             # Return specific category
@@ -925,10 +784,9 @@ def get_advanced_models_info(request: Request):
         )
 
 
-# Phase 5: Re-enabling cache management
-@router.get("/cache/status")
+@router.get("/cache/service-status")
 @query_performance_monitor
-def get_cache_status(request: Request):
+def get_cache_service_status(request: Request):
     """
     **Cache Status Endpoint**
 

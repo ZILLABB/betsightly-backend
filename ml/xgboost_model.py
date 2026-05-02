@@ -14,8 +14,8 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, log_loss
 from datetime import datetime
 
-from app.ml.base_model import BaseModel
-from app.ml.advanced_feature_engineering import AdvancedFootballFeatureEngineer
+from ml.base_model import BaseModel
+from ml.advanced_feature_engineering import AdvancedFootballFeatureEngineer
 from utils.common import setup_logging
 
 # Set up logging

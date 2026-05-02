@@ -83,34 +83,39 @@ class AdvancedPredictionService:
     """
     
     def __init__(self):
-        """Initialize the advanced prediction service."""
+        """Initialize the advanced prediction service (models are loaded lazily on first use)."""
         self.football_data_api_key = os.getenv("FOOTBALL_DATA_API_KEY")
         self.api_football_key = os.getenv("API_FOOTBALL_API_KEY")
         self.base_url_football_data = "https://api.football-data.org/v4"
         self.base_url_api_football = "https://v3.football.api-sports.io"
-        
-        # Initialize ML components
+
+        # ML components — populated on first use via _ensure_loaded()
         self.feature_engineer = None
         self.model_factory = None
         self.models = {}
         self.explainers = {}
-        
+
         # Memory optimization for Render (512MB limit)
         self.memory_limit_mb = 400  # Leave 112MB buffer
         self.models_loaded = 0
+        self._loaded = False
 
-        # Load models and setup
+    def _ensure_loaded(self):
+        """Load ML components and models on first use (lazy init)."""
+        if self._loaded:
+            return
         self._initialize_ml_components()
         self._load_advanced_models()
         self._setup_explainers()
-
-        logger.info(f"Advanced Prediction Service initialized with {self.models_loaded} models")
+        self._loaded = True
+        logger.info(f"Advanced Prediction Service loaded {self.models_loaded} models")
     
     def _initialize_ml_components(self):
-        """Initialize ML components if available."""
+        """Initialize ML components and inject historical data into feature engineer."""
         if FEATURE_ENGINEERING_AVAILABLE:
             try:
                 self.feature_engineer = AdvancedFootballFeatureEngineer()
+                self._load_historical_data()
                 logger.info("✅ Advanced feature engineering initialized")
             except Exception as e:
                 logger.error(f"❌ Failed to initialize feature engineering: {str(e)}")
@@ -126,6 +131,20 @@ class AdvancedPredictionService:
             logger.info("✅ Advanced ML components fully initialized")
         else:
             logger.warning("⚠️ Advanced ML components partially available - using fallbacks")
+
+    def _load_historical_data(self):
+        """Load the GitHub dataset into the feature engineer."""
+        try:
+            from services.historical_data_service import historical_data_service
+            df = historical_data_service.get_historical_data()
+            if df is not None and self.feature_engineer is not None:
+                self.feature_engineer.set_historical_data(df)
+                logger.info(f"✅ Historical data injected: {len(df):,} matches available for feature engineering")
+                self._historical_data_service = historical_data_service
+            else:
+                logger.warning("⚠️ Historical data not available — feature engineering will use heuristics")
+        except Exception as e:
+            logger.error(f"❌ Failed to load historical data: {e}")
     
     def _load_advanced_models(self):
         """Load all available advanced models."""
@@ -228,16 +247,18 @@ class AdvancedPredictionService:
     def get_predictions_for_date(self, date_str: Optional[str] = None) -> Dict[str, Any]:
         """
         Get advanced ML predictions for a specific date.
-        
+
         Args:
             date_str: Date in YYYY-MM-DD format (default: today)
-            
+
         Returns:
             Dictionary with advanced predictions and metadata
         """
+        self._ensure_loaded()
+
         if not date_str:
             date_str = datetime.now().strftime("%Y-%m-%d")
-        
+
         start_time = datetime.now()
         
         try:
@@ -430,18 +451,24 @@ class AdvancedPredictionService:
         """Engineer advanced features for a match using ML feature engineering."""
         try:
             if self.feature_engineer and ADVANCED_ML_AVAILABLE:
-                # Use advanced feature engineering
+                # Normalise API team names to dataset naming convention
+                norm_home = home_team
+                norm_away = away_team
+                if hasattr(self, "_historical_data_service"):
+                    norm_home = self._historical_data_service.normalize_team_name(home_team)
+                    norm_away = self._historical_data_service.normalize_team_name(away_team)
+
                 features_df = self.feature_engineer.engineer_features_for_match(
-                    home_team, away_team, league, datetime.now()
+                    norm_home, norm_away, league, datetime.now()
                 )
-                return features_df.values.flatten().tolist()
-            else:
-                # Fallback to basic feature engineering
-                return self._engineer_basic_features(home_team, away_team, league)
+                if features_df is not None and not features_df.empty:
+                    return features_df.values.flatten().tolist()
+                logger.warning(f"Feature engineering returned empty DataFrame for {home_team} vs {away_team}")
 
         except Exception as e:
             logger.error(f"❌ Feature engineering error: {str(e)}")
-            return self._engineer_basic_features(home_team, away_team, league)
+
+        return self._engineer_basic_features(home_team, away_team, league)
 
     def _engineer_basic_features(self, home_team: str, away_team: str, league: str) -> List[float]:
         """Basic feature engineering as fallback."""
@@ -654,6 +681,7 @@ class AdvancedPredictionService:
 
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about loaded models."""
+        self._ensure_loaded()
         return {
             "total_models": len(self.models),
             "model_types": {

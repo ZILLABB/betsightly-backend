@@ -54,8 +54,7 @@ class PunterPrediction(Base):
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    # Relationships - temporarily disabled to fix startup issue
-    # punter = relationship("Punter", back_populates="predictions")
+    punter = relationship("Punter", back_populates="punter_predictions")
 
     def __init__(
         self,

@@ -12,32 +12,32 @@ from typing import Dict, Any, List, Optional, Union, Type
 logger = logging.getLogger(__name__)
 
 # Import base model
-from app.ml.base_model import BaseModel
+from ml.base_model import BaseModel
 
 # Import model implementations
-from app.ml.ensemble_model_improved import MatchResultModel, OverUnderModel, BTTSModel
+from ml.ensemble_model_improved import MatchResultModel, OverUnderModel, BTTSModel
 
 # Import advanced models
 try:
-    from app.ml.xgboost_model import XGBoostMatchResultModel
+    from ml.xgboost_model import XGBoostMatchResultModel
 except ImportError:
     logger.warning("XGBoost model not available")
     XGBoostMatchResultModel = None
 
 try:
-    from app.ml.lightgbm_models import LightGBMBTTSModel
+    from ml.lightgbm_models import LightGBMBTTSModel
 except ImportError:
     logger.warning("LightGBM model not available")
     LightGBMBTTSModel = None
 
 try:
-    from app.ml.neural_network_models import NeuralNetworkOverUnderModel
+    from ml.neural_network_models import NeuralNetworkOverUnderModel
 except ImportError:
     logger.warning("Neural Network model not available")
     NeuralNetworkOverUnderModel = None
 
 try:
-    from app.ml.lstm_models import LSTMTeamFormModel
+    from ml.lstm_models import LSTMTeamFormModel
 except ImportError:
     logger.warning("LSTM model not available")
     LSTMTeamFormModel = None

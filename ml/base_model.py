@@ -22,11 +22,11 @@ logger = setup_logging(__name__)
 
 # Import confidence calibrator
 try:
-    from app.ml.confidence_calibrator import IsotonicCalibrator as ConfidenceCalibrator
+    from ml.confidence_calibrator import IsotonicCalibrator as ConfidenceCalibrator
 except ImportError:
     logger.warning("Advanced confidence calibrator not available, using fallback")
     try:
-        from app.ml.confidence_calibration import ConfidenceCalibrator
+        from ml.confidence_calibration import ConfidenceCalibrator
     except ImportError:
         logger.error("No confidence calibrator available")
 

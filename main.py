@@ -15,7 +15,30 @@ from api.api import api_router
 from database import init_db, get_db
 from utils.config import settings
 from utils.error_handling import setup_exception_handlers
-from utils.security import SecurityMiddleware
+from utils.security import SecurityMiddleware, RateLimitMiddleware
+
+# ---------------------------------------------------------------------------
+# Sentry — error tracking (no-op when SENTRY_DSN is not set)
+# ---------------------------------------------------------------------------
+_SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+if _SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
+        sentry_sdk.init(
+            dsn=_SENTRY_DSN,
+            environment=os.getenv("ENVIRONMENT", "production"),
+            traces_sample_rate=0.1,   # capture 10% of transactions for performance
+            integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+        )
+        logging.getLogger(__name__).info("Sentry error tracking enabled")
+    except ImportError:
+        logging.getLogger(__name__).warning(
+            "SENTRY_DSN is set but sentry-sdk is not installed — "
+            "add sentry-sdk to requirements.txt"
+        )
 
 # Set up logging
 logging.basicConfig(
@@ -55,6 +78,7 @@ app.add_middleware(
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityMiddleware)
 
 # Add CORS middleware with enhanced security - allow all origins for now

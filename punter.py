@@ -42,6 +42,7 @@ class Punter(Base):
 
     # Relationships
     betting_codes = relationship("BettingCode", lazy="select", overlaps="punter")
+    punter_predictions = relationship("PunterPrediction", back_populates="punter", lazy="select")
 
     def __init__(
         self,

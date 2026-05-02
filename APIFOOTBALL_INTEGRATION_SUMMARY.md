@@ -29,7 +29,7 @@ Successfully integrated APIFootball.com as a temporary fixture data source for t
 
 ### 4. **Configuration**
 - ✅ Environment variables configured in `.env`
-- ✅ API key: `04c7cc560707dfd61408d4ba8b347ac04486a22aa85a9fa211db2dd517236048`
+- ✅ API key: configured via `API_FOOTBALL_API_KEY` environment variable (never commit keys to source)
 - ✅ Base URL: `https://apiv3.apifootball.com`
 
 ### 5. **Testing Scripts**

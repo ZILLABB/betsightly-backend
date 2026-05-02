@@ -84,32 +84,46 @@ class RateLimiter:
         return max(0, self.max_requests - total_requests)
 
 
-class SecurityMiddleware(BaseHTTPMiddleware):
-    """Security middleware for adding security headers and basic protection."""
-    
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Global rate-limiting middleware applied to all requests."""
+
+    # Paths that are exempt from rate limiting (health/liveness probes)
+    _EXEMPT = {"/api/health", "/api/health/ready", "/api/health/live", "/"}
+
     async def dispatch(self, request: Request, call_next):
-        """Process request and add security headers."""
-        
-        # Add security headers
+        if request.url.path not in self._EXEMPT:
+            client_id = get_client_id(request)
+            if not rate_limiter.is_allowed(client_id):
+                from starlette.responses import JSONResponse
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": "Rate limit exceeded",
+                        "message": "Too many requests. Please try again later.",
+                        "remaining_requests": rate_limiter.get_remaining_requests(client_id),
+                    },
+                )
+        return await call_next(request)
+
+
+class SecurityMiddleware(BaseHTTPMiddleware):
+    """Security middleware for adding security headers."""
+
+    async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        
-        # Security headers
+
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = "default-src 'self'"
-        
-        # Remove server information
-        if hasattr(response.headers, 'pop'):
-            response.headers.pop("Server", None)
-        elif hasattr(response.headers, '__delitem__'):
-            try:
-                del response.headers["Server"]
-            except KeyError:
-                pass
-        
+
+        try:
+            del response.headers["Server"]
+        except (KeyError, AttributeError):
+            pass
+
         return response
 
 
@@ -186,6 +200,36 @@ class APIKeyValidator:
 rate_limiter = RateLimiter(max_requests=1000, window_seconds=3600)  # 1000 requests per hour
 api_key_validator = APIKeyValidator()
 security_bearer = HTTPBearer(auto_error=False)
+
+
+def require_api_key(request: Request) -> None:
+    """
+    Dependency that enforces API key auth when API_KEY env var is set.
+
+    Pass the key via the X-API-Key header. In development (API_KEY unset),
+    all requests are allowed through so local iteration stays frictionless.
+    """
+    import os
+    expected_key = os.getenv("API_KEY", "")
+    if not expected_key:
+        # Dev / unprotected mode — skip auth
+        return
+
+    provided_key = request.headers.get("X-API-Key", "")
+    if not provided_key:
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "Missing API key", "message": "Provide your key in the X-API-Key header."}
+        )
+
+    # Constant-time comparison to prevent timing attacks
+    import hmac
+    if not hmac.compare_digest(provided_key, expected_key):
+        logger.warning(f"Invalid API key attempt from {request.client.host if request.client else 'unknown'}")
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "Invalid API key", "message": "The provided API key is not valid."}
+        )
 
 
 def get_client_id(request: Request) -> str:

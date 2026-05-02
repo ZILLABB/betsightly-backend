@@ -181,6 +181,7 @@ class Settings(BaseSettings):
 
     # Security settings
     SECRET_KEY: str = Field("", description="Secret key for JWT tokens and encryption")
+    API_KEY: str = Field("", description="Static API key clients must send in X-API-Key header (leave blank to disable auth in dev)")
     API_KEY_HEADER: str = Field("X-API-Key", description="Header name for API key authentication")
     ALLOWED_HOSTS: str = Field("localhost,127.0.0.1", description="Comma-separated allowed hosts")
 

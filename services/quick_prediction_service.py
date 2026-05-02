@@ -30,15 +30,19 @@ class QuickPredictionService:
     """
     
     def __init__(self):
-        """Initialize the prediction service."""
+        """Initialize the prediction service (models loaded lazily on first use)."""
         self.models = {}
         self.encoders = {}
         self.model_dir = Path("models/quick")
-        
-        # Load models
+        self._loaded = False
+
+    def _ensure_loaded(self):
+        """Load models on first use."""
+        if self._loaded:
+            return
         self._load_models()
-        
-        logger.info("Quick Prediction Service initialized")
+        self._loaded = True
+        logger.info("Quick Prediction Service models loaded")
     
     def _load_models(self):
         """Load trained models and encoders."""
@@ -71,9 +75,11 @@ class QuickPredictionService:
         Returns:
             Dictionary with predictions and categories
         """
+        self._ensure_loaded()
+
         if not date:
             date = datetime.now().strftime("%Y-%m-%d")
-        
+
         try:
             # Get fixtures from API
             fixtures = self._get_fixtures_from_api(date)
