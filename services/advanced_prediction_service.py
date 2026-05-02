@@ -147,13 +147,43 @@ class AdvancedPredictionService:
             logger.error(f"❌ Failed to load historical data: {e}")
     
     def _load_advanced_models(self):
-        """Load all available advanced models."""
-        # Optimized model loading for Render 512MB limit - Load only essential models
-        model_directories = [
-            ("xgboost", "models/xgboost"),      # Priority 1: Core XGBoost models (10 models)
-            # Skip other models to stay under memory limit
-        ]
+        """Load all available advanced models, preferring API-Football retrained models."""
+        # Try the API-Football retrained models first (team names align with live API)
+        api_meta_path = Path("models/api_football/meta.json")
+        if api_meta_path.exists():
+            try:
+                import json
+                with open(api_meta_path) as f:
+                    self._api_model_meta = json.load(f)
 
+                self._api_models = {}
+                for model_name in self._api_model_meta.get("models", []):
+                    p = Path(f"models/api_football/{model_name}.joblib")
+                    if p.exists():
+                        self._api_models[model_name] = joblib.load(p)
+
+                # Load the API-Football historical data for feature computation
+                api_csv = Path("data/api-football/matches.csv")
+                if api_csv.exists():
+                    self._api_df = pd.read_csv(api_csv, low_memory=False)
+                    self._api_df["date"] = pd.to_datetime(self._api_df["date"], errors="coerce")
+                    self._api_df = self._api_df.dropna(subset=["date"]).sort_values("date")
+                    logger.info(
+                        f"✅ API-Football models loaded: {len(self._api_models)} models, "
+                        f"{len(self._api_df):,} historical matches"
+                    )
+                    return  # Use these — skip legacy models
+                else:
+                    logger.warning("API-Football models found but matches.csv missing — run fetch_history.py")
+            except Exception as e:
+                logger.warning(f"Could not load API-Football models: {e}")
+
+        # Fall back to legacy xgboost models
+        self._api_models = {}
+        self._api_df = None
+        model_directories = [
+            ("xgboost", "models/xgboost"),
+        ]
         for model_type, model_dir in model_directories:
             self._load_models_from_directory(model_type, model_dir)
     
@@ -367,24 +397,53 @@ class AdvancedPredictionService:
             logger.error(f"❌ Football-Data.org API error: {str(e)}")
             return []
 
+    # League IDs for the competitions our models are trained on.
+    # See https://www.api-football.com/documentation-v3#tag/Leagues
+    _TARGET_LEAGUE_IDS = {
+        39,   # England - Premier League
+        40,   # England - Championship
+        41,   # England - League One
+        61,   # France - Ligue 1
+        62,   # France - Ligue 2
+        78,   # Germany - Bundesliga
+        79,   # Germany - 2. Bundesliga
+        135,  # Italy - Serie A
+        136,  # Italy - Serie B
+        140,  # Spain - La Liga
+        141,  # Spain - Segunda División
+        94,   # Portugal - Primeira Liga
+        88,   # Netherlands - Eredivisie
+        144,  # Belgium - Pro League
+        203,  # Turkey - Süper Lig
+        2,    # UEFA Champions League
+        3,    # UEFA Europa League
+        848,  # UEFA Conference League
+    }
+
     def _get_fixtures_api_football(self, date_str: str) -> List[Dict]:
         """Get fixtures from API-Football (api-sports.io direct endpoint)."""
         try:
             headers = {"x-apisports-key": self.api_football_key}
-
             url = f"{self.base_url_api_football}/fixtures"
             params = {"date": date_str}
 
             response = requests.get(url, headers=headers, params=params, timeout=15)
 
-            if response.status_code == 200:
-                data = response.json()
-                fixtures = data.get("response", [])
-                logger.info(f"✅ Got {len(fixtures)} fixtures from API-Football")
-                return fixtures
-            else:
+            if response.status_code != 200:
                 logger.warning(f"⚠️  API-Football failed: {response.status_code} — {response.text[:200]}")
                 return []
+
+            all_fixtures = response.json().get("response", [])
+            # Filter to leagues our models are trained on
+            fixtures = [
+                f for f in all_fixtures
+                if f.get("league", {}).get("id") in self._TARGET_LEAGUE_IDS
+            ]
+            logger.info(
+                f"✅ API-Football: {len(fixtures)} target-league fixtures "
+                f"(of {len(all_fixtures)} total) on {date_str}"
+            )
+            return fixtures
 
         except Exception as e:
             logger.error(f"❌ API-Football error: {str(e)}")
@@ -398,12 +457,44 @@ class AdvancedPredictionService:
                 home_team = fixture["homeTeam"]["name"]
                 away_team = fixture["awayTeam"]["name"]
                 league = fixture.get("competition", {}).get("name", "Unknown")
+                league_tier = 1
             else:  # API-Football format
                 home_team = fixture["teams"]["home"]["name"]
                 away_team = fixture["teams"]["away"]["name"]
                 league = fixture.get("league", {}).get("name", "Unknown")
+                league_id = fixture.get("league", {}).get("id", 0)
+                league_tier = 2 if league_id in {40, 62, 79, 136, 141} else 1
 
-            # Engineer features for this match
+            # --- Use retrained API-Football models if available (perfect name alignment) ---
+            if self._api_models and self._api_df is not None:
+                api_features = self._compute_api_features(home_team, away_team, league_tier)
+                api_result = self._predict_with_api_models(api_features, home_team, away_team)
+                if api_result:
+                    confidence = api_result["confidence"]
+                    odds = self._calculate_odds_from_confidence(confidence)
+                    category = self._determine_odds_category(odds)
+                    if category is None:
+                        return None
+                    return {
+                        "home_team":  home_team,
+                        "away_team":  away_team,
+                        "league":     league,
+                        "bet_type":   api_result["prediction"],
+                        "prediction": api_result["prediction"],
+                        "confidence": confidence,
+                        "odds":       odds,
+                        "category":   category,
+                        "model_predictions": api_result["model_predictions"],
+                        "explanations": {"available": False},
+                        "advanced_features": {
+                            "meta_stacking": False,
+                            "ensemble_voting": True,
+                            "feature_engineering": "api_football_v2",
+                            "models_used": len(api_result["model_predictions"]),
+                        },
+                    }
+
+            # --- Legacy path: old feature engineering + old models ---
             features = self._engineer_match_features_advanced(home_team, away_team, league)
 
             # Get predictions from all available models
@@ -422,11 +513,15 @@ class AdvancedPredictionService:
             odds = self._calculate_odds_from_confidence(confidence)
             category = self._determine_odds_category(odds)
 
+            raw_label = final_prediction["prediction"]
+            bet_type = self._resolve_bet_label(raw_label, model_predictions, home_team, away_team)
+
             return {
                 "home_team": home_team,
                 "away_team": away_team,
                 "league": league,
-                "prediction": final_prediction["prediction"],
+                "bet_type": bet_type,
+                "prediction": bet_type,
                 "confidence": confidence,
                 "odds": odds,
                 "category": category,
@@ -443,6 +538,153 @@ class AdvancedPredictionService:
         except Exception as e:
             logger.error(f"❌ Error predicting fixture: {str(e)}")
             return None
+
+    # ------------------------------------------------------------------
+    # API-Football feature engineering (mirrors retrain_models.py exactly)
+    # ------------------------------------------------------------------
+
+    def _compute_api_features(self, home: str, away: str, league_tier: int = 1) -> Optional[list]:
+        """Compute feature vector using API-Football historical data."""
+        if self._api_df is None or len(self._api_df) == 0:
+            return None
+
+        now = datetime.now()
+        df_past = self._api_df[self._api_df["date"] < pd.Timestamp(now)]
+
+        def team_stats(team, n):
+            games = df_past[
+                (df_past["home_team"] == team) | (df_past["away_team"] == team)
+            ].tail(n)
+            if len(games) == 0:
+                return {"win_rate": 0.5, "draw_rate": 0.25, "goals_scored": 1.2, "goals_conceded": 1.2}
+            wins = draws = gs = gc = 0
+            for _, r in games.iterrows():
+                if r["home_team"] == team:
+                    s, c = r["home_score"], r["away_score"]
+                else:
+                    s, c = r["away_score"], r["home_score"]
+                gs += s; gc += c
+                if s > c: wins += 1
+                elif s == c: draws += 1
+            n_g = len(games)
+            return {"win_rate": wins/n_g, "draw_rate": draws/n_g,
+                    "goals_scored": gs/n_g, "goals_conceded": gc/n_g}
+
+        def home_stats(team, n):
+            games = df_past[df_past["home_team"] == team].tail(n)
+            if len(games) == 0:
+                return {"win_rate": 0.5, "goals_scored": 1.5}
+            wins  = sum(1 for _, r in games.iterrows() if r["home_score"] > r["away_score"])
+            goals = sum(r["home_score"] for _, r in games.iterrows())
+            return {"win_rate": wins/len(games), "goals_scored": goals/len(games)}
+
+        def away_stats(team, n):
+            games = df_past[df_past["away_team"] == team].tail(n)
+            if len(games) == 0:
+                return {"win_rate": 0.35, "goals_scored": 1.1}
+            wins  = sum(1 for _, r in games.iterrows() if r["away_score"] > r["home_score"])
+            goals = sum(r["away_score"] for _, r in games.iterrows())
+            return {"win_rate": wins/len(games), "goals_scored": goals/len(games)}
+
+        def h2h_stats(home_t, away_t, n):
+            h2h = df_past[
+                ((df_past["home_team"] == home_t) & (df_past["away_team"] == away_t)) |
+                ((df_past["home_team"] == away_t) & (df_past["away_team"] == home_t))
+            ].tail(n)
+            if len(h2h) == 0:
+                return {"home_win_rate": 0.45, "avg_goals": 2.5, "btts_rate": 0.5, "n": 0}
+            hw = btts = tg = 0
+            for _, r in h2h.iterrows():
+                hg = r["home_score"] if r["home_team"] == home_t else r["away_score"]
+                ag = r["away_score"] if r["home_team"] == home_t else r["home_score"]
+                tg += hg + ag
+                if hg > ag: hw += 1
+                if hg > 0 and ag > 0: btts += 1
+            n_g = len(h2h)
+            return {"home_win_rate": hw/n_g, "avg_goals": tg/n_g, "btts_rate": btts/n_g, "n": n_g}
+
+        h5  = team_stats(home, 5);  h10 = team_stats(home, 10)
+        hh5 = home_stats(home, 5)
+        a5  = team_stats(away, 5);  a10 = team_stats(away, 10)
+        aa5 = away_stats(away, 5)
+        h2h = h2h_stats(home, away, 10)
+
+        return [
+            h5["win_rate"], h10["win_rate"], h5["draw_rate"],
+            h5["goals_scored"], h5["goals_conceded"],
+            hh5["win_rate"], hh5["goals_scored"],
+            a5["win_rate"], a10["win_rate"], a5["draw_rate"],
+            a5["goals_scored"], a5["goals_conceded"],
+            aa5["win_rate"], aa5["goals_scored"],
+            h2h["home_win_rate"], h2h["avg_goals"], h2h["btts_rate"],
+            min(h2h["n"], 10) / 10,
+            league_tier / 2,
+        ]
+
+    def _predict_with_api_models(self, features: list, home: str, away: str) -> Optional[Dict]:
+        """Run the retrained API-Football models and return a structured prediction."""
+        if not self._api_models or features is None:
+            return None
+
+        X = np.array(features).reshape(1, -1)
+        result_classes = {0: f"{away} to Win", 1: "Draw", 2: f"{home} to Win"}
+        preds = {}
+
+        for model_name, model in self._api_models.items():
+            try:
+                proba = model.predict_proba(X)[0]
+                pred_idx = int(np.argmax(proba))
+                conf = float(proba[pred_idx]) * 100
+
+                if "match_result" in model_name:
+                    label = result_classes.get(pred_idx, "Unknown")
+                elif "over_2_5" in model_name:
+                    label = "Over 2.5 Goals" if pred_idx == 1 else "Under 2.5 Goals"
+                elif "btts" in model_name:
+                    label = "Both Teams to Score" if pred_idx == 1 else "Clean Sheet"
+                else:
+                    label = str(pred_idx)
+
+                preds[model_name] = {"prediction": label, "confidence": conf,
+                                     "model_type": model_name.split("_")[-1]}
+            except Exception as e:
+                logger.debug(f"Model {model_name} prediction failed: {e}")
+
+        if not preds:
+            return None
+
+        # Pick the highest-confidence prediction as the headline bet
+        best = max(preds.values(), key=lambda p: p["confidence"])
+        return {"prediction": best["prediction"], "confidence": best["confidence"],
+                "model_predictions": preds}
+
+    def _resolve_bet_label(self, raw_label: str, model_predictions: Dict, home_team: str, away_team: str) -> str:
+        """Convert raw model class labels to human-readable bet descriptions."""
+        _LABEL_MAP = {
+            "Home Win": f"{home_team} to Win",
+            "Away Win": f"{away_team} to Win",
+            "Draw": "Draw",
+            "Over 2.5": "Over 2.5 Goals",
+            "Under 2.5": "Under 2.5 Goals",
+            "BTTS Yes": "Both Teams to Score",
+            "BTTS No": "Clean Sheet",
+            "Over 1.5": "Over 1.5 Goals",
+            "Over 3.5": "Over 3.5 Goals",
+        }
+        if raw_label in _LABEL_MAP:
+            return _LABEL_MAP[raw_label]
+
+        # "Class 0/1" fallback — pick the most common readable prediction from sub-models
+        readable = [
+            v["prediction"] for v in model_predictions.values()
+            if v.get("prediction") and not v["prediction"].startswith("Class")
+        ]
+        if readable:
+            from collections import Counter
+            return _LABEL_MAP.get(Counter(readable).most_common(1)[0][0],
+                                  Counter(readable).most_common(1)[0][0])
+
+        return "Value Bet"
 
     def _engineer_match_features_advanced(self, home_team: str, away_team: str, league: str) -> List[float]:
         """Engineer advanced features for a match using ML feature engineering."""
