@@ -320,15 +320,15 @@ class AdvancedPredictionService:
     def _get_fixtures_from_api(self, date_str: str) -> List[Dict]:
         """Get fixtures from API using real API keys."""
         try:
-            # Try Football-Data.org first
-            if self.football_data_api_key and len(self.football_data_api_key) > 10:
-                logger.info(f"🌐 Using Football-Data.org API")
-                return self._get_fixtures_football_data(date_str)
-
-            # Try API-Football as fallback
-            elif self.api_football_key and len(self.api_football_key) > 10:
-                logger.info(f"🌐 Using API-Football API")
+            # API-Football (api-sports.io) is primary — broad league coverage
+            if self.api_football_key and len(self.api_football_key) > 10:
+                logger.info("🌐 Using API-Football (api-sports.io)")
                 return self._get_fixtures_api_football(date_str)
+
+            # Football-Data.org as fallback
+            elif self.football_data_api_key and len(self.football_data_api_key) > 10:
+                logger.info("🌐 Using Football-Data.org API")
+                return self._get_fixtures_football_data(date_str)
 
             else:
                 logger.warning("⚠️  No valid API keys found")
@@ -368,17 +368,14 @@ class AdvancedPredictionService:
             return []
 
     def _get_fixtures_api_football(self, date_str: str) -> List[Dict]:
-        """Get fixtures from API-Football."""
+        """Get fixtures from API-Football (api-sports.io direct endpoint)."""
         try:
-            headers = {
-                "x-rapidapi-key": self.api_football_key,
-                "x-rapidapi-host": "v3.football.api-sports.io"
-            }
+            headers = {"x-apisports-key": self.api_football_key}
 
             url = f"{self.base_url_api_football}/fixtures"
             params = {"date": date_str}
 
-            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response = requests.get(url, headers=headers, params=params, timeout=15)
 
             if response.status_code == 200:
                 data = response.json()
@@ -386,7 +383,7 @@ class AdvancedPredictionService:
                 logger.info(f"✅ Got {len(fixtures)} fixtures from API-Football")
                 return fixtures
             else:
-                logger.warning(f"⚠️  API-Football failed: {response.status_code}")
+                logger.warning(f"⚠️  API-Football failed: {response.status_code} — {response.text[:200]}")
                 return []
 
         except Exception as e:
