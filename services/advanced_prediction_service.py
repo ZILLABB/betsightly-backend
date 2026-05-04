@@ -61,6 +61,32 @@ except ImportError as e:
 
 ADVANCED_ML_AVAILABLE = FEATURE_ENGINEERING_AVAILABLE and MODEL_FACTORY_AVAILABLE
 
+# --- New statistical models (module-level singletons) ---
+try:
+    from ml.elo_model import EloRatingSystem
+    _elo_system = EloRatingSystem()
+    ELO_AVAILABLE = True
+except ImportError:
+    _elo_system = None
+    ELO_AVAILABLE = False
+
+try:
+    from ml.dixon_coles_model import DixonColesModel
+    _dixon_coles = DixonColesModel()
+    DIXON_COLES_AVAILABLE = True
+except ImportError:
+    _dixon_coles = None
+    DIXON_COLES_AVAILABLE = False
+
+try:
+    from ml.bayesian_averaging import BayesianModelAverager
+    _bma = BayesianModelAverager()
+    BMA_AVAILABLE = True
+except ImportError:
+    _bma = None
+    BMA_AVAILABLE = False
+
+
 # Disable SHAP temporarily for memory optimization on Render
 SHAP_AVAILABLE = False
 logger.info("ℹ️ SHAP disabled for memory optimization")
@@ -106,6 +132,7 @@ class AdvancedPredictionService:
             return
         self._initialize_ml_components()
         self._load_advanced_models()
+        self._train_statistical_models()
         self._setup_explainers()
         self._loaded = True
         logger.info(f"Advanced Prediction Service loaded {self.models_loaded} models")
@@ -187,6 +214,35 @@ class AdvancedPredictionService:
         for model_type, model_dir in model_directories:
             self._load_models_from_directory(model_type, model_dir)
     
+
+    def _train_statistical_models(self):
+        """Train ELO and Dixon-Coles on historical data (called once at startup)."""
+        if self._api_df is None or len(self._api_df) < 50:
+            return
+        try:
+            matches = []
+            for _, r in self._api_df.iterrows():
+                try:
+                    matches.append({
+                        "home_team": r["home_team"],
+                        "away_team": r["away_team"],
+                        "home_goals": int(r["home_score"]),
+                        "away_goals": int(r["away_score"]),
+                        "date": str(r["date"]),
+                    })
+                except (ValueError, KeyError):
+                    continue
+            if not matches:
+                return
+            if ELO_AVAILABLE and _elo_system is not None:
+                _elo_system.train(matches)
+                logger.info(f"ELO trained on {len(matches)} historical matches")
+            if DIXON_COLES_AVAILABLE and _dixon_coles is not None:
+                _dixon_coles.train(matches[-2000:])
+                logger.info("Dixon-Coles trained on last 2000 matches")
+        except Exception as e:
+            logger.warning(f"Statistical model training failed: {e}")
+
     def _load_models_from_directory(self, model_type: str, model_dir: str):
         """Load models from a specific directory."""
         model_path = Path(model_dir)
@@ -485,12 +541,17 @@ class AdvancedPredictionService:
                         "odds":       odds,
                         "category":   category,
                         "model_predictions": api_result["model_predictions"],
+                        "model_disagreement": api_result.get("model_disagreement", 0.0),
+                        "elo_gap": api_result.get("elo_gap", 0.0),
                         "explanations": {"available": False},
                         "advanced_features": {
                             "meta_stacking": False,
                             "ensemble_voting": True,
                             "feature_engineering": "api_football_v2",
                             "models_used": len(api_result["model_predictions"]),
+                            "elo_enabled": ELO_AVAILABLE,
+                            "dixon_coles_enabled": DIXON_COLES_AVAILABLE and (_dixon_coles is not None and _dixon_coles.is_trained),
+                            "bma_enabled": BMA_AVAILABLE,
                         },
                     }
 
@@ -622,13 +683,15 @@ class AdvancedPredictionService:
         ]
 
     def _predict_with_api_models(self, features: list, home: str, away: str) -> Optional[Dict]:
-        """Run the retrained API-Football models and return a structured prediction."""
+        """Run all available models (XGB/LGBM + ELO + Dixon-Coles) and combine via BMA."""
         if not self._api_models or features is None:
             return None
 
         X = np.array(features).reshape(1, -1)
         result_classes = {0: f"{away} to Win", 1: "Draw", 2: f"{home} to Win"}
+        result_keys = {0: "away_win", 1: "draw", 2: "home_win"}
         preds = {}
+        bma_inputs = []
 
         for model_name, model in self._api_models.items():
             try:
@@ -638,6 +701,16 @@ class AdvancedPredictionService:
 
                 if "match_result" in model_name:
                     label = result_classes.get(pred_idx, "Unknown")
+                    pred_key = result_keys.get(pred_idx, "home_win")
+                    prob_dict = {}
+                    for ci, ck in result_keys.items():
+                        prob_dict[ck] = float(proba[ci]) if ci < len(proba) else 0.0
+                    bma_inputs.append({
+                        "model_name": model_name,
+                        "prediction": pred_key,
+                        "confidence": float(proba[pred_idx]),
+                        "probabilities": prob_dict,
+                    })
                 elif "over_2_5" in model_name:
                     label = "Over 2.5 Goals" if pred_idx == 1 else "Under 2.5 Goals"
                 elif "btts" in model_name:
@@ -650,13 +723,69 @@ class AdvancedPredictionService:
             except Exception as e:
                 logger.debug(f"Model {model_name} prediction failed: {e}")
 
+        # Add ELO prediction
+        elo_gap = 0.0
+        if ELO_AVAILABLE and _elo_system is not None:
+            try:
+                elo_pred = _elo_system.predict(home, away)
+                elo_gap = elo_pred.get("elo_gap", 0.0)
+                preds["elo_rating"] = {
+                    "prediction": elo_pred["prediction"].replace("_", " ").title(),
+                    "confidence": elo_pred["confidence"] * 100,
+                    "model_type": "elo",
+                }
+                bma_inputs.append({
+                    "model_name": "elo_rating",
+                    "prediction": elo_pred["prediction"],
+                    "confidence": elo_pred["confidence"],
+                    "probabilities": elo_pred.get("probabilities", {}),
+                })
+            except Exception as e:
+                logger.debug(f"ELO prediction failed: {e}")
+
+        # Add Dixon-Coles prediction
+        if DIXON_COLES_AVAILABLE and _dixon_coles is not None and _dixon_coles.is_trained:
+            try:
+                dc_pred = _dixon_coles.predict(home, away)
+                preds["dixon_coles"] = {
+                    "prediction": dc_pred["prediction"].replace("_", " ").title(),
+                    "confidence": dc_pred["confidence"] * 100,
+                    "model_type": "dixon_coles",
+                }
+                bma_inputs.append({
+                    "model_name": "dixon_coles",
+                    "prediction": dc_pred["prediction"],
+                    "confidence": dc_pred["confidence"],
+                    "probabilities": dc_pred.get("probabilities", {}),
+                })
+            except Exception as e:
+                logger.debug(f"Dixon-Coles prediction failed: {e}")
+
         if not preds:
             return None
 
-        # Pick the highest-confidence prediction as the headline bet
+        # Combine match-result predictions via BMA if available
+        model_disagreement = 0.0
+        if BMA_AVAILABLE and _bma is not None and len(bma_inputs) >= 2:
+            try:
+                combined = _bma.combine(bma_inputs)
+                model_disagreement = combined.get("model_disagreement", 0.0)
+            except Exception:
+                pass
+        elif len(bma_inputs) >= 2:
+            from collections import Counter
+            pred_vals = [p["prediction"] for p in bma_inputs]
+            majority = Counter(pred_vals).most_common(1)[0]
+            model_disagreement = 1.0 - majority[1] / len(pred_vals)
+
         best = max(preds.values(), key=lambda p: p["confidence"])
-        return {"prediction": best["prediction"], "confidence": best["confidence"],
-                "model_predictions": preds}
+        return {
+            "prediction": best["prediction"],
+            "confidence": best["confidence"],
+            "model_predictions": preds,
+            "model_disagreement": round(model_disagreement, 4),
+            "elo_gap": round(elo_gap, 1),
+        }
 
     def _resolve_bet_label(self, raw_label: str, model_predictions: Dict, home_team: str, away_team: str) -> str:
         """Convert raw model class labels to human-readable bet descriptions."""

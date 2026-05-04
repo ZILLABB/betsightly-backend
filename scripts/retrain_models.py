@@ -2,8 +2,8 @@
 Retrain all ML models on API-Football historical data.
 
 Reads data/api-football/matches.csv (produced by fetch_history.py),
-engineers features, trains XGBoost + LightGBM models, and writes
-the .joblib files to models/.
+engineers features, trains XGBoost + LightGBM + CatBoost models,
+ELO ratings, and Dixon-Coles parameters, and writes to models/.
 
 The feature vector is defined ONCE here and mirrored exactly in
 services/advanced_prediction_service.py ? that's what makes
@@ -301,6 +301,28 @@ def train_lightgbm(X_train, y_train, label: str):
     return model
 
 
+
+def train_catboost(X_train, y_train, label: str):
+    try:
+        from catboost import CatBoostClassifier
+    except ImportError:
+        print("  catboost not installed - skipping CatBoost")
+        return None
+
+    n_classes = len(np.unique(y_train))
+    loss = "MultiClass" if n_classes > 2 else "Logloss"
+
+    model = CatBoostClassifier(
+        iterations=300,
+        depth=5,
+        learning_rate=0.05,
+        loss_function=loss,
+        random_seed=42,
+        verbose=0,
+    )
+    model.fit(X_train, y_train)
+    return model
+
 def evaluate(model, X_test, y_test, name: str):
     from sklearn.metrics import accuracy_score
     preds = model.predict(X_test)
@@ -320,8 +342,9 @@ def train_and_save(X, y, label: str, out_dir: Path):
 
     xgb_model  = train_xgboost(X_train, y_train, label)
     lgbm_model = train_lightgbm(X_train, y_train, label)
+    cb_model   = train_catboost(X_train, y_train, label)
 
-    for model, name in [(xgb_model, "xgb"), (lgbm_model, "lgbm")]:
+    for model, name in [(xgb_model, "xgb"), (lgbm_model, "lgbm"), (cb_model, "catboost")]:
         if model is None:
             continue
         evaluate(model, X_test, y_test, name)
@@ -363,6 +386,41 @@ def main():
     train_and_save(X, y_over25, "over_2_5",     MODELS_DIR)
     train_and_save(X, y_btts,   "btts",         MODELS_DIR)
 
+    # Train statistical models (ELO + Dixon-Coles)
+    print("\nTraining statistical models...")
+    matches_for_stat = []
+    for _, r in df.iterrows():
+        try:
+            matches_for_stat.append({
+                "home_team": r["home_team"],
+                "away_team": r["away_team"],
+                "home_goals": int(r["home_score"]),
+                "away_goals": int(r["away_score"]),
+                "date": str(r["date"]),
+            })
+        except (ValueError, KeyError):
+            continue
+
+    try:
+        from ml.elo_model import EloRatingSystem
+        elo = EloRatingSystem()
+        elo.train(matches_for_stat)
+        elo_path = MODELS_DIR / "elo_ratings.json"
+        elo.save(str(elo_path))
+        print(f"  ELO ratings saved ({len(elo.ratings)} teams)")
+    except Exception as e:
+        print(f"  ELO training failed: {e}")
+
+    try:
+        from ml.dixon_coles_model import DixonColesModel
+        dc = DixonColesModel()
+        dc.train(matches_for_stat[-2000:])
+        dc_path = MODELS_DIR / "dixon_coles.json"
+        dc.save(str(dc_path))
+        print(f"  Dixon-Coles saved ({len(dc.teams)} teams)")
+    except Exception as e:
+        print(f"  Dixon-Coles training failed: {e}")
+
     # Save feature columns so prediction code knows the vector layout
     meta = {
         "feature_columns": FEATURE_COLUMNS,
@@ -370,9 +428,9 @@ def main():
         "h2h_window":      H2H_WINDOW,
         "trained_at":      datetime.utcnow().isoformat(),
         "n_samples":       len(X),
-        "models": ["match_result_xgb", "match_result_lgbm",
-                   "over_2_5_xgb", "over_2_5_lgbm",
-                   "btts_xgb", "btts_lgbm"],
+        "models": ["match_result_xgb", "match_result_lgbm", "match_result_catboost",
+                   "over_2_5_xgb", "over_2_5_lgbm", "over_2_5_catboost",
+                   "btts_xgb", "btts_lgbm", "btts_catboost"],
         "result_classes":  {0: "Away Win", 1: "Draw", 2: "Home Win"},
     }
     meta_path = MODELS_DIR / "meta.json"

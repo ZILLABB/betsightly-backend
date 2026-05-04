@@ -43,6 +43,38 @@ except ImportError:
     LSTMTeamFormModel = None
 
 
+try:
+    from ml.catboost_model import CatBoostMatchResultModel, CatBoostBTTSModel, CatBoostOverUnderModel
+    CATBOOST_AVAILABLE = True
+except ImportError:
+    logger.warning("CatBoost model not available")
+    CatBoostMatchResultModel = CatBoostBTTSModel = CatBoostOverUnderModel = None
+    CATBOOST_AVAILABLE = False
+
+try:
+    from ml.dixon_coles_model import DixonColesModel
+    DIXON_COLES_AVAILABLE = True
+except ImportError:
+    logger.warning("Dixon-Coles model not available")
+    DixonColesModel = None
+    DIXON_COLES_AVAILABLE = False
+
+try:
+    from ml.elo_model import EloRatingSystem
+    ELO_AVAILABLE = True
+except ImportError:
+    logger.warning("ELO model not available")
+    EloRatingSystem = None
+    ELO_AVAILABLE = False
+
+try:
+    from ml.bayesian_averaging import BayesianModelAverager
+    BMA_AVAILABLE = True
+except ImportError:
+    logger.warning("Bayesian Model Averaging not available")
+    BayesianModelAverager = None
+    BMA_AVAILABLE = False
+
 
 class ModelFactory:
     """
@@ -84,6 +116,29 @@ class ModelFactory:
             self.register_model("lstm_btts", lambda: LSTMTeamFormModel(prediction_type="btts"))
             self.register_model("lstm_over_under", lambda: LSTMTeamFormModel(prediction_type="over_under"))
             logger.info("Registered LSTM team form models")
+
+        # Register CatBoost models if available
+        if CatBoostMatchResultModel is not None:
+            self.register_model("catboost_match_result", CatBoostMatchResultModel)
+            self.register_model("catboost_btts", CatBoostBTTSModel)
+            self.register_model("catboost_over_under_2_5", lambda: CatBoostOverUnderModel(threshold=2.5))
+            logger.info("Registered CatBoost models")
+
+        # Register Dixon-Coles model if available
+        if DixonColesModel is not None:
+            self.register_model("dixon_coles", DixonColesModel)
+            logger.info("Registered Dixon-Coles model")
+
+        # Register ELO model if available
+        if EloRatingSystem is not None:
+            self.register_model("elo_rating", EloRatingSystem)
+            logger.info("Registered ELO rating model")
+
+        # Bayesian Model Averager (accessible via factory)
+        if BayesianModelAverager is not None:
+            self.register_model("bayesian_model_average", BayesianModelAverager)
+            logger.info("Registered Bayesian Model Averaging")
+
 
     def register_model(self, model_type: str, model_class: Union[Type[BaseModel], callable]):
         """
