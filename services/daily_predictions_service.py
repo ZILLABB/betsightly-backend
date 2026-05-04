@@ -207,7 +207,7 @@ class DailyPredictionsService:
             
             # Update summary
             summary.predictions_generated = predictions_count
-            summary.models_used = sum(len(self.ml_service.models[mt]) for mt in self.ml_service.models)
+            summary.models_used = len(self.ml_service.api_models)
             summary.betting_2_odds_count = category_counts["2_odds"]
             summary.betting_5_odds_count = category_counts["5_odds"]
             summary.betting_10_odds_count = category_counts["10_odds"]
@@ -247,36 +247,26 @@ class DailyPredictionsService:
             }
     
     def _filter_upcoming_fixtures(self, fixtures: List[Dict]) -> List[Dict]:
-        """Filter for truly upcoming fixtures."""
+        """Filter for upcoming (not-started) fixtures only.
+
+        API-Football short status codes:
+            NS = Not Started, TBD = Time To Be Defined
+            1H/2H/HT/ET/BT/P/SUSP/INT = in-play
+            FT/AET/PEN = finished
+            PST/CANC/ABD/AWD/WO = cancelled/postponed
+        """
+        upcoming_codes = {"NS", "TBD"}
         upcoming = []
-        excluded_statuses = [
-            'Finished', 'FT', 'AET', 'PEN', 'After Pen.', 'After Extra Time',
-            'Live', 'HT', 'Half Time', '1st Half', '2nd Half', 'Extra Time',
-            'Penalty Shootout', 'Suspended', 'Postponed', 'Cancelled',
-            'Abandoned', 'Interrupted', 'Awarded', 'WalkOver', 'Retired'
-        ]
-        
+
         for fixture in fixtures:
-            status = fixture.get('status', '').strip()
-            status_lower = status.lower()
-            
-            # Check if finished
-            finished_indicators = ['finished', 'ft', 'aet', 'pen', 'after', 'live', 'half', 'time', 'extra']
-            is_finished = (status in excluded_statuses or 
-                          any(indicator in status_lower for indicator in finished_indicators))
-            
-            if not is_finished and status not in ['', 'Unknown']:
-                # Additional date check
-                try:
-                    fixture_date_str = fixture.get('date', '')
-                    if fixture_date_str:
-                        fixture_date = datetime.fromisoformat(fixture_date_str.replace('Z', '+00:00'))
-                        if fixture_date > datetime.now():
-                            upcoming.append(fixture)
-                except:
-                    if status in ['Not Started', 'Scheduled', 'Fixture']:
-                        upcoming.append(fixture)
-        
+            status = fixture.get("status", "").strip()
+            if status in upcoming_codes:
+                upcoming.append(fixture)
+                continue
+            # Fallback for long-form status strings
+            if status.lower() in ("not started", "scheduled"):
+                upcoming.append(fixture)
+
         return upcoming
     
     def _create_db_prediction_with_accumulators(self, prediction_result: Dict, prediction_date: date, accumulators: Dict) -> DailyPrediction:

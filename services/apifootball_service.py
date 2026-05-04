@@ -1,541 +1,293 @@
 """
-APIFootball.com integration service for fetching football fixtures and data.
-Temporary service for testing before potential permanent integration.
+API-Football (api-sports.io) integration service.
+
+Uses the SAME data source as the training pipeline (fetch_history.py)
+so team names align perfectly between training and live predictions.
+
+Caching: every API response is cached to disk under cache/api_football/.
+Daily fixtures are cached for 6 hours (fixtures don't change often).
+This keeps API calls to a minimum — the free tier allows ~100/day.
+
+API docs: https://www.api-football.com/documentation-v3
 """
 
 import os
+import json
+import hashlib
 import requests
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+API_KEY = os.getenv("API_FOOTBALL_API_KEY", "")
+BASE_URL = "https://v3.football.api-sports.io"
+CACHE_DIR = Path("cache/api_football")
+CACHE_TTL_HOURS = 6
+
+TARGET_LEAGUE_IDS = {
+    39, 40, 61, 62, 78, 79, 135, 136, 140, 141,
+    94, 88, 144, 203, 2, 3,
+}
+
 
 class APIFootballService:
-    """Service for integrating with APIFootball.com API."""
-    
-    def __init__(self, api_key: str = None):
-        """
-        Initialize APIFootball service.
-        
-        Args:
-            api_key: APIFootball.com API key
-        """
-        self.api_key = api_key or os.getenv("APIFOOTBALL_API_KEY", "")
-        self.base_url = "https://apiv3.apifootball.com"
+    """Service for fetching fixtures from API-Football (api-sports.io)."""
+
+    def __init__(self, api_key: str = None, cache_ttl_hours: float = CACHE_TTL_HOURS):
+        self.api_key = api_key or API_KEY
+        self.base_url = BASE_URL
+        self.headers = {"x-apisports-key": self.api_key}
         self.timeout = 30
-        
+        self.cache_ttl = timedelta(hours=cache_ttl_hours)
+        self.cache_dir = CACHE_DIR
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
         if not self.api_key:
-            logger.warning("⚠️  APIFootball API key not configured")
-    
-    def get_historical_matches(self, from_date: str, to_date: str, league_id: str = None) -> List[Dict[str, Any]]:
-        """
-        Get historical matches for training data.
+            logger.warning("API_FOOTBALL_API_KEY not configured")
 
-        Args:
-            from_date: Start date in YYYY-MM-DD format
-            to_date: End date in YYYY-MM-DD format
-            league_id: Optional league ID to filter results
+    # ------------------------------------------------------------------
+    # Caching
+    # ------------------------------------------------------------------
 
-        Returns:
-            List of historical match dictionaries
-        """
+    def _cache_key(self, endpoint: str, params: dict) -> str:
+        raw = f"{endpoint}:{json.dumps(params, sort_keys=True)}"
+        return hashlib.md5(raw.encode()).hexdigest()
+
+    def _read_cache(self, key: str) -> Optional[dict]:
+        path = self.cache_dir / f"{key}.json"
+        if not path.exists():
+            return None
         try:
-            logger.info(f"🔍 Fetching historical matches from {from_date} to {to_date}")
+            with open(path, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            cached_at = datetime.fromisoformat(cached["cached_at"])
+            if datetime.now() - cached_at > self.cache_ttl:
+                return None
+            logger.info(f"Cache hit ({key[:8]}...) — saved an API call")
+            return cached["data"]
+        except Exception:
+            return None
 
-            url = f"{self.base_url}/"
-            params = {
-                "action": "get_events",
-                "from": from_date,
-                "to": to_date,
-                "APIkey": self.api_key
-            }
-
-            if league_id:
-                params["league_id"] = league_id
-                logger.info(f"   📋 Filtering for league ID: {league_id}")
-
-            response = requests.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-
-            data = response.json()
-
-            if isinstance(data, dict) and "error" in data:
-                logger.error(f"❌ APIFootball error: {data['error']}")
-                return []
-
-            matches = data if isinstance(data, list) else []
-
-            # Filter for finished matches only (for training data)
-            finished_matches = []
-            finished_statuses = ['Finished', 'FT', 'AET', 'PEN']
-
-            for match in matches:
-                status = match.get('match_status', '')
-                if status in finished_statuses:
-                    # Ensure we have score data
-                    home_score = match.get('match_hometeam_score', '')
-                    away_score = match.get('match_awayteam_score', '')
-
-                    if home_score != '' and away_score != '':
-                        finished_matches.append(match)
-
-            logger.info(f"✅ Retrieved {len(finished_matches)} finished matches from APIFootball.com")
-            return self._convert_fixtures_to_standard_format(finished_matches)
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Network error fetching historical matches: {str(e)}")
-            return []
-        except Exception as e:
-            logger.error(f"❌ Error fetching historical matches: {str(e)}")
-            return []
-
-    def get_historical_matches(self, from_date: str, to_date: str, league_id: str = None) -> List[Dict[str, Any]]:
-        """
-        Get historical matches for training data.
-
-        Args:
-            from_date: Start date in YYYY-MM-DD format
-            to_date: End date in YYYY-MM-DD format
-            league_id: Optional league ID to filter results
-
-        Returns:
-            List of historical match dictionaries with scores
-        """
+    def _write_cache(self, key: str, data: dict) -> None:
+        path = self.cache_dir / f"{key}.json"
         try:
-            logger.info(f"🔍 Fetching historical matches from {from_date} to {to_date}")
-
-            url = f"{self.base_url}/"
-            params = {
-                "action": "get_events",
-                "from": from_date,
-                "to": to_date,
-                "APIkey": self.api_key
-            }
-
-            if league_id:
-                params["league_id"] = league_id
-                logger.info(f"   📋 Filtering for league ID: {league_id}")
-
-            response = requests.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-
-            data = response.json()
-
-            if isinstance(data, dict) and "error" in data:
-                logger.error(f"❌ APIFootball error: {data['error']}")
-                return []
-
-            matches = data if isinstance(data, list) else []
-
-            # Filter for finished matches only (for training data)
-            finished_matches = []
-            finished_statuses = ['Finished', 'FT', 'AET', 'PEN']
-
-            for match in matches:
-                status = match.get('match_status', '')
-                if status in finished_statuses:
-                    # Ensure we have score data
-                    home_score = match.get('match_hometeam_score', '')
-                    away_score = match.get('match_awayteam_score', '')
-
-                    if home_score != '' and away_score != '' and home_score.isdigit() and away_score.isdigit():
-                        finished_matches.append(match)
-
-            logger.info(f"✅ Retrieved {len(finished_matches)} finished matches from APIFootball.com")
-            return self._convert_historical_to_training_format(finished_matches)
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Network error fetching historical matches: {str(e)}")
-            return []
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"cached_at": datetime.now().isoformat(), "data": data}, f)
         except Exception as e:
-            logger.error(f"❌ Error fetching historical matches: {str(e)}")
-            return []
+            logger.debug(f"Cache write failed: {e}")
+
+    # ------------------------------------------------------------------
+    # HTTP
+    # ------------------------------------------------------------------
+
+    def _get(self, endpoint: str, params: dict, use_cache: bool = True) -> dict:
+        if use_cache:
+            key = self._cache_key(endpoint, params)
+            cached = self._read_cache(key)
+            if cached is not None:
+                return cached
+
+        url = f"{self.base_url}/{endpoint}"
+        resp = requests.get(url, headers=self.headers, params=params, timeout=self.timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        errors = data.get("errors", {})
+        if errors:
+            logger.error(f"API-Football errors: {errors}")
+            return {"response": []}
+
+        if use_cache:
+            self._write_cache(key, data)
+
+        remaining = resp.headers.get("x-ratelimit-requests-remaining", "?")
+        logger.info(f"API call: /{endpoint} — {remaining} requests remaining today")
+        return data
+
+    # ------------------------------------------------------------------
+    # Public methods
+    # ------------------------------------------------------------------
 
     def get_daily_fixtures(self, date: str = None) -> List[Dict[str, Any]]:
-        """
-        Get fixtures for a specific date.
-        
-        Args:
-            date: Date in YYYY-MM-DD format (defaults to today)
-            
-        Returns:
-            List of fixture dictionaries
-        """
         if not date:
             date = datetime.now().strftime("%Y-%m-%d")
-            
+
+        logger.info(f"Getting fixtures for {date}")
+
         try:
-            logger.info(f"🌐 Fetching fixtures from APIFootball.com for {date}")
-            
-            # APIFootball.com endpoint for fixtures by date
-            url = f"{self.base_url}/"
-            params = {
-                "action": "get_events",
-                "from": date,
-                "to": date,
-                "APIkey": self.api_key
-            }
-            
-            response = requests.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            # APIFootball returns data directly as array or with error
-            if isinstance(data, dict) and "error" in data:
-                logger.error(f"❌ APIFootball error: {data['error']}")
-                return []
-            
-            fixtures = data if isinstance(data, list) else []
-            logger.info(f"✅ Fetched {len(fixtures)} fixtures from APIFootball.com")
-            
-            # Convert to standardized format
-            return self._convert_fixtures_to_standard_format(fixtures)
-            
+            data = self._get("fixtures", {"date": date})
+            raw_fixtures = data.get("response", [])
+
+            fixtures = []
+            for f in raw_fixtures:
+                league_id = f.get("league", {}).get("id", 0)
+                if league_id not in TARGET_LEAGUE_IDS:
+                    continue
+                parsed = self._parse_fixture(f)
+                if parsed:
+                    fixtures.append(parsed)
+
+            logger.info(f"{len(fixtures)} fixtures from target leagues (of {len(raw_fixtures)} total)")
+            return fixtures
+
         except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Network error fetching fixtures: {str(e)}")
+            logger.error(f"Network error fetching fixtures: {e}")
             return []
         except Exception as e:
-            logger.error(f"❌ Error fetching fixtures from APIFootball: {str(e)}")
+            logger.error(f"Error fetching fixtures: {e}")
             return []
-    
-    def get_fixtures_by_league(self, league_id: str, date: str = None) -> List[Dict[str, Any]]:
-        """
-        Get fixtures for a specific league.
-        
-        Args:
-            league_id: League ID (e.g., "152" for Premier League)
-            date: Date in YYYY-MM-DD format
-            
-        Returns:
-            List of fixture dictionaries
-        """
+
+    def get_fixtures_by_league(self, league_id: int, date: str = None) -> List[Dict[str, Any]]:
+        params: dict = {"league": league_id, "season": datetime.now().year}
+        if date:
+            params["date"] = date
+
         try:
-            logger.info(f"🌐 Fetching league {league_id} fixtures from APIFootball.com")
-            
-            url = f"{self.base_url}/"
-            params = {
-                "action": "get_events",
-                "league_id": league_id,
-                "APIkey": self.api_key
-            }
-            
-            if date:
-                params.update({"from": date, "to": date})
-            
-            response = requests.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            if isinstance(data, dict) and "error" in data:
-                logger.error(f"❌ APIFootball error: {data['error']}")
-                return []
-            
-            fixtures = data if isinstance(data, list) else []
-            logger.info(f"✅ Fetched {len(fixtures)} league fixtures from APIFootball.com")
-            
-            return self._convert_fixtures_to_standard_format(fixtures)
-            
+            data = self._get("fixtures", params)
+            return [p for f in data.get("response", []) if (p := self._parse_fixture(f))]
         except Exception as e:
-            logger.error(f"❌ Error fetching league fixtures: {str(e)}")
+            logger.error(f"Error fetching league {league_id} fixtures: {e}")
             return []
-    
+
     def get_live_fixtures(self) -> List[Dict[str, Any]]:
-        """
-        Get currently live fixtures.
-        
-        Returns:
-            List of live fixture dictionaries
-        """
         try:
-            logger.info("🔴 Fetching live fixtures from APIFootball.com")
-            
-            url = f"{self.base_url}/"
-            params = {
-                "action": "get_events",
-                "match_live": "1",
-                "APIkey": self.api_key
-            }
-            
-            response = requests.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            if isinstance(data, dict) and "error" in data:
-                logger.error(f"❌ APIFootball error: {data['error']}")
-                return []
-            
-            fixtures = data if isinstance(data, list) else []
-            logger.info(f"✅ Fetched {len(fixtures)} live fixtures from APIFootball.com")
-            
-            return self._convert_fixtures_to_standard_format(fixtures)
-            
+            data = self._get("fixtures", {"live": "all"}, use_cache=False)
+            fixtures = []
+            for f in data.get("response", []):
+                league_id = f.get("league", {}).get("id", 0)
+                if league_id not in TARGET_LEAGUE_IDS:
+                    continue
+                parsed = self._parse_fixture(f)
+                if parsed:
+                    fixtures.append(parsed)
+            return fixtures
         except Exception as e:
-            logger.error(f"❌ Error fetching live fixtures: {str(e)}")
+            logger.error(f"Error fetching live fixtures: {e}")
             return []
-    
+
+    def get_historical_matches(self, from_date: str, to_date: str, league_id: int = None) -> List[Dict[str, Any]]:
+        params: dict = {"from": from_date, "to": to_date, "status": "FT"}
+        if league_id:
+            params["league"] = league_id
+            params["season"] = int(from_date[:4])
+
+        try:
+            data = self._get("fixtures", params)
+            results = [p for f in data.get("response", []) if (p := self._parse_fixture(f))]
+            logger.info(f"Retrieved {len(results)} historical matches")
+            return results
+        except Exception as e:
+            logger.error(f"Error fetching historical matches: {e}")
+            return []
+
     def get_leagues(self) -> List[Dict[str, Any]]:
-        """
-        Get available leagues.
-        
-        Returns:
-            List of league dictionaries
-        """
         try:
-            logger.info("📋 Fetching leagues from APIFootball.com")
-            
-            url = f"{self.base_url}/"
-            params = {
-                "action": "get_leagues",
-                "APIkey": self.api_key
-            }
-            
-            response = requests.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            if isinstance(data, dict) and "error" in data:
-                logger.error(f"❌ APIFootball error: {data['error']}")
-                return []
-            
-            leagues = data if isinstance(data, list) else []
-            logger.info(f"✅ Fetched {len(leagues)} leagues from APIFootball.com")
-            
-            return leagues
-            
+            data = self._get("leagues", {})
+            return data.get("response", [])
         except Exception as e:
-            logger.error(f"❌ Error fetching leagues: {str(e)}")
+            logger.error(f"Error fetching leagues: {e}")
             return []
-    
-    def _convert_fixtures_to_standard_format(self, fixtures: List[Dict]) -> List[Dict[str, Any]]:
-        """
-        Convert APIFootball fixtures to standardized format.
-        
-        Args:
-            fixtures: Raw fixtures from APIFootball API
-            
-        Returns:
-            Standardized fixture format
-        """
-        standardized_fixtures = []
-        
-        for fixture in fixtures:
-            try:
-                # Parse date
-                match_date = fixture.get("match_date", "")
-                match_time = fixture.get("match_time", "")
-                
-                # Combine date and time
-                if match_date and match_time:
-                    datetime_str = f"{match_date} {match_time}"
-                    try:
-                        parsed_date = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M")
-                    except ValueError:
-                        parsed_date = datetime.now()
-                else:
-                    parsed_date = datetime.now()
-                
-                standardized_fixture = {
-                    "fixture_id": int(fixture.get("match_id", 0)),
-                    "date": parsed_date.isoformat(),
-                    "league_id": int(fixture.get("league_id", 0)),
-                    "league_name": fixture.get("league_name", "Unknown League"),
-                    "home_team_id": int(fixture.get("match_hometeam_id", 0)),
-                    "home_team": fixture.get("match_hometeam_name", "Unknown Home"),
-                    "away_team_id": int(fixture.get("match_awayteam_id", 0)),
-                    "away_team": fixture.get("match_awayteam_name", "Unknown Away"),
-                    "home_odds": float(fixture.get("match_hometeam_score", 0)),
-                    "draw_odds": 0.0,  # APIFootball doesn't provide odds in basic plan
-                    "away_odds": float(fixture.get("match_awayteam_score", 0)),
-                    "status": fixture.get("match_status", ""),
-                    "round": fixture.get("match_round", ""),
-                    "season": fixture.get("league_season", ""),
-                    # Additional APIFootball specific fields
-                    "country_name": fixture.get("country_name", ""),
-                    "league_logo": fixture.get("league_logo", ""),
-                    "home_team_logo": fixture.get("team_home_badge", ""),
-                    "away_team_logo": fixture.get("team_away_badge", ""),
-                }
-                
-                standardized_fixtures.append(standardized_fixture)
-                
-            except Exception as e:
-                logger.warning(f"⚠️  Error converting fixture {fixture.get('match_id', 'unknown')}: {str(e)}")
-                continue
-        
-        return standardized_fixtures
 
-    def _convert_historical_to_training_format(self, matches: List[Dict]) -> List[Dict[str, Any]]:
-        """
-        Convert APIFootball historical matches to training data format.
+    def clear_cache(self) -> int:
+        """Remove all cached responses. Returns number of files removed."""
+        count = 0
+        for f in self.cache_dir.glob("*.json"):
+            f.unlink()
+            count += 1
+        logger.info(f"Cleared {count} cached API responses")
+        return count
 
-        Args:
-            matches: Raw historical matches from APIFootball API
+    # ------------------------------------------------------------------
+    # Parsing
+    # ------------------------------------------------------------------
 
-        Returns:
-            Training data format with match results and statistics
-        """
-        training_data = []
+    def _parse_fixture(self, f: dict) -> Optional[Dict[str, Any]]:
+        """Convert raw API-Football fixture to standardised format.
 
-        for match in matches:
-            try:
-                # Parse scores
-                home_score = int(match.get("match_hometeam_score", 0))
-                away_score = int(match.get("match_awayteam_score", 0))
-                total_goals = home_score + away_score
-
-                # Parse date
-                match_date = match.get("match_date", "")
-                match_time = match.get("match_time", "")
-
-                if match_date and match_time:
-                    datetime_str = f"{match_date} {match_time}"
-                    try:
-                        parsed_date = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M")
-                    except ValueError:
-                        parsed_date = datetime.now()
-                else:
-                    parsed_date = datetime.now()
-
-                # Create training record
-                training_record = {
-                    # Basic match info
-                    "match_id": int(match.get("match_id", 0)),
-                    "date": parsed_date.isoformat(),
-                    "league_id": int(match.get("league_id", 0)),
-                    "league_name": match.get("league_name", "Unknown League"),
-                    "country_name": match.get("country_name", "Unknown"),
-
-                    # Team info
-                    "home_team_id": int(match.get("match_hometeam_id", 0)),
-                    "home_team": match.get("match_hometeam_name", "Unknown Home"),
-                    "away_team_id": int(match.get("match_awayteam_id", 0)),
-                    "away_team": match.get("match_awayteam_name", "Unknown Away"),
-
-                    # Match results (target variables)
-                    "home_score": home_score,
-                    "away_score": away_score,
-                    "total_goals": total_goals,
-
-                    # Match result outcomes
-                    "match_result": "home_win" if home_score > away_score else
-                                   "away_win" if away_score > home_score else "draw",
-
-                    # Over/Under outcomes
-                    "over_1_5": 1 if total_goals > 1.5 else 0,
-                    "over_2_5": 1 if total_goals > 2.5 else 0,
-                    "over_3_5": 1 if total_goals > 3.5 else 0,
-
-                    # BTTS (Both Teams To Score)
-                    "btts": 1 if home_score > 0 and away_score > 0 else 0,
-
-                    # Clean sheets
-                    "clean_sheet_home": 1 if away_score == 0 else 0,
-                    "clean_sheet_away": 1 if home_score == 0 else 0,
-
-                    # Win to nil
-                    "win_to_nil_home": 1 if home_score > away_score and away_score == 0 else 0,
-                    "win_to_nil_away": 1 if away_score > home_score and home_score == 0 else 0,
-
-                    # Additional match info
-                    "season": match.get("league_year", "Unknown"),
-                    "round": match.get("match_round", ""),
-                    "stadium": match.get("match_stadium", ""),
-
-                    # Halftime scores if available
-                    "home_ht_score": int(match.get("match_hometeam_halftime_score", 0)) if match.get("match_hometeam_halftime_score", "").isdigit() else 0,
-                    "away_ht_score": int(match.get("match_awayteam_halftime_score", 0)) if match.get("match_awayteam_halftime_score", "").isdigit() else 0,
-                }
-
-                training_data.append(training_record)
-
-            except Exception as e:
-                logger.warning(f"⚠️  Error converting historical match {match.get('match_id', 'unknown')}: {str(e)}")
-                continue
-
-        return training_data
-    
-    def test_connection(self) -> bool:
-        """
-        Test the API connection.
-        
-        Returns:
-            True if connection successful, False otherwise
+        Team names match the training CSV because both come from the
+        same v3.football.api-sports.io endpoint.
         """
         try:
-            logger.info("🔍 Testing APIFootball.com connection...")
-            
-            url = f"{self.base_url}/"
-            params = {
-                "action": "get_leagues",
-                "APIkey": self.api_key
+            fixture_info = f.get("fixture", {})
+            teams = f.get("teams", {})
+            league = f.get("league", {})
+            goals = f.get("goals", {})
+            score = f.get("score", {})
+
+            raw_date = fixture_info.get("date", "")
+            status_obj = fixture_info.get("status", {})
+            status_short = status_obj.get("short", "")
+            status_long = status_obj.get("long", "")
+
+            home_score = goals.get("home")
+            away_score = goals.get("away")
+            ft = score.get("fulltime", {})
+            if ft.get("home") is not None:
+                home_score = ft["home"]
+                away_score = ft["away"]
+
+            return {
+                "fixture_id": fixture_info.get("id", 0),
+                "date": raw_date,
+                "league_id": league.get("id", 0),
+                "league_name": league.get("name", "Unknown"),
+                "country_name": league.get("country", ""),
+                "season": league.get("season", ""),
+                "round": league.get("round", ""),
+                "home_team_id": teams.get("home", {}).get("id", 0),
+                "home_team": teams.get("home", {}).get("name", "Unknown"),
+                "away_team_id": teams.get("away", {}).get("id", 0),
+                "away_team": teams.get("away", {}).get("name", "Unknown"),
+                "home_team_logo": teams.get("home", {}).get("logo", ""),
+                "away_team_logo": teams.get("away", {}).get("logo", ""),
+                "league_logo": league.get("logo", ""),
+                "status": status_short,
+                "status_long": status_long,
+                "home_score": home_score,
+                "away_score": away_score,
+                "home_odds": 0.0,
+                "draw_odds": 0.0,
+                "away_odds": 0.0,
             }
-            
-            response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            if isinstance(data, dict) and "error" in data:
-                logger.error(f"❌ APIFootball connection test failed: {data['error']}")
-                return False
-            
-            logger.info("✅ APIFootball.com connection test successful")
-            return True
-            
         except Exception as e:
-            logger.error(f"❌ APIFootball connection test failed: {str(e)}")
+            logger.warning(f"Error parsing fixture: {e}")
+            return None
+
+    def test_connection(self) -> bool:
+        try:
+            data = self._get("status", {}, use_cache=False)
+            resp = data.get("response", {})
+            account = resp.get("account", {})
+            req_info = resp.get("requests", {})
+            current = req_info.get("current", "?")
+            limit = req_info.get("limit_day", "?")
+            logger.info(f"API-Football connected: {account.get('firstname', '')} ({current}/{limit} requests today)")
+            print(f"Connected: {current}/{limit} API calls used today")
+            return True
+        except Exception as e:
+            logger.error(f"API-Football connection test failed: {e}")
             return False
 
 
-# Convenience function for quick access
 def get_apifootball_service() -> APIFootballService:
-    """Get configured APIFootball service instance."""
     return APIFootballService()
 
 
-# Test function
-def test_apifootball_integration():
-    """Test the APIFootball integration."""
-    service = get_apifootball_service()
-    
-    print("🔍 Testing APIFootball.com integration...")
-    
-    # Test connection
-    if not service.test_connection():
-        print("❌ Connection test failed")
-        return False
-    
-    # Test getting today's fixtures
-    fixtures = service.get_daily_fixtures()
-    print(f"📅 Found {len(fixtures)} fixtures for today")
-    
-    if fixtures:
-        print("📋 Sample fixture:")
-        print(f"   {fixtures[0]['home_team']} vs {fixtures[0]['away_team']}")
-        print(f"   League: {fixtures[0]['league_name']}")
-        print(f"   Date: {fixtures[0]['date']}")
-    
-    # Test getting leagues
-    leagues = service.get_leagues()
-    print(f"🏆 Found {len(leagues)} leagues")
-    
-    if leagues:
-        print("📋 Sample leagues:")
-        for league in leagues[:5]:
-            print(f"   {league.get('league_name', 'Unknown')} ({league.get('country_name', 'Unknown')})")
-    
-    return True
-
-
 if __name__ == "__main__":
-    test_apifootball_integration()
+    service = get_apifootball_service()
+    print("Testing API-Football connection...")
+
+    if not service.test_connection():
+        print("Connection failed - check API_FOOTBALL_API_KEY")
+    else:
+        fixtures = service.get_daily_fixtures()
+        print(f"\nFound {len(fixtures)} fixtures for today")
+        ns = [fx for fx in fixtures if fx.get("status") in ("NS", "TBD")]
+        print(f"Not started: {len(ns)}")
+        for fx in fixtures[:10]:
+            print(f"  {fx['home_team']} vs {fx['away_team']} ({fx['league_name']}) [{fx['status']}]")

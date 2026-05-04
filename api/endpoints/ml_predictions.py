@@ -1,555 +1,455 @@
 """
-Real ML Predictions API Endpoints
-Connects to the actual trained 24-model ML system.
+Real ML Predictions API Endpoints.
+
+Uses the API-Football retrained models (.joblib) whose feature vector
+is computed from the same data source as live fixtures, so team names
+align perfectly. Also runs ELO, Dixon-Coles, and combines via BMA.
 """
 
 import logging
 import sys
-import os
+import json
 from typing import List, Dict, Any, Optional
-from datetime import datetime, date
-from fastapi import APIRouter, HTTPException, Query
+from datetime import datetime
 from pathlib import Path
-import pandas as pd
-import joblib
+from collections import Counter
 
-# Add project root to path
+import joblib
+import numpy as np
+import pandas as pd
+from fastapi import APIRouter, HTTPException, Query
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 from services.apifootball_service import APIFootballService
 
-# Set up logging
 logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
-class RealMLPredictionService:
-    """Service that uses the actual trained 24 ML models."""
-    
-    def __init__(self):
-        """Initialize the real ML prediction service."""
-        self.apifootball_service = APIFootballService()
-        self.models_dir = Path("models")
-        self.encoders = self.load_encoders()
-        self.models = self.load_trained_models()
-        
-    def load_encoders(self) -> Dict[str, Any]:
-        """Load the trained encoders from GitHub dataset training."""
-        encoders = {}
+MATCHES_CSV = Path("data/api-football/matches.csv")
+MODELS_DIR = Path("models/api_football")
+
+# Statistical model singletons (trained once, reused)
+_elo_system = None
+_dixon_coles = None
+_bma = None
+
+
+def _init_statistical_models(df: pd.DataFrame):
+    """Train ELO and Dixon-Coles on historical data (once at startup)."""
+    global _elo_system, _dixon_coles, _bma
+
+    matches = []
+    for _, r in df.iterrows():
         try:
-            # Load encoders from pickle file (from our training)
-            import pickle
-            encoder_path = self.models_dir / 'encoders.pkl'
-            if encoder_path.exists():
-                with open(encoder_path, 'rb') as f:
-                    encoders = pickle.load(f)
-                logger.info(f"✅ Loaded encoders from GitHub training: {list(encoders.keys())}")
-            else:
-                logger.warning("⚠️  GitHub training encoders not found")
+            matches.append({
+                "home_team": r["home_team"],
+                "away_team": r["away_team"],
+                "home_goals": int(r["home_score"]),
+                "away_goals": int(r["away_score"]),
+                "date": str(r["date"]),
+            })
+        except (ValueError, KeyError):
+            continue
 
-            return encoders
+    if not matches:
+        return
 
-        except Exception as e:
-            logger.error(f"Error loading encoders: {str(e)}")
-            return {}
-    
-    def load_trained_models(self) -> Dict[str, Dict[str, Any]]:
-        """Load all trained models from GitHub dataset training."""
-        models = {}
-        import pickle
-
-        # Model types and their files (from our training)
-        model_types = {
-            'xgboost': [
-                'match_result', 'over_2_5', 'over_1_5', 'over_3_5', 'btts',
-                'clean_sheet_home', 'clean_sheet_away', 'win_to_nil_home', 'win_to_nil_away'
-            ],
-            'lightgbm': [
-                'match_result', 'over_2_5', 'btts', 'clean_sheet_home', 'clean_sheet_away', 'over_3_5'
-            ],
-            'random_forest': [
-                'match_result', 'over_2_5', 'btts'
-            ],
-            'neural_network': [
-                'match_result', 'over_2_5', 'btts'
-            ]
-        }
-
-        models_loaded = 0
-        total_models = sum(len(model_names) for model_names in model_types.values())
-
-        for model_type, model_names in model_types.items():
-            models[model_type] = {}
-
-            for model_name in model_names:
-                try:
-                    model_path = self.models_dir / f'{model_type}_{model_name}.pkl'
-
-                    if model_path.exists():
-                        # Load model
-                        with open(model_path, 'rb') as f:
-                            model = pickle.load(f)
-
-                        models[model_type][model_name] = {
-                            'model': model,
-                            'scaler': None  # No scalers in our training
-                        }
-
-                        models_loaded += 1
-                        logger.info(f"✅ Loaded {model_type}/{model_name}")
-                    else:
-                        logger.warning(f"⚠️  Model not found: {model_path}")
-
-                except Exception as e:
-                    logger.error(f"Error loading {model_type}/{model_name}: {str(e)}")
-
-        logger.info(f"📊 Total models loaded: {models_loaded}/{total_models}")
-        return models
-    
-    def encode_team_safe(self, team_name: str, encoder_type: str) -> int:
-        """Safely encode team name, handling unknown teams."""
-        try:
-            encoder = self.encoders[encoder_type]
-            
-            # Check if team is in encoder's classes
-            if team_name in encoder.classes_:
-                return encoder.transform([team_name])[0]
-            else:
-                # Return a default encoding for unknown teams
-                return 0
-                
-        except Exception as e:
-            logger.error(f"Error encoding {team_name}: {str(e)}")
-            return 0
-    
-    def prepare_fixture_for_prediction(self, fixture: Dict[str, Any]) -> Optional[pd.DataFrame]:
-        """Prepare fixture data for ML prediction using trained model features."""
-        try:
-            home_team = fixture.get('home_team', 'Unknown')
-            away_team = fixture.get('away_team', 'Unknown')
-            league = fixture.get('league', 'Unknown')
-
-            # Extract odds (default to neutral if not provided)
-            home_odds = float(fixture.get('home_odds', 2.0))
-            draw_odds = float(fixture.get('draw_odds', 3.0))
-            away_odds = float(fixture.get('away_odds', 2.0))
-
-            # Create feature vector matching training data
-            features = {}
-
-            # Team encoding (handle unknown teams gracefully)
-            if 'home_team' in self.encoders and 'away_team' in self.encoders and 'league' in self.encoders:
-                try:
-                    # Try to encode teams, use default if unknown
-                    home_encoded = self.encode_team_safe(home_team, 'home_team')
-                    away_encoded = self.encode_team_safe(away_team, 'away_team')
-                    league_encoded = self.encode_team_safe(league, 'league')
-
-                    features['home_team_encoded'] = home_encoded
-                    features['away_team_encoded'] = away_encoded
-                    features['league_encoded'] = league_encoded
-
-                except Exception as e:
-                    logger.warning(f"Team encoding failed: {str(e)}")
-                    features['home_team_encoded'] = 0
-                    features['away_team_encoded'] = 0
-                    features['league_encoded'] = 0
-            else:
-                # Default encoding if encoders not available
-                features['home_team_encoded'] = 0
-                features['away_team_encoded'] = 0
-                features['league_encoded'] = 0
-
-            # Odds features (exactly as in training)
-            features['home_odds'] = home_odds
-            features['draw_odds'] = draw_odds
-            features['away_odds'] = away_odds
-            features['odds_diff'] = home_odds - away_odds
-            features['total_odds'] = home_odds + draw_odds + away_odds
-
-            # Probability features (exactly as in training)
-            total_prob = (1/home_odds) + (1/draw_odds) + (1/away_odds)
-            features['home_win_prob'] = (1/home_odds) / total_prob
-            features['draw_prob'] = (1/draw_odds) / total_prob
-            features['away_win_prob'] = (1/away_odds) / total_prob
-
-            # Form features (exactly as in training)
-            features['home_form'] = max(0.1, min(1.0, 3.0 / home_odds))
-            features['away_form'] = max(0.1, min(1.0, 3.0 / away_odds))
-            features['form_diff'] = features['home_form'] - features['away_form']
-
-            # Use only the exact feature columns from training
-            expected_features = [
-                'home_team_encoded', 'away_team_encoded', 'league_encoded',
-                'home_odds', 'draw_odds', 'away_odds', 'odds_diff', 'total_odds',
-                'home_win_prob', 'draw_prob', 'away_win_prob',
-                'home_form', 'away_form', 'form_diff'
-            ]
-
-            # Create DataFrame with only expected features
-            feature_data = {}
-            for feature in expected_features:
-                feature_data[feature] = features.get(feature, 0.0)
-
-            return pd.DataFrame([feature_data])
-
-        except Exception as e:
-            logger.error(f"Error preparing fixture: {str(e)}")
-            return None
-    
-    def generate_predictions_for_fixture(self, fixture: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate predictions for a single fixture using all models."""
-        try:
-            # Prepare features
-            features_df = self.prepare_fixture_for_prediction(fixture)
-            
-            if features_df is None:
-                return {"error": "Could not prepare features"}
-            
-            fixture_predictions = {
-                'fixture_info': {
-                    'fixture_id': fixture.get('fixture_id'),
-                    'home_team': fixture.get('home_team'),
-                    'away_team': fixture.get('away_team'),
-                    'league': fixture.get('league_name'),
-                    'date': fixture.get('date'),
-                    'status': fixture.get('status')
-                },
-                'ml_predictions': {},
-                'betting_categories': {},
-                'model_summary': {'total_predictions': 0, 'successful_predictions': 0}
-            }
-            
-            # Run predictions with each model type
-            for model_type, type_models in self.models.items():
-                for model_name, model_data in type_models.items():
-                    try:
-                        model = model_data['model']
-                        scaler = model_data['scaler']
-                        
-                        # Prepare features
-                        if scaler:
-                            features_scaled = scaler.transform(features_df)
-                            prediction = model.predict(features_scaled)[0]
-                            probabilities = model.predict_proba(features_scaled)[0]
-                        else:
-                            prediction = model.predict(features_df)[0]
-                            probabilities = model.predict_proba(features_df)[0]
-                        
-                        # Store prediction
-                        pred_key = f"{model_type}_{model_name}"
-                        fixture_predictions['ml_predictions'][pred_key] = {
-                            'prediction': int(prediction),
-                            'probabilities': probabilities.tolist(),
-                            'confidence': float(max(probabilities)),
-                            'model_type': model_type,
-                            'model_name': model_name
-                        }
-                        
-                        fixture_predictions['model_summary']['total_predictions'] += 1
-                        
-                    except Exception as e:
-                        logger.error(f"Error with {model_type}/{model_name}: {str(e)}")
-                        continue
-            
-            # Generate betting categories
-            betting_categories = self.generate_betting_categories(fixture_predictions['ml_predictions'])
-            fixture_predictions['betting_categories'] = betting_categories
-            
-            fixture_predictions['model_summary']['successful_predictions'] = len(fixture_predictions['ml_predictions'])
-            
-            return fixture_predictions
-            
-        except Exception as e:
-            logger.error(f"Error generating predictions: {str(e)}")
-            return {"error": str(e)}
-    
-    def generate_betting_categories(self, predictions: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate betting categories based on predictions."""
-        betting_categories = {}
-        
-        # Define confidence thresholds for LOW RISK
-        thresholds = {
-            '2_odds': 0.85,   # Very high confidence - very low risk
-            '5_odds': 0.80,   # High confidence - low risk  
-            '10_odds': 0.75,  # High confidence - low-medium risk
-            'rollover': 0.85  # Very high confidence for accumulator
-        }
-        
-        for category, threshold in thresholds.items():
-            best_prediction = None
-            best_confidence = 0
-            
-            # Find best prediction that meets threshold
-            for pred_key, pred_data in predictions.items():
-                confidence = pred_data.get('confidence', 0)
-                if confidence >= threshold and confidence > best_confidence:
-                    best_confidence = confidence
-                    best_prediction = {
-                        'prediction_key': pred_key,
-                        'prediction': pred_data['prediction'],
-                        'confidence': confidence,
-                        'model_type': pred_data['model_type'],
-                        'model_name': pred_data['model_name']
-                    }
-            
-            if best_prediction:
-                betting_categories[category] = {
-                    'selected': True,
-                    'prediction': best_prediction,
-                    'threshold_met': True,
-                    'expected_odds': self.estimate_odds(category),
-                    'risk_level': self.get_risk_level(category),
-                    'recommendation': 'INCLUDE'
-                }
-            else:
-                betting_categories[category] = {
-                    'selected': False,
-                    'threshold_met': False,
-                    'reason': f'No predictions met {threshold} confidence threshold',
-                    'recommendation': 'EXCLUDE'
-                }
-        
-        return betting_categories
-    
-    def estimate_odds(self, category: str) -> float:
-        """Estimate typical odds for betting category."""
-        odds_mapping = {'2_odds': 1.8, '5_odds': 4.2, '10_odds': 8.5, 'rollover': 2.1}
-        return odds_mapping.get(category, 2.0)
-    
-    def get_risk_level(self, category: str) -> str:
-        """Get risk level for betting category."""
-        risk_mapping = {'2_odds': 'VERY_LOW', '5_odds': 'LOW', '10_odds': 'LOW_MEDIUM', 'rollover': 'VERY_LOW'}
-        return risk_mapping.get(category, 'MEDIUM')
-
-# Initialize the service
-ml_service = RealMLPredictionService()
-
-# Simple cache for predictions (resets daily)
-_predictions_cache = {
-    'date': None,
-    'data': None,
-    'timestamp': None
-}
-
-@router.get("/today")
-def get_todays_predictions(force_refresh: bool = Query(False, description="Force refresh predictions (default: False)")):
-    """
-    Get today's fixtures with real ML predictions and betting categories.
-    
-    Returns:
-        List of fixtures with ML predictions and low-risk betting categories
-    """
     try:
-        today = datetime.now().strftime("%Y-%m-%d")
-        current_time = datetime.now()
+        from ml.elo_model import EloRatingSystem
+        _elo_system = EloRatingSystem()
+        _elo_system.train(matches)
+        logger.info(f"ELO trained: {len(_elo_system.ratings)} teams")
+    except Exception as e:
+        logger.warning(f"ELO init failed: {e}")
 
-        # Check cache first (unless force refresh)
-        if not force_refresh and _predictions_cache['date'] == today and _predictions_cache['data']:
-            cache_age = (current_time - _predictions_cache['timestamp']).total_seconds() / 60
-            if cache_age < 30:  # Cache for 30 minutes
-                logger.info(f"🔄 Returning cached predictions (age: {cache_age:.1f} minutes)")
-                return _predictions_cache['data']
+    try:
+        from ml.dixon_coles_model import DixonColesModel
+        _dixon_coles = DixonColesModel()
+        _dixon_coles.train(matches[-2000:])
+        logger.info(f"Dixon-Coles trained: {len(_dixon_coles.teams)} teams")
+    except Exception as e:
+        logger.warning(f"Dixon-Coles init failed: {e}")
 
-        logger.info("🎯 Getting fresh ML predictions")
+    try:
+        from ml.bayesian_averaging import BayesianModelAverager
+        _bma = BayesianModelAverager()
+    except Exception as e:
+        logger.warning(f"BMA init failed: {e}")
 
-        # Get today's upcoming fixtures
-        all_fixtures = ml_service.apifootball_service.get_daily_fixtures(today)
-        
-        # Filter for upcoming fixtures only (exclude all finished/live games)
-        upcoming_fixtures = []
-        excluded_statuses = [
-            'Finished', 'FT', 'AET', 'PEN', 'After Pen.', 'After Extra Time',
-            'Live', 'HT', 'Half Time', '1st Half', '2nd Half', 'Extra Time',
-            'Penalty Shootout', 'Suspended', 'Postponed', 'Cancelled',
-            'Abandoned', 'Interrupted', 'Awarded', 'WalkOver', 'Retired'
+
+class RealMLPredictionService:
+    """Prediction service using API-Football retrained models + statistical models."""
+
+    def __init__(self):
+        self.apifootball_service = APIFootballService()
+        self.models_dir = MODELS_DIR
+        self.api_models: Dict[str, Any] = {}
+        self.api_df: Optional[pd.DataFrame] = None
+        self.models: Dict[str, Dict] = {}
+
+        self._load_api_football_models()
+
+    def _load_api_football_models(self):
+        """Load the .joblib models retrained on API-Football data."""
+        meta_path = self.models_dir / "meta.json"
+        if not meta_path.exists():
+            logger.warning(f"No model meta at {meta_path} — run scripts/retrain_models.py")
+            return
+
+        with open(meta_path) as f:
+            meta = json.load(f)
+
+        for model_name in meta.get("models", []):
+            p = self.models_dir / f"{model_name}.joblib"
+            if p.exists():
+                self.api_models[model_name] = joblib.load(p)
+
+        logger.info(f"Loaded {len(self.api_models)} API-Football models")
+
+        # Populate self.models for backward-compat with daily_predictions_service
+        self.models = {"api_football": {k: {"model": v} for k, v in self.api_models.items()}}
+
+        # Load historical CSV for feature computation
+        if MATCHES_CSV.exists():
+            self.api_df = pd.read_csv(MATCHES_CSV, low_memory=False)
+            self.api_df["date"] = pd.to_datetime(self.api_df["date"], errors="coerce")
+            self.api_df = self.api_df.dropna(subset=["date"]).sort_values("date")
+            logger.info(f"Historical data: {len(self.api_df):,} matches")
+
+            _init_statistical_models(self.api_df)
+        else:
+            logger.warning(f"{MATCHES_CSV} not found — run scripts/fetch_history.py")
+
+        # Also load encoders for backward compat (may not exist)
+        self.encoders = {}
+
+    def _compute_features(self, home: str, away: str, league_tier: int = 1) -> Optional[list]:
+        """Compute 19-feature vector from historical data.
+
+        Must mirror scripts/retrain_models.py:compute_features() exactly.
+        """
+        if self.api_df is None or len(self.api_df) == 0:
+            return None
+
+        now = datetime.now()
+        df_past = self.api_df[self.api_df["date"] < pd.Timestamp(now)]
+
+        def team_stats(team, n):
+            games = df_past[(df_past["home_team"] == team) | (df_past["away_team"] == team)].tail(n)
+            if len(games) == 0:
+                return {"win_rate": 0.5, "draw_rate": 0.25, "goals_scored": 1.2, "goals_conceded": 1.2}
+            wins = draws = gs = gc = 0
+            for _, r in games.iterrows():
+                if r["home_team"] == team:
+                    s, c = r["home_score"], r["away_score"]
+                else:
+                    s, c = r["away_score"], r["home_score"]
+                gs += s; gc += c
+                if s > c: wins += 1
+                elif s == c: draws += 1
+            n_g = len(games)
+            return {"win_rate": wins/n_g, "draw_rate": draws/n_g,
+                    "goals_scored": gs/n_g, "goals_conceded": gc/n_g}
+
+        def home_stats(team, n):
+            games = df_past[df_past["home_team"] == team].tail(n)
+            if len(games) == 0:
+                return {"win_rate": 0.5, "goals_scored": 1.5}
+            wins = sum(1 for _, r in games.iterrows() if r["home_score"] > r["away_score"])
+            goals = sum(r["home_score"] for _, r in games.iterrows())
+            return {"win_rate": wins/len(games), "goals_scored": goals/len(games)}
+
+        def away_stats(team, n):
+            games = df_past[df_past["away_team"] == team].tail(n)
+            if len(games) == 0:
+                return {"win_rate": 0.35, "goals_scored": 1.1}
+            wins = sum(1 for _, r in games.iterrows() if r["away_score"] > r["home_score"])
+            goals = sum(r["away_score"] for _, r in games.iterrows())
+            return {"win_rate": wins/len(games), "goals_scored": goals/len(games)}
+
+        def h2h_stats(home_t, away_t, n):
+            h2h = df_past[
+                ((df_past["home_team"] == home_t) & (df_past["away_team"] == away_t)) |
+                ((df_past["home_team"] == away_t) & (df_past["away_team"] == home_t))
+            ].tail(n)
+            if len(h2h) == 0:
+                return {"home_win_rate": 0.45, "avg_goals": 2.5, "btts_rate": 0.5, "n": 0}
+            hw = btts = tg = 0
+            for _, r in h2h.iterrows():
+                hg = r["home_score"] if r["home_team"] == home_t else r["away_score"]
+                ag = r["away_score"] if r["home_team"] == home_t else r["home_score"]
+                tg += hg + ag
+                if hg > ag: hw += 1
+                if hg > 0 and ag > 0: btts += 1
+            n_g = len(h2h)
+            return {"home_win_rate": hw/n_g, "avg_goals": tg/n_g, "btts_rate": btts/n_g, "n": n_g}
+
+        h5  = team_stats(home, 5);  h10 = team_stats(home, 10)
+        hh5 = home_stats(home, 5)
+        a5  = team_stats(away, 5);  a10 = team_stats(away, 10)
+        aa5 = away_stats(away, 5)
+        h2h = h2h_stats(home, away, 10)
+
+        return [
+            h5["win_rate"], h10["win_rate"], h5["draw_rate"],
+            h5["goals_scored"], h5["goals_conceded"],
+            hh5["win_rate"], hh5["goals_scored"],
+            a5["win_rate"], a10["win_rate"], a5["draw_rate"],
+            a5["goals_scored"], a5["goals_conceded"],
+            aa5["win_rate"], aa5["goals_scored"],
+            h2h["home_win_rate"], h2h["avg_goals"], h2h["btts_rate"],
+            min(h2h["n"], 10) / 10,
+            league_tier / 2,
         ]
 
-        for fixture in all_fixtures:
-            status = fixture.get('status', '').strip()
+    def generate_predictions_for_fixture(self, fixture: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate predictions for a single fixture using all available models."""
+        try:
+            home_team = fixture.get("home_team", "Unknown")
+            away_team = fixture.get("away_team", "Unknown")
+            league = fixture.get("league_name", "Unknown")
+            league_id = fixture.get("league_id", 0)
 
-            # Additional check: exclude if status contains finished game indicators
-            status_lower = status.lower()
-            finished_indicators = ['finished', 'ft', 'aet', 'pen', 'after', 'live', 'half', 'time', 'extra']
+            # Determine league tier
+            tier_2_leagues = {40, 62, 79, 136, 141}
+            league_tier = 2 if league_id in tier_2_leagues else 1
 
-            is_finished = (status in excluded_statuses or
-                          any(indicator in status_lower for indicator in finished_indicators))
+            features = self._compute_features(home_team, away_team, league_tier)
+            if features is None:
+                return {"error": "Could not compute features (no historical data)"}
 
-            # Only include truly upcoming fixtures
-            if not is_finished and status not in ['', 'Unknown']:
-                # Additional date check - only future fixtures
+            X = np.array(features).reshape(1, -1)
+            result_classes = {0: "away_win", 1: "draw", 2: "home_win"}
+            ml_predictions = {}
+            bma_inputs = []
+
+            # Run API-Football retrained models
+            for model_name, model in self.api_models.items():
                 try:
-                    fixture_date_str = fixture.get('date', '')
-                    if fixture_date_str:
-                        # Parse fixture date and compare with current time
-                        fixture_date = datetime.fromisoformat(fixture_date_str.replace('Z', '+00:00'))
-                        current_time = datetime.now()
+                    proba = model.predict_proba(X)[0]
+                    pred_idx = int(np.argmax(proba))
+                    conf = float(proba[pred_idx])
 
-                        # Only include if fixture is in the future
-                        if fixture_date > current_time:
-                            upcoming_fixtures.append(fixture)
-                except:
-                    # If date parsing fails, include only if status looks upcoming
-                    if status in ['Not Started', 'Scheduled', 'Fixture']:
-                        upcoming_fixtures.append(fixture)
-        
-        logger.info(f"📊 Found {len(upcoming_fixtures)} upcoming fixtures")
-        
-        # Generate predictions for each fixture
+                    if "match_result" in model_name:
+                        pred_key = result_classes.get(pred_idx, "home_win")
+                        prob_dict = {}
+                        for ci, ck in result_classes.items():
+                            prob_dict[ck] = float(proba[ci]) if ci < len(proba) else 0.0
+                        bma_inputs.append({
+                            "model_name": model_name,
+                            "prediction": pred_key,
+                            "confidence": conf,
+                            "probabilities": prob_dict,
+                        })
+                        prediction_value = pred_key
+                    elif "over_2_5" in model_name:
+                        prediction_value = "over_2_5" if pred_idx == 1 else "under_2_5"
+                    elif "btts" in model_name:
+                        prediction_value = "yes" if pred_idx == 1 else "no"
+                    else:
+                        prediction_value = str(pred_idx)
+
+                    ml_predictions[model_name] = {
+                        "prediction": prediction_value,
+                        "probabilities": proba.tolist(),
+                        "confidence": conf,
+                        "model_type": model_name.split("_")[-1],
+                        "model_name": model_name,
+                    }
+                except Exception as e:
+                    logger.debug(f"Model {model_name} failed: {e}")
+
+            # Run ELO
+            elo_gap = 0.0
+            if _elo_system is not None:
+                try:
+                    elo_pred = _elo_system.predict(home_team, away_team)
+                    elo_gap = elo_pred.get("elo_gap", 0.0)
+                    ml_predictions["elo_rating"] = {
+                        "prediction": elo_pred["prediction"],
+                        "probabilities": elo_pred.get("probabilities", {}),
+                        "confidence": elo_pred["confidence"],
+                        "model_type": "elo",
+                        "model_name": "elo_rating",
+                        "elo_gap": elo_gap,
+                    }
+                    bma_inputs.append({
+                        "model_name": "elo_rating",
+                        "prediction": elo_pred["prediction"],
+                        "confidence": elo_pred["confidence"],
+                        "probabilities": elo_pred.get("probabilities", {}),
+                    })
+                except Exception as e:
+                    logger.debug(f"ELO failed: {e}")
+
+            # Run Dixon-Coles
+            if _dixon_coles is not None and _dixon_coles.is_trained:
+                try:
+                    dc_pred = _dixon_coles.predict(home_team, away_team)
+                    ml_predictions["dixon_coles"] = {
+                        "prediction": dc_pred["prediction"],
+                        "probabilities": dc_pred.get("probabilities", {}),
+                        "confidence": dc_pred["confidence"],
+                        "model_type": "dixon_coles",
+                        "model_name": "dixon_coles",
+                        "expected_home_goals": dc_pred.get("expected_home_goals"),
+                        "expected_away_goals": dc_pred.get("expected_away_goals"),
+                        "over_2_5_probability": dc_pred.get("over_2_5_probability"),
+                        "btts_probability": dc_pred.get("btts_probability"),
+                    }
+                    bma_inputs.append({
+                        "model_name": "dixon_coles",
+                        "prediction": dc_pred["prediction"],
+                        "confidence": dc_pred["confidence"],
+                        "probabilities": dc_pred.get("probabilities", {}),
+                    })
+                except Exception as e:
+                    logger.debug(f"Dixon-Coles failed: {e}")
+
+            if not ml_predictions:
+                return {"error": "All models failed"}
+
+            # Compute model disagreement via BMA or fallback
+            model_disagreement = 0.0
+            if _bma is not None and len(bma_inputs) >= 2:
+                try:
+                    combined = _bma.combine(bma_inputs)
+                    model_disagreement = combined.get("model_disagreement", 0.0)
+                except Exception:
+                    pass
+            elif len(bma_inputs) >= 2:
+                pred_vals = [p["prediction"] for p in bma_inputs]
+                majority = Counter(pred_vals).most_common(1)[0]
+                model_disagreement = 1.0 - majority[1] / len(pred_vals)
+
+            return {
+                "fixture_info": {
+                    "fixture_id": fixture.get("fixture_id"),
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "league": league,
+                    "date": fixture.get("date"),
+                    "status": fixture.get("status"),
+                },
+                "ml_predictions": ml_predictions,
+                "model_disagreement": round(model_disagreement, 4),
+                "elo_gap": round(elo_gap, 1),
+                "model_summary": {
+                    "total_predictions": len(ml_predictions),
+                    "successful_predictions": len(ml_predictions),
+                },
+            }
+        except Exception as e:
+            logger.error(f"Error generating predictions: {e}")
+            return {"error": str(e)}
+
+
+# ------------------------------------------------------------------
+# Module-level init
+# ------------------------------------------------------------------
+ml_service = RealMLPredictionService()
+
+_predictions_cache: Dict[str, Any] = {"date": None, "data": None, "timestamp": None}
+
+
+# ------------------------------------------------------------------
+# API endpoints
+# ------------------------------------------------------------------
+
+@router.get("/today")
+def get_todays_predictions(force_refresh: bool = Query(False)):
+    """Get today's fixtures with ML predictions."""
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        now = datetime.now()
+
+        if (not force_refresh
+                and _predictions_cache["date"] == today
+                and _predictions_cache["data"]
+                and (now - _predictions_cache["timestamp"]).total_seconds() < 1800):
+            return _predictions_cache["data"]
+
+        all_fixtures = ml_service.apifootball_service.get_daily_fixtures(today)
+        upcoming = [fx for fx in all_fixtures if fx.get("status") in ("NS", "TBD")]
+
         predictions_results = []
-        for fixture in upcoming_fixtures:
-            prediction_result = ml_service.generate_predictions_for_fixture(fixture)
-            if 'error' not in prediction_result:
-                predictions_results.append(prediction_result)
-        
+        for fixture in upcoming:
+            result = ml_service.generate_predictions_for_fixture(fixture)
+            if "error" not in result:
+                predictions_results.append(result)
+
         result = {
             "status": "success",
             "date": today,
             "total_fixtures": len(all_fixtures),
-            "upcoming_fixtures": len(upcoming_fixtures),
+            "upcoming_fixtures": len(upcoming),
             "predictions_generated": len(predictions_results),
-            "models_used": sum(len(ml_service.models[mt]) for mt in ml_service.models),
+            "models_used": len(ml_service.api_models),
             "predictions": predictions_results,
             "cached": False,
-            "cache_info": "Fresh predictions generated"
         }
 
-        # Update cache
-        _predictions_cache['date'] = today
-        _predictions_cache['data'] = result
-        _predictions_cache['timestamp'] = current_time
-
+        _predictions_cache.update(date=today, data=result, timestamp=now)
         return result
-        
+
     except Exception as e:
-        logger.error(f"Error getting today's predictions: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        logger.error(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/categories")
 def get_betting_categories():
-    """
-    Get today's betting categories with low-risk selections.
-    
-    Returns:
-        Categorized betting recommendations for today's fixtures
-    """
+    """Get today's betting categories."""
     try:
-        # Get today's predictions
-        predictions_response = get_todays_predictions()
-        predictions = predictions_response.get('predictions', [])
-        
-        # Extract betting categories
-        categorized_results = {
-            '2_odds': [],
-            '5_odds': [],
-            '10_odds': [],
-            'rollover': []
-        }
-        
-        for prediction in predictions:
-            betting_categories = prediction.get('betting_categories', {})
-            fixture_info = prediction.get('fixture_info', {})
-            
-            for category, category_data in betting_categories.items():
-                if category_data.get('selected', False):
-                    categorized_results[category].append({
-                        'fixture': fixture_info,
-                        'prediction': category_data['prediction'],
-                        'confidence': category_data['prediction']['confidence'],
-                        'risk_level': category_data['risk_level'],
-                        'expected_odds': category_data['expected_odds'],
-                        'recommendation': category_data['recommendation']
-                    })
-        
+        resp = get_todays_predictions()
         return {
             "status": "success",
             "date": datetime.now().strftime("%Y-%m-%d"),
-            "categories": categorized_results,
-            "summary": {
-                "2_odds_count": len(categorized_results['2_odds']),
-                "5_odds_count": len(categorized_results['5_odds']),
-                "10_odds_count": len(categorized_results['10_odds']),
-                "rollover_count": len(categorized_results['rollover']),
-                "total_selections": sum(len(cat) for cat in categorized_results.values())
-            }
+            "predictions": resp.get("predictions", []),
         }
-        
     except Exception as e:
-        logger.error(f"Error getting betting categories: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        logger.error(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/fixture/{fixture_id}")
 def get_fixture_prediction(fixture_id: int):
-    """
-    Get ML predictions for a specific fixture.
-    
-    Args:
-        fixture_id: The ID of the fixture
-        
-    Returns:
-        ML predictions and betting categories for the fixture
-    """
+    """Get ML predictions for a specific fixture."""
     try:
-        # Get today's fixtures
         today = datetime.now().strftime("%Y-%m-%d")
         all_fixtures = ml_service.apifootball_service.get_daily_fixtures(today)
-        
-        # Find the specific fixture
-        target_fixture = None
-        for fixture in all_fixtures:
-            if fixture.get('fixture_id') == fixture_id:
-                target_fixture = fixture
-                break
-        
-        if not target_fixture:
+
+        target = next((fx for fx in all_fixtures if fx.get("fixture_id") == fixture_id), None)
+        if not target:
             raise HTTPException(status_code=404, detail="Fixture not found")
-        
-        # Generate prediction for this fixture
-        prediction_result = ml_service.generate_predictions_for_fixture(target_fixture)
-        
-        if 'error' in prediction_result:
-            raise HTTPException(status_code=500, detail=prediction_result['error'])
-        
-        return {
-            "status": "success",
-            "fixture_id": fixture_id,
-            "prediction": prediction_result
-        }
-        
+
+        result = ml_service.generate_predictions_for_fixture(target)
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+
+        return {"status": "success", "fixture_id": fixture_id, "prediction": result}
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting fixture prediction: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        logger.error(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/models/status")
 def get_models_status():
-    """
-    Get status of loaded ML models.
-    
-    Returns:
-        Information about loaded models and their status
-    """
-    try:
-        model_status = {}
-        total_models = 0
-        
-        for model_type, type_models in ml_service.models.items():
-            model_status[model_type] = {
-                'count': len(type_models),
-                'models': list(type_models.keys())
-            }
-            total_models += len(type_models)
-        
-        return {
-            "status": "success",
-            "total_models": total_models,
-            "model_breakdown": model_status,
-            "encoders_loaded": len(ml_service.encoders),
-            "service_ready": total_models > 0
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting models status: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    """Get status of loaded ML models."""
+    return {
+        "status": "success",
+        "api_football_models": len(ml_service.api_models),
+        "model_names": list(ml_service.api_models.keys()),
+        "historical_data_loaded": ml_service.api_df is not None,
+        "historical_matches": len(ml_service.api_df) if ml_service.api_df is not None else 0,
+        "elo_available": _elo_system is not None,
+        "elo_teams": len(_elo_system.ratings) if _elo_system else 0,
+        "dixon_coles_available": _dixon_coles is not None and getattr(_dixon_coles, "is_trained", False),
+        "dixon_coles_teams": len(_dixon_coles.teams) if _dixon_coles else 0,
+        "bma_available": _bma is not None,
+    }
