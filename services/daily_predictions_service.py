@@ -216,16 +216,18 @@ class DailyPredictionsService:
             summary.generation_time = datetime.utcnow()
             
             db.commit()
-            db.close()
-            
+
             logger.info(f"✅ Generated {predictions_count} predictions for {target_date}")
-            
-            return {
+
+            # Build response before closing session (object is still bound)
+            result = {
                 "status": "success",
                 "date": target_date,
                 "message": f"Generated {predictions_count} predictions",
                 "summary": self._summary_to_dict(summary)
             }
+            db.close()
+            return result
             
         except Exception as e:
             logger.error(f"Error generating daily predictions: {str(e)}")
