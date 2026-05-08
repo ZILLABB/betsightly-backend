@@ -4,9 +4,13 @@ API-Football (api-sports.io) integration service.
 Uses the SAME data source as the training pipeline (fetch_history.py)
 so team names align perfectly between training and live predictions.
 
-Caching: every API response is cached to disk under cache/api_football/.
-Daily fixtures are cached for 6 hours (fixtures don't change often).
-This keeps API calls to a minimum — the free tier allows ~100/day.
+Caching strategy (free tier = 100 requests/day):
+    - Daily fixtures: cached per date, valid until end of that day.
+      Calling get_daily_fixtures("2026-05-08") makes 1 API call,
+      then every subsequent call that same day hits cache.
+      Next day it auto-expires — new call fetches fresh fixtures.
+    - Other endpoints: generic 6-hour TTL.
+    - Stale cache files (older than 3 days) are auto-cleaned on init.
 
 API docs: https://www.api-football.com/documentation-v3
 """
@@ -16,7 +20,7 @@ import json
 import hashlib
 import requests
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as date_type
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
@@ -29,6 +33,7 @@ API_KEY = os.getenv("API_FOOTBALL_API_KEY", "")
 BASE_URL = "https://v3.football.api-sports.io"
 CACHE_DIR = Path("cache/api_football")
 CACHE_TTL_HOURS = 6
+STALE_CACHE_DAYS = 3  # auto-delete cache files older than this
 
 TARGET_LEAGUE_IDS = {
     39, 40, 61, 62, 78, 79, 135, 136, 140, 141,
@@ -51,6 +56,9 @@ class APIFootballService:
         if not self.api_key:
             logger.warning("API_FOOTBALL_API_KEY not configured")
 
+        # Auto-clean stale cache files on startup
+        self._cleanup_stale_cache()
+
     # ------------------------------------------------------------------
     # Caching
     # ------------------------------------------------------------------
@@ -59,7 +67,16 @@ class APIFootballService:
         raw = f"{endpoint}:{json.dumps(params, sort_keys=True)}"
         return hashlib.md5(raw.encode()).hexdigest()
 
-    def _read_cache(self, key: str) -> Optional[dict]:
+    def _daily_cache_key(self, target_date: str) -> str:
+        """Deterministic cache key for a specific date's fixtures.
+
+        Key includes the date itself, so each day gets its own file.
+        """
+        raw = f"fixtures:daily:{target_date}"
+        return hashlib.md5(raw.encode()).hexdigest()
+
+    def _read_cache(self, key: str, ttl: timedelta = None) -> Optional[dict]:
+        """Read from cache. Uses custom ttl if provided, else self.cache_ttl."""
         path = self.cache_dir / f"{key}.json"
         if not path.exists():
             return None
@@ -67,12 +84,62 @@ class APIFootballService:
             with open(path, "r", encoding="utf-8") as f:
                 cached = json.load(f)
             cached_at = datetime.fromisoformat(cached["cached_at"])
-            if datetime.now() - cached_at > self.cache_ttl:
+            effective_ttl = ttl if ttl is not None else self.cache_ttl
+            if datetime.now() - cached_at > effective_ttl:
+                path.unlink(missing_ok=True)  # Delete expired cache
                 return None
             logger.info(f"Cache hit ({key[:8]}...) — saved an API call")
             return cached["data"]
         except Exception:
             return None
+
+    def _read_daily_cache(self, target_date: str) -> Optional[dict]:
+        """Read daily fixture cache. Valid until end of the target date.
+
+        If today is 2026-05-08 and we cached fixtures for 2026-05-08,
+        the cache is valid all day. At midnight it expires automatically.
+        Past dates stay cached for STALE_CACHE_DAYS before cleanup.
+        """
+        key = self._daily_cache_key(target_date)
+        path = self.cache_dir / f"{key}.json"
+        if not path.exists():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+
+            cached_date = cached.get("fixture_date", "")
+            today = datetime.now().strftime("%Y-%m-%d")
+
+            # If requesting today's fixtures and cache is from today -> valid
+            if cached_date == target_date == today:
+                logger.info(f"Daily cache hit for {target_date} — saved an API call")
+                return cached["data"]
+
+            # If requesting a future date and cache exists -> valid
+            if cached_date == target_date and target_date > today:
+                logger.info(f"Daily cache hit for future date {target_date}")
+                return cached["data"]
+
+            # Past date: cache is stale, let cleanup handle it
+            return None
+
+        except Exception:
+            return None
+
+    def _write_daily_cache(self, target_date: str, data: dict) -> None:
+        """Write daily fixture cache with the target date embedded."""
+        key = self._daily_cache_key(target_date)
+        path = self.cache_dir / f"{key}.json"
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "cached_at": datetime.now().isoformat(),
+                    "fixture_date": target_date,
+                    "data": data,
+                }, f)
+        except Exception as e:
+            logger.debug(f"Daily cache write failed: {e}")
 
     def _write_cache(self, key: str, data: dict) -> None:
         path = self.cache_dir / f"{key}.json"
@@ -81,6 +148,29 @@ class APIFootballService:
                 json.dump({"cached_at": datetime.now().isoformat(), "data": data}, f)
         except Exception as e:
             logger.debug(f"Cache write failed: {e}")
+
+    def _cleanup_stale_cache(self) -> int:
+        """Remove cache files older than STALE_CACHE_DAYS. Runs on init."""
+        cutoff = datetime.now() - timedelta(days=STALE_CACHE_DAYS)
+        removed = 0
+        try:
+            for f in self.cache_dir.glob("*.json"):
+                try:
+                    with open(f, "r", encoding="utf-8") as fh:
+                        cached = json.load(fh)
+                    cached_at = datetime.fromisoformat(cached.get("cached_at", "2000-01-01"))
+                    if cached_at < cutoff:
+                        f.unlink()
+                        removed += 1
+                except Exception:
+                    # Corrupt file — remove it
+                    f.unlink(missing_ok=True)
+                    removed += 1
+            if removed:
+                logger.info(f"Cleaned up {removed} stale cache files (older than {STALE_CACHE_DAYS} days)")
+        except Exception as e:
+            logger.debug(f"Cache cleanup error: {e}")
+        return removed
 
     # ------------------------------------------------------------------
     # HTTP
@@ -114,14 +204,28 @@ class APIFootballService:
     # ------------------------------------------------------------------
 
     def get_daily_fixtures(self, date: str = None) -> List[Dict[str, Any]]:
+        """Fetch fixtures for a date. Uses date-aware cache.
+
+        First call of the day makes 1 API request, all subsequent calls
+        that same day use cache. Next day the cache auto-expires so
+        fresh fixtures are fetched. Costs only 1 API call per day.
+        """
         if not date:
             date = datetime.now().strftime("%Y-%m-%d")
 
         logger.info(f"Getting fixtures for {date}")
 
         try:
-            data = self._get("fixtures", {"date": date})
-            raw_fixtures = data.get("response", [])
+            # Try date-aware cache first
+            cached = self._read_daily_cache(date)
+            if cached is not None:
+                raw_fixtures = cached.get("response", [])
+            else:
+                # Cache miss — make API call
+                data = self._get("fixtures", {"date": date}, use_cache=False)
+                raw_fixtures = data.get("response", [])
+                # Store in date-aware cache (not the generic one)
+                self._write_daily_cache(date, data)
 
             fixtures = []
             for f in raw_fixtures:

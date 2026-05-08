@@ -26,20 +26,33 @@ class DixonColesModel:
     def train(self, matches):
         if len(matches) < 20:
             logger.warning("Dixon-Coles needs at least 20 matches to fit reliably")
-        self.teams = sorted(set([m["home_team"] for m in matches] + [m["away_team"] for m in matches]))
+        self.teams = sorted(set(
+            [m["home_team"] for m in matches] + [m["away_team"] for m in matches]
+        ))
         n = len(self.teams)
         idx = {t: i for i, t in enumerate(self.teams)}
+
+        # Pre-compute arrays for vectorised NLL (much faster than Python loop)
+        hi_arr = np.array([idx[m["home_team"]] for m in matches], dtype=np.int32)
+        ai_arr = np.array([idx[m["away_team"]] for m in matches], dtype=np.int32)
+        hg_arr = np.array([int(m["home_goals"]) for m in matches], dtype=np.int32)
+        ag_arr = np.array([int(m["away_goals"]) for m in matches], dtype=np.int32)
         weights = self._time_weights(matches)
+
         x0 = np.zeros(n * 2 + 2)
         x0[:n] = 0.5; x0[n:2*n] = 0.5; x0[-2] = 0.3; x0[-1] = -0.1
-        result = minimize(self._nll, x0, args=(matches, idx, weights), method="L-BFGS-B",
-                          options={"maxiter": 500, "ftol": 1e-9})
+        result = minimize(
+            self._nll_vec, x0,
+            args=(n, hi_arr, ai_arr, hg_arr, ag_arr, weights),
+            method="L-BFGS-B",
+            options={"maxiter": 150, "ftol": 1e-5},
+        )
         params = result.x
         for team, i in idx.items():
-            self.attack[team] = np.exp(params[i])
-            self.defence[team] = np.exp(params[n + i])
-        self.home_advantage = np.exp(params[-2])
-        self.rho = params[-1]
+            self.attack[team] = float(np.exp(params[i]))
+            self.defence[team] = float(np.exp(params[n + i]))
+        self.home_advantage = float(np.exp(params[-2]))
+        self.rho = float(params[-1])
         self.is_trained = True
         logger.info(f"Dixon-Coles trained on {len(matches)} matches, {n} teams")
 
@@ -54,27 +67,35 @@ class DixonColesModel:
         latest = max(dates) if dates else datetime.now()
         return np.array([np.exp(-self.xi * max((latest - d).days, 0)) for d in dates])
 
-    def _nll(self, params, matches, idx, weights):
-        n = len(idx)
-        att = np.exp(params[:n]); deff = np.exp(params[n:2*n])
-        ha = np.exp(params[-2]); rho = params[-1]
-        ll = 0.0
-        for i, m in enumerate(matches):
-            hi = idx.get(m["home_team"]); ai = idx.get(m["away_team"])
-            if hi is None or ai is None: continue
-            mu_h = att[hi] * deff[ai] * ha; mu_a = att[ai] * deff[hi]
-            hg, ag = int(m["home_goals"]), int(m["away_goals"])
-            ll += weights[i] * (poisson.logpmf(hg, mu_h) + poisson.logpmf(ag, mu_a)
-                                + np.log(max(self._tau(hg, ag, mu_h, mu_a, rho), 1e-10)))
-        return -ll
-
     @staticmethod
-    def _tau(hg, ag, mu_h, mu_a, rho):
-        if hg == 0 and ag == 0: return 1 - mu_h * mu_a * rho
-        elif hg == 0 and ag == 1: return 1 + mu_h * rho
-        elif hg == 1 and ag == 0: return 1 + mu_a * rho
-        elif hg == 1 and ag == 1: return 1 - rho
-        return 1.0
+    def _nll_vec(params, n, hi, ai, hg, ag, weights):
+        """Fully vectorised negative log-likelihood — no Python loop."""
+        att = np.exp(params[:n])
+        deff = np.exp(params[n:2*n])
+        ha = np.exp(params[-2])
+        rho = params[-1]
+
+        mu_h = att[hi] * deff[ai] * ha
+        mu_a = att[ai] * deff[hi]
+
+        # Poisson log-pmf: k*log(mu) - mu - lgamma(k+1)
+        from scipy.special import gammaln
+        ll_home = hg * np.log(mu_h + 1e-10) - mu_h - gammaln(hg + 1)
+        ll_away = ag * np.log(mu_a + 1e-10) - mu_a - gammaln(ag + 1)
+
+        # Vectorised tau correction (Dixon-Coles rho adjustment for low scores)
+        tau = np.ones(len(hg))
+        m00 = (hg == 0) & (ag == 0)
+        m01 = (hg == 0) & (ag == 1)
+        m10 = (hg == 1) & (ag == 0)
+        m11 = (hg == 1) & (ag == 1)
+        tau[m00] = 1 - mu_h[m00] * mu_a[m00] * rho
+        tau[m01] = 1 + mu_h[m01] * rho
+        tau[m10] = 1 + mu_a[m10] * rho
+        tau[m11] = 1 - rho
+
+        ll = weights * (ll_home + ll_away + np.log(np.maximum(tau, 1e-10)))
+        return -ll.sum()
 
     def _lambdas(self, home, away):
         mu_h = self.attack.get(home, 1.0) * self.defence.get(away, 1.0) * self.home_advantage

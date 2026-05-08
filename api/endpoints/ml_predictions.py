@@ -30,16 +30,79 @@ router = APIRouter()
 MATCHES_CSV = Path("data/api-football/matches.csv")
 MODELS_DIR = Path("models/api_football")
 
-# Statistical model singletons (trained once, reused)
+# Saved statistical model paths (train once, load instantly)
+ELO_SAVE_PATH = MODELS_DIR / "elo_ratings.json"
+DC_SAVE_PATH = MODELS_DIR / "dixon_coles.json"
+STAT_MODEL_MAX_AGE_DAYS = 7  # retrain if saved model is older than this
+
+# Statistical model singletons (loaded once, reused)
 _elo_system = None
 _dixon_coles = None
 _bma = None
 
 
+def _is_model_fresh(path: Path, max_age_days: int = STAT_MODEL_MAX_AGE_DAYS) -> bool:
+    """Check if a saved model file exists and is recent enough."""
+    if not path.exists():
+        return False
+    age = datetime.now().timestamp() - path.stat().st_mtime
+    return age < max_age_days * 86400
+
+
 def _init_statistical_models(df: pd.DataFrame):
-    """Train ELO and Dixon-Coles on historical data (once at startup)."""
+    """Load ELO and Dixon-Coles from disk. Only retrain if missing or stale.
+
+    First run: trains from scratch and saves to models/api_football/.
+    Subsequent runs: loads instantly from disk (< 1 second).
+    Models auto-retrain every 7 days to stay current.
+    """
     global _elo_system, _dixon_coles, _bma
 
+    # --- ELO: load or train ---
+    try:
+        from ml.elo_model import EloRatingSystem
+        _elo_system = EloRatingSystem()
+        if _is_model_fresh(ELO_SAVE_PATH):
+            _elo_system.load(str(ELO_SAVE_PATH))
+            logger.info(f"ELO loaded from disk: {len(_elo_system.ratings)} teams (instant)")
+        else:
+            matches = _df_to_matches(df)
+            if matches:
+                _elo_system.train(matches)
+                _elo_system.save(str(ELO_SAVE_PATH))
+                logger.info(f"ELO trained and saved: {len(_elo_system.ratings)} teams")
+    except Exception as e:
+        logger.warning(f"ELO init failed: {e}")
+        _elo_system = None
+
+    # --- Dixon-Coles: load or train ---
+    try:
+        from ml.dixon_coles_model import DixonColesModel
+        _dixon_coles = DixonColesModel()
+        if _is_model_fresh(DC_SAVE_PATH):
+            _dixon_coles.load(str(DC_SAVE_PATH))
+            logger.info(f"Dixon-Coles loaded from disk: {len(_dixon_coles.teams)} teams (instant)")
+        else:
+            matches = _df_to_matches(df)
+            if matches:
+                logger.info("Dixon-Coles training (first run or weekly refresh)...")
+                _dixon_coles.train(matches[-500:])
+                _dixon_coles.save(str(DC_SAVE_PATH))
+                logger.info(f"Dixon-Coles trained and saved: {len(_dixon_coles.teams)} teams")
+    except Exception as e:
+        logger.warning(f"Dixon-Coles init failed: {e}")
+        _dixon_coles = None
+
+    # --- BMA ---
+    try:
+        from ml.bayesian_averaging import BayesianModelAverager
+        _bma = BayesianModelAverager()
+    except Exception as e:
+        logger.warning(f"BMA init failed: {e}")
+
+
+def _df_to_matches(df: pd.DataFrame) -> list:
+    """Convert DataFrame to list of match dicts for training."""
     matches = []
     for _, r in df.iterrows():
         try:
@@ -52,31 +115,7 @@ def _init_statistical_models(df: pd.DataFrame):
             })
         except (ValueError, KeyError):
             continue
-
-    if not matches:
-        return
-
-    try:
-        from ml.elo_model import EloRatingSystem
-        _elo_system = EloRatingSystem()
-        _elo_system.train(matches)
-        logger.info(f"ELO trained: {len(_elo_system.ratings)} teams")
-    except Exception as e:
-        logger.warning(f"ELO init failed: {e}")
-
-    try:
-        from ml.dixon_coles_model import DixonColesModel
-        _dixon_coles = DixonColesModel()
-        _dixon_coles.train(matches[-2000:])
-        logger.info(f"Dixon-Coles trained: {len(_dixon_coles.teams)} teams")
-    except Exception as e:
-        logger.warning(f"Dixon-Coles init failed: {e}")
-
-    try:
-        from ml.bayesian_averaging import BayesianModelAverager
-        _bma = BayesianModelAverager()
-    except Exception as e:
-        logger.warning(f"BMA init failed: {e}")
+    return matches
 
 
 class RealMLPredictionService:
