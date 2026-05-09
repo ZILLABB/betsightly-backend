@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Daily Predictions Script — run this once per day to get today's accumulators.
 
@@ -24,6 +25,11 @@ import logging
 import argparse
 from datetime import datetime
 from pathlib import Path
+
+# Fix Windows console encoding for team names with special characters
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Ensure project root is on path
 project_root = Path(__file__).parent.parent
