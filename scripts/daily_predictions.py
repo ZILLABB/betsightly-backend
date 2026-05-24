@@ -88,7 +88,29 @@ def run(target_date: str = None, force: bool = False):
     dc_teams = len(getattr(_dixon_coles, "teams", [])) if _dixon_coles else 0
     print(f"  6 ML models + ELO ({elo_teams} teams) + Dixon-Coles ({dc_teams} teams)\n")
 
-    # --- Step 3: Generate predictions ---
+    # --- Step 3: Fetch real bookmaker odds ---
+    odds_map = {}
+    try:
+        from services.odds_service import OddsService
+        odds_svc = OddsService()
+        if odds_svc.api_key:
+            print("Fetching real bookmaker odds...", end=" ", flush=True)
+            odds_map = odds_svc.get_odds_for_fixtures(upcoming)
+            print(f"matched {len(odds_map)}/{len(upcoming)} fixtures")
+            if odds_map:
+                print(f"  Strategy: VALUE-BASED (using real market odds)\n")
+            else:
+                print(f"  No odds matched — using confidence-based fallback\n")
+        else:
+            print("  No ODDS_API_KEY set — using confidence-based selection")
+            print("  (Set ODDS_API_KEY in .env for value-based picks)\n")
+    except ImportError:
+        print("  Odds service not available — using confidence-based selection\n")
+    except Exception as e:
+        logger.warning(f"Odds fetch failed: {e} — using fallback")
+        print(f"  Odds unavailable ({e}) — using confidence-based fallback\n")
+
+    # --- Step 4: Generate predictions ---
     print("Generating predictions...")
     all_predictions = []
     for fx in upcoming:
@@ -101,15 +123,20 @@ def run(target_date: str = None, force: bool = False):
 
     print(f"  {len(all_predictions)}/{len(upcoming)} fixtures predicted\n")
 
-    # --- Step 4: Build accumulators ---
+    # --- Step 5: Build accumulators ---
     from services.accumulator_builder import AccumulatorBuilder
     builder = AccumulatorBuilder()
-    result = builder.build_accumulators(all_predictions)
+    result = builder.build_accumulators(all_predictions, odds_map=odds_map or None)
 
+    strategy = result.get("strategy", "confidence_based")
+    print(f"Strategy: {strategy.upper().replace('_', ' ')}")
     print(f"Quality picks: {result.get('quality_selections', 0)}")
-    print(f"Safe picks: {result.get('safe_selections', 0)}\n")
+    print(f"Safe picks: {result.get('safe_selections', 0)}")
+    if result.get("value_selections") is not None:
+        print(f"Value bets (edge > 3%): {result.get('value_selections', 0)}")
+    print()
 
-    # --- Step 5: Display accumulators ---
+    # --- Step 6: Display accumulators ---
     accumulators = result.get("accumulators", {})
     any_selected = False
 
@@ -117,20 +144,33 @@ def run(target_date: str = None, force: bool = False):
         if acc.get("selected"):
             any_selected = True
             print(f"{'='*50}")
-            print(f"  {cat.upper()}: {acc['num_games']} games @ {acc['total_odds']:.2f} odds")
-            print(f"  Avg Confidence: {acc['average_confidence']*100:.1f}%  |  Risk: {acc['risk_level']}")
+            header = f"  {cat.upper()}: {acc['num_games']} games @ {acc['total_odds']:.2f} odds"
+            if acc.get("average_edge"):
+                header += f"  [AVG EDGE: {acc['average_edge']*100:.1f}%]"
+            print(header)
+            print(f"  Confidence: {acc['average_confidence']*100:.1f}%  |  Risk: {acc['risk_level']}")
+            if acc.get("value_rating"):
+                print(f"  Value Rating: {acc['value_rating']}")
             print(f"{'='*50}")
             for g in acc["games"]:
                 conf_bar = "=" * int(g["confidence"] * 20)
                 print(f"  {g['home_team']} vs {g['away_team']}")
-                print(f"    -> {g['prediction']}  [{conf_bar}] {g['confidence']*100:.1f}%  (odds {g['estimated_odds']})")
+                odds_str = f"odds {g.get('real_odds') or g.get('odds', '?')}"
+                edge_str = ""
+                if g.get("edge") and g["edge"] > 0:
+                    edge_str = f"  EDGE: +{g['edge']*100:.1f}%"
+                print(f"    -> {g['prediction']}  [{conf_bar}] {g['confidence']*100:.1f}%  ({odds_str}){edge_str}")
             print()
         else:
-            print(f"  {cat.upper()}: SKIPPED — {acc.get('reason', 'not enough safe games')}")
+            print(f"  {cat.upper()}: SKIPPED — {acc.get('reason', 'not enough qualifying bets')}")
 
     if not any_selected:
         print("\nNo accumulators could be built today.")
-        print("Not enough confident + safe predictions to hit any target odds.")
+        if odds_map:
+            print("No bets with sufficient value (edge > 3%) found.")
+            print("This means the market is priced efficiently today — no edge to exploit.")
+        else:
+            print("Not enough confident + safe predictions to hit any target odds.")
         return
 
     # --- Step 6: Store in database ---
