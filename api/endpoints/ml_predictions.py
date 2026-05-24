@@ -283,6 +283,8 @@ class RealMLPredictionService:
                             "probabilities": prob_dict,
                         })
                         prediction_value = pred_key
+                    elif "over_1_5" in model_name:
+                        prediction_value = "over_1_5" if pred_idx == 1 else "under_1_5"
                     elif "over_2_5" in model_name:
                         prediction_value = "over_2_5" if pred_idx == 1 else "under_2_5"
                     elif "btts" in model_name:

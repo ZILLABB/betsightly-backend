@@ -30,7 +30,9 @@
     "over_2_5_xgb",
     "over_2_5_lgbm",
     "btts_xgb",
-    "btts_lgbm"
+    "btts_lgbm",
+    "over_1_5_xgb",
+    "over_1_5_lgbm"
   ],
   "result_classes": {
     "0": "Away Win",

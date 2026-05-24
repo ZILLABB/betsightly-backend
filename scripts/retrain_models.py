@@ -206,11 +206,11 @@ def build_dataset(df: pd.DataFrame) -> tuple:
     """
     Compute features + targets for every match in df (using only past data).
     Skips the first 20 matches per team to ensure enough history.
-    Returns X (numpy), y_result, y_over25, y_btts.
+    Returns X (numpy), y_result, y_over15, y_over25, y_btts.
     """
     print("Building feature matrix (this takes a few minutes)...")
 
-    X, y_result, y_over25, y_btts = [], [], [], []
+    X, y_result, y_over15, y_over25, y_btts = [], [], [], [], []
     skipped = 0
 
     for idx, row in df.iterrows():
@@ -237,11 +237,12 @@ def build_dataset(df: pd.DataFrame) -> tuple:
         # Targets
         hg, ag = row["home_score"], row["away_score"]
         y_result.append(2 if hg > ag else (1 if hg == ag else 0))
-        y_over25.append(1 if hg + ag > 2 else 0)
+        y_over15.append(1 if hg + ag > 1 else 0)   # 2+ goals total
+        y_over25.append(1 if hg + ag > 2 else 0)   # 3+ goals total
         y_btts.append(1 if hg > 0 and ag > 0 else 0)
 
     print(f"  Built {len(X):,} training samples (skipped {skipped:,} with insufficient history)")
-    return np.array(X), np.array(y_result), np.array(y_over25), np.array(y_btts)
+    return np.array(X), np.array(y_result), np.array(y_over15), np.array(y_over25), np.array(y_btts)
 
 
 # ---------------------------------------------------------------------------
@@ -372,17 +373,19 @@ def main():
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     df = load_data()
-    X, y_result, y_over25, y_btts = build_dataset(df)
+    X, y_result, y_over15, y_over25, y_btts = build_dataset(df)
 
     print(f"\nDataset summary:")
     print(f"  Samples   : {len(X):,}")
     print(f"  Home wins : {(y_result == 2).sum():,}  ({(y_result == 2).mean():.1%})")
     print(f"  Draws     : {(y_result == 1).sum():,}  ({(y_result == 1).mean():.1%})")
     print(f"  Away wins : {(y_result == 0).sum():,}  ({(y_result == 0).mean():.1%})")
+    print(f"  Over 1.5  : {y_over15.sum():,}  ({y_over15.mean():.1%})")
     print(f"  Over 2.5  : {y_over25.sum():,}  ({y_over25.mean():.1%})")
     print(f"  BTTS      : {y_btts.sum():,}  ({y_btts.mean():.1%})")
 
     train_and_save(X, y_result, "match_result", MODELS_DIR)
+    train_and_save(X, y_over15, "over_1_5",     MODELS_DIR)
     train_and_save(X, y_over25, "over_2_5",     MODELS_DIR)
     train_and_save(X, y_btts,   "btts",         MODELS_DIR)
 

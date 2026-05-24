@@ -49,10 +49,11 @@ MIN_EV = 1.03          # Minimum expected value (£1.03 return per £1 bet)
 class AccumulatorBuilder:
 
     TARGET_ODDS = {
-        "2_odds":   {"min": 1.80, "max": 2.50},
-        "5_odds":   {"min": 4.50, "max": 6.00},
-        "10_odds":  {"min": 8.00, "max": 15.00},
-        "rollover": {"min": 2.00, "max": 3.00},
+        "2_odds":     {"min": 1.80, "max": 2.50},
+        "5_odds":     {"min": 4.50, "max": 6.00},
+        "10_odds":    {"min": 8.00, "max": 15.00},
+        "over_1_5":   {"min": 2.50, "max": 8.00, "filter": "over_1_5"},
+        "rollover":   {"min": 2.00, "max": 3.00},
     }
     MAX_GAMES = 15
 
@@ -81,25 +82,60 @@ class AccumulatorBuilder:
             use_value = odds_map is not None and len(odds_map) > 0
             strategy = "value_based" if use_value else "confidence_based"
 
+            # Extract best selection per fixture (for general categories)
             selections = self._extract_best_selections(predictions, odds_map)
             safe_pool = [s for s in selections if s.get("is_safe", False)]
+
+            # Also extract ALL qualifying predictions (for filtered categories like over_1_5)
+            all_candidates = self._extract_all_selections(predictions, odds_map)
+            safe_all = [s for s in all_candidates if s.get("is_safe", False)]
 
             # In value mode, further filter to only value bets
             if use_value:
                 value_pool = [s for s in safe_pool if s.get("is_value", False)]
+                value_all = [s for s in safe_all if s.get("is_value", False)]
                 logger.info(
                     "Accumulator [VALUE]: %d fixtures -> %d quality -> %d safe -> %d value bets",
                     len(predictions), len(selections), len(safe_pool), len(value_pool),
                 )
                 build_pool = value_pool
+                build_pool_all = value_all
             else:
                 logger.info(
                     "Accumulator [FALLBACK]: %d fixtures -> %d quality picks -> %d safe",
                     len(predictions), len(selections), len(safe_pool),
                 )
                 build_pool = safe_pool
+                build_pool_all = safe_all
+                value_pool = []
 
-            if not build_pool:
+            # Build accumulators — use filtered pool for categories with filters
+            accumulators = {}
+            for cat, target in self.TARGET_ODDS.items():
+                if target.get("filter"):
+                    # Filtered categories (over_1_5) use ALL candidates for that type.
+                    # If value mode but no real odds for this market, allow confidence-based.
+                    filtered_pool = [
+                        s for s in safe_all
+                        if s.get("prediction_value") == target["filter"]
+                    ]
+                    # Use value bets if they have odds, else confidence-based
+                    value_filtered = [s for s in filtered_pool if s.get("is_value", False)]
+                    if value_filtered:
+                        accumulators[cat] = self._build_category(value_filtered, cat, target, True)
+                    elif filtered_pool:
+                        # Confidence-based fallback for this category
+                        accumulators[cat] = self._build_category(filtered_pool, cat, target, False)
+                    else:
+                        accumulators[cat] = self._build_category([], cat, target, use_value)
+                else:
+                    accumulators[cat] = self._build_category(build_pool, cat, target, use_value)
+
+            has_selections = build_pool or any(
+                a.get("selected") for a in accumulators.values()
+            )
+
+            if not has_selections:
                 reason = "No value bets found (model edge < 3%)" if use_value else "No confident + safe selections found"
                 return {
                     "status": "no_selections",
@@ -111,11 +147,6 @@ class AccumulatorBuilder:
                     "accumulators": self._empty_accumulators(reason),
                     "summary": self._summary({}, strategy),
                 }
-
-            accumulators = {
-                cat: self._build_category(build_pool, cat, target, use_value)
-                for cat, target in self.TARGET_ODDS.items()
-            }
 
             return {
                 "status": "success",
@@ -167,7 +198,18 @@ class AccumulatorBuilder:
                 self._attach_value(mr_candidate, fixture_odds)
                 candidates.append(mr_candidate)
 
-            # --- Evaluate over/under predictions ---
+            # --- Evaluate over 1.5 predictions ---
+            o15_candidate = self._evaluate_binary_pair(
+                ml, fi, fixture_disagreement, fixture_elo_gap,
+                key_pattern="over_1_5",
+                pos_label="over_1_5", neg_label="under_1_5",
+                pos_readable="Over 1.5 goals", neg_readable="Under 1.5 goals",
+            )
+            if o15_candidate:
+                self._attach_value(o15_candidate, fixture_odds)
+                candidates.append(o15_candidate)
+
+            # --- Evaluate over 2.5 predictions ---
             ou_candidate = self._evaluate_binary_pair(
                 ml, fi, fixture_disagreement, fixture_elo_gap,
                 key_pattern="over_2_5",
@@ -211,6 +253,74 @@ class AccumulatorBuilder:
             return sorted(selections, key=lambda x: x.get("edge", -1), reverse=True)
         return sorted(selections, key=lambda x: x.get("risk_score", 1.0))
 
+    def _extract_all_selections(
+        self,
+        predictions: List[Dict[str, Any]],
+        odds_map: Optional[Dict[int, Dict]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Extract ALL qualifying predictions across all fixtures (not just best).
+
+        Used for filtered categories (e.g., over_1_5) that need to pick from all
+        over_1_5 predictions, not just the ones that won the per-fixture comparison.
+        """
+        all_selections: List[Dict[str, Any]] = []
+
+        for pred in predictions:
+            fi = pred.get("fixture_info", {})
+            ml = pred.get("ml_predictions", {})
+            fixture_disagreement = pred.get("model_disagreement", 0.5)
+            fixture_elo_gap = pred.get("elo_gap", 0.0)
+            fixture_id = fi.get("fixture_id")
+            fixture_odds = odds_map.get(fixture_id, {}) if odds_map else {}
+
+            # Evaluate over 1.5
+            o15 = self._evaluate_binary_pair(
+                ml, fi, fixture_disagreement, fixture_elo_gap,
+                key_pattern="over_1_5",
+                pos_label="over_1_5", neg_label="under_1_5",
+                pos_readable="Over 1.5 goals", neg_readable="Under 1.5 goals",
+            )
+            if o15:
+                self._attach_value(o15, fixture_odds)
+                scored = self.risk_scorer.score_and_annotate(o15)
+                all_selections.append(scored)
+
+            # Evaluate over 2.5
+            ou = self._evaluate_binary_pair(
+                ml, fi, fixture_disagreement, fixture_elo_gap,
+                key_pattern="over_2_5",
+                pos_label="over_2_5", neg_label="under_2_5",
+                pos_readable="Over 2.5 goals", neg_readable="Under 2.5 goals",
+            )
+            if ou:
+                self._attach_value(ou, fixture_odds)
+                scored = self.risk_scorer.score_and_annotate(ou)
+                all_selections.append(scored)
+
+            # Evaluate BTTS
+            btts = self._evaluate_binary_pair(
+                ml, fi, fixture_disagreement, fixture_elo_gap,
+                key_pattern="btts",
+                pos_label="yes", neg_label="no",
+                pos_readable="BTTS Yes", neg_readable="BTTS No",
+            )
+            if btts:
+                self._attach_value(btts, fixture_odds)
+                scored = self.risk_scorer.score_and_annotate(btts)
+                all_selections.append(scored)
+
+            # Evaluate match result
+            mr = self._evaluate_match_result(ml, fi, fixture_disagreement, fixture_elo_gap)
+            if mr:
+                self._attach_value(mr, fixture_odds)
+                scored = self.risk_scorer.score_and_annotate(mr)
+                all_selections.append(scored)
+
+        # Sort by edge if value mode, else by risk
+        if odds_map:
+            return sorted(all_selections, key=lambda x: x.get("edge", -1), reverse=True)
+        return sorted(all_selections, key=lambda x: x.get("risk_score", 1.0))
+
     def _attach_value(self, candidate: Dict, fixture_odds: Dict) -> None:
         """Attach value metrics to a candidate using real odds."""
         if not fixture_odds:
@@ -231,6 +341,10 @@ class AccumulatorBuilder:
             real_odds = fixture_odds.get("away_odds")
         elif pred_value == "draw":
             real_odds = fixture_odds.get("draw_odds")
+        elif pred_value == "over_1_5":
+            real_odds = fixture_odds.get("over_1_5_odds")
+        elif pred_value == "under_1_5":
+            real_odds = fixture_odds.get("under_1_5_odds")
         elif pred_value == "over_2_5":
             real_odds = fixture_odds.get("over_2_5_odds")
         elif pred_value == "under_2_5":
@@ -371,8 +485,11 @@ class AccumulatorBuilder:
 
     def _build_category(self, pool, category, target, use_value: bool = False):
         min_odds, max_odds = target["min"], target["max"]
+        pred_filter = target.get("filter")
+
         if not pool:
-            return self._no(category, min_odds, max_odds, "No qualifying games available")
+            reason = f"No {pred_filter} predictions available" if pred_filter else "No qualifying games available"
+            return self._no(category, min_odds, max_odds, reason)
 
         chosen = []
         running_odds = 1.0
@@ -482,6 +599,7 @@ class AccumulatorBuilder:
         m = {
             "home_win": "Home Win", "away_win": "Away Win", "draw": "Draw",
             "yes": "BTTS Yes", "no": "BTTS No",
+            "over_1_5": "Over 1.5 goals", "under_1_5": "Under 1.5 goals",
             "over_2_5": "Over 2.5 goals", "under_2_5": "Under 2.5 goals",
         }
         return m.get(value, value.replace("_", " ").title())

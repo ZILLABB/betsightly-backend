@@ -211,12 +211,12 @@ class OddsService:
 
         # Make API call
         try:
-            # h2h = match winner odds, totals = over/under, btts = both teams to score
+            # h2h = match winner, totals = over/under (2.5 default + alternate lines)
             url = f"{self.base_url}/sports/{sport_key}/odds/"
             params = {
                 "apiKey": self.api_key,
                 "regions": "uk,eu",  # UK and EU bookmakers for best football coverage
-                "markets": "h2h,totals",  # Match winner + over/under
+                "markets": "h2h,totals,alternate_totals",  # Match winner + all goal lines
                 "oddsFormat": "decimal",
             }
 
@@ -286,6 +286,8 @@ class OddsService:
             "home_odds": None,
             "draw_odds": None,
             "away_odds": None,
+            "over_1_5_odds": None,
+            "under_1_5_odds": None,
             "over_2_5_odds": None,
             "under_2_5_odds": None,
             "bookmaker": None,
@@ -325,17 +327,39 @@ class OddsService:
                     elif name == "draw":
                         result["draw_odds"] = price
 
-            # Extract totals (over/under)
-            elif market.get("key") == "totals":
+            # Extract totals (over/under) for multiple lines
+            elif market.get("key") in ("totals", "alternate_totals"):
                 for outcome in market.get("outcomes", []):
                     name = outcome.get("name", "").lower()
                     point = outcome.get("point", 0)
                     price = outcome.get("price", 0)
-                    if point == 2.5:
-                        if name == "over":
+                    if point == 1.5:
+                        if name == "over" and result["over_1_5_odds"] is None:
+                            result["over_1_5_odds"] = price
+                        elif name == "under" and result["under_1_5_odds"] is None:
+                            result["under_1_5_odds"] = price
+                    elif point == 2.5:
+                        if name == "over" and result["over_2_5_odds"] is None:
                             result["over_2_5_odds"] = price
-                        elif name == "under":
+                        elif name == "under" and result["under_2_5_odds"] is None:
                             result["under_2_5_odds"] = price
+
+        # If over_1_5 not found in selected bookie, check all bookmakers
+        if result["over_1_5_odds"] is None:
+            for bk in bookmakers:
+                if result["over_1_5_odds"] is not None:
+                    break
+                for market in bk.get("markets", []):
+                    if market.get("key") in ("totals", "alternate_totals"):
+                        for outcome in market.get("outcomes", []):
+                            point = outcome.get("point", 0)
+                            name = outcome.get("name", "").lower()
+                            price = outcome.get("price", 0)
+                            if point == 1.5 and name == "over" and price > 1.0:
+                                result["over_1_5_odds"] = price
+                                break
+                            if point == 1.5 and name == "under" and price > 1.0:
+                                result["under_1_5_odds"] = price
 
         # Calculate implied probabilities
         if result["home_odds"] and result["draw_odds"] and result["away_odds"]:
