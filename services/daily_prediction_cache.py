@@ -298,7 +298,7 @@ class DailyPredictionCache:
                     'status': 'error',
                     'date': date_str,
                     'message': 'Both cache and real-time prediction failed',
-                    'categories': {'2_odds': [], '5_odds': [], '10_odds': [], 'rollover': []}
+                    'categories': {'2_odds': [], '5_odds': [], '10_odds': [], 'over_1_5': [], 'rollover': []}
                 }
                 
         except Exception as e:
@@ -307,7 +307,7 @@ class DailyPredictionCache:
                 'status': 'error',
                 'date': date_str,
                 'error': str(e),
-                'categories': {'2_odds': [], '5_odds': [], '10_odds': [], 'rollover': []}
+                'categories': {'2_odds': [], '5_odds': [], '10_odds': [], 'over_1_5': [], 'rollover': []}
             }
     
     def _update_cache_status(self, db: Session, date_str: str, cached_count: int, 

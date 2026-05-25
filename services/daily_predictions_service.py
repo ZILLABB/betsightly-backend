@@ -40,6 +40,7 @@ class DailyPrediction(Base):
     betting_2_odds = Column(Text, nullable=True)  # JSON string
     betting_5_odds = Column(Text, nullable=True)  # JSON string
     betting_10_odds = Column(Text, nullable=True)  # JSON string
+    betting_over_1_5 = Column(Text, nullable=True)  # JSON string
     betting_rollover = Column(Text, nullable=True)  # JSON string
     
     # Metadata
@@ -63,6 +64,7 @@ class DailyPredictionSummary(Base):
     betting_2_odds_count = Column(Integer, default=0)
     betting_5_odds_count = Column(Integer, default=0)
     betting_10_odds_count = Column(Integer, default=0)
+    betting_over_1_5_count = Column(Integer, default=0)
     betting_rollover_count = Column(Integer, default=0)
     
     generation_status = Column(String(50), default="pending")  # pending, completed, failed
@@ -173,7 +175,7 @@ class DailyPredictionsService:
             accumulators = accumulator_result.get('accumulators', {})
 
             # Count successful accumulators
-            category_counts = {"2_odds": 0, "5_odds": 0, "10_odds": 0, "rollover": 0}
+            category_counts = {"2_odds": 0, "5_odds": 0, "10_odds": 0, "over_1_5": 0, "rollover": 0}
             for category, accumulator in accumulators.items():
                 if accumulator.get('selected', False):
                     category_counts[category] = 1  # 1 accumulator per category
@@ -211,6 +213,7 @@ class DailyPredictionsService:
             summary.betting_2_odds_count = category_counts["2_odds"]
             summary.betting_5_odds_count = category_counts["5_odds"]
             summary.betting_10_odds_count = category_counts["10_odds"]
+            summary.betting_over_1_5_count = category_counts["over_1_5"]
             summary.betting_rollover_count = category_counts["rollover"]
             summary.generation_status = "completed"
             summary.generation_time = datetime.utcnow()
@@ -300,6 +303,7 @@ class DailyPredictionsService:
             betting_2_odds=json.dumps(betting_categories.get('2_odds', {})),
             betting_5_odds=json.dumps(betting_categories.get('5_odds', {})),
             betting_10_odds=json.dumps(betting_categories.get('10_odds', {})),
+            betting_over_1_5=json.dumps(betting_categories.get('over_1_5', {})),
             betting_rollover=json.dumps(betting_categories.get('rollover', {})),
             total_models_used=prediction_result['model_summary']['total_predictions'],
             highest_confidence=highest_confidence
@@ -310,14 +314,14 @@ class DailyPredictionsService:
         fixture_info = prediction_result['fixture_info']
         ml_predictions = prediction_result['ml_predictions']
         betting_categories = prediction_result['betting_categories']
-        
+
         # Calculate highest confidence
         highest_confidence = 0.0
         for pred_data in ml_predictions.values():
             confidence = pred_data.get('confidence', 0.0)
             if confidence > highest_confidence:
                 highest_confidence = confidence
-        
+
         return DailyPrediction(
             prediction_date=prediction_date,
             fixture_id=fixture_info.get('fixture_id', 0),
@@ -330,6 +334,7 @@ class DailyPredictionsService:
             betting_2_odds=json.dumps(betting_categories.get('2_odds', {})),
             betting_5_odds=json.dumps(betting_categories.get('5_odds', {})),
             betting_10_odds=json.dumps(betting_categories.get('10_odds', {})),
+            betting_over_1_5=json.dumps(betting_categories.get('over_1_5', {})),
             betting_rollover=json.dumps(betting_categories.get('rollover', {})),
             total_models_used=prediction_result['model_summary']['total_predictions'],
             highest_confidence=highest_confidence
@@ -347,6 +352,7 @@ class DailyPredictionsService:
                 "2_odds": summary.betting_2_odds_count,
                 "5_odds": summary.betting_5_odds_count,
                 "10_odds": summary.betting_10_odds_count,
+                "over_1_5": summary.betting_over_1_5_count,
                 "rollover": summary.betting_rollover_count
             },
             "status": summary.generation_status,

@@ -477,6 +477,9 @@ class AccumulatorBuilder:
             "model_disagreement": disagreement,
             "elo_gap": elo_gap,
             "models_agreed": models_agreed,
+            "home_team_logo": fi.get("home_team_logo", ""),
+            "away_team_logo": fi.get("away_team_logo", ""),
+            "league_logo": fi.get("league_logo", ""),
         }
 
     # ------------------------------------------------------------------
@@ -619,6 +622,9 @@ class AccumulatorBuilder:
             "risk_score": g.get("risk_score"),
             "risk_level": g.get("risk_level"),
             "models_agreed": g.get("models_agreed", 0),
+            "home_team_logo": g.get("home_team_logo", ""),
+            "away_team_logo": g.get("away_team_logo", ""),
+            "league_logo": g.get("league_logo", ""),
         }
 
         if include_value:

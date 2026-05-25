@@ -61,7 +61,7 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
         accumulators = {}
         
         # Get accumulator data from betting categories
-        categories = ['2_odds', '5_odds', '10_odds', 'rollover']
+        categories = ['2_odds', '5_odds', '10_odds', 'over_1_5', 'rollover']
         for category in categories:
             category_data = getattr(first_prediction, f'betting_{category}', '{}')
             if category_data:
@@ -273,6 +273,7 @@ def get_accumulator_summary(db: Session = Depends(get_db)):
                     "2_odds": summary.betting_2_odds_count > 0,
                     "5_odds": summary.betting_5_odds_count > 0,
                     "10_odds": summary.betting_10_odds_count > 0,
+                    "over_1_5": summary.betting_over_1_5_count > 0,
                     "rollover": summary.betting_rollover_count > 0
                 },
                 "generation_status": summary.generation_status,
@@ -341,6 +342,7 @@ def rebuild_accumulators(
             pred.betting_2_odds = json.dumps(accumulators.get('2_odds', {}))
             pred.betting_5_odds = json.dumps(accumulators.get('5_odds', {}))
             pred.betting_10_odds = json.dumps(accumulators.get('10_odds', {}))
+            pred.betting_over_1_5 = json.dumps(accumulators.get('over_1_5', {}))
             pred.betting_rollover = json.dumps(accumulators.get('rollover', {}))
             pred.updated_at = datetime.utcnow()
         
