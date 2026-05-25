@@ -57,3 +57,4 @@ htmlcov/
 # Temporary files
 .DS_Store
 Thumbs.db
+cache/

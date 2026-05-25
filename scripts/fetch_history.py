@@ -2,7 +2,7 @@
 Fetch 5 seasons of historical fixtures from API-Football.
 
 Saves to data/api-football/matches.csv with team names that exactly
-match the live fixture API — eliminating all name-mismatch issues.
+match the live fixture API ? eliminating all name-mismatch issues.
 
 Usage:
     py scripts/fetch_history.py
@@ -10,7 +10,7 @@ Usage:
 Resume-safe: tracks progress in data/api-football/progress.json so you
 can stop and restart without re-fetching completed league/season combos.
 
-API cost: ~80 requests (16 leagues × 5 seasons). Free tier = 100/day.
+API cost: ~80 requests (16 leagues ? 5 seasons). Free tier = 100/day.
 """
 
 import csv
@@ -32,10 +32,10 @@ OUTPUT_DIR      = Path("data/api-football")
 OUTPUT_CSV      = OUTPUT_DIR / "matches.csv"
 PROGRESS_FILE   = OUTPUT_DIR / "progress.json"
 
-# 5 seasons back from current
-SEASONS = [2020, 2021, 2022, 2023, 2024]
+# Free plan allows 2022-2024 only
+SEASONS = [2022, 2023, 2024]
 
-# League ID → (display name, country, tier)
+# League ID ? (display name, country, tier)
 TARGET_LEAGUES = {
     39:  ("Premier League",    "England",     1),
     40:  ("Championship",      "England",     2),
@@ -78,44 +78,36 @@ def save_progress(done: set):
 
 
 def fetch_season(league_id: int, season: int) -> list:
-    """Fetch all finished fixtures for one league/season (handles pagination)."""
-    all_fixtures = []
-    page = 1
+    """Fetch all finished fixtures for one league/season."""
+    resp = requests.get(
+        f"{BASE_URL}/fixtures",
+        headers=HEADERS,
+        params={"league": league_id, "season": season, "status": "FT"},
+        timeout=30,
+    )
 
-    while True:
+    if resp.status_code == 429:
+        print("  Rate limited - waiting 65s...")
+        time.sleep(65)
+        # Retry once
         resp = requests.get(
             f"{BASE_URL}/fixtures",
             headers=HEADERS,
-            params={"league": league_id, "season": season, "status": "FT", "page": page},
+            params={"league": league_id, "season": season, "status": "FT"},
             timeout=30,
         )
 
-        if resp.status_code == 429:
-            print("  Rate limited — waiting 60s...")
-            time.sleep(60)
-            continue
+    if resp.status_code != 200:
+        print(f"  HTTP {resp.status_code}: {resp.text[:120]}")
+        return []
 
-        if resp.status_code != 200:
-            print(f"  HTTP {resp.status_code}: {resp.text[:120]}")
-            return all_fixtures
+    data = resp.json()
+    errors = data.get("errors", {})
+    if errors:
+        print(f"  API errors: {errors}")
+        return []
 
-        data = resp.json()
-        errors = data.get("errors", {})
-        if errors:
-            print(f"  API errors: {errors}")
-            return all_fixtures
-
-        batch = data.get("response", [])
-        all_fixtures.extend(batch)
-
-        paging = data.get("paging", {})
-        if paging.get("current", 1) >= paging.get("total", 1):
-            break
-
-        page += 1
-        time.sleep(0.5)
-
-    return all_fixtures
+    return data.get("response", [])
 
 
 def parse_fixture(f: dict, league_id: int, league_name: str,
@@ -169,7 +161,7 @@ def main():
     print(f"Remaining: {len(tasks)} fetches (~{len(tasks) * 1.2:.0f}s)\n")
 
     if not tasks:
-        print("Nothing to fetch — all done!")
+        print("Nothing to fetch ? all done!")
         return
 
     file_exists = OUTPUT_CSV.exists() and OUTPUT_CSV.stat().st_size > 50
@@ -184,7 +176,7 @@ def main():
 
         for league_id, season in tasks:
             name, country, tier = TARGET_LEAGUES[league_id]
-            print(f"[{requests_used + 1}/{len(tasks)}] {name} — {season}/{season+1}...")
+            print(f"[{requests_used + 1}/{len(tasks)}] {name} ? {season}/{season+1}...")
 
             fixtures = fetch_season(league_id, season)
             requests_used += 1
@@ -203,7 +195,7 @@ def main():
             print(f"  Saved {len(rows)} matches  (running total: {total_written:,})")
             time.sleep(1.2)   # Stay well under rate limit
 
-    print(f"\n✅  Done! {total_written:,} matches → {OUTPUT_CSV}")
+    print(f"\nOK  Done! {total_written:,} matches ? {OUTPUT_CSV}")
     print(f"   API requests used today: {requests_used}")
     print(f"\nNext step: py scripts/retrain_models.py")
 

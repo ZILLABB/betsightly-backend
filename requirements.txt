@@ -30,3 +30,8 @@ python-dotenv==1.0.0
 python-telegram-bot==20.7
 redis==5.0.1
 sentry-sdk[fastapi]==1.39.1
+
+# New ML models — added for enhanced prediction accuracy
+catboost==1.2.3
+scipy>=1.11.0
+tensorflow>=2.14.0

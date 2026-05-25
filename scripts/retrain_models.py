@@ -2,11 +2,11 @@
 Retrain all ML models on API-Football historical data.
 
 Reads data/api-football/matches.csv (produced by fetch_history.py),
-engineers features, trains XGBoost + LightGBM models, and writes
-the .joblib files to models/.
+engineers features, trains XGBoost + LightGBM + CatBoost models,
+ELO ratings, and Dixon-Coles parameters, and writes to models/.
 
 The feature vector is defined ONCE here and mirrored exactly in
-services/advanced_prediction_service.py — that's what makes
+services/advanced_prediction_service.py ? that's what makes
 predictions consistent with training.
 
 Usage:
@@ -166,7 +166,7 @@ FEATURE_COLUMNS = [
 
 def compute_features(home: str, away: str, date, df_past: pd.DataFrame,
                      league_tier: int = 1) -> list:
-    """Build feature vector — must mirror advanced_prediction_service._compute_api_features()."""
+    """Build feature vector ? must mirror advanced_prediction_service._compute_api_features()."""
     h5  = _team_stats(df_past, home, 5)
     h10 = _team_stats(df_past, home, 10)
     hh5 = _team_home_stats(df_past, home, 5)
@@ -206,11 +206,11 @@ def build_dataset(df: pd.DataFrame) -> tuple:
     """
     Compute features + targets for every match in df (using only past data).
     Skips the first 20 matches per team to ensure enough history.
-    Returns X (numpy), y_result, y_over25, y_btts.
+    Returns X (numpy), y_result, y_over15, y_over25, y_btts.
     """
     print("Building feature matrix (this takes a few minutes)...")
 
-    X, y_result, y_over25, y_btts = [], [], [], []
+    X, y_result, y_over15, y_over25, y_btts = [], [], [], [], []
     skipped = 0
 
     for idx, row in df.iterrows():
@@ -237,11 +237,12 @@ def build_dataset(df: pd.DataFrame) -> tuple:
         # Targets
         hg, ag = row["home_score"], row["away_score"]
         y_result.append(2 if hg > ag else (1 if hg == ag else 0))
-        y_over25.append(1 if hg + ag > 2 else 0)
+        y_over15.append(1 if hg + ag > 1 else 0)   # 2+ goals total
+        y_over25.append(1 if hg + ag > 2 else 0)   # 3+ goals total
         y_btts.append(1 if hg > 0 and ag > 0 else 0)
 
     print(f"  Built {len(X):,} training samples (skipped {skipped:,} with insufficient history)")
-    return np.array(X), np.array(y_result), np.array(y_over25), np.array(y_btts)
+    return np.array(X), np.array(y_result), np.array(y_over15), np.array(y_over25), np.array(y_btts)
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +253,7 @@ def train_xgboost(X_train, y_train, label: str):
     try:
         from xgboost import XGBClassifier
     except ImportError:
-        print("  xgboost not installed — skipping XGBoost")
+        print("  xgboost not installed ? skipping XGBoost")
         return None
 
     n_classes = len(np.unique(y_train))
@@ -279,7 +280,7 @@ def train_lightgbm(X_train, y_train, label: str):
     try:
         import lightgbm as lgb
     except ImportError:
-        print("  lightgbm not installed — skipping LightGBM")
+        print("  lightgbm not installed ? skipping LightGBM")
         return None
 
     n_classes = len(np.unique(y_train))
@@ -301,6 +302,28 @@ def train_lightgbm(X_train, y_train, label: str):
     return model
 
 
+
+def train_catboost(X_train, y_train, label: str):
+    try:
+        from catboost import CatBoostClassifier
+    except ImportError:
+        print("  catboost not installed - skipping CatBoost")
+        return None
+
+    n_classes = len(np.unique(y_train))
+    loss = "MultiClass" if n_classes > 2 else "Logloss"
+
+    model = CatBoostClassifier(
+        iterations=300,
+        depth=5,
+        learning_rate=0.05,
+        loss_function=loss,
+        random_seed=42,
+        verbose=0,
+    )
+    model.fit(X_train, y_train)
+    return model
+
 def evaluate(model, X_test, y_test, name: str):
     from sklearn.metrics import accuracy_score
     preds = model.predict(X_test)
@@ -320,14 +343,15 @@ def train_and_save(X, y, label: str, out_dir: Path):
 
     xgb_model  = train_xgboost(X_train, y_train, label)
     lgbm_model = train_lightgbm(X_train, y_train, label)
+    cb_model   = train_catboost(X_train, y_train, label)
 
-    for model, name in [(xgb_model, "xgb"), (lgbm_model, "lgbm")]:
+    for model, name in [(xgb_model, "xgb"), (lgbm_model, "lgbm"), (cb_model, "catboost")]:
         if model is None:
             continue
         evaluate(model, X_test, y_test, name)
         path = out_dir / f"{label}_{name}.joblib"
         joblib.dump(model, path)
-        print(f"    Saved → {path}")
+        print(f"    Saved ? {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -349,19 +373,56 @@ def main():
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     df = load_data()
-    X, y_result, y_over25, y_btts = build_dataset(df)
+    X, y_result, y_over15, y_over25, y_btts = build_dataset(df)
 
     print(f"\nDataset summary:")
     print(f"  Samples   : {len(X):,}")
     print(f"  Home wins : {(y_result == 2).sum():,}  ({(y_result == 2).mean():.1%})")
     print(f"  Draws     : {(y_result == 1).sum():,}  ({(y_result == 1).mean():.1%})")
     print(f"  Away wins : {(y_result == 0).sum():,}  ({(y_result == 0).mean():.1%})")
+    print(f"  Over 1.5  : {y_over15.sum():,}  ({y_over15.mean():.1%})")
     print(f"  Over 2.5  : {y_over25.sum():,}  ({y_over25.mean():.1%})")
     print(f"  BTTS      : {y_btts.sum():,}  ({y_btts.mean():.1%})")
 
     train_and_save(X, y_result, "match_result", MODELS_DIR)
+    train_and_save(X, y_over15, "over_1_5",     MODELS_DIR)
     train_and_save(X, y_over25, "over_2_5",     MODELS_DIR)
     train_and_save(X, y_btts,   "btts",         MODELS_DIR)
+
+    # Train statistical models (ELO + Dixon-Coles)
+    print("\nTraining statistical models...")
+    matches_for_stat = []
+    for _, r in df.iterrows():
+        try:
+            matches_for_stat.append({
+                "home_team": r["home_team"],
+                "away_team": r["away_team"],
+                "home_goals": int(r["home_score"]),
+                "away_goals": int(r["away_score"]),
+                "date": str(r["date"]),
+            })
+        except (ValueError, KeyError):
+            continue
+
+    try:
+        from ml.elo_model import EloRatingSystem
+        elo = EloRatingSystem()
+        elo.train(matches_for_stat)
+        elo_path = MODELS_DIR / "elo_ratings.json"
+        elo.save(str(elo_path))
+        print(f"  ELO ratings saved ({len(elo.ratings)} teams)")
+    except Exception as e:
+        print(f"  ELO training failed: {e}")
+
+    try:
+        from ml.dixon_coles_model import DixonColesModel
+        dc = DixonColesModel()
+        dc.train(matches_for_stat[-2000:])
+        dc_path = MODELS_DIR / "dixon_coles.json"
+        dc.save(str(dc_path))
+        print(f"  Dixon-Coles saved ({len(dc.teams)} teams)")
+    except Exception as e:
+        print(f"  Dixon-Coles training failed: {e}")
 
     # Save feature columns so prediction code knows the vector layout
     meta = {
@@ -370,18 +431,18 @@ def main():
         "h2h_window":      H2H_WINDOW,
         "trained_at":      datetime.utcnow().isoformat(),
         "n_samples":       len(X),
-        "models": ["match_result_xgb", "match_result_lgbm",
-                   "over_2_5_xgb", "over_2_5_lgbm",
-                   "btts_xgb", "btts_lgbm"],
+        "models": ["match_result_xgb", "match_result_lgbm", "match_result_catboost",
+                   "over_2_5_xgb", "over_2_5_lgbm", "over_2_5_catboost",
+                   "btts_xgb", "btts_lgbm", "btts_catboost"],
         "result_classes":  {0: "Away Win", 1: "Draw", 2: "Home Win"},
     }
     meta_path = MODELS_DIR / "meta.json"
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
 
-    print(f"\n✅  All models saved to {MODELS_DIR}/")
+    print(f"\n?  All models saved to {MODELS_DIR}/")
     print(f"   Feature columns: {len(FEATURE_COLUMNS)}")
-    print(f"\nNext step: restart the server — predictions will use the new models automatically.")
+    print(f"\nNext step: restart the server ? predictions will use the new models automatically.")
 
 
 if __name__ == "__main__":

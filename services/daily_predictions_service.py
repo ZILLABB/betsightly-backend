@@ -40,6 +40,7 @@ class DailyPrediction(Base):
     betting_2_odds = Column(Text, nullable=True)  # JSON string
     betting_5_odds = Column(Text, nullable=True)  # JSON string
     betting_10_odds = Column(Text, nullable=True)  # JSON string
+    betting_over_1_5 = Column(Text, nullable=True)  # JSON string
     betting_rollover = Column(Text, nullable=True)  # JSON string
     
     # Metadata
@@ -63,6 +64,7 @@ class DailyPredictionSummary(Base):
     betting_2_odds_count = Column(Integer, default=0)
     betting_5_odds_count = Column(Integer, default=0)
     betting_10_odds_count = Column(Integer, default=0)
+    betting_over_1_5_count = Column(Integer, default=0)
     betting_rollover_count = Column(Integer, default=0)
     
     generation_status = Column(String(50), default="pending")  # pending, completed, failed
@@ -173,7 +175,7 @@ class DailyPredictionsService:
             accumulators = accumulator_result.get('accumulators', {})
 
             # Count successful accumulators
-            category_counts = {"2_odds": 0, "5_odds": 0, "10_odds": 0, "rollover": 0}
+            category_counts = {"2_odds": 0, "5_odds": 0, "10_odds": 0, "over_1_5": 0, "rollover": 0}
             for category, accumulator in accumulators.items():
                 if accumulator.get('selected', False):
                     category_counts[category] = 1  # 1 accumulator per category
@@ -207,25 +209,28 @@ class DailyPredictionsService:
             
             # Update summary
             summary.predictions_generated = predictions_count
-            summary.models_used = sum(len(self.ml_service.models[mt]) for mt in self.ml_service.models)
+            summary.models_used = len(self.ml_service.api_models)
             summary.betting_2_odds_count = category_counts["2_odds"]
             summary.betting_5_odds_count = category_counts["5_odds"]
             summary.betting_10_odds_count = category_counts["10_odds"]
+            summary.betting_over_1_5_count = category_counts["over_1_5"]
             summary.betting_rollover_count = category_counts["rollover"]
             summary.generation_status = "completed"
             summary.generation_time = datetime.utcnow()
             
             db.commit()
-            db.close()
-            
+
             logger.info(f"✅ Generated {predictions_count} predictions for {target_date}")
-            
-            return {
+
+            # Build response before closing session (object is still bound)
+            result = {
                 "status": "success",
                 "date": target_date,
                 "message": f"Generated {predictions_count} predictions",
                 "summary": self._summary_to_dict(summary)
             }
+            db.close()
+            return result
             
         except Exception as e:
             logger.error(f"Error generating daily predictions: {str(e)}")
@@ -247,36 +252,26 @@ class DailyPredictionsService:
             }
     
     def _filter_upcoming_fixtures(self, fixtures: List[Dict]) -> List[Dict]:
-        """Filter for truly upcoming fixtures."""
+        """Filter for upcoming (not-started) fixtures only.
+
+        API-Football short status codes:
+            NS = Not Started, TBD = Time To Be Defined
+            1H/2H/HT/ET/BT/P/SUSP/INT = in-play
+            FT/AET/PEN = finished
+            PST/CANC/ABD/AWD/WO = cancelled/postponed
+        """
+        upcoming_codes = {"NS", "TBD"}
         upcoming = []
-        excluded_statuses = [
-            'Finished', 'FT', 'AET', 'PEN', 'After Pen.', 'After Extra Time',
-            'Live', 'HT', 'Half Time', '1st Half', '2nd Half', 'Extra Time',
-            'Penalty Shootout', 'Suspended', 'Postponed', 'Cancelled',
-            'Abandoned', 'Interrupted', 'Awarded', 'WalkOver', 'Retired'
-        ]
-        
+
         for fixture in fixtures:
-            status = fixture.get('status', '').strip()
-            status_lower = status.lower()
-            
-            # Check if finished
-            finished_indicators = ['finished', 'ft', 'aet', 'pen', 'after', 'live', 'half', 'time', 'extra']
-            is_finished = (status in excluded_statuses or 
-                          any(indicator in status_lower for indicator in finished_indicators))
-            
-            if not is_finished and status not in ['', 'Unknown']:
-                # Additional date check
-                try:
-                    fixture_date_str = fixture.get('date', '')
-                    if fixture_date_str:
-                        fixture_date = datetime.fromisoformat(fixture_date_str.replace('Z', '+00:00'))
-                        if fixture_date > datetime.now():
-                            upcoming.append(fixture)
-                except:
-                    if status in ['Not Started', 'Scheduled', 'Fixture']:
-                        upcoming.append(fixture)
-        
+            status = fixture.get("status", "").strip()
+            if status in upcoming_codes:
+                upcoming.append(fixture)
+                continue
+            # Fallback for long-form status strings
+            if status.lower() in ("not started", "scheduled"):
+                upcoming.append(fixture)
+
         return upcoming
     
     def _create_db_prediction_with_accumulators(self, prediction_result: Dict, prediction_date: date, accumulators: Dict) -> DailyPrediction:
@@ -308,6 +303,7 @@ class DailyPredictionsService:
             betting_2_odds=json.dumps(betting_categories.get('2_odds', {})),
             betting_5_odds=json.dumps(betting_categories.get('5_odds', {})),
             betting_10_odds=json.dumps(betting_categories.get('10_odds', {})),
+            betting_over_1_5=json.dumps(betting_categories.get('over_1_5', {})),
             betting_rollover=json.dumps(betting_categories.get('rollover', {})),
             total_models_used=prediction_result['model_summary']['total_predictions'],
             highest_confidence=highest_confidence
@@ -318,14 +314,14 @@ class DailyPredictionsService:
         fixture_info = prediction_result['fixture_info']
         ml_predictions = prediction_result['ml_predictions']
         betting_categories = prediction_result['betting_categories']
-        
+
         # Calculate highest confidence
         highest_confidence = 0.0
         for pred_data in ml_predictions.values():
             confidence = pred_data.get('confidence', 0.0)
             if confidence > highest_confidence:
                 highest_confidence = confidence
-        
+
         return DailyPrediction(
             prediction_date=prediction_date,
             fixture_id=fixture_info.get('fixture_id', 0),
@@ -338,6 +334,7 @@ class DailyPredictionsService:
             betting_2_odds=json.dumps(betting_categories.get('2_odds', {})),
             betting_5_odds=json.dumps(betting_categories.get('5_odds', {})),
             betting_10_odds=json.dumps(betting_categories.get('10_odds', {})),
+            betting_over_1_5=json.dumps(betting_categories.get('over_1_5', {})),
             betting_rollover=json.dumps(betting_categories.get('rollover', {})),
             total_models_used=prediction_result['model_summary']['total_predictions'],
             highest_confidence=highest_confidence
@@ -355,6 +352,7 @@ class DailyPredictionsService:
                 "2_odds": summary.betting_2_odds_count,
                 "5_odds": summary.betting_5_odds_count,
                 "10_odds": summary.betting_10_odds_count,
+                "over_1_5": summary.betting_over_1_5_count,
                 "rollover": summary.betting_rollover_count
             },
             "status": summary.generation_status,
