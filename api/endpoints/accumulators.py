@@ -5,7 +5,7 @@ Provides accumulator bets that combine multiple games to reach target odds.
 
 import logging
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from services.daily_predictions_service import DailyPrediction, DailyPredictionSummary
 from services.accumulator_builder import AccumulatorBuilder, format_accumulator_for_display
+from services.apifootball_service import APIFootballService
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -284,6 +285,158 @@ def get_accumulator_summary(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error getting accumulator summary: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+#  Result checking helpers
+# ---------------------------------------------------------------------------
+
+def _check_prediction_result(prediction_value: str, home_score: int, away_score: int) -> str:
+    """Compare a prediction against actual scores. Returns 'won', 'lost', or 'void'."""
+    total_goals = home_score + away_score
+    pv = (prediction_value or "").lower().strip()
+
+    if pv in ("home_win", "home win"):
+        return "won" if home_score > away_score else "lost"
+    if pv in ("away_win", "away win"):
+        return "won" if away_score > home_score else "lost"
+    if pv == "draw":
+        return "won" if home_score == away_score else "lost"
+    if pv == "over_1_5" or pv == "over 1.5 goals":
+        return "won" if total_goals > 1 else "lost"
+    if pv == "under_1_5" or pv == "under 1.5 goals":
+        return "won" if total_goals <= 1 else "lost"
+    if pv == "over_2_5" or pv == "over 2.5 goals":
+        return "won" if total_goals > 2 else "lost"
+    if pv == "under_2_5" or pv == "under 2.5 goals":
+        return "won" if total_goals <= 2 else "lost"
+    if pv in ("yes", "btts yes"):
+        return "won" if home_score > 0 and away_score > 0 else "lost"
+    if pv in ("no", "btts no"):
+        return "won" if home_score == 0 or away_score == 0 else "lost"
+
+    return "void"  # unknown prediction type
+
+
+@router.get("/results")
+def get_accumulator_results(
+    target_date: str = Query(None, description="Date in YYYY-MM-DD format (default: yesterday)"),
+    db: Session = Depends(get_db),
+):
+    """
+    Check actual results for a date's accumulators.
+
+    Fetches finished fixtures from API-Football, compares against predictions,
+    and returns win/loss status per game and per category.
+    """
+    try:
+        if target_date is None:
+            check_date = datetime.now().date() - timedelta(days=1)
+        else:
+            check_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+
+        # Get stored predictions for that date
+        predictions = db.query(DailyPrediction).filter(
+            DailyPrediction.prediction_date == check_date
+        ).all()
+
+        if not predictions:
+            return {
+                "status": "no_predictions",
+                "date": check_date.isoformat(),
+                "message": "No predictions found for this date.",
+                "categories": {},
+            }
+
+        # Fetch actual fixture results from API-Football
+        apifootball = APIFootballService()
+        fixtures = apifootball.get_daily_fixtures(check_date.isoformat())
+
+        # Build a lookup: fixture_id -> {home_score, away_score, status}
+        score_lookup: Dict[int, Dict] = {}
+        for fx in fixtures:
+            fid = fx.get("fixture_id")
+            if fid and fx.get("status") in ("FT", "AET", "PEN"):
+                score_lookup[fid] = {
+                    "home_score": fx.get("home_score", 0) or 0,
+                    "away_score": fx.get("away_score", 0) or 0,
+                    "status": fx.get("status"),
+                }
+
+        # Check each category
+        first_pred = predictions[0]
+        categories_list = ["2_odds", "5_odds", "10_odds", "over_1_5", "rollover"]
+        results: Dict[str, Any] = {}
+
+        for cat in categories_list:
+            raw = getattr(first_pred, f"betting_{cat}", "{}")
+            try:
+                cat_data = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                cat_data = {}
+
+            if not cat_data.get("selected"):
+                results[cat] = {"selected": False, "reason": cat_data.get("reason", "Not available")}
+                continue
+
+            games = cat_data.get("games", [])
+            checked_games = []
+            wins = 0
+            losses = 0
+            pending = 0
+
+            for game in games:
+                fid = game.get("fixture_id")
+                sc = score_lookup.get(fid)
+
+                if sc is None:
+                    game["result"] = "pending"
+                    game["home_score"] = None
+                    game["away_score"] = None
+                    pending += 1
+                else:
+                    game["home_score"] = sc["home_score"]
+                    game["away_score"] = sc["away_score"]
+                    # Use prediction field for readable, prediction_type+value for matching
+                    pred_val = game.get("prediction", "") or game.get("prediction_value", "")
+                    game["result"] = _check_prediction_result(pred_val, sc["home_score"], sc["away_score"])
+                    if game["result"] == "won":
+                        wins += 1
+                    elif game["result"] == "lost":
+                        losses += 1
+                    else:
+                        pending += 1
+
+                checked_games.append(game)
+
+            total = len(checked_games)
+            all_resolved = pending == 0 and total > 0
+            cat_result = "won" if all_resolved and losses == 0 else "lost" if all_resolved else "pending"
+
+            results[cat] = {
+                "selected": True,
+                "total_odds": cat_data.get("total_odds", 0),
+                "games": checked_games,
+                "wins": wins,
+                "losses": losses,
+                "pending": pending,
+                "total_games": total,
+                "accumulator_result": cat_result,
+            }
+
+        return {
+            "status": "success",
+            "date": check_date.isoformat(),
+            "fixtures_checked": len(score_lookup),
+            "categories": results,
+        }
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    except Exception as e:
+        logger.error(f"Error checking accumulator results: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
 
 @router.post("/rebuild")
 def rebuild_accumulators(
