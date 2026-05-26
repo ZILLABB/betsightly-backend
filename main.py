@@ -11,6 +11,8 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 
+import threading
+
 from api.api import api_router
 from database import init_db, get_db
 from utils.config import settings
@@ -96,6 +98,45 @@ setup_exception_handlers(app)
 
 # Include API router
 app.include_router(api_router, prefix="/api")
+
+def _auto_generate_predictions():
+    """Auto-generate today's predictions on startup (runs in background thread)."""
+    import time
+    time.sleep(5)  # Let the server finish booting first
+    try:
+        from services.daily_predictions_service import DailyPredictionsService
+        from database import SessionLocal
+        from services.daily_predictions_service import DailyPredictionSummary
+
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_date = datetime.now().date()
+
+        db = SessionLocal()
+        try:
+            existing = db.query(DailyPredictionSummary).filter(
+                DailyPredictionSummary.prediction_date == today_date
+            ).first()
+
+            if existing and existing.generation_status == "completed":
+                logger.info(f"Predictions for {today_str} already exist — skipping auto-generate")
+                return
+
+            logger.info(f"Auto-generating predictions for {today_str}...")
+            service = DailyPredictionsService()
+            result = service.generate_daily_predictions(today_str)
+            status = result.get("status", "unknown")
+            count = result.get("summary", {}).get("predictions_generated", 0)
+            logger.info(f"Auto-generate complete: status={status}, predictions={count}")
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Auto-generate predictions failed: {e}")
+
+# Start auto-generation in background thread on app startup
+threading.Thread(target=_auto_generate_predictions, daemon=True).start()
+logger.info("Background prediction auto-generation scheduled")
+
 
 @app.get("/")
 def root():
