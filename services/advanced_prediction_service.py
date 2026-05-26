@@ -184,10 +184,24 @@ class AdvancedPredictionService:
                     self._api_model_meta = json.load(f)
 
                 self._api_models = {}
+                self._api_model_weights = {}
+
+                # Load accuracy-based weights if available
+                weights_path = Path("models/api_football/model_weights.json")
+                if weights_path.exists():
+                    with open(weights_path) as f:
+                        self._api_model_weights = json.load(f)
+                    logger.info(f"  Loaded accuracy weights for {len(self._api_model_weights)} models")
+
                 for model_name in self._api_model_meta.get("models", []):
                     p = Path(f"models/api_football/{model_name}.joblib")
                     if p.exists():
-                        self._api_models[model_name] = joblib.load(p)
+                        loaded = joblib.load(p)
+                        # Neural network models are saved as (model, scaler) tuples
+                        if model_name.endswith("_nn") and isinstance(loaded, tuple):
+                            self._api_models[model_name] = {"model": loaded[0], "scaler": loaded[1], "is_nn": True}
+                        else:
+                            self._api_models[model_name] = {"model": loaded, "scaler": None, "is_nn": False}
 
                 # Load the API-Football historical data for feature computation
                 api_csv = Path("data/api-football/matches.csv")
@@ -195,8 +209,12 @@ class AdvancedPredictionService:
                     self._api_df = pd.read_csv(api_csv, low_memory=False)
                     self._api_df["date"] = pd.to_datetime(self._api_df["date"], errors="coerce")
                     self._api_df = self._api_df.dropna(subset=["date"]).sort_values("date")
+
+                    nn_count = sum(1 for v in self._api_models.values() if v["is_nn"])
+                    tree_count = len(self._api_models) - nn_count
                     logger.info(
-                        f"✅ API-Football models loaded: {len(self._api_models)} models, "
+                        f"✅ API-Football full ensemble loaded: {len(self._api_models)} models "
+                        f"({tree_count} tree-based + {nn_count} neural nets), "
                         f"{len(self._api_df):,} historical matches"
                     )
                     return  # Use these — skip legacy models
@@ -207,6 +225,7 @@ class AdvancedPredictionService:
 
         # Fall back to legacy xgboost models
         self._api_models = {}
+        self._api_model_weights = {}
         self._api_df = None
         model_directories = [
             ("xgboost", "models/xgboost"),
@@ -683,7 +702,7 @@ class AdvancedPredictionService:
         ]
 
     def _predict_with_api_models(self, features: list, home: str, away: str) -> Optional[Dict]:
-        """Run all available models (XGB/LGBM + ELO + Dixon-Coles) and combine via BMA."""
+        """Run full ensemble (XGB/LGBM/CatBoost/RF/ET/NN + ELO + Dixon-Coles) and combine via weighted voting."""
         if not self._api_models or features is None:
             return None
 
@@ -693,11 +712,26 @@ class AdvancedPredictionService:
         preds = {}
         bma_inputs = []
 
-        for model_name, model in self._api_models.items():
+        for model_name, model_info in self._api_models.items():
             try:
-                proba = model.predict_proba(X)[0]
+                model_obj = model_info["model"]
+                is_nn = model_info["is_nn"]
+                scaler = model_info["scaler"]
+
+                # Neural networks need scaled features
+                if is_nn and scaler is not None:
+                    X_input = scaler.transform(X)
+                else:
+                    X_input = X
+
+                proba = model_obj.predict_proba(X_input)[0]
                 pred_idx = int(np.argmax(proba))
-                conf = float(proba[pred_idx]) * 100
+
+                # Use accuracy-based weight if available, else default weight
+                accuracy_weight = self._api_model_weights.get(model_name, 0.5)
+                # Scale confidence by model accuracy so better models count more
+                raw_conf = float(proba[pred_idx]) * 100
+                conf = raw_conf * accuracy_weight  # weighted confidence for voting
 
                 if "match_result" in model_name:
                     label = result_classes.get(pred_idx, "Unknown")
@@ -710,7 +744,10 @@ class AdvancedPredictionService:
                         "prediction": pred_key,
                         "confidence": float(proba[pred_idx]),
                         "probabilities": prob_dict,
+                        "weight": accuracy_weight,
                     })
+                elif "over_1_5" in model_name:
+                    label = "Over 1.5 Goals" if pred_idx == 1 else "Under 1.5 Goals"
                 elif "over_2_5" in model_name:
                     label = "Over 2.5 Goals" if pred_idx == 1 else "Under 2.5 Goals"
                 elif "btts" in model_name:
@@ -718,8 +755,13 @@ class AdvancedPredictionService:
                 else:
                     label = str(pred_idx)
 
-                preds[model_name] = {"prediction": label, "confidence": conf,
-                                     "model_type": model_name.split("_")[-1]}
+                preds[model_name] = {
+                    "prediction": label,
+                    "confidence": round(raw_conf, 1),
+                    "weighted_confidence": round(conf, 1),
+                    "model_type": model_name.split("_")[-1],
+                    "accuracy_weight": round(accuracy_weight, 4),
+                }
             except Exception as e:
                 logger.debug(f"Model {model_name} prediction failed: {e}")
 
@@ -778,13 +820,47 @@ class AdvancedPredictionService:
             majority = Counter(pred_vals).most_common(1)[0]
             model_disagreement = 1.0 - majority[1] / len(pred_vals)
 
-        best = max(preds.values(), key=lambda p: p["confidence"])
+        # --- Weighted ensemble voting across all models ---
+        # Group by prediction label, weight votes by model accuracy
+        from collections import defaultdict
+        vote_scores = defaultdict(float)
+        vote_counts = defaultdict(int)
+        raw_confidences = []
+
+        for model_name, pred_info in preds.items():
+            label = pred_info["prediction"]
+            weight = pred_info.get("accuracy_weight", 0.5)
+            raw_conf = pred_info.get("confidence", pred_info.get("weighted_confidence", 50.0))
+            vote_scores[label] += weight * (raw_conf / 100.0)
+            vote_counts[label] += 1
+            raw_confidences.append(raw_conf)
+
+        # Pick the prediction with the highest weighted score
+        best_label = max(vote_scores, key=vote_scores.get)
+        # Average raw confidence of models that voted for the winner
+        winner_confs = [
+            p["confidence"] for p in preds.values()
+            if p["prediction"] == best_label
+        ]
+        ensemble_confidence = np.mean(winner_confs) if winner_confs else 50.0
+
+        # Boost confidence when many models agree, penalize when they disagree
+        agreement_ratio = vote_counts[best_label] / len(preds)
+        # Scale: 1.0 = all agree, 0.5 = half agree
+        confidence_adj = 0.8 + 0.2 * agreement_ratio  # 0.9 to 1.0 multiplier
+        final_confidence = min(ensemble_confidence * confidence_adj, 95.0)
+
         return {
-            "prediction": best["prediction"],
-            "confidence": best["confidence"],
+            "prediction": best_label,
+            "confidence": round(final_confidence, 1),
             "model_predictions": preds,
             "model_disagreement": round(model_disagreement, 4),
             "elo_gap": round(elo_gap, 1),
+            "ensemble_stats": {
+                "models_voted": len(preds),
+                "agreement_ratio": round(agreement_ratio, 2),
+                "vote_scores": dict(vote_scores),
+            },
         }
 
     def _resolve_bet_label(self, raw_label: str, model_predictions: Dict, home_team: str, away_team: str) -> str:
