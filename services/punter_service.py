@@ -46,17 +46,32 @@ class PunterService:
         self.cache_dir = os.path.join(settings.punter.CACHE_DIR)
         os.makedirs(self.cache_dir, exist_ok=True)
 
-    def get_all_punters(self) -> List[Dict[str, Any]]:
+    def get_all_punters(self, include_codes: bool = True) -> List[Dict[str, Any]]:
         """
-        Get all punters.
+        Get all punters, optionally with their recent betting codes.
 
         Returns:
-            List of punters
+            List of punters (each with a ``betting_codes`` list when *include_codes* is True)
         """
         try:
             punters = self.db.query(Punter).all()
+            result = []
 
-            return [punter.to_dict() for punter in punters]
+            for punter in punters:
+                data = punter.to_dict()
+                if include_codes:
+                    from betting_code import BettingCode
+                    codes = (
+                        self.db.query(BettingCode)
+                        .filter(BettingCode.punter_id == punter.id)
+                        .order_by(BettingCode.created_at.desc())
+                        .limit(10)
+                        .all()
+                    )
+                    data["betting_codes"] = [c.to_dict() for c in codes]
+                result.append(data)
+
+            return result
 
         except Exception as e:
             logger.error(f"Error getting all punters: {str(e)}")
