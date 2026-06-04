@@ -99,6 +99,14 @@ setup_exception_handlers(app)
 # Include API router
 app.include_router(api_router, prefix="/api")
 
+# World Cup 2026 endpoints
+try:
+    from worldcup.api import router as worldcup_router
+    app.include_router(worldcup_router)
+    logger.info("World Cup 2026 API endpoints registered")
+except ImportError as e:
+    logger.warning(f"World Cup module not available: {e}")
+
 def _auto_generate_predictions():
     """Auto-generate today's predictions on startup (runs in background thread)."""
     import time
