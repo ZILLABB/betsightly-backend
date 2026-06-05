@@ -456,6 +456,25 @@ async def get_performance():
     }
 
 
+@router.get("/daily-accumulators")
+async def get_daily_accumulators():
+    """
+    Get daily accumulator picks from World Cup data.
+    Same format as /accumulators/today — used as fallback when leagues are off-season.
+    """
+    try:
+        from worldcup.daily_feed import build_daily_accumulators
+        result = build_daily_accumulators()
+        if not result:
+            raise HTTPException(404, "No WC predictions available")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error building daily accumulators: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.post("/refresh")
 async def refresh_predictions():
     """Re-fetch odds and regenerate predictions."""

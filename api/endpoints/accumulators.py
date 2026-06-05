@@ -37,6 +37,17 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
         ).first()
         
         if not summary or summary.generation_status != "completed":
+            # Fallback to World Cup predictions when no league data
+            logger.info("No daily predictions — trying WC fallback...")
+            try:
+                from worldcup.daily_feed import build_daily_accumulators
+                wc_result = build_daily_accumulators()
+                logger.info(f"WC fallback result: {bool(wc_result)}")
+                if wc_result:
+                    return wc_result
+            except Exception as wc_err:
+                logger.error(f"WC fallback failed: {wc_err}", exc_info=True)
+
             return {
                 "status": "no_accumulators",
                 "date": today.isoformat(),
@@ -50,6 +61,15 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
         ).all()
         
         if not predictions:
+            # Fallback to World Cup predictions
+            try:
+                from worldcup.daily_feed import build_daily_accumulators
+                wc_result = build_daily_accumulators()
+                if wc_result:
+                    return wc_result
+            except Exception as wc_err:
+                logger.warning(f"WC fallback failed: {wc_err}")
+
             return {
                 "status": "no_predictions",
                 "date": today.isoformat(),
