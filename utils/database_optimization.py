@@ -395,42 +395,46 @@ def create_database_indexes():
     ]
     
     try:
-        with engine.connect() as conn:
-            for index_sql in indexes:
-                try:
+        for index_sql in indexes:
+            try:
+                with engine.connect() as conn:
                     conn.execute(text(index_sql))
+                    conn.commit()
                     logger.info(f"Created index: {index_sql}")
-                except Exception as e:
-                    logger.warning(f"Failed to create index: {index_sql}, Error: {str(e)}")
+            except Exception as e:
+                logger.warning(f"Skipped index: {str(e).split(chr(10))[0]}")
 
-            conn.commit()
-            logger.info("Database indexes created successfully")
-            
+        logger.info("Database indexes created successfully")
+
     except Exception as e:
         logger.error(f"Error creating database indexes: {str(e)}")
 
 
 def optimize_query_performance():
     """
-    Apply SQLite-specific optimizations for better performance.
+    Apply database-specific optimizations.
+    PRAGMA commands are SQLite-only — skip on PostgreSQL.
     """
-    from database import engine
-    
+    from database import engine, DATABASE_URL
+
+    # PRAGMAs only work on SQLite
+    if not DATABASE_URL.startswith("sqlite"):
+        logger.info("PostgreSQL detected — skipping SQLite PRAGMA optimizations")
+        return
+
     optimizations = [
-        "PRAGMA journal_mode = WAL;",  # Write-Ahead Logging for better concurrency
-        "PRAGMA synchronous = NORMAL;",  # Balance between safety and performance
-        "PRAGMA cache_size = 10000;",  # Increase cache size
-        "PRAGMA temp_store = MEMORY;",  # Store temporary tables in memory
-        "PRAGMA mmap_size = 268435456;",  # 256MB memory-mapped I/O
+        "PRAGMA journal_mode = WAL;",
+        "PRAGMA synchronous = NORMAL;",
+        "PRAGMA cache_size = 10000;",
+        "PRAGMA temp_store = MEMORY;",
+        "PRAGMA mmap_size = 268435456;",
     ]
-    
+
     try:
         with engine.connect() as conn:
             for pragma in optimizations:
                 conn.execute(text(pragma))
                 logger.info(f"Applied optimization: {pragma}")
-
             logger.info("Database optimizations applied successfully")
-            
     except Exception as e:
         logger.error(f"Error applying database optimizations: {str(e)}")
