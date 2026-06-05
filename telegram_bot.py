@@ -310,6 +310,154 @@ async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         db.close()
 
 
+# ── World Cup Commands ──────────────────────────────────────
+
+
+async def wctips_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show today's World Cup tips: /wctips or /wctips 2026-06-12"""
+    try:
+        import json
+        from pathlib import Path
+
+        data_dir = Path(__file__).parent / "worldcup" / "data"
+        preds_path = data_dir / "wc_predictions.json"
+
+        if not preds_path.exists():
+            await update.message.reply_text("No World Cup predictions available yet.")
+            return
+
+        with open(preds_path) as f:
+            predictions = json.load(f)
+
+        # Filter by date
+        from datetime import datetime as dt
+        target_date = context.args[0] if context.args else None
+
+        if not target_date:
+            today = dt.now().strftime("%Y-%m-%d")
+            future = sorted(set(
+                p["commence_time"][:10] for p in predictions
+                if p["commence_time"][:10] >= today
+            ))
+            target_date = future[0] if future else today
+
+        day_preds = [p for p in predictions if p["commence_time"].startswith(target_date)]
+
+        if not day_preds:
+            await update.message.reply_text(f"No World Cup matches on {target_date}")
+            return
+
+        # Format nice date
+        nice_date = dt.strptime(target_date, "%Y-%m-%d").strftime("%A, %d %b %Y")
+
+        lines = [f"World Cup Tips - {nice_date}\n{len(day_preds)} matches\n"]
+
+        for p in day_preds:
+            time_str = dt.fromisoformat(p["commence_time"].replace("Z", "+00:00")).strftime("%H:%M")
+            conf_pct = round(p["confidence"] * 100)
+
+            lines.append(f"{time_str} | {p['home_team']} vs {p['away_team']}")
+            lines.append(f"  Tip: {p['prediction']} ({conf_pct}%)")
+
+            # Show top tips if available
+            for tip in p.get("top_tips", [])[1:]:
+                tip_pct = round(tip["confidence"] * 100)
+                lines.append(f"  Alt: {tip['tip']} ({tip_pct}%)")
+            lines.append("")
+
+        await update.message.reply_text("\n".join(lines))
+
+    except Exception as e:
+        logger.error(f"Error in wctips: {e}", exc_info=True)
+        await update.message.reply_text(f"Error loading WC tips: {str(e)}")
+
+
+async def wcacca_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show World Cup accumulator picks: /wcacca"""
+    try:
+        import json
+        from pathlib import Path
+
+        data_dir = Path(__file__).parent / "worldcup" / "data"
+        preds_path = data_dir / "wc_predictions.json"
+
+        if not preds_path.exists():
+            await update.message.reply_text("No World Cup predictions available yet.")
+            return
+
+        with open(preds_path) as f:
+            predictions = json.load(f)
+
+        from datetime import datetime as dt
+        today = dt.now().strftime("%Y-%m-%d")
+        future = sorted(set(
+            p["commence_time"][:10] for p in predictions
+            if p["commence_time"][:10] >= today
+        ))
+        target_date = future[0] if future else today
+        day_preds = [p for p in predictions if p["commence_time"].startswith(target_date)]
+
+        if not day_preds:
+            await update.message.reply_text("No upcoming WC matches for accumulators.")
+            return
+
+        nice_date = dt.strptime(target_date, "%Y-%m-%d").strftime("%a %d %b")
+
+        # Collect all tips sorted by confidence
+        all_tips = []
+        for p in day_preds:
+            for tip in p.get("top_tips", []):
+                all_tips.append({
+                    "match": f"{p['home_team']} vs {p['away_team']}",
+                    "tip": tip["tip"],
+                    "conf": tip["confidence"],
+                    "match_id": p["match_id"],
+                })
+
+        all_tips.sort(key=lambda x: x["conf"], reverse=True)
+
+        # Build safe acca (top 3 from different matches)
+        safe = []
+        used = set()
+        for t in all_tips:
+            if t["match_id"] not in used and t["conf"] >= 0.55:
+                safe.append(t)
+                used.add(t["match_id"])
+            if len(safe) >= 3:
+                break
+
+        lines = [f"WC Accumulator - {nice_date}\n"]
+
+        if safe:
+            lines.append("SAFE ACCA (3 picks):")
+            for t in safe:
+                lines.append(f"  {t['match']}")
+                lines.append(f"  -> {t['tip']} ({round(t['conf']*100)}%)")
+            lines.append("")
+
+        # Bold acca (top 5)
+        bold = []
+        used2 = set()
+        for t in all_tips:
+            if t["match_id"] not in used2 and t["conf"] >= 0.40:
+                bold.append(t)
+                used2.add(t["match_id"])
+            if len(bold) >= 5:
+                break
+
+        if bold:
+            lines.append("BOLD ACCA (5 picks):")
+            for t in bold:
+                lines.append(f"  {t['match']}")
+                lines.append(f"  -> {t['tip']} ({round(t['conf']*100)}%)")
+
+        await update.message.reply_text("\n".join(lines))
+
+    except Exception as e:
+        logger.error(f"Error in wcacca: {e}", exc_info=True)
+        await update.message.reply_text(f"Error: {str(e)}")
+
+
 # ── Message Handlers ────────────────────────────────────────
 
 
@@ -516,6 +664,8 @@ def main() -> None:
     application.add_handler(CommandHandler("today", today_command))
     application.add_handler(CommandHandler("verify", verify_command))
     application.add_handler(CommandHandler("delete", delete_command))
+    application.add_handler(CommandHandler("wctips", wctips_command))
+    application.add_handler(CommandHandler("wcacca", wcacca_command))
 
     # All text messages (codes + status replies)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

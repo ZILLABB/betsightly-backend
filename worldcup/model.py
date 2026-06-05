@@ -141,73 +141,196 @@ def predict_match(
     # Over 1.5 (for safer bets)
     over_1_5_prob = min(0.92, max(0.40, 0.5 + (exp_total - 1.5) * 0.25))
 
-    # === Determine prediction ===
-    probs = {"home_win": final_home, "draw": final_draw, "away_win": final_away}
-    pred_key = max(probs, key=probs.get)
-    confidence = probs[pred_key]
+    # === Match result probabilities ===
+    result_probs = {"home_win": final_home, "draw": final_draw, "away_win": final_away}
 
-    pred_labels = {
+    result_labels = {
         "home_win": f"{home_team} Win",
         "draw": "Draw",
         "away_win": f"{away_team} Win",
     }
 
-    # === Value bets ===
+    # === Build ALL candidate picks across every market ===
+    all_picks = []
+
+    # Match result picks
+    for key in ["home_win", "draw", "away_win"]:
+        all_picks.append({
+            "key": key,
+            "label": result_labels[key],
+            "market": "match_result",
+            "prob": result_probs[key],
+            "odds": best_odds.get(key),
+        })
+
+    # Over 1.5 Goals
+    all_picks.append({
+        "key": "over_1_5",
+        "label": "Over 1.5 Goals",
+        "market": "goals",
+        "prob": over_1_5_prob,
+        "odds": None,  # Bookmakers don't always provide O1.5 odds
+    })
+
+    # Over 2.5 Goals
+    all_picks.append({
+        "key": "over_2_5",
+        "label": "Over 2.5 Goals",
+        "market": "goals",
+        "prob": over_2_5_prob,
+        "odds": best_odds.get("over_2_5"),
+    })
+
+    # Under 2.5 Goals
+    all_picks.append({
+        "key": "under_2_5",
+        "label": "Under 2.5 Goals",
+        "market": "goals",
+        "prob": under_2_5_prob,
+        "odds": best_odds.get("under_2_5"),
+    })
+
+    # BTTS (GG)
+    all_picks.append({
+        "key": "btts_yes",
+        "label": "Both Teams to Score (GG)",
+        "market": "btts",
+        "prob": btts_prob,
+        "odds": None,
+    })
+
+    # BTTS No
+    btts_no_prob = 1.0 - btts_prob
+    all_picks.append({
+        "key": "btts_no",
+        "label": "BTTS No",
+        "market": "btts",
+        "prob": btts_no_prob,
+        "odds": None,
+    })
+
+    # Double Chance: Home or Draw
+    # Discount double chance so it only wins when it's genuinely useful
+    # (close match where neither team dominates). Penalty of 20% to raw prob.
+    home_or_draw_raw = min(0.95, final_home + final_draw)
+    home_or_draw = home_or_draw_raw * 0.80  # Penalize so specific picks win
+    all_picks.append({
+        "key": "home_or_draw",
+        "label": f"{home_team} or Draw",
+        "market": "double_chance",
+        "prob": home_or_draw,
+        "display_prob": round(home_or_draw_raw, 3),  # Show real prob on frontend
+        "odds": None,
+    })
+
+    # Double Chance: Away or Draw
+    away_or_draw_raw = min(0.95, final_away + final_draw)
+    away_or_draw = away_or_draw_raw * 0.80
+    all_picks.append({
+        "key": "away_or_draw",
+        "label": f"{away_team} or Draw",
+        "market": "double_chance",
+        "prob": away_or_draw,
+        "display_prob": round(away_or_draw_raw, 3),
+        "odds": None,
+    })
+
+    # === Pick the BEST prediction using scoring system ===
+    # We want variety — not just "Over 1.5" every time.
+    # Score = probability * market_weight
+    # Match result is most valuable, then specific goals, then double chance
+    MARKET_WEIGHTS = {
+        "match_result": 1.15,   # Reward direct match predictions
+        "goals": 1.00,          # Goals markets are standard
+        "btts": 1.05,           # BTTS is popular and useful
+        "double_chance": 0.65,  # Double chance only when genuinely close
+    }
+
+    # Extra: penalize Over 1.5 (too easy/obvious) and boost Over 2.5 / BTTS
+    KEY_WEIGHTS = {
+        "over_1_5": 0.78,       # Very safe but boring — penalize
+        "over_2_5": 1.10,       # More interesting, better odds
+        "under_2_5": 1.05,      # Contrarian pick — useful
+        "btts_yes": 1.10,       # Popular market
+        "btts_no": 0.95,        # Less exciting
+        "home_win": 1.15,       # Direct winner picks are premium
+        "away_win": 1.15,
+        "draw": 1.20,           # Draw picks are rare and valuable
+    }
+
+    for pick in all_picks:
+        raw_prob = pick.get("display_prob", pick["prob"])
+        market_w = MARKET_WEIGHTS.get(pick["market"], 1.0)
+        key_w = KEY_WEIGHTS.get(pick["key"], 1.0)
+        pick["score"] = raw_prob * market_w * key_w
+
+    all_picks.sort(key=lambda x: x["score"], reverse=True)
+    best_pick = all_picks[0]
+
+    # Build top 3 tips from different markets
+    top_tips = [best_pick]
+    used_markets = {best_pick["market"]}
+    for pick in all_picks[1:]:
+        if pick["market"] not in used_markets and pick.get("display_prob", pick["prob"]) >= 0.45:
+            top_tips.append(pick)
+            used_markets.add(pick["market"])
+        if len(top_tips) >= 3:
+            break
+    # If we still need tips, fill from remaining high-prob picks
+    if len(top_tips) < 3:
+        for pick in all_picks[1:]:
+            if pick["key"] != best_pick["key"] and pick not in top_tips and pick.get("display_prob", pick["prob"]) >= 0.50:
+                top_tips.append(pick)
+            if len(top_tips) >= 3:
+                break
+
+    # === Value bets (where our probability beats bookmaker implied) ===
     value_bets = []
-    for key, label, odds_key in [
-        ("home_win", f"{home_team} Win", "home_win"),
-        ("away_win", f"{away_team} Win", "away_win"),
-        ("draw", "Draw", "draw"),
-    ]:
-        odds = best_odds.get(odds_key)
-        if odds and odds > 1:
-            implied = 1.0 / odds
-            our_prob = probs[key]
-            edge = our_prob - implied
-            ev = our_prob * odds - 1
-            if edge > 0.02:  # At least 2% edge
+    for pick in all_picks:
+        if pick["odds"] and pick["odds"] > 1:
+            implied = 1.0 / pick["odds"]
+            edge = pick["prob"] - implied
+            ev = pick["prob"] * pick["odds"] - 1
+            if edge > 0.02:
                 value_bets.append({
-                    "bet": label,
-                    "market": "match_result",
-                    "odds": odds,
-                    "our_prob": round(our_prob, 3),
+                    "bet": pick["label"],
+                    "market": pick["market"],
+                    "odds": pick["odds"],
+                    "our_prob": round(pick["prob"], 3),
                     "implied_prob": round(implied, 3),
                     "edge": round(edge, 3),
                     "expected_value": round(ev, 3),
                 })
 
-    # Over 2.5 value
-    if best_odds.get("over_2_5"):
-        odds = best_odds["over_2_5"]
-        implied = 1.0 / odds
-        edge = over_2_5_prob - implied
-        if edge > 0.02:
-            value_bets.append({
-                "bet": "Over 2.5 Goals",
-                "market": "totals",
-                "odds": odds,
-                "our_prob": round(over_2_5_prob, 3),
-                "implied_prob": round(implied, 3),
-                "edge": round(edge, 3),
-                "expected_value": round(over_2_5_prob * odds - 1, 3),
-            })
-
     value_bets.sort(key=lambda x: x["expected_value"], reverse=True)
 
-    # === Risk level ===
-    if confidence >= 0.50:
+    # === Risk level based on best pick confidence ===
+    confidence = best_pick.get("display_prob", best_pick["prob"])
+    if confidence >= 0.70:
+        risk = "very_low"
+    elif confidence >= 0.55:
         risk = "low"
-    elif confidence >= 0.38:
+    elif confidence >= 0.42:
         risk = "medium"
     else:
         risk = "high"
 
     return {
-        "prediction": pred_labels[pred_key],
-        "prediction_key": pred_key,
+        "prediction": best_pick["label"],
+        "prediction_key": best_pick["key"],
+        "prediction_market": best_pick["market"],
         "confidence": round(confidence, 3),
         "risk_level": risk,
-        "probabilities": {k: round(v, 3) for k, v in probs.items()},
+        "top_tips": [
+            {
+                "tip": t["label"],
+                "market": t["market"],
+                "confidence": round(t.get("display_prob", t["prob"]), 3),
+                "odds": t["odds"],
+            }
+            for t in top_tips
+        ],
+        "probabilities": {k: round(v, 3) for k, v in result_probs.items()},
         "goals": {
             "expected_home": round(exp_home, 2),
             "expected_away": round(exp_away, 2),
