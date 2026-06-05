@@ -143,7 +143,10 @@ class RealMLPredictionService:
         for model_name in meta.get("models", []):
             p = self.models_dir / f"{model_name}.joblib"
             if p.exists():
-                self.api_models[model_name] = joblib.load(p)
+                try:
+                    self.api_models[model_name] = joblib.load(p)
+                except Exception as e:
+                    logger.warning(f"Skipping model {model_name}: {e}")
 
         logger.info(f"Loaded {len(self.api_models)} API-Football models")
 
@@ -151,11 +154,14 @@ class RealMLPredictionService:
         self.models = {"api_football": {k: {"model": v} for k, v in self.api_models.items()}}
 
         # Load historical CSV for feature computation
-        if MATCHES_CSV.exists():
-            self.api_df = pd.read_csv(MATCHES_CSV, low_memory=False)
-            self.api_df["date"] = pd.to_datetime(self.api_df["date"], errors="coerce")
-            self.api_df = self.api_df.dropna(subset=["date"]).sort_values("date")
-            logger.info(f"Historical data: {len(self.api_df):,} matches")
+        try:
+            if MATCHES_CSV.exists():
+                self.api_df = pd.read_csv(MATCHES_CSV, low_memory=False)
+                self.api_df["date"] = pd.to_datetime(self.api_df["date"], errors="coerce")
+                self.api_df = self.api_df.dropna(subset=["date"]).sort_values("date")
+                logger.info(f"Historical data: {len(self.api_df):,} matches")
+        except Exception as e:
+            logger.warning(f"Could not load historical data: {e}")
 
             _init_statistical_models(self.api_df)
         else:
@@ -393,7 +399,11 @@ class RealMLPredictionService:
 # ------------------------------------------------------------------
 # Module-level init
 # ------------------------------------------------------------------
-ml_service = RealMLPredictionService()
+try:
+    ml_service = RealMLPredictionService()
+except Exception as _init_err:
+    logger.error(f"ML service init failed (app will run without ML predictions): {_init_err}")
+    ml_service = None  # type: ignore
 
 _predictions_cache: Dict[str, Any] = {"date": None, "data": None, "timestamp": None}
 
