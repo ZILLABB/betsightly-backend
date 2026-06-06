@@ -270,7 +270,62 @@ def readiness_check(db: Session = Depends(get_db)):
 def liveness_check():
     """
     Kubernetes-style liveness check.
-    
+
     Returns 200 if the service is alive.
     """
     return {"status": "alive", "timestamp": datetime.now().isoformat()}
+
+
+@router.get("/ml-status")
+def ml_status():
+    """
+    Report ML model loading status. Used to verify ML pipeline health
+    without breaking anything — pure diagnostic endpoint.
+    """
+    info = {
+        "numpy_version": None,
+        "ml_service_loaded": False,
+        "models_loaded": 0,
+        "model_names": [],
+        "historical_data_loaded": False,
+        "elo_loaded": False,
+        "dixon_coles_loaded": False,
+        "errors": [],
+    }
+
+    try:
+        import numpy as _np
+        info["numpy_version"] = _np.__version__
+    except Exception as e:
+        info["errors"].append(f"numpy: {e}")
+
+    try:
+        from api.endpoints.ml_predictions import ml_service
+        if ml_service is not None:
+            info["ml_service_loaded"] = True
+            info["models_loaded"] = len(getattr(ml_service, "api_models", {}))
+            info["model_names"] = list(getattr(ml_service, "api_models", {}).keys())[:20]
+            info["historical_data_loaded"] = getattr(ml_service, "api_df", None) is not None
+    except Exception as e:
+        info["errors"].append(f"ml_service: {e}")
+
+    try:
+        from pathlib import Path
+        import json as _json
+        models_dir = Path(__file__).resolve().parent.parent.parent / "models" / "api_football"
+        elo_path = models_dir / "elo_ratings.json"
+        dc_path = models_dir / "dixon_coles.json"
+        if elo_path.exists():
+            with open(elo_path) as f:
+                elo = _json.load(f)
+            info["elo_loaded"] = True
+            info["elo_team_count"] = len(elo) if isinstance(elo, dict) else 0
+        if dc_path.exists():
+            with open(dc_path) as f:
+                dc = _json.load(f)
+            info["dixon_coles_loaded"] = True
+            info["dixon_coles_team_count"] = len(dc) if isinstance(dc, dict) else 0
+    except Exception as e:
+        info["errors"].append(f"elo/dc: {e}")
+
+    return info
