@@ -140,6 +140,38 @@ try:
 except Exception as e:
     logger.warning(f"Could not start results checker: {e}")
 
+
+def _start_telegram_bot_thread():
+    """
+    Spawn the Telegram bot polling loop in a daemon thread.
+    Uses its own asyncio event loop so it doesn't fight with uvicorn's.
+    """
+    import threading
+    import asyncio
+
+    def _run():
+        try:
+            # The bot needs its own event loop inside this thread
+            asyncio.set_event_loop(asyncio.new_event_loop())
+            from telegram_bot import main as _bot_main
+            _bot_main()
+        except Exception as e:
+            logger.error(f"Telegram bot thread crashed: {e}", exc_info=True)
+
+    if not os.getenv("TELEGRAM_BOT_TOKEN"):
+        logger.info("Telegram bot disabled (TELEGRAM_BOT_TOKEN not set)")
+        return
+
+    t = threading.Thread(target=_run, daemon=True, name="telegram-bot")
+    t.start()
+    logger.info("Telegram bot started in background thread")
+
+
+try:
+    _start_telegram_bot_thread()
+except Exception as e:
+    logger.warning(f"Could not start Telegram bot: {e}")
+
 def _auto_generate_predictions():
     """Auto-generate today's predictions on startup (runs in background thread)."""
     import time
