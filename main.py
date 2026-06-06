@@ -83,15 +83,28 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityMiddleware)
 
-# Add CORS middleware with enhanced security - allow all origins for now
+# CORS — locked to known origins via ALLOWED_ORIGINS env var
+_allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+_allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+if not _allowed_origins:
+    # Sensible defaults — Vercel preview + production + local dev
+    _allowed_origins = [
+        "https://betsightly-frontend.vercel.app",
+        "https://betsightly.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5180",
+    ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # Must be False when allow_origins=["*"]
+    allow_origins=_allowed_origins,
+    allow_origin_regex=r"https://betsightly-frontend-.*\.vercel\.app",
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
-    max_age=3600,  # Cache preflight requests for 1 hour
+    max_age=3600,
 )
+logger.info(f"CORS locked to: {_allowed_origins} + Vercel preview subdomains")
 
 # Phase 5: Re-enable exception handlers
 setup_exception_handlers(app)
@@ -106,6 +119,20 @@ try:
     logger.info("World Cup 2026 API endpoints registered")
 except ImportError as e:
     logger.warning(f"World Cup module not available: {e}")
+
+# Ensure rollover-chain table exists in PostgreSQL
+try:
+    from worldcup.rollover_db import ensure_table as _rollover_ensure_table
+    _rollover_ensure_table()
+except Exception as e:
+    logger.warning(f"Could not ensure rollover_days table: {e}")
+
+# Start background results checker (every 6h)
+try:
+    from worldcup.results_checker import start_background_loop as _start_results_loop
+    _start_results_loop()
+except Exception as e:
+    logger.warning(f"Could not start results checker: {e}")
 
 def _auto_generate_predictions():
     """Auto-generate today's predictions on startup (runs in background thread)."""

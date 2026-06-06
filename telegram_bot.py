@@ -648,6 +648,63 @@ async def handle_status_reply(update: Update, text: str) -> None:
 # ── Main ────────────────────────────────────────────────────
 
 
+async def _daily_post_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Posts today's safest accumulator pick into the group every morning.
+    Scheduled by Application.job_queue below.
+    """
+    chat_id = TELEGRAM_GROUP_ID
+    if not chat_id:
+        return
+    try:
+        import json as _json
+        from pathlib import Path
+
+        # Try DB rollover chain first (the new persistent store)
+        try:
+            from worldcup.rollover_db import load_chain
+            chain = load_chain(datetime.now().strftime("%Y-%m-%d"))
+            days = chain.get("days", [])
+        except Exception:
+            chain_path = Path(__file__).parent / "worldcup" / "data" / "wc_rollover_chain.json"
+            days = []
+            if chain_path.exists():
+                with open(chain_path) as f:
+                    days = _json.load(f).get("days", [])
+
+        if not days:
+            return
+
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_day = next((d for d in days if d.get("date", "") >= today_str and d.get("status") == "pending"), None)
+        if not today_day:
+            return
+
+        picks = today_day.get("picks", [])
+        if not picks:
+            return
+
+        nice_date = datetime.strptime(today_day["date"], "%Y-%m-%d").strftime("%A, %d %b %Y")
+        lines = [
+            "Today's Safe Rollover Pick",
+            f"{nice_date} · Day {today_day['day_number']}",
+            "",
+        ]
+        for pk in picks:
+            lines.append(f"  {pk.get('home_team', '?')} vs {pk.get('away_team', '?')}")
+            lines.append(f"     -> {pk.get('prediction', '?')} @{pk.get('odds')}")
+            lines.append("")
+        lines.append(f"Combined odds: {today_day.get('combined_odds')}x")
+        lines.append(f"All {len(picks)} pick(s) must hit for the day to count.")
+        lines.append("")
+        lines.append("Full chain: https://betsightly-frontend.vercel.app/rollover")
+
+        await context.bot.send_message(chat_id=int(chat_id), text="\n".join(lines))
+        logger.info(f"Posted daily tip to {chat_id}")
+    except Exception as e:
+        logger.error(f"Daily post failed: {e}", exc_info=True)
+
+
 def main() -> None:
     """Start the bot."""
     if not TELEGRAM_BOT_TOKEN:
@@ -669,6 +726,15 @@ def main() -> None:
 
     # All text messages (codes + status replies)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Schedule daily auto-post at 09:00 UTC if job_queue is available
+    try:
+        from datetime import time as _dtime
+        if application.job_queue is not None:
+            application.job_queue.run_daily(_daily_post_job, time=_dtime(hour=9, minute=0))
+            logger.info("Scheduled daily Telegram post for 09:00 UTC")
+    except Exception as e:
+        logger.warning(f"Could not schedule daily post: {e}")
 
     logger.info("BetSightly Bot starting...")
     application.run_polling()

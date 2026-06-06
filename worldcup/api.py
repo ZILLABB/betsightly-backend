@@ -475,6 +475,18 @@ async def get_daily_accumulators():
         raise HTTPException(500, str(e))
 
 
+@router.post("/check-results")
+async def trigger_results_check():
+    """Manually trigger a results check (also runs every 6h automatically)."""
+    try:
+        from worldcup.results_checker import check_all_pending
+        summary = check_all_pending()
+        return {"status": "success", **summary}
+    except Exception as e:
+        logger.error(f"Results check trigger failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.post("/refresh")
 async def refresh_predictions():
     """Re-fetch odds and regenerate predictions."""

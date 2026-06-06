@@ -57,11 +57,15 @@ def _to_game(p: dict, tip: dict = None) -> dict:
         confidence = tip.get("confidence", 0.5)
         odds = tip.get("odds")
 
+    # League name: from prediction's data_quality (club) or default to WC
+    league_name = (p.get("data_quality") or {}).get("league") or "FIFA World Cup 2026"
+    is_club = (p.get("data_quality") or {}).get("source") == "club_odds"
+
     return {
         "fixture_id": hash(p.get("match_id", "")) % 1000000,
         "home_team": p.get("home_team", ""),
         "away_team": p.get("away_team", ""),
-        "league": "FIFA World Cup 2026",
+        "league": league_name,
         "date": p.get("commence_time", ""),
         "prediction": prediction,
         "prediction_type": prediction_type,
@@ -76,20 +80,93 @@ def _to_game(p: dict, tip: dict = None) -> dict:
         "models_agreed": 3,
         "edge": 0.05,
         "expected_value": 0.1,
-        "model_type": "worldcup_ensemble",
+        "model_type": "club_odds" if is_club else "worldcup_ensemble",
         "home_team_logo": p.get("home_team_logo"),
         "away_team_logo": p.get("away_team_logo"),
-        "league_logo": "https://media.api-sports.io/football/leagues/1.png",
+        "league_logo": p.get("_league_logo") or "https://media.api-sports.io/football/leagues/1.png",
     }
+
+
+def _club_match_to_prediction(m: dict) -> dict:
+    """
+    Convert a parsed club match (from club_odds.get_active_matches) into
+    the same schema as a WC prediction, so build_daily_accumulators can
+    merge them seamlessly.
+    """
+    pk = m.get("safe_pick", {})
+    probs = m.get("probabilities", {})
+    return {
+        "match_id": m.get("match_id"),
+        "home_team": m["home_team"],
+        "away_team": m["away_team"],
+        "home_team_logo": None,
+        "away_team_logo": None,
+        "commence_time": m["commence_time"],
+        "prediction": pk.get("prediction", ""),
+        "prediction_key": pk.get("market", "match_result"),
+        "prediction_market": pk.get("market", "match_result"),
+        "confidence": pk.get("confidence", 0.5),
+        "risk_level": "low" if pk.get("confidence", 0) >= 0.65 else "medium",
+        "probabilities": {
+            "home_win": probs.get("home_win", 0.33),
+            "draw": probs.get("draw", 0.33),
+            "away_win": probs.get("away_win", 0.33),
+        },
+        "best_odds": m.get("best_odds", {}),
+        "top_tips": [{
+            "tip": pk.get("prediction", ""),
+            "market": pk.get("market", "match_result"),
+            "confidence": pk.get("confidence", 0.5),
+            "odds": pk.get("odds"),
+        }],
+        "goals": {
+            "over_2_5_prob": probs.get("over_2_5", 0.5),
+            "under_2_5_prob": probs.get("under_2_5", 0.5),
+            "over_1_5_prob": min(0.95, (probs.get("over_2_5") or 0.5) + 0.15),
+            "btts_prob": 0.5,
+            "expected_total": 2.5,
+            "expected_home": 1.3,
+            "expected_away": 1.2,
+        },
+        "value_bets": [],
+        "data_quality": {
+            "source": "club_odds",
+            "league": m.get("league", "Club"),
+            "ml_verified": pk.get("ml_verified", False),
+            "ml_agreement": pk.get("ml_agreement", "n/a"),
+            "ml_probability": pk.get("ml_probability"),
+            "raw_confidence": pk.get("raw_confidence"),
+        },
+        "_league_logo": "https://media.api-sports.io/football/leagues/1.png",
+    }
+
+
+def _load_club_predictions() -> list:
+    """
+    Pull club matches via The Odds API and convert to prediction schema.
+    Returns empty list on any failure — caller falls back to WC-only.
+    """
+    try:
+        from worldcup.club_odds import get_active_matches
+        club_matches = get_active_matches(days_ahead=10)
+        return [_club_match_to_prediction(m) for m in club_matches]
+    except Exception as e:
+        logger.warning(f"Club odds unavailable: {e}")
+        return []
 
 
 def build_daily_accumulators() -> dict:
     """
-    Build accumulator categories from WC predictions for today/next match day.
+    Build accumulator categories from WC + club predictions for today.
 
     Returns data in the exact format the frontend expects from /accumulators/today.
     """
-    predictions = _load("wc_predictions.json")
+    wc_predictions = _load("wc_predictions.json") or []
+    club_predictions = _load_club_predictions()
+
+    # Merge: club matches first (they're closer to today), then WC
+    predictions = club_predictions + wc_predictions
+
     if not predictions:
         return None
 
@@ -318,7 +395,18 @@ def _build_rollover(predictions: list, today: str) -> dict:
     """
     chain_path = DATA_DIR / "wc_rollover_chain.json"
 
-    if chain_path.exists():
+    # Primary store: Postgres (survives Render redeploys).
+    # Fallback: legacy JSON file on disk (still works locally / when DB unreachable).
+    try:
+        from worldcup.rollover_db import load_chain as _db_load, append_day as _db_append, reset_chain as _db_reset
+        db_available = True
+    except Exception:
+        db_available = False
+        _db_load = _db_append = _db_reset = None  # type: ignore
+
+    if db_available:
+        chain = _db_load(today)
+    elif chain_path.exists():
         with open(chain_path) as f:
             chain = json.load(f)
     else:
@@ -329,12 +417,16 @@ def _build_rollover(predictions: list, today: str) -> dict:
         try:
             start = datetime.strptime(chain["start_date"], "%Y-%m-%d")
             if (datetime.now() - start).days > 30:
+                if db_available and _db_reset:
+                    _db_reset(chain["start_date"])
                 chain = {"start_date": today, "days": [], "status": "active"}
         except Exception:
             chain = {"start_date": today, "days": [], "status": "active"}
 
     # Detect old chain schema (with 'prediction'/'odds' at day level instead of 'picks') and reset
     if chain.get("days") and "picks" not in chain["days"][0]:
+        if db_available and _db_reset:
+            _db_reset(chain.get("start_date", today))
         chain = {"start_date": today, "days": [], "status": "active"}
 
     # Track match IDs already used in the chain
@@ -402,16 +494,22 @@ def _build_rollover(predictions: list, today: str) -> dict:
             combined *= pick["odds"]
             used_match_ids.add(p["match_id"])
 
-        chain["days"].append({
+        new_day = {
             "day_number": len(chain["days"]) + 1,
             "date": date,
             "picks": picks_data,
             "combined_odds": round(combined, 2),
             "avg_confidence": round(sum(pk["confidence"] for pk in picks_data) / len(picks_data), 3),
             "status": "pending",
-        })
+        }
+        chain["days"].append(new_day)
         needed -= 1
-        _save("wc_rollover_chain.json", chain)
+
+        # Persist: DB primary, JSON fallback
+        if db_available and _db_append:
+            _db_append(chain["start_date"], new_day)
+        else:
+            _save("wc_rollover_chain.json", chain)
 
     # Calculate cumulative odds (product of each day's combined_odds)
     cum_odds = 1.0
