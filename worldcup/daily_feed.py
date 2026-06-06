@@ -299,7 +299,7 @@ def _build_rollover(predictions: list, today: str) -> dict:
         for p in day_preds:
             bo = p.get("best_odds", {})
 
-            # Match result tips
+            # Match result tips — 1.8 to 3.0 odds range (true 2-3 odds rollover)
             for key, label, odds_key in [
                 ("home_win", f"{p['home_team']} Win", "home_win"),
                 ("away_win", f"{p['away_team']} Win", "away_win"),
@@ -309,27 +309,21 @@ def _build_rollover(predictions: list, today: str) -> dict:
                 if not odds:
                     continue
                 prob = p.get("probabilities", {}).get(key, 0)
-                if 1.5 <= odds <= 2.5 and prob >= 0.45:
+                if 1.8 <= odds <= 3.0 and prob >= 0.40:
                     candidates.append((prob, odds, label, "match_result", p))
 
             # Goals tips
             g = p.get("goals", {})
-            if bo.get("over_2_5") and 1.5 <= bo["over_2_5"] <= 2.5 and g.get("over_2_5_prob", 0) >= 0.50:
+            if bo.get("over_2_5") and 1.8 <= bo["over_2_5"] <= 3.0 and g.get("over_2_5_prob", 0) >= 0.45:
                 candidates.append((g["over_2_5_prob"], bo["over_2_5"], "Over 2.5 Goals", "goals", p))
-            if bo.get("under_2_5") and 1.5 <= bo["under_2_5"] <= 2.5 and g.get("under_2_5_prob", 0) >= 0.50:
+            if bo.get("under_2_5") and 1.8 <= bo["under_2_5"] <= 3.0 and g.get("under_2_5_prob", 0) >= 0.45:
                 candidates.append((g["under_2_5_prob"], bo["under_2_5"], "Under 2.5 Goals", "goals", p))
 
-            # Over 1.5 (always priced low, but useful for safer days)
-            if g.get("over_1_5_prob", 0) >= 0.70:
-                est = round(1.0 / max(g["over_1_5_prob"], 0.55), 2)
-                if 1.45 <= est <= 1.85:
-                    candidates.append((g["over_1_5_prob"], est, "Over 1.5 Goals", "goals", p))
-
-            # BTTS Yes
+            # BTTS Yes — estimate from probability
             btts = g.get("btts_prob", 0)
-            if btts >= 0.55:
-                est = round(1.0 / max(btts, 0.4), 2)
-                if 1.5 <= est <= 2.3:
+            if btts >= 0.50:
+                est = round(1.0 / max(btts, 0.35), 2)
+                if 1.8 <= est <= 3.0:
                     candidates.append((btts, est, "Both Teams to Score", "btts", p))
 
         if not candidates:
