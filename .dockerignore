@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.pytest_cache
+
+# Virtual env
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Large training data — NOT needed in production
+data/historical/
+data/github-football/
+data/basketball/
+data/api-football/
+
+# Large model files not tracked by git anyway
+models/api_football/*_rf.joblib
+models/api_football/*_et.joblib
+catboost_info/
+
+# Local DB (production uses PostgreSQL)
+*.db
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Env file (use Render dashboard for env vars)
+.env
+
+# Docs / tests
+tests/
+docs/
+*.md
+LICENSE
+
+# Temp
+cache/
+check_db.py

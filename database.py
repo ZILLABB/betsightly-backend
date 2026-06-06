@@ -21,19 +21,25 @@ from utils.config import settings
 # Get database URL from settings
 DATABASE_URL = settings.database.URL
 
+# Render gives postgres:// but SQLAlchemy 2.0 needs postgresql://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 # Determine if we're using SQLite or PostgreSQL
 if DATABASE_URL.startswith("sqlite"):
     DB_FILE = DATABASE_URL.replace("sqlite:///", "")
     logger.info(f"Using SQLite database: {DB_FILE}")
-    # Create engine with SQLite-specific options
     engine = create_engine(
         DATABASE_URL, connect_args={"check_same_thread": False}
     )
 else:
-    # PostgreSQL or other database
-    logger.info(f"Using PostgreSQL database: {DATABASE_URL}")
-    # Create engine without SQLite-specific options
-    engine = create_engine(DATABASE_URL)
+    logger.info("Using PostgreSQL database")
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=5,
+        max_overflow=10,
+        pool_pre_ping=True,  # Auto-reconnect on stale connections
+    )
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

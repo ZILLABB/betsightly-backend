@@ -476,4 +476,8 @@ class CachedPredictionService:
 
 
 # Global instance for use across the application
-cached_prediction_service = CachedPredictionService()
+try:
+    cached_prediction_service = CachedPredictionService()
+except Exception as _e:
+    logger.error(f"CachedPredictionService init failed: {_e}")
+    cached_prediction_service = None  # type: ignore
