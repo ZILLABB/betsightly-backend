@@ -229,13 +229,24 @@ def check_all_pending() -> Dict[str, int]:
 
 
 def run_loop(interval_hours: float = 6.0):
-    """Background thread entry point — runs check_all_pending every N hours."""
+    """Background thread entry point — runs check_all_pending every N hours.
+    Also runs old-chain cleanup once per ~28 loop iterations (~1 week)."""
+    iteration = 0
     while True:
         time.sleep(interval_hours * 3600)
+        iteration += 1
         try:
             check_all_pending()
         except Exception as e:
             logger.error(f"Results check loop iteration failed: {e}")
+
+        # Weekly cleanup of old rollover chains
+        if iteration % 28 == 0:
+            try:
+                from worldcup.rollover_db import cleanup_old_chains
+                cleanup_old_chains(keep_recent_chains=3)
+            except Exception as e:
+                logger.error(f"Rollover cleanup failed: {e}")
 
 
 def start_background_loop():
