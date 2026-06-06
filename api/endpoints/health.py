@@ -319,13 +319,77 @@ def ml_status():
             with open(elo_path) as f:
                 elo = _json.load(f)
             info["elo_loaded"] = True
-            info["elo_team_count"] = len(elo) if isinstance(elo, dict) else 0
+            # The file is {"ratings": {team: rating}, "match_count": ..., ...}
+            ratings = elo.get("ratings", elo) if isinstance(elo, dict) else {}
+            info["elo_team_count"] = len(ratings)
         if dc_path.exists():
             with open(dc_path) as f:
                 dc = _json.load(f)
             info["dixon_coles_loaded"] = True
-            info["dixon_coles_team_count"] = len(dc) if isinstance(dc, dict) else 0
+            # Dixon-Coles file uses similar structure
+            dc_teams = dc.get("teams", dc.get("attack", dc)) if isinstance(dc, dict) else {}
+            info["dixon_coles_team_count"] = len(dc_teams) if isinstance(dc_teams, dict) else 0
     except Exception as e:
         info["errors"].append(f"elo/dc: {e}")
 
     return info
+
+
+@router.get("/ml-test")
+def ml_test(home: str = "Real Madrid", away: str = "Barcelona"):
+    """
+    Run ML pipeline on a sample match. Pure diagnostic — verifies the
+    models can actually produce predictions, not just load.
+    """
+    result = {
+        "request": {"home": home, "away": away},
+        "ml_available": False,
+        "elo_lookup": {},
+        "raw_predictions": {},
+        "errors": [],
+    }
+
+    try:
+        from pathlib import Path
+        import json as _json
+        models_dir = Path(__file__).resolve().parent.parent.parent / "models" / "api_football"
+        with open(models_dir / "elo_ratings.json") as f:
+            elo = _json.load(f)
+        ratings = elo.get("ratings", {})
+        result["elo_lookup"] = {
+            "home_rating": ratings.get(home),
+            "away_rating": ratings.get(away),
+            "default": elo.get("default_rating", 1500),
+        }
+    except Exception as e:
+        result["errors"].append(f"elo lookup: {e}")
+
+    try:
+        from api.endpoints.ml_predictions import ml_service
+        if ml_service is None or not getattr(ml_service, "api_models", {}):
+            result["errors"].append("ml_service has no models")
+            return result
+        result["ml_available"] = True
+
+        import numpy as _np
+        home_rating = result["elo_lookup"].get("home_rating") or 1500
+        away_rating = result["elo_lookup"].get("away_rating") or 1500
+        elo_diff = home_rating - away_rating
+
+        for name, mdl in list(ml_service.api_models.items())[:6]:
+            try:
+                n_features = getattr(mdl, "n_features_in_", 20)
+                X = _np.zeros((1, n_features))
+                X[0, 0] = elo_diff / 100.0
+                if hasattr(mdl, "predict_proba"):
+                    proba = mdl.predict_proba(X)[0]
+                    result["raw_predictions"][name] = [round(float(x), 3) for x in proba]
+                else:
+                    pred = mdl.predict(X)[0]
+                    result["raw_predictions"][name] = round(float(pred), 3)
+            except Exception as e:
+                result["raw_predictions"][name] = f"error: {str(e)[:80]}"
+    except Exception as e:
+        result["errors"].append(f"ml test: {e}")
+
+    return result
