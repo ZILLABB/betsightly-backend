@@ -736,8 +736,14 @@ def main() -> None:
     except Exception as e:
         logger.warning(f"Could not schedule daily post: {e}")
 
-    logger.info("BetSightly Bot starting...")
-    application.run_polling()
+    # If running in a non-main thread (e.g. as a daemon in the FastAPI process),
+    # signal handlers can't be installed — disable them.
+    import threading as _threading
+    in_main_thread = _threading.current_thread() is _threading.main_thread()
+    polling_kwargs: dict = {} if in_main_thread else {"stop_signals": None}
+
+    logger.info(f"BetSightly Bot starting (main_thread={in_main_thread})...")
+    application.run_polling(**polling_kwargs)
 
 
 if __name__ == "__main__":
