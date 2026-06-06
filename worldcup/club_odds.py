@@ -221,62 +221,102 @@ def safest_pick(match: dict) -> Optional[dict]:
     """
     Pick the single SAFEST option from a parsed match.
 
-    Considers (highest-confidence wins):
-    - Strong favourite Win (>= 62%)
-    - Double Chance favourite-or-draw (>= 75%)
-    - Over 1.5 Goals (estimated from Over 2.5)
-    - Over 2.5 Goals (>= 55%)
-    - Under 2.5 Goals (>= 62%)
+    Each candidate carries a pick_key used to ask the ML overlay
+    (worldcup.ml_overlay) whether ELO ratings AGREE with the bookmaker.
+
+    - Picks where ML AGREES get a +5% confidence boost (capped at 95%)
+      and are flagged ml_verified=True.
+    - Picks where ML STRONGLY DISAGREES are dropped from consideration.
+    - Picks ML can't evaluate (unknown team OR goals market) keep their
+      bookmaker confidence and ml_verified=False.
     """
+    from worldcup.ml_overlay import check_agreement
+
     p = match.get("probabilities", {})
     bo = match.get("best_odds", {})
     home = match["home_team"]
     away = match["away_team"]
 
+    # Each candidate: (prob, odds, label, market, pick_key)
     candidates = []
 
-    # Strong favourite Win
     if bo.get("home_win") and p.get("home_win", 0) >= 0.62:
-        candidates.append((p["home_win"], bo["home_win"], f"{home} Win", "match_result"))
+        candidates.append((p["home_win"], bo["home_win"], f"{home} Win", "match_result", "home_win"))
     if bo.get("away_win") and p.get("away_win", 0) >= 0.62:
-        candidates.append((p["away_win"], bo["away_win"], f"{away} Win", "match_result"))
+        candidates.append((p["away_win"], bo["away_win"], f"{away} Win", "match_result", "away_win"))
 
-    # Double chance
     hd = min(0.95, p.get("home_win", 0) + p.get("draw", 0))
     ad = min(0.95, p.get("away_win", 0) + p.get("draw", 0))
     if hd >= 0.75:
         est = round(1.0 / max(hd, 0.55), 2)
-        candidates.append((hd, est, f"{home} or Draw", "double_chance"))
+        candidates.append((hd, est, f"{home} or Draw", "double_chance", "home_or_draw"))
     if ad >= 0.75:
         est = round(1.0 / max(ad, 0.55), 2)
-        candidates.append((ad, est, f"{away} or Draw", "double_chance"))
+        candidates.append((ad, est, f"{away} or Draw", "double_chance", "away_or_draw"))
 
-    # Over 1.5 (derived — usually ~15% higher than Over 2.5)
     over_2_5 = p.get("over_2_5") or 0
     if over_2_5 >= 0.50:
         over_1_5 = min(0.92, over_2_5 + 0.15)
         est = round(1.0 / max(over_1_5, 0.62), 2)
-        candidates.append((over_1_5, est, "Over 1.5 Goals", "goals"))
+        candidates.append((over_1_5, est, "Over 1.5 Goals", "goals", "over_1_5"))
 
-    # Over 2.5
     if bo.get("over_2_5") and over_2_5 >= 0.55:
-        candidates.append((over_2_5, bo["over_2_5"], "Over 2.5 Goals", "goals"))
+        candidates.append((over_2_5, bo["over_2_5"], "Over 2.5 Goals", "goals", "over_2_5"))
 
-    # Under 2.5
     under_2_5 = p.get("under_2_5") or 0
     if bo.get("under_2_5") and under_2_5 >= 0.62:
-        candidates.append((under_2_5, bo["under_2_5"], "Under 2.5 Goals", "goals"))
+        candidates.append((under_2_5, bo["under_2_5"], "Under 2.5 Goals", "goals", "under_2_5"))
 
     if not candidates:
         return None
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    prob, odds, label, market = candidates[0]
+    # ── Run ML overlay on each candidate ──
+    enriched = []
+    for prob, odds, label, market, pick_key in candidates:
+        try:
+            check = check_agreement(p, pick_key, home, away)
+        except Exception:
+            check = {"ml_available": False, "agreement": "n/a"}
+
+        if check["agreement"] == "strong_disagree":
+            # Skip — bookmaker and ELO can't both be right
+            continue
+
+        boosted_prob = prob
+        ml_verified = False
+        if check["agreement"] == "agree":
+            ml_verified = True
+            # Small boost (avg of bookmaker + ml, capped slightly higher)
+            ml_prob = check.get("ml_prob_for_pick") or prob
+            boosted_prob = min(0.95, (prob + ml_prob) / 2 + 0.03)
+
+        enriched.append({
+            "prob": prob,
+            "boosted_prob": boosted_prob,
+            "odds": odds,
+            "label": label,
+            "market": market,
+            "pick_key": pick_key,
+            "ml_verified": ml_verified,
+            "ml_check": check,
+        })
+
+    if not enriched:
+        return None
+
+    # Prefer ml_verified picks; then sort by boosted confidence
+    enriched.sort(key=lambda x: (x["ml_verified"], x["boosted_prob"]), reverse=True)
+    best = enriched[0]
+
     return {
-        "prediction": label,
-        "odds": round(odds, 2),
-        "confidence": round(prob, 3),
-        "market": market,
+        "prediction": best["label"],
+        "odds": round(best["odds"], 2),
+        "confidence": round(best["boosted_prob"], 3),
+        "raw_confidence": round(best["prob"], 3),
+        "market": best["market"],
+        "ml_verified": best["ml_verified"],
+        "ml_agreement": best["ml_check"].get("agreement", "n/a"),
+        "ml_probability": best["ml_check"].get("ml_prob_for_pick"),
     }
 
 

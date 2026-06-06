@@ -132,6 +132,10 @@ def _club_match_to_prediction(m: dict) -> dict:
         "data_quality": {
             "source": "club_odds",
             "league": m.get("league", "Club"),
+            "ml_verified": pk.get("ml_verified", False),
+            "ml_agreement": pk.get("ml_agreement", "n/a"),
+            "ml_probability": pk.get("ml_probability"),
+            "raw_confidence": pk.get("raw_confidence"),
         },
         "_league_logo": "https://media.api-sports.io/football/leagues/1.png",
     }
