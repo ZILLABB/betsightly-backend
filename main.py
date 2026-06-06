@@ -83,28 +83,34 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityMiddleware)
 
-# CORS — locked to known origins via ALLOWED_ORIGINS env var
+# CORS — accepts the production Vercel domain + any preview deploy
+# (betsightly-frontend.vercel.app and betsightly-frontend-HASH-XXX.vercel.app),
+# plus any explicit ALLOWED_ORIGINS env var, plus local dev.
 _allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
-_allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
-if not _allowed_origins:
-    # Sensible defaults — Vercel preview + production + local dev
-    _allowed_origins = [
-        "https://betsightly-frontend.vercel.app",
-        "https://betsightly.com",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:5180",
-    ]
+_explicit_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+
+_defaults = [
+    "https://betsightly-frontend.vercel.app",
+    "https://betsightly.com",
+    "https://www.betsightly.com",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:5180",
+]
+_allowed_origins = list(set(_explicit_origins + _defaults))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_origin_regex=r"https://betsightly-frontend-.*\.vercel\.app",
+    # Matches: betsightly-frontend.vercel.app AND betsightly-frontend-anything.vercel.app
+    # (so all Vercel preview deploys work — they look like betsightly-frontend-abc123-team.vercel.app)
+    allow_origin_regex=r"https://betsightly-frontend([-.][^.]+)?\.vercel\.app",
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     max_age=3600,
 )
-logger.info(f"CORS locked to: {_allowed_origins} + Vercel preview subdomains")
+logger.info(f"CORS allows: {_allowed_origins} + betsightly-frontend*.vercel.app")
 
 # Phase 5: Re-enable exception handlers
 setup_exception_handlers(app)
