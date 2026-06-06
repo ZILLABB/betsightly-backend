@@ -19,11 +19,12 @@ env/
 .vscode/
 *.swp
 
-# Large training data — NOT needed in production
+# Large RE-training data — only needed for retraining models, not runtime
 data/historical/
 data/github-football/
 data/basketball/
-data/api-football/
+# NOTE: data/api-football/matches.csv (1.18 MB) IS needed at runtime
+# for ML feature computation. Kept in the image.
 
 # Large model files not tracked by git anyway
 models/api_football/*_rf.joblib
