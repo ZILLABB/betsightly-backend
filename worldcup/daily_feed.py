@@ -395,7 +395,18 @@ def _build_rollover(predictions: list, today: str) -> dict:
     """
     chain_path = DATA_DIR / "wc_rollover_chain.json"
 
-    if chain_path.exists():
+    # Primary store: Postgres (survives Render redeploys).
+    # Fallback: legacy JSON file on disk (still works locally / when DB unreachable).
+    try:
+        from worldcup.rollover_db import load_chain as _db_load, append_day as _db_append, reset_chain as _db_reset
+        db_available = True
+    except Exception:
+        db_available = False
+        _db_load = _db_append = _db_reset = None  # type: ignore
+
+    if db_available:
+        chain = _db_load(today)
+    elif chain_path.exists():
         with open(chain_path) as f:
             chain = json.load(f)
     else:
@@ -406,12 +417,16 @@ def _build_rollover(predictions: list, today: str) -> dict:
         try:
             start = datetime.strptime(chain["start_date"], "%Y-%m-%d")
             if (datetime.now() - start).days > 30:
+                if db_available and _db_reset:
+                    _db_reset(chain["start_date"])
                 chain = {"start_date": today, "days": [], "status": "active"}
         except Exception:
             chain = {"start_date": today, "days": [], "status": "active"}
 
     # Detect old chain schema (with 'prediction'/'odds' at day level instead of 'picks') and reset
     if chain.get("days") and "picks" not in chain["days"][0]:
+        if db_available and _db_reset:
+            _db_reset(chain.get("start_date", today))
         chain = {"start_date": today, "days": [], "status": "active"}
 
     # Track match IDs already used in the chain
@@ -479,16 +494,22 @@ def _build_rollover(predictions: list, today: str) -> dict:
             combined *= pick["odds"]
             used_match_ids.add(p["match_id"])
 
-        chain["days"].append({
+        new_day = {
             "day_number": len(chain["days"]) + 1,
             "date": date,
             "picks": picks_data,
             "combined_odds": round(combined, 2),
             "avg_confidence": round(sum(pk["confidence"] for pk in picks_data) / len(picks_data), 3),
             "status": "pending",
-        })
+        }
+        chain["days"].append(new_day)
         needed -= 1
-        _save("wc_rollover_chain.json", chain)
+
+        # Persist: DB primary, JSON fallback
+        if db_available and _db_append:
+            _db_append(chain["start_date"], new_day)
+        else:
+            _save("wc_rollover_chain.json", chain)
 
     # Calculate cumulative odds (product of each day's combined_odds)
     cum_odds = 1.0

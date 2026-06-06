@@ -38,7 +38,7 @@ psycopg2-binary==2.9.9
 # Utilities
 python-dotenv==1.0.0
 python-multipart==0.0.6
-python-telegram-bot==20.7
+python-telegram-bot[job-queue]==20.7
 
 # Monitoring (optional)
 sentry-sdk[fastapi]==1.39.1
