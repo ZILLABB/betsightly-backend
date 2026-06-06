@@ -244,9 +244,17 @@ def build_daily_accumulators() -> dict:
 
 def _build_rollover(predictions: list, today: str) -> dict:
     """
-    Build 10-day rollover chain.
-    Each day = 1 pick at 2-3 odds.
-    Saves state to wc_rollover_chain.json.
+    Build 10-day rollover chain with VARIETY across markets.
+
+    Strategy:
+    - For each day, consider ALL tip types (match_result, goals, BTTS, double_chance)
+      across all matches that day, not just the primary prediction.
+    - Pick highest confidence tip in 1.5-2.5 odds range.
+    - Penalize same-market tips when 2+ recent days used that same market type,
+      so the chain stays varied (avoids 9 days of "X Win" picks in a row).
+    - Persists to wc_rollover_chain.json; only adds NEW days (won't overwrite).
+
+    Caller can delete wc_rollover_chain.json to force regeneration.
     """
     chain_path = DATA_DIR / "wc_rollover_chain.json"
 
@@ -270,6 +278,10 @@ def _build_rollover(predictions: list, today: str) -> dict:
     # Only add 1 pick per match day, and only for days not already in chain
     existing_dates = set(d["date"] for d in chain.get("days", []))
 
+    # Track recent markets for diversity scoring
+    def recent_markets(days, n=3):
+        return [d.get("market", "match_result") for d in days[-n:]]
+
     for pick_date in next_dates:
         if pick_date in existing_dates:
             continue
@@ -277,28 +289,57 @@ def _build_rollover(predictions: list, today: str) -> dict:
             break
 
         day_preds = [p for p in predictions if p["commence_time"].startswith(pick_date)]
+        if not day_preds:
+            continue
 
-        if day_preds:
-            # Find a pick with odds between 1.8 and 3.5
-            best = None
-            for p in sorted(day_preds, key=lambda x: x["confidence"], reverse=True):
-                bo = p.get("best_odds", {})
-                pk = p.get("prediction_key", "")
-                odds = bo.get(pk) or round(1.0 / max(p["confidence"], 0.1), 2)
-                if 1.5 <= odds <= 3.5:
-                    best = (p, odds)
-                    break
+        # Gather ALL candidate tips from every match this day
+        candidates = []  # (score, prob, odds, label, market, source_pred)
+        recent = recent_markets(chain.get("days", []))
 
-            if not best:
-                # Fallback: use highest confidence
-                p = day_preds[0]
-                odds = round(1.0 / max(p["confidence"], 0.1), 2)
-                best = (p, odds)
+        for p in day_preds:
+            bo = p.get("best_odds", {})
 
-            p, odds = best
+            # Match result tips
+            for key, label, odds_key in [
+                ("home_win", f"{p['home_team']} Win", "home_win"),
+                ("away_win", f"{p['away_team']} Win", "away_win"),
+                ("draw", "Draw", "draw"),
+            ]:
+                odds = bo.get(odds_key)
+                if not odds:
+                    continue
+                prob = p.get("probabilities", {}).get(key, 0)
+                if 1.5 <= odds <= 2.5 and prob >= 0.45:
+                    candidates.append((prob, odds, label, "match_result", p))
+
+            # Goals tips
+            g = p.get("goals", {})
+            if bo.get("over_2_5") and 1.5 <= bo["over_2_5"] <= 2.5 and g.get("over_2_5_prob", 0) >= 0.50:
+                candidates.append((g["over_2_5_prob"], bo["over_2_5"], "Over 2.5 Goals", "goals", p))
+            if bo.get("under_2_5") and 1.5 <= bo["under_2_5"] <= 2.5 and g.get("under_2_5_prob", 0) >= 0.50:
+                candidates.append((g["under_2_5_prob"], bo["under_2_5"], "Under 2.5 Goals", "goals", p))
+
+            # Over 1.5 (always priced low, but useful for safer days)
+            if g.get("over_1_5_prob", 0) >= 0.70:
+                est = round(1.0 / max(g["over_1_5_prob"], 0.55), 2)
+                if 1.45 <= est <= 1.85:
+                    candidates.append((g["over_1_5_prob"], est, "Over 1.5 Goals", "goals", p))
+
+            # BTTS Yes
+            btts = g.get("btts_prob", 0)
+            if btts >= 0.55:
+                est = round(1.0 / max(btts, 0.4), 2)
+                if 1.5 <= est <= 2.3:
+                    candidates.append((btts, est, "Both Teams to Score", "btts", p))
+
+        if not candidates:
+            # Fallback: use primary prediction (old behavior)
+            p = sorted(day_preds, key=lambda x: x["confidence"], reverse=True)[0]
+            odds = round(1.0 / max(p["confidence"], 0.1), 2)
             chain["days"].append({
                 "date": pick_date,
                 "day_number": len(chain["days"]) + 1,
+                "market": "match_result",
                 "match": f"{p['home_team']} vs {p['away_team']}",
                 "prediction": p["prediction"],
                 "odds": round(odds, 2),
@@ -306,9 +347,37 @@ def _build_rollover(predictions: list, today: str) -> dict:
                 "status": "pending",
                 "game": _to_game(p),
             })
-
-            # Save chain
             _save("wc_rollover_chain.json", chain)
+            continue
+
+        # Score: confidence × diversity_bonus
+        # If a market was used 2+ times in last 3 days, penalize it
+        def score(cand):
+            prob, odds, label, market, p = cand
+            penalty = 1.0
+            same_count = recent.count(market)
+            if same_count >= 2:
+                penalty = 0.65  # Strong push toward different markets
+            elif same_count == 1:
+                penalty = 0.90
+            return prob * penalty
+
+        candidates.sort(key=score, reverse=True)
+        prob, odds, label, market, p = candidates[0]
+
+        chain["days"].append({
+            "date": pick_date,
+            "day_number": len(chain["days"]) + 1,
+            "market": market,
+            "match": f"{p['home_team']} vs {p['away_team']}",
+            "prediction": label,
+            "odds": round(odds, 2),
+            "confidence": round(prob, 3),
+            "status": "pending",
+            "game": _to_game(p),
+        })
+
+        _save("wc_rollover_chain.json", chain)
 
     # Calculate cumulative odds
     cum_odds = 1.0
