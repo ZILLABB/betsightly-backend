@@ -242,149 +242,207 @@ def build_daily_accumulators() -> dict:
     return result
 
 
+def _safest_pick(p: dict) -> dict | None:
+    """
+    Find the single SAFEST tip for a match (highest confidence, not value).
+
+    Considers (in preference order, all must clear confidence threshold):
+    - Over 1.5 Goals (typically highest hit rate)
+    - Strong favorite win (>=60% prob)
+    - Double chance favorite-or-draw (very safe)
+    """
+    bo = p.get("best_odds", {})
+    g = p.get("goals", {})
+    probs = p.get("probabilities", {})
+    candidates = []
+
+    # Over 1.5 Goals — typically the safest single bet in football
+    o15 = g.get("over_1_5_prob", 0)
+    if o15 >= 0.70:
+        est = round(1.0 / max(o15, 0.62), 2)  # Crude odds estimate
+        if est >= 1.10:
+            candidates.append((o15, est, "Over 1.5 Goals", "goals"))
+
+    # Strong favorite Win
+    for key, label, odds_key in [
+        ("home_win", f"{p['home_team']} Win", "home_win"),
+        ("away_win", f"{p['away_team']} Win", "away_win"),
+    ]:
+        odds = bo.get(odds_key)
+        prob = probs.get(key, 0)
+        if odds and odds >= 1.05 and prob >= 0.60:
+            candidates.append((prob, odds, label, "match_result"))
+
+    # Double chance (very safe)
+    hw = probs.get("home_win", 0)
+    aw = probs.get("away_win", 0)
+    dr = probs.get("draw", 0)
+    home_or_draw = min(0.95, hw + dr)
+    away_or_draw = min(0.95, aw + dr)
+
+    if home_or_draw >= 0.75:
+        est = round(1.0 / max(home_or_draw, 0.55), 2)
+        candidates.append((home_or_draw, est, f"{p['home_team']} or Draw", "double_chance"))
+    if away_or_draw >= 0.75:
+        est = round(1.0 / max(away_or_draw, 0.55), 2)
+        candidates.append((away_or_draw, est, f"{p['away_team']} or Draw", "double_chance"))
+
+    # Under 2.5 / BTTS only when extremely confident
+    if g.get("under_2_5_prob", 0) >= 0.65 and bo.get("under_2_5"):
+        candidates.append((g["under_2_5_prob"], bo["under_2_5"], "Under 2.5 Goals", "goals"))
+
+    if not candidates:
+        return None
+
+    # Pick the highest confidence option
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    prob, odds, label, market = candidates[0]
+    return {
+        "prediction": label,
+        "odds": round(odds, 2),
+        "confidence": round(prob, 3),
+        "market": market,
+    }
+
+
 def _build_rollover(predictions: list, today: str) -> dict:
     """
-    Build 10-day rollover chain with VARIETY across markets.
+    10-day SAFE rollover chain.
 
-    Strategy:
-    - For each day, consider ALL tip types (match_result, goals, BTTS, double_chance)
-      across all matches that day, not just the primary prediction.
-    - Pick highest confidence tip in 1.5-2.5 odds range.
-    - Penalize same-market tips when 2+ recent days used that same market type,
-      so the chain stays varied (avoids 9 days of "X Win" picks in a row).
-    - Persists to wc_rollover_chain.json; only adds NEW days (won't overwrite).
-
-    Caller can delete wc_rollover_chain.json to force regeneration.
+    Rules:
+    - Each day slot = 1 to 3 SAFE picks (combined ~1.5-3.0 odds per slot)
+    - Pick = highest-confidence option across all markets (NOT value-based)
+    - No match repeats across the entire chain
+    - Days with 0 safe picks are skipped — chain pulls from next match day instead
+    - All picks in a slot must hit for that slot to count
     """
     chain_path = DATA_DIR / "wc_rollover_chain.json"
 
-    # Load existing chain
     if chain_path.exists():
         with open(chain_path) as f:
             chain = json.load(f)
     else:
         chain = {"start_date": today, "days": [], "status": "active"}
 
-    # Clean up old chains (if start_date is >10 days ago, reset)
+    # Reset chain if start_date is too old
     if chain.get("start_date"):
-        start = datetime.strptime(chain["start_date"], "%Y-%m-%d")
-        if (datetime.now() - start).days > 10:
+        try:
+            start = datetime.strptime(chain["start_date"], "%Y-%m-%d")
+            if (datetime.now() - start).days > 30:
+                chain = {"start_date": today, "days": [], "status": "active"}
+        except Exception:
             chain = {"start_date": today, "days": [], "status": "active"}
 
-    # Find the next match day
-    match_dates = sorted(set(p["commence_time"][:10] for p in predictions))
-    next_dates = [d for d in match_dates if d >= today]
+    # Detect old chain schema (with 'prediction'/'odds' at day level instead of 'picks') and reset
+    if chain.get("days") and "picks" not in chain["days"][0]:
+        chain = {"start_date": today, "days": [], "status": "active"}
 
-    # Only add 1 pick per match day, and only for days not already in chain
-    existing_dates = set(d["date"] for d in chain.get("days", []))
+    # Track match IDs already used in the chain
+    used_match_ids = set()
+    for day in chain.get("days", []):
+        for pick in day.get("picks", []):
+            mid = pick.get("match_id")
+            if mid:
+                used_match_ids.add(mid)
 
-    # Track recent markets for diversity scoring
-    def recent_markets(days, n=3):
-        return [d.get("market", "match_result") for d in days[-n:]]
+    # Find safest pick for each upcoming, unused match
+    upcoming = sorted(
+        [p for p in predictions if p["commence_time"][:10] >= today and p["match_id"] not in used_match_ids],
+        key=lambda p: p["commence_time"]
+    )
 
-    for pick_date in next_dates:
-        if pick_date in existing_dates:
+    # Group by date, attach safe-pick
+    by_date: dict[str, list] = {}
+    for p in upcoming:
+        pick = _safest_pick(p)
+        if not pick:
             continue
-        if len(chain.get("days", [])) >= 10:
+        date = p["commence_time"][:10]
+        by_date.setdefault(date, []).append({"pred": p, "pick": pick})
+
+    # Don't add days before the last chain date
+    last_date = chain["days"][-1]["date"] if chain.get("days") else ""
+
+    # Add new day slots up to 10 total
+    needed = 10 - len(chain.get("days", []))
+
+    for date in sorted(by_date.keys()):
+        if needed <= 0:
             break
-
-        day_preds = [p for p in predictions if p["commence_time"].startswith(pick_date)]
-        if not day_preds:
+        if date <= last_date:
             continue
 
-        # Gather ALL candidate tips from every match this day
-        candidates = []  # (score, prob, odds, label, market, source_pred)
-        recent = recent_markets(chain.get("days", []))
+        # Sort matches by pick confidence, take top 1-3
+        day_matches = sorted(by_date[date], key=lambda x: x["pick"]["confidence"], reverse=True)
+        # Cap: 3 picks max; 1 pick if the day has only 1 viable match
+        chosen = day_matches[:3]
 
-        for p in day_preds:
-            bo = p.get("best_odds", {})
+        if not chosen:
+            continue
 
-            # Match result tips — 1.8 to 3.0 odds range (true 2-3 odds rollover)
-            for key, label, odds_key in [
-                ("home_win", f"{p['home_team']} Win", "home_win"),
-                ("away_win", f"{p['away_team']} Win", "away_win"),
-                ("draw", "Draw", "draw"),
-            ]:
-                odds = bo.get(odds_key)
-                if not odds:
-                    continue
-                prob = p.get("probabilities", {}).get(key, 0)
-                if 1.8 <= odds <= 3.0 and prob >= 0.40:
-                    candidates.append((prob, odds, label, "match_result", p))
-
-            # Goals tips
-            g = p.get("goals", {})
-            if bo.get("over_2_5") and 1.8 <= bo["over_2_5"] <= 3.0 and g.get("over_2_5_prob", 0) >= 0.45:
-                candidates.append((g["over_2_5_prob"], bo["over_2_5"], "Over 2.5 Goals", "goals", p))
-            if bo.get("under_2_5") and 1.8 <= bo["under_2_5"] <= 3.0 and g.get("under_2_5_prob", 0) >= 0.45:
-                candidates.append((g["under_2_5_prob"], bo["under_2_5"], "Under 2.5 Goals", "goals", p))
-
-            # BTTS Yes — estimate from probability
-            btts = g.get("btts_prob", 0)
-            if btts >= 0.50:
-                est = round(1.0 / max(btts, 0.35), 2)
-                if 1.8 <= est <= 3.0:
-                    candidates.append((btts, est, "Both Teams to Score", "btts", p))
-
-        if not candidates:
-            # Fallback: use primary prediction (old behavior)
-            p = sorted(day_preds, key=lambda x: x["confidence"], reverse=True)[0]
-            odds = round(1.0 / max(p["confidence"], 0.1), 2)
-            chain["days"].append({
-                "date": pick_date,
-                "day_number": len(chain["days"]) + 1,
-                "market": "match_result",
+        picks_data = []
+        combined = 1.0
+        for m in chosen:
+            p = m["pred"]
+            pick = m["pick"]
+            picks_data.append({
+                "match_id": p["match_id"],
                 "match": f"{p['home_team']} vs {p['away_team']}",
-                "prediction": p["prediction"],
-                "odds": round(odds, 2),
-                "confidence": p["confidence"],
+                "home_team": p["home_team"],
+                "away_team": p["away_team"],
+                "home_team_logo": p.get("home_team_logo"),
+                "away_team_logo": p.get("away_team_logo"),
+                "commence_time": p["commence_time"],
+                "prediction": pick["prediction"],
+                "market": pick["market"],
+                "odds": pick["odds"],
+                "confidence": pick["confidence"],
                 "status": "pending",
-                "game": _to_game(p),
             })
-            _save("wc_rollover_chain.json", chain)
-            continue
-
-        # Score: confidence × diversity_bonus
-        # If a market was used 2+ times in last 3 days, penalize it
-        def score(cand):
-            prob, odds, label, market, p = cand
-            penalty = 1.0
-            same_count = recent.count(market)
-            if same_count >= 2:
-                penalty = 0.65  # Strong push toward different markets
-            elif same_count == 1:
-                penalty = 0.90
-            return prob * penalty
-
-        candidates.sort(key=score, reverse=True)
-        prob, odds, label, market, p = candidates[0]
+            combined *= pick["odds"]
+            used_match_ids.add(p["match_id"])
 
         chain["days"].append({
-            "date": pick_date,
             "day_number": len(chain["days"]) + 1,
-            "market": market,
-            "match": f"{p['home_team']} vs {p['away_team']}",
-            "prediction": label,
-            "odds": round(odds, 2),
-            "confidence": round(prob, 3),
+            "date": date,
+            "picks": picks_data,
+            "combined_odds": round(combined, 2),
+            "avg_confidence": round(sum(pk["confidence"] for pk in picks_data) / len(picks_data), 3),
             "status": "pending",
-            "game": _to_game(p),
         })
-
+        needed -= 1
         _save("wc_rollover_chain.json", chain)
 
-    # Calculate cumulative odds
+    # Calculate cumulative odds (product of each day's combined_odds)
     cum_odds = 1.0
     for d in chain.get("days", []):
-        cum_odds *= d.get("odds", 1.0)
+        cum_odds *= d.get("combined_odds", 1.0)
 
-    # Build rollover response
-    games = [d.get("game", {}) for d in chain.get("days", []) if d.get("game")]
-    today_pick = next((d for d in chain.get("days", []) if d["date"] >= today), None)
+    # Build legacy games list (flatten today's picks into game objects)
+    today_day = next((d for d in chain.get("days", []) if d["date"] >= today and d.get("status") == "pending"), None)
+    games = []
+    if today_day:
+        for pk in today_day.get("picks", []):
+            games.append({
+                "fixture_id": hash(pk.get("match_id", "")) % 1_000_000,
+                "home_team": pk.get("home_team", ""),
+                "away_team": pk.get("away_team", ""),
+                "league": "FIFA World Cup 2026",
+                "date": pk.get("commence_time", ""),
+                "prediction": pk.get("prediction", ""),
+                "prediction_type": pk.get("market", "match_result"),
+                "confidence": pk.get("confidence", 0.5),
+                "estimated_odds": pk.get("odds"),
+                "odds": pk.get("odds"),
+                "home_team_logo": pk.get("home_team_logo"),
+                "away_team_logo": pk.get("away_team_logo"),
+                "risk_level": "low",
+                "model_type": "worldcup_safe",
+            })
 
     return {
         "selected": True,
-        "games": [today_pick["game"]] if today_pick else (games[-1:] if games else []),
+        "games": games,
         "total_odds": round(cum_odds, 2),
         "risk_level": "Challenge",
         "reason": None,
