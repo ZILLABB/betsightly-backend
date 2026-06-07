@@ -85,23 +85,29 @@ class RateLimiter:
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Global rate-limiting middleware applied to all requests."""
+    """Global rate-limiting middleware applied to all requests.
 
-    # Paths that are exempt from rate limiting (health/liveness probes)
+    GET endpoints allow 1000 req/hr (general browsing).
+    POST/PUT/DELETE endpoints allow 60 req/hr (write operations).
+    """
+
     _EXEMPT = {"/api/health", "/api/health/ready", "/api/health/live", "/"}
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path not in self._EXEMPT:
             client_id = get_client_id(request)
-            if not rate_limiter.is_allowed(client_id):
+            is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
+            limiter = write_rate_limiter if is_write else rate_limiter
+            if not limiter.is_allowed(client_id):
                 from starlette.responses import JSONResponse
                 return JSONResponse(
                     status_code=429,
                     content={
                         "error": "Rate limit exceeded",
                         "message": "Too many requests. Please try again later.",
-                        "remaining_requests": rate_limiter.get_remaining_requests(client_id),
+                        "retry_after": limiter.window_seconds,
                     },
+                    headers={"Retry-After": str(limiter.window_seconds)},
                 )
         return await call_next(request)
 
@@ -117,7 +123,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none'"
 
         try:
             del response.headers["Server"]
@@ -197,7 +203,8 @@ class APIKeyValidator:
 
 
 # Global instances
-rate_limiter = RateLimiter(max_requests=1000, window_seconds=3600)  # 1000 requests per hour
+rate_limiter = RateLimiter(max_requests=1000, window_seconds=3600)  # 1000 GET requests per hour
+write_rate_limiter = RateLimiter(max_requests=60, window_seconds=3600)  # 60 write requests per hour
 api_key_validator = APIKeyValidator()
 security_bearer = HTTPBearer(auto_error=False)
 
