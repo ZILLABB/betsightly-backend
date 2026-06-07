@@ -1,18 +1,14 @@
 """
-Fetch historical fixtures from API-Football for all target leagues.
+(DEPRECATED) Fetch historical fixtures from API-Football.
 
-Saves to data/api-football/matches.csv with team names that exactly
-match the live fixture API — eliminating all name-mismatch issues.
+⚠️  Use fetch_history_fdc.py instead — it pulls from football-data.co.uk
+    which is free, has no API key requirement, no rate limits, and no
+    suspension risk.  This file is kept for reference only.
 
-Usage:
-    py scripts/fetch_history.py
+    py scripts/fetch_history_fdc.py --recent
 
-Resume-safe: tracks progress in data/api-football/progress.json so you
-can stop and restart without re-fetching completed league/season combos.
-
-API cost: ~100 requests (34 leagues × 3 seasons). Free tier = 100/day,
-so you may need to run this on 2 consecutive days — the resume logic
-handles that automatically.
+This script requires an API-Football key (api-sports.io), which has a
+100 requests/day free tier and seasons limited to 2022-2024.
 """
 
 import csv

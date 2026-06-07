@@ -22,8 +22,8 @@
   ],
   "form_window": 5,
   "h2h_window": 10,
-  "trained_at": "2026-05-26T07:48:31.610811",
-  "n_samples": 14712,
+  "trained_at": "2026-06-07T23:46:58.125279",
+  "n_samples": 37357,
   "models": [
     "btts_catboost",
     "btts_et",
