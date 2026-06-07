@@ -26,7 +26,7 @@ from pathlib import Path
 import requests
 
 # ---------------------------------------------------------------------------
-API_KEY  = os.getenv("API_FOOTBALL_API_KEY", "bbfc08f4961fb2ef3476a129b8cb1cd9")
+API_KEY  = os.getenv("API_FOOTBALL_API_KEY", "")
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS  = {"x-apisports-key": API_KEY}
 
@@ -34,9 +34,8 @@ OUTPUT_DIR      = Path("data/api-football")
 OUTPUT_CSV      = OUTPUT_DIR / "matches.csv"
 PROGRESS_FILE   = OUTPUT_DIR / "progress.json"
 
-# Seasons to fetch — most recent 3 full seasons give enough history
-# without wasting API calls on stale data.
-SEASONS = [2023, 2024, 2025]
+# Seasons to fetch — free plan allows 2022-2024 only
+SEASONS = [2022, 2023, 2024]
 
 # League ID → (display name, country, tier)
 #   tier 0 = continental cups, 1 = top flight, 2 = second division
@@ -173,6 +172,13 @@ def parse_fixture(f: dict, league_id: int, league_name: str,
 
 
 def main():
+    if not API_KEY:
+        print("ERROR: API_FOOTBALL_API_KEY not set.")
+        print("Set it via environment variable or in a .env file:")
+        print("  set API_FOOTBALL_API_KEY=your_key_here   (Windows)")
+        print("  export API_FOOTBALL_API_KEY=your_key_here (Linux/Mac)")
+        sys.exit(1)
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     done = load_progress()
 
