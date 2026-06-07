@@ -118,7 +118,7 @@ def get_apifootball_daily_fixtures(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Error fetching fixtures from APIFootball.com: {str(e)}"
+            detail="Failed to fetch fixtures"
         )
 
 
@@ -139,7 +139,7 @@ def get_apifootball_live_fixtures():
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Error fetching live fixtures from APIFootball.com: {str(e)}"
+            detail="Failed to fetch live fixtures"
         )
 
 
@@ -160,7 +160,7 @@ def get_apifootball_leagues():
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Error fetching leagues from APIFootball.com: {str(e)}"
+            detail="Failed to fetch leagues"
         )
 
 
@@ -184,5 +184,5 @@ def sync_fixtures_from_apifootball(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Error syncing fixtures from APIFootball.com: {str(e)}"
+            detail="Failed to sync fixtures"
         )

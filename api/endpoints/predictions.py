@@ -450,7 +450,7 @@ def trigger_model_retraining(
         raise
     except Exception as e:
         logger.error(f"Error triggering training: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Training request failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Training request failed")
 
 
 @router.get("/models/training/status")
@@ -503,7 +503,7 @@ def get_training_status():
 
     except Exception as e:
         logger.error(f"Error getting training status: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get training status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get training status")
 
 
 @router.post("/cache/generate")
@@ -572,7 +572,7 @@ def generate_daily_cache(
         raise
     except Exception as e:
         logger.error(f"Error generating cache: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Cache generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Cache generation failed")
 
 
 @router.get("/cache/status")
@@ -627,7 +627,7 @@ def get_cache_status(
 
     except Exception as e:
         logger.error(f"Error getting cache status: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get cache status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get cache status")
 
 
 @router.delete("/cache/clear")
@@ -698,7 +698,7 @@ def clear_cache(
 
     except Exception as e:
         logger.error(f"Error clearing cache: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to clear cache")
 
 
 @router.get("/models/info")
@@ -780,7 +780,7 @@ def get_advanced_models_info(request: Request):
         logger.error(f"Models info endpoint error: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error getting models info: {str(e)}"
+            detail="Failed to retrieve models info"
         )
 
 
@@ -831,7 +831,7 @@ def get_cache_service_status(request: Request):
         logger.error(f"Cache status endpoint error: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error getting cache status: {str(e)}"
+            detail="Failed to retrieve cache status"
         )
 
 
@@ -886,5 +886,5 @@ def force_cache_refresh(
         logger.error(f"Cache refresh endpoint error: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error refreshing cache: {str(e)}"
+            detail="Failed to refresh cache"
         )

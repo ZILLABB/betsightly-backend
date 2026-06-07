@@ -263,7 +263,7 @@ def readiness_check(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Readiness check failed: {str(e)}")
-        raise HTTPException(status_code=503, detail=f"Service not ready: {str(e)}")
+        raise HTTPException(status_code=503, detail="Service not ready")
 
 
 @router.get("/live")

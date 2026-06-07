@@ -134,7 +134,7 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting today's accumulators: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve today's accumulators")
 
 @router.get("/2-odds")
 def get_2_odds_accumulator(db: Session = Depends(get_db)):
@@ -257,7 +257,7 @@ def _get_category_accumulator(category: str, db: Session):
 
     except Exception as e:
         logger.error(f"Error getting category accumulator: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve accumulator")
 
 @router.get("/summary")
 def get_accumulator_summary(db: Session = Depends(get_db)):
@@ -304,7 +304,7 @@ def get_accumulator_summary(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting accumulator summary: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve accumulator summary")
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +455,7 @@ def get_accumulator_results(
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
         logger.error(f"Error checking accumulator results: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to check accumulator results")
 
 
 @router.post("/rebuild")
@@ -534,4 +534,4 @@ def rebuild_accumulators(
         raise
     except Exception as e:
         logger.error(f"Error rebuilding accumulators: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to rebuild accumulators")

@@ -242,26 +242,6 @@ def health_check():
             "status": "healthy",
             "service": "BetSightly API",
             "version": "1.0.0",
-            "error": str(e)
+            "error": "health check error"
         }
 
-@app.get("/api/debug/predictions")
-def debug_predictions():
-    """Debug endpoint to check predictions data."""
-    try:
-        # Simple debug endpoint for Railway deployment
-        return {
-            "status": "operational",
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "message": "Minimal deployment - ML services loading",
-            "endpoints": {
-                "health": "/api/health",
-                "predictions": "/api/predictions/",
-                "betting_codes": "/api/betting-codes/",
-                "punters": "/api/punters/"
-            },
-            "deployment": "railway-minimal"
-        }
-    except Exception as e:
-        logger.error(f"Error in debug predictions endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting debug predictions: {str(e)}")

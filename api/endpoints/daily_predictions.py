@@ -96,7 +96,7 @@ def get_todays_predictions_from_db(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting today's predictions: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve today's predictions")
 
 @router.get("/categories")
 def get_betting_categories_from_db(db: Session = Depends(get_db)):
@@ -175,7 +175,7 @@ def get_betting_categories_from_db(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting betting categories: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve betting categories")
 
 @router.post("/generate")
 def generate_daily_predictions(
@@ -234,7 +234,7 @@ def generate_daily_predictions(
         raise
     except Exception as e:
         logger.error(f"Error generating predictions: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate predictions")
 
 @router.get("/status")
 def get_prediction_status(
@@ -278,7 +278,7 @@ def get_prediction_status(
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
         logger.error(f"Error getting prediction status: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve prediction status")
 
 @router.get("/history")
 def get_prediction_history(
@@ -313,7 +313,7 @@ def get_prediction_history(
         
     except Exception as e:
         logger.error(f"Error getting prediction history: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve prediction history")
 
 @router.delete("/clear")
 def clear_predictions(
@@ -357,4 +357,4 @@ def clear_predictions(
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
         logger.error(f"Error clearing predictions: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to clear predictions")

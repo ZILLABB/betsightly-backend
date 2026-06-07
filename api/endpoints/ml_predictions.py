@@ -450,7 +450,7 @@ def get_todays_predictions(force_refresh: bool = Query(False)):
 
     except Exception as e:
         logger.error(f"Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve predictions")
 
 
 @router.get("/categories")
@@ -465,7 +465,7 @@ def get_betting_categories():
         }
     except Exception as e:
         logger.error(f"Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve betting categories")
 
 
 @router.get("/fixture/{fixture_id}")
@@ -489,7 +489,7 @@ def get_fixture_prediction(fixture_id: int):
         raise
     except Exception as e:
         logger.error(f"Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve fixture prediction")
 
 
 @router.get("/models/status")

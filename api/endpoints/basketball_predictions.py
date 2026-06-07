@@ -233,7 +233,7 @@ def get_basketball_summary(
     
     except Exception as e:
         logger.error(f"Error getting basketball summary: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve basketball predictions summary")
 
 @router.get("/confidence/{confidence_level}")
 def get_basketball_predictions_by_confidence(
@@ -302,7 +302,7 @@ def get_basketball_predictions_by_confidence(
     
     except Exception as e:
         logger.error(f"Error getting basketball confidence predictions: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve basketball predictions by confidence")
 
 @router.get("/models/status")
 def get_basketball_models_status(request: Request):
@@ -348,7 +348,7 @@ def get_basketball_models_status(request: Request):
         
     except Exception as e:
         logger.error(f"Error getting basketball models status: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve basketball models status")
 
 @router.post("/train")
 def train_basketball_models(request: Request):
@@ -379,4 +379,4 @@ def train_basketball_models(request: Request):
         
     except Exception as e:
         logger.error(f"Error training basketball models: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Basketball model training failed")
