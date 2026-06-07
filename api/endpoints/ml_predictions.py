@@ -160,12 +160,11 @@ class RealMLPredictionService:
                 self.api_df["date"] = pd.to_datetime(self.api_df["date"], errors="coerce")
                 self.api_df = self.api_df.dropna(subset=["date"]).sort_values("date")
                 logger.info(f"Historical data: {len(self.api_df):,} matches")
+                _init_statistical_models(self.api_df)
+            else:
+                logger.warning(f"{MATCHES_CSV} not found — run scripts/fetch_history.py")
         except Exception as e:
             logger.warning(f"Could not load historical data: {e}")
-
-            _init_statistical_models(self.api_df)
-        else:
-            logger.warning(f"{MATCHES_CSV} not found — run scripts/fetch_history.py")
 
         # Also load encoders for backward compat (may not exist)
         self.encoders = {}
