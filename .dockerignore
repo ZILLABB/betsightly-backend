@@ -49,3 +49,9 @@ LICENSE
 # Temp
 cache/
 check_db.py
+
+# Claude / misc
+.claude/
+.env.*
+UsersZILLABDesktopbetsightly-frontend-tmp/
+.github/

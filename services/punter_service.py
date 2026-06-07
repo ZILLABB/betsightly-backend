@@ -57,18 +57,35 @@ class PunterService:
             punters = self.db.query(Punter).all()
             result = []
 
+            codes_by_punter: Dict[Any, list] = {}
+            if include_codes and punters:
+                from betting_code import BettingCode
+                from sqlalchemy import func as sqla_func
+                punter_ids = [p.id for p in punters]
+                # Window function to rank codes per punter, then filter top 10
+                row_num = sqla_func.row_number().over(
+                    partition_by=BettingCode.punter_id,
+                    order_by=BettingCode.created_at.desc()
+                ).label("rn")
+                subq = (
+                    self.db.query(BettingCode, row_num)
+                    .filter(BettingCode.punter_id.in_(punter_ids))
+                    .subquery()
+                )
+                from sqlalchemy.orm import aliased
+                CodeAlias = aliased(BettingCode, subq)
+                codes = (
+                    self.db.query(CodeAlias)
+                    .filter(subq.c.rn <= 10)
+                    .all()
+                )
+                for code in codes:
+                    codes_by_punter.setdefault(code.punter_id, []).append(code.to_dict())
+
             for punter in punters:
                 data = punter.to_dict()
                 if include_codes:
-                    from betting_code import BettingCode
-                    codes = (
-                        self.db.query(BettingCode)
-                        .filter(BettingCode.punter_id == punter.id)
-                        .order_by(BettingCode.created_at.desc())
-                        .limit(10)
-                        .all()
-                    )
-                    data["betting_codes"] = [c.to_dict() for c in codes]
+                    data["betting_codes"] = codes_by_punter.get(punter.id, [])
                 result.append(data)
 
             return result
