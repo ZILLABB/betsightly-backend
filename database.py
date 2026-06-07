@@ -64,6 +64,7 @@ def init_db():
         from betting_code import BettingCode  # noqa: F401
         from fixture import Fixture  # noqa: F401
         from prediction import Prediction  # noqa: F401
+        from services.push_notification_service import PushSubscription, TelegramDMSubscription  # noqa: F401
 
         # Create SQLAlchemy tables (works for both SQLite and PostgreSQL)
         Base.metadata.create_all(bind=engine)

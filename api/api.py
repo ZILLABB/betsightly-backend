@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from api.endpoints import (
     betting_codes, predictions, fixtures, punters,
     bookmakers, dashboard, health, ml_predictions,
-    daily_predictions, accumulators,
+    daily_predictions, accumulators, subscriptions,
 )
 from utils.security import require_api_key
 
@@ -30,3 +30,6 @@ api_router.include_router(fixtures.router, prefix="/fixtures", tags=["fixtures"]
 api_router.include_router(punters.router, prefix="/punters", tags=["punters"], **_protected)
 api_router.include_router(bookmakers.router, prefix="/bookmakers", tags=["bookmakers"], **_protected)
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"], **_protected)
+
+# Subscription endpoints are unauthenticated (public subscribe/unsubscribe)
+api_router.include_router(subscriptions.router, prefix="/notifications", tags=["notifications"])

@@ -136,6 +136,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/stats <name> - Punter stats\n"
         "/leaderboard - Top punters\n"
         "/today - Today's codes\n"
+        "/subscribe - Get DM when new predictions drop\n"
+        "/unsubscribe - Stop notifications\n"
         "/help - Show this message"
     )
 
@@ -461,6 +463,81 @@ async def wcacca_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ── Message Handlers ────────────────────────────────────────
 
 
+async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Subscribe to daily prediction notifications via DM."""
+    if MOCK_MODE:
+        await update.message.reply_text("Bot is in mock mode — no database available.")
+        return
+
+    try:
+        from database import SessionLocal
+        from services.push_notification_service import TelegramDMSubscription
+
+        chat_id = str(update.effective_user.id)
+        username = update.effective_user.username or update.effective_user.full_name
+
+        db = SessionLocal()
+        try:
+            existing = db.query(TelegramDMSubscription).filter(
+                TelegramDMSubscription.chat_id == chat_id
+            ).first()
+
+            if existing and existing.active:
+                await update.message.reply_text(
+                    "You're already subscribed! You'll get a DM when new predictions drop.\n"
+                    "Use /unsubscribe to stop."
+                )
+                return
+
+            if existing:
+                existing.active = True
+                existing.username = username
+            else:
+                sub = TelegramDMSubscription(chat_id=chat_id, username=username)
+                db.add(sub)
+
+            db.commit()
+            await update.message.reply_text(
+                "Subscribed! You'll receive a DM when new predictions are ready.\n"
+                "Use /unsubscribe to stop notifications."
+            )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Subscribe error: {e}")
+        await update.message.reply_text("Something went wrong. Please try again.")
+
+
+async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Unsubscribe from prediction notifications."""
+    if MOCK_MODE:
+        await update.message.reply_text("Bot is in mock mode — no database available.")
+        return
+
+    try:
+        from database import SessionLocal
+        from services.push_notification_service import TelegramDMSubscription
+
+        chat_id = str(update.effective_user.id)
+        db = SessionLocal()
+        try:
+            sub = db.query(TelegramDMSubscription).filter(
+                TelegramDMSubscription.chat_id == chat_id
+            ).first()
+
+            if sub and sub.active:
+                sub.active = False
+                db.commit()
+                await update.message.reply_text("Unsubscribed. You won't receive prediction notifications anymore.")
+            else:
+                await update.message.reply_text("You're not currently subscribed.")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Unsubscribe error: {e}")
+        await update.message.reply_text("Something went wrong. Please try again.")
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle all non-command text messages."""
     if not update.message or not update.message.text:
@@ -723,6 +800,8 @@ def main() -> None:
     application.add_handler(CommandHandler("delete", delete_command))
     application.add_handler(CommandHandler("wctips", wctips_command))
     application.add_handler(CommandHandler("wcacca", wcacca_command))
+    application.add_handler(CommandHandler("subscribe", subscribe_command))
+    application.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
 
     # All text messages (codes + status replies)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
