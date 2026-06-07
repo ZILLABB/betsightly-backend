@@ -15,6 +15,7 @@ from database import get_db, Base, engine
 from services.apifootball_service import APIFootballService
 from api.endpoints.ml_predictions import RealMLPredictionService
 from services.accumulator_builder import AccumulatorBuilder
+from services.odds_service import OddsService
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -82,6 +83,7 @@ class DailyPredictionsService:
         self.apifootball_service = APIFootballService()
         self.ml_service = RealMLPredictionService()
         self.accumulator_builder = AccumulatorBuilder()
+        self.odds_service = OddsService()
 
         # Create tables
         Base.metadata.create_all(bind=engine)
@@ -169,9 +171,23 @@ class DailyPredictionsService:
                     logger.error(f"Error processing fixture {fixture.get('fixture_id')}: {str(e)}")
                     continue
 
-            # Build accumulators from all predictions
+            # Fetch real bookmaker odds to enable value-based selection
+            odds_map = {}
+            try:
+                odds_map = self.odds_service.get_odds_for_fixtures(upcoming_fixtures)
+                if odds_map:
+                    logger.info(f"💰 Real odds fetched for {len(odds_map)}/{len(upcoming_fixtures)} fixtures")
+                else:
+                    logger.info("📊 No real odds available — using confidence-based selection")
+            except Exception as e:
+                logger.warning(f"Odds fetch failed (non-fatal): {e}")
+
+            # Build accumulators from all predictions + real odds
             logger.info(f"🎯 Building accumulators from {len(all_predictions)} predictions")
-            accumulator_result = self.accumulator_builder.build_accumulators(all_predictions)
+            accumulator_result = self.accumulator_builder.build_accumulators(
+                all_predictions,
+                odds_map=odds_map if odds_map else None,
+            )
             accumulators = accumulator_result.get('accumulators', {})
 
             # Count successful accumulators

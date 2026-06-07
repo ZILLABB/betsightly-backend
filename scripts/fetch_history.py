@@ -1,8 +1,8 @@
 """
-Fetch 5 seasons of historical fixtures from API-Football.
+Fetch historical fixtures from API-Football for all target leagues.
 
 Saves to data/api-football/matches.csv with team names that exactly
-match the live fixture API ? eliminating all name-mismatch issues.
+match the live fixture API — eliminating all name-mismatch issues.
 
 Usage:
     py scripts/fetch_history.py
@@ -10,7 +10,9 @@ Usage:
 Resume-safe: tracks progress in data/api-football/progress.json so you
 can stop and restart without re-fetching completed league/season combos.
 
-API cost: ~80 requests (16 leagues ? 5 seasons). Free tier = 100/day.
+API cost: ~100 requests (34 leagues × 3 seasons). Free tier = 100/day,
+so you may need to run this on 2 consecutive days — the resume logic
+handles that automatically.
 """
 
 import csv
@@ -32,27 +34,53 @@ OUTPUT_DIR      = Path("data/api-football")
 OUTPUT_CSV      = OUTPUT_DIR / "matches.csv"
 PROGRESS_FILE   = OUTPUT_DIR / "progress.json"
 
-# Free plan allows 2022-2024 only
-SEASONS = [2022, 2023, 2024]
+# Seasons to fetch — most recent 3 full seasons give enough history
+# without wasting API calls on stale data.
+SEASONS = [2023, 2024, 2025]
 
-# League ID ? (display name, country, tier)
+# League ID → (display name, country, tier)
+#   tier 0 = continental cups, 1 = top flight, 2 = second division
 TARGET_LEAGUES = {
-    39:  ("Premier League",    "England",     1),
-    40:  ("Championship",      "England",     2),
-    61:  ("Ligue 1",           "France",      1),
-    62:  ("Ligue 2",           "France",      2),
-    78:  ("Bundesliga",        "Germany",     1),
-    79:  ("2. Bundesliga",     "Germany",     2),
-    135: ("Serie A",           "Italy",       1),
-    136: ("Serie B",           "Italy",       2),
-    140: ("La Liga",           "Spain",       1),
-    141: ("Segunda Division",  "Spain",       2),
-    94:  ("Primeira Liga",     "Portugal",    1),
-    88:  ("Eredivisie",        "Netherlands", 1),
-    144: ("Pro League",        "Belgium",     1),
-    203: ("Super Lig",         "Turkey",      1),
-    2:   ("Champions League",  "Europe",      0),
-    3:   ("Europa League",     "Europe",      0),
+    # ── European top flights (Aug-May) ──
+    39:  ("Premier League",    "England",       1),
+    40:  ("Championship",      "England",       2),
+    61:  ("Ligue 1",           "France",        1),
+    62:  ("Ligue 2",           "France",        2),
+    78:  ("Bundesliga",        "Germany",       1),
+    79:  ("2. Bundesliga",     "Germany",       2),
+    135: ("Serie A",           "Italy",         1),
+    136: ("Serie B",           "Italy",         2),
+    140: ("La Liga",           "Spain",         1),
+    141: ("Segunda Division",  "Spain",         2),
+    94:  ("Primeira Liga",     "Portugal",      1),
+    88:  ("Eredivisie",        "Netherlands",   1),
+    144: ("Pro League",        "Belgium",       1),
+    203: ("Super Lig",         "Turkey",        1),
+    179: ("Premiership",       "Scotland",      1),
+    # ── European cups ──
+    2:   ("Champions League",  "Europe",        0),
+    3:   ("Europa League",     "Europe",        0),
+    848: ("Conference League", "Europe",        0),
+    # ── Americas (year-round / summer) ──
+    253: ("MLS",               "USA",           1),
+    71:  ("Serie A",           "Brazil",        1),
+    128: ("Primera Division",  "Argentina",     1),
+    262: ("Liga MX",           "Mexico",        1),
+    265: ("Primera Division",  "Chile",         1),
+    # ── Copa competitions ──
+    13:  ("Copa Libertadores", "South America", 0),
+    11:  ("Copa Sudamericana", "South America", 0),
+    # ── Nordic / Summer leagues (Mar-Nov) ──
+    103: ("Eliteserien",       "Norway",        1),
+    113: ("Allsvenskan",       "Sweden",        1),
+    244: ("Veikkausliiga",     "Finland",       1),
+    119: ("Superliga",         "Denmark",       1),
+    # ── Asia ──
+    98:  ("J1 League",         "Japan",         1),
+    292: ("K League 1",        "South Korea",   1),
+    307: ("Pro League",        "Saudi Arabia",  1),
+    # ── World Cup ──
+    1:   ("World Cup",         "International", 0),
 }
 
 CSV_COLUMNS = [
