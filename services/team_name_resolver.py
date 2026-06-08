@@ -343,10 +343,39 @@ ALIASES: Dict[str, str] = {
     "paok": "PAOK",
     "aek athens": "AEK Athens",
     "aris thessaloniki": "Aris",
+    # ── football-data.org Brazilian names ──
+    "ca mineiro": "Atletico-MG",
+    "sc corinthians paulista": "Corinthians",
+    "coritiba fbc": "Coritiba",
+    "mirassol fc": "Mirassol",
+    "clube do remo": "Remo",
+    "chapecoense af": "Chapecoense",
+    "grêmio fbpa": "Gremio",
+    "cruzeiro ec": "Cruzeiro",
 }
 
 # Lowercase the keys for fast lookup
 ALIASES = {k.lower(): v for k, v in ALIASES.items()}
+
+# National team names — these should NOT fuzzy-match to club teams.
+# When the resolver sees one of these, it returns None (no match) rather
+# than accidentally matching "England" → "New England Revolution", etc.
+NATIONAL_TEAMS = {
+    "england", "france", "spain", "italy", "germany", "brazil", "argentina",
+    "portugal", "netherlands", "belgium", "scotland", "turkey", "greece",
+    "switzerland", "austria", "sweden", "norway", "denmark", "finland",
+    "poland", "romania", "czech republic", "czechia", "croatia", "serbia",
+    "ukraine", "hungary", "ireland", "wales", "northern ireland",
+    "united states", "usa", "canada", "mexico", "japan", "south korea",
+    "australia", "qatar", "saudi arabia", "morocco", "south africa",
+    "nigeria", "senegal", "cameroon", "ghana", "egypt", "tunisia",
+    "colombia", "chile", "peru", "uruguay", "paraguay", "ecuador",
+    "costa rica", "panama", "haiti", "jamaica",
+    "bosnia-herzegovina", "bosnia and herzegovina", "north macedonia",
+    "montenegro", "iceland", "albania", "slovakia", "slovenia",
+    "curaçao", "curacao", "new zealand", "iran", "china", "india",
+    "indonesia", "thailand", "vietnam",
+}
 
 
 class TeamNameResolver:
@@ -399,6 +428,11 @@ class TeamNameResolver:
         """Internal resolution logic."""
         clean = name.strip()
         lower = clean.lower()
+
+        # 0. National team guard — don't fuzzy-match country names to clubs
+        if lower in NATIONAL_TEAMS:
+            logger.debug(f"National team detected: '{name}' — skipping (club data only)")
+            return None
 
         # 1. Exact match
         if clean in self._known_teams:
