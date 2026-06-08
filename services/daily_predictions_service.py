@@ -15,7 +15,7 @@ from database import get_db, Base, engine
 from services.fixture_service import FixtureService
 from api.endpoints.ml_predictions import RealMLPredictionService
 from services.accumulator_builder import AccumulatorBuilder
-from services.odds_service import OddsService
+# OddsService no longer needed — odds come embedded in fixture data
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class DailyPredictionsService:
         self.fixture_service = FixtureService()
         self.ml_service = RealMLPredictionService()
         self.accumulator_builder = AccumulatorBuilder()
-        self.odds_service = OddsService()
+        # Odds come embedded in fixture data (no separate service needed)
 
         # Create tables
         Base.metadata.create_all(bind=engine)

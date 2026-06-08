@@ -78,15 +78,19 @@ def get_fixture_prediction(
 # Fixture Testing Endpoints (via The Odds API)
 @router.get("/odds-api/test")
 def test_odds_api_connection():
-    """Test The Odds API connection for fixtures."""
+    """Test fixture API connections (football-data.org + The Odds API)."""
     try:
         service = OddsFixtureService()
         is_connected = service.test_connection()
+        credit_status = service.get_credit_status()
         return {
             "status": "success" if is_connected else "failed",
-            "message": "The Odds API connection test",
+            "message": "Fixture API connection test",
             "connected": is_connected,
-            "credits_remaining": service.remaining_credits,
+            "credits_remaining": credit_status.get("remaining", "?"),
+            "credits_used": credit_status.get("used", "?"),
+            "has_football_data_org": bool(service.fdo_api_key),
+            "has_odds_api": bool(service.odds_api_key),
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:

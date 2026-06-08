@@ -88,27 +88,27 @@ def run(target_date: str = None, force: bool = False):
     dc_teams = len(getattr(_dixon_coles, "teams", [])) if _dixon_coles else 0
     print(f"  6 ML models + ELO ({elo_teams} teams) + Dixon-Coles ({dc_teams} teams)\n")
 
-    # --- Step 3: Fetch real bookmaker odds ---
+    # --- Step 3: Extract odds (already fetched with fixtures — 0 extra credits) ---
     odds_map = {}
-    try:
-        from services.odds_service import OddsService
-        odds_svc = OddsService()
-        if odds_svc.api_key:
-            print("Fetching real bookmaker odds...", end=" ", flush=True)
-            odds_map = odds_svc.get_odds_for_fixtures(upcoming)
-            print(f"matched {len(odds_map)}/{len(upcoming)} fixtures")
-            if odds_map:
-                print(f"  Strategy: VALUE-BASED (using real market odds)\n")
-            else:
-                print(f"  No odds matched — using confidence-based fallback\n")
-        else:
-            print("  No ODDS_API_KEY set — using confidence-based selection")
-            print("  (Set ODDS_API_KEY in .env for value-based picks)\n")
-    except ImportError:
-        print("  Odds service not available — using confidence-based selection\n")
-    except Exception as e:
-        logger.warning(f"Odds fetch failed: {e} — using fallback")
-        print(f"  Odds unavailable ({e}) — using confidence-based fallback\n")
+    for fx in upcoming:
+        fx_odds = fx.get("odds", {})
+        if fx_odds and fx_odds.get("home"):
+            fixture_id = fx.get("fixture_id")
+            odds_map[fixture_id] = {
+                "home_odds": fx_odds.get("home"),
+                "draw_odds": fx_odds.get("draw"),
+                "away_odds": fx_odds.get("away"),
+                "over_2_5_odds": fx_odds.get("over_2_5"),
+                "under_2_5_odds": fx_odds.get("under_2_5"),
+                "bookmaker": fx_odds.get("bookmaker", ""),
+            }
+
+    if odds_map:
+        print(f"Odds available: {len(odds_map)}/{len(upcoming)} fixtures (embedded in fixture data)")
+        print(f"  Strategy: VALUE-BASED (using real market odds)\n")
+    else:
+        print(f"  No odds available — using confidence-based fallback")
+        print(f"  (Odds come from The Odds API fixtures, not a separate call)\n")
 
     # --- Step 4: Generate predictions ---
     print("Generating predictions...")
