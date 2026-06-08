@@ -248,6 +248,129 @@ class RealMLPredictionService:
             league_tier / 2,
         ]
 
+    def _has_team_history(self, team: str) -> bool:
+        """Check if a team has any historical data in matches.csv."""
+        if self.api_df is None or len(self.api_df) == 0:
+            return False
+        return ((self.api_df["home_team"] == team) | (self.api_df["away_team"] == team)).any()
+
+    def _odds_based_predictions(self, fixture: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate predictions from bookmaker odds when no historical data exists.
+
+        This is used for World Cup / international matches where we don't have
+        club-level historical stats.  Bookmaker odds encode expert assessment
+        of each team's strength, so implied probabilities are a solid signal.
+        """
+        home_team = fixture.get("home_team", "Unknown")
+        away_team = fixture.get("away_team", "Unknown")
+        league = fixture.get("league_name", "Unknown")
+        odds = fixture.get("odds", {}) or {}
+
+        home_odds = odds.get("home")
+        draw_odds = odds.get("draw")
+        away_odds = odds.get("away")
+        over_odds = odds.get("over_2_5")
+        under_odds = odds.get("under_2_5")
+
+        if not home_odds or not draw_odds or not away_odds:
+            return {"error": "No odds available for odds-based prediction"}
+
+        # Convert decimal odds to implied probabilities (remove overround)
+        raw_h = 1.0 / home_odds
+        raw_d = 1.0 / draw_odds
+        raw_a = 1.0 / away_odds
+        total = raw_h + raw_d + raw_a
+        prob_h = raw_h / total
+        prob_d = raw_d / total
+        prob_a = raw_a / total
+
+        # Match result prediction
+        probs = {"home_win": prob_h, "draw": prob_d, "away_win": prob_a}
+        best_result = max(probs, key=probs.get)
+        best_conf = probs[best_result]
+
+        ml_predictions = {}
+
+        # Odds-implied match result (treated like a high-quality model)
+        ml_predictions["odds_implied_result"] = {
+            "prediction": best_result,
+            "probabilities": [prob_a, prob_d, prob_h],
+            "confidence": best_conf,
+            "model_type": "odds_implied",
+            "model_name": "odds_implied_result",
+        }
+
+        # Over/Under 2.5
+        if over_odds and under_odds:
+            raw_over = 1.0 / over_odds
+            raw_under = 1.0 / under_odds
+            ou_total = raw_over + raw_under
+            prob_over = raw_over / ou_total
+            prob_under = raw_under / ou_total
+            ou_pred = "over_2_5" if prob_over > prob_under else "under_2_5"
+            ou_conf = max(prob_over, prob_under)
+            ml_predictions["odds_implied_over_2_5"] = {
+                "prediction": ou_pred,
+                "probabilities": [prob_under, prob_over],
+                "confidence": ou_conf,
+                "model_type": "odds_implied",
+                "model_name": "odds_implied_over_2_5",
+            }
+        else:
+            # World Cup average: ~2.5 goals/game, roughly 50/50 for over 2.5
+            ml_predictions["odds_implied_over_2_5"] = {
+                "prediction": "over_2_5",
+                "probabilities": [0.48, 0.52],
+                "confidence": 0.52,
+                "model_type": "odds_implied",
+                "model_name": "odds_implied_over_2_5",
+            }
+
+        # Over 1.5 (World Cup games almost always have 2+ goals — ~82% historically)
+        ml_predictions["odds_implied_over_1_5"] = {
+            "prediction": "over_1_5",
+            "probabilities": [0.18, 0.82],
+            "confidence": 0.82,
+            "model_type": "odds_implied",
+            "model_name": "odds_implied_over_1_5",
+        }
+
+        # BTTS — estimate from odds. Tight games (close odds) = more likely BTTS
+        odds_gap = abs(prob_h - prob_a)
+        btts_prob = 0.55 - (odds_gap * 0.3)  # tighter game = higher BTTS chance
+        btts_prob = max(0.35, min(0.65, btts_prob))
+        btts_pred = "yes" if btts_prob > 0.5 else "no"
+        ml_predictions["odds_implied_btts"] = {
+            "prediction": btts_pred,
+            "probabilities": [1 - btts_prob, btts_prob],
+            "confidence": max(btts_prob, 1 - btts_prob),
+            "model_type": "odds_implied",
+            "model_name": "odds_implied_btts",
+        }
+
+        return {
+            "fixture_info": {
+                "fixture_id": fixture.get("fixture_id"),
+                "home_team": home_team,
+                "away_team": away_team,
+                "league": league,
+                "date": fixture.get("date"),
+                "status": fixture.get("status"),
+                "home_team_logo": fixture.get("home_team_logo", ""),
+                "away_team_logo": fixture.get("away_team_logo", ""),
+                "league_logo": fixture.get("league_logo", ""),
+            },
+            "ml_predictions": ml_predictions,
+            "model_disagreement": 0.0,
+            "elo_gap": 0.0,
+            "prediction_mode": "odds_implied",
+            "model_summary": {
+                "total_predictions": len(ml_predictions),
+                "successful_predictions": len(ml_predictions),
+                "note": "Odds-based predictions (no club history for national teams)",
+            },
+        }
+
     def generate_predictions_for_fixture(self, fixture: Dict[str, Any]) -> Dict[str, Any]:
         """Generate predictions for a single fixture using all available models."""
         try:
@@ -255,6 +378,19 @@ class RealMLPredictionService:
             away_team = fixture.get("away_team", "Unknown")
             league = fixture.get("league_name", "Unknown")
             league_id = fixture.get("league_id", 0)
+
+            # Check if both teams have historical data
+            home_has_history = self._has_team_history(home_team)
+            away_has_history = self._has_team_history(away_team)
+
+            # If either team has no history (national teams, new clubs),
+            # use odds-based predictions instead of ML models with default features
+            if not home_has_history or not away_has_history:
+                logger.info(
+                    f"Odds-based mode for {home_team} vs {away_team} "
+                    f"(history: home={home_has_history}, away={away_has_history})"
+                )
+                return self._odds_based_predictions(fixture)
 
             # Determine league tier
             tier_2_leagues = {40, 62, 79, 136, 141}
