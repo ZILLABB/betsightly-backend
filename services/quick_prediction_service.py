@@ -129,33 +129,13 @@ class QuickPredictionService:
             }
     
     def _get_fixtures_from_api(self, date: str) -> List[Dict]:
-        """Get fixtures from API using your configured keys - NO MOCKS."""
+        """Get fixtures from The Odds API via FixtureService."""
         try:
-            # Load environment variables
-            import os
-            from dotenv import load_dotenv
-            load_dotenv()
-
-            football_key = os.getenv("FOOTBALL_DATA_API_KEY", "")
-            api_football_key = os.getenv("API_FOOTBALL_API_KEY", "")
-
-            # Try Football-Data.org first
-            if football_key and "dummy" not in football_key and len(football_key) > 10:
-                logger.info(f"🌐 Using Football-Data.org API (key: {football_key[:10]}...)")
-                return self._get_fixtures_football_data(date)
-
-            # Try API-Football as fallback
-            elif api_football_key and "dummy" not in api_football_key and len(api_football_key) > 10:
-                logger.info(f"🌐 Using API-Football API (key: {api_football_key[:10]}...)")
-                return self._get_fixtures_api_football(date)
-
-            else:
-                # NO MOCKS - return empty if no API keys
-                logger.warning("⚠️  No valid API keys found - returning no fixtures")
-                logger.warning(f"Football key: {football_key[:10] if football_key else 'None'}...")
-                logger.warning(f"API-Football key: {api_football_key[:10] if api_football_key else 'None'}...")
-                return []
-
+            from services.fixture_service import FixtureService
+            svc = FixtureService()
+            fixtures = svc.get_daily_fixtures(date)
+            logger.info(f"📡 Fetched {len(fixtures)} fixtures from The Odds API")
+            return fixtures
         except Exception as e:
             logger.error(f"❌ Error fetching fixtures: {str(e)}")
             return []

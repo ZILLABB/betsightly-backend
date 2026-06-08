@@ -11,8 +11,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from fixture import Fixture
 from prediction import Prediction
-from services.fixture_service import FixtureService
-from services.apifootball_service import APIFootballService
+from services.fixture_service import FixtureService as OddsFixtureService
 
 router = APIRouter()
 
@@ -76,92 +75,47 @@ def get_fixture_prediction(
     return prediction.to_dict()
 
 
-# APIFootball.com Testing Endpoints
-@router.get("/apifootball/test")
-def test_apifootball_connection():
-    """Test APIFootball.com connection."""
+# Fixture Testing Endpoints (via The Odds API)
+@router.get("/odds-api/test")
+def test_odds_api_connection():
+    """Test The Odds API connection for fixtures."""
     try:
-        service = APIFootballService()
+        service = OddsFixtureService()
         is_connected = service.test_connection()
-
         return {
             "status": "success" if is_connected else "failed",
-            "message": "APIFootball.com connection test",
+            "message": "The Odds API connection test",
             "connected": is_connected,
+            "credits_remaining": service.remaining_credits,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Error testing APIFootball.com connection: {str(e)}",
+            "message": f"Error: {str(e)}",
             "connected": False,
             "timestamp": datetime.now().isoformat()
         }
 
 
-@router.get("/apifootball/daily")
-def get_apifootball_daily_fixtures(
+@router.get("/odds-api/daily")
+def get_daily_fixtures_odds_api(
     date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format (defaults to today)")
 ):
-    """Get daily fixtures from APIFootball.com for testing."""
+    """Get daily fixtures from The Odds API."""
     try:
-        service = APIFootballService()
+        service = OddsFixtureService()
         fixtures = service.get_daily_fixtures(date)
-
         return {
             "status": "success",
-            "message": f"Retrieved fixtures from APIFootball.com for {date or 'today'}",
+            "message": f"Retrieved fixtures for {date or 'today'}",
             "count": len(fixtures),
+            "credits_remaining": service.remaining_credits,
             "fixtures": fixtures,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch fixtures"
-        )
-
-
-@router.get("/apifootball/live")
-def get_apifootball_live_fixtures():
-    """Get live fixtures from APIFootball.com."""
-    try:
-        service = APIFootballService()
-        fixtures = service.get_live_fixtures()
-
-        return {
-            "status": "success",
-            "message": "Retrieved live fixtures from APIFootball.com",
-            "count": len(fixtures),
-            "fixtures": fixtures,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch live fixtures"
-        )
-
-
-@router.get("/apifootball/leagues")
-def get_apifootball_leagues():
-    """Get available leagues from APIFootball.com."""
-    try:
-        service = APIFootballService()
-        leagues = service.get_leagues()
-
-        return {
-            "status": "success",
-            "message": "Retrieved leagues from APIFootball.com",
-            "count": len(leagues),
-            "leagues": leagues,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch leagues"
-        )
+        raise HTTPException(status_code=500, detail="Failed to fetch fixtures")
 
 
 @router.post("/apifootball/sync")

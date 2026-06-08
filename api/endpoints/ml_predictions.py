@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Query
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
-from services.apifootball_service import APIFootballService
+from services.fixture_service import FixtureService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -122,7 +122,7 @@ class RealMLPredictionService:
     """Prediction service using API-Football retrained models + statistical models."""
 
     def __init__(self):
-        self.apifootball_service = APIFootballService()
+        self.fixture_service = FixtureService()
         self.models_dir = MODELS_DIR
         self.api_models: Dict[str, Any] = {}
         self.api_df: Optional[pd.DataFrame] = None
@@ -424,7 +424,7 @@ def get_todays_predictions(force_refresh: bool = Query(False)):
                 and (now - _predictions_cache["timestamp"]).total_seconds() < 1800):
             return _predictions_cache["data"]
 
-        all_fixtures = ml_service.apifootball_service.get_daily_fixtures(today)
+        all_fixtures = ml_service.fixture_service.get_daily_fixtures(today)
         upcoming = [fx for fx in all_fixtures if fx.get("status") in ("NS", "TBD")]
 
         predictions_results = []
@@ -472,7 +472,7 @@ def get_fixture_prediction(fixture_id: int):
     """Get ML predictions for a specific fixture."""
     try:
         today = datetime.now().strftime("%Y-%m-%d")
-        all_fixtures = ml_service.apifootball_service.get_daily_fixtures(today)
+        all_fixtures = ml_service.fixture_service.get_daily_fixtures(today)
 
         target = next((fx for fx in all_fixtures if fx.get("fixture_id") == fixture_id), None)
         if not target:

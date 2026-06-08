@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from services.daily_predictions_service import DailyPrediction, DailyPredictionSummary
 from services.accumulator_builder import AccumulatorBuilder, format_accumulator_for_display
-from services.apifootball_service import APIFootballService
+from services.fixture_service import FixtureService
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -368,9 +368,9 @@ def get_accumulator_results(
                 "categories": {},
             }
 
-        # Fetch actual fixture results from API-Football
-        apifootball = APIFootballService()
-        fixtures = apifootball.get_daily_fixtures(check_date.isoformat())
+        # Fetch actual fixture results
+        fixture_svc = FixtureService()
+        fixtures = fixture_svc.get_daily_fixtures(check_date.isoformat())
 
         # Build a lookup: fixture_id -> {home_score, away_score, status}
         score_lookup: Dict[int, Dict] = {}

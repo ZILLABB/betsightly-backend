@@ -60,10 +60,10 @@ def run(target_date: str = None, force: bool = False):
     print(f"{'='*60}\n")
 
     # --- Step 1: Fetch fixtures ---
-    from services.apifootball_service import APIFootballService
-    svc = APIFootballService()
+    from services.fixture_service import FixtureService
+    svc = FixtureService()
     fixtures = svc.get_daily_fixtures(target_date)
-    upcoming = [f for f in fixtures if f.get("status") in ("NS", "TBD")]
+    upcoming = fixtures  # All Odds API fixtures are upcoming (NS)
 
     if not upcoming:
         print("No upcoming fixtures found for this date.")

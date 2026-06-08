@@ -12,7 +12,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Float, Boolean, 
 from sqlalchemy.ext.declarative import declarative_base
 
 from database import get_db, Base, engine
-from services.apifootball_service import APIFootballService
+from services.fixture_service import FixtureService
 from api.endpoints.ml_predictions import RealMLPredictionService
 from services.accumulator_builder import AccumulatorBuilder
 from services.odds_service import OddsService
@@ -80,7 +80,7 @@ class DailyPredictionsService:
     
     def __init__(self):
         """Initialize the service."""
-        self.apifootball_service = APIFootballService()
+        self.fixture_service = FixtureService()
         self.ml_service = RealMLPredictionService()
         self.accumulator_builder = AccumulatorBuilder()
         self.odds_service = OddsService()
@@ -138,12 +138,12 @@ class DailyPredictionsService:
             
             db.commit()
             
-            # Get fixtures for the date
-            all_fixtures = self.apifootball_service.get_daily_fixtures(target_date)
+            # Get fixtures for the date (from The Odds API via FixtureService)
+            all_fixtures = self.fixture_service.get_daily_fixtures(target_date)
             summary.total_fixtures = len(all_fixtures)
-            
-            # Filter for upcoming fixtures
-            upcoming_fixtures = self._filter_upcoming_fixtures(all_fixtures)
+
+            # All fixtures from Odds API are already upcoming (status=NS)
+            upcoming_fixtures = all_fixtures
             summary.upcoming_fixtures = len(upcoming_fixtures)
             
             logger.info(f"📊 Found {len(upcoming_fixtures)} upcoming fixtures")
@@ -171,16 +171,24 @@ class DailyPredictionsService:
                     logger.error(f"Error processing fixture {fixture.get('fixture_id')}: {str(e)}")
                     continue
 
-            # Fetch real bookmaker odds to enable value-based selection
+            # Build odds map from fixture data (already fetched with fixtures)
             odds_map = {}
-            try:
-                odds_map = self.odds_service.get_odds_for_fixtures(upcoming_fixtures)
-                if odds_map:
-                    logger.info(f"💰 Real odds fetched for {len(odds_map)}/{len(upcoming_fixtures)} fixtures")
-                else:
-                    logger.info("📊 No real odds available — using confidence-based selection")
-            except Exception as e:
-                logger.warning(f"Odds fetch failed (non-fatal): {e}")
+            for fx in upcoming_fixtures:
+                fx_odds = fx.get("odds", {})
+                if fx_odds and fx_odds.get("home"):
+                    fixture_id = fx.get("fixture_id")
+                    odds_map[fixture_id] = {
+                        "home_odds": fx_odds.get("home"),
+                        "draw_odds": fx_odds.get("draw"),
+                        "away_odds": fx_odds.get("away"),
+                        "over_2_5_odds": fx_odds.get("over_2_5"),
+                        "under_2_5_odds": fx_odds.get("under_2_5"),
+                        "bookmaker": fx_odds.get("bookmaker", ""),
+                    }
+            if odds_map:
+                logger.info(f"💰 Real odds available for {len(odds_map)}/{len(upcoming_fixtures)} fixtures")
+            else:
+                logger.info("📊 No real odds available — using confidence-based selection")
 
             # Build accumulators from all predictions + real odds
             logger.info(f"🎯 Building accumulators from {len(all_predictions)} predictions")
