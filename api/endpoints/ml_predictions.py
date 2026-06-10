@@ -160,6 +160,7 @@ class RealMLPredictionService:
                 self.api_df["date"] = pd.to_datetime(self.api_df["date"], errors="coerce")
                 self.api_df = self.api_df.dropna(subset=["date"]).sort_values("date")
                 logger.info(f"Historical data: {len(self.api_df):,} matches")
+                self._build_team_index()
                 _init_statistical_models(self.api_df)
             else:
                 logger.warning(f"{MATCHES_CSV} not found — run scripts/fetch_history.py")
@@ -169,27 +170,52 @@ class RealMLPredictionService:
         # Also load encoders for backward compat (may not exist)
         self.encoders = {}
 
-    def _compute_features(self, home: str, away: str, league_tier: int = 1) -> Optional[list]:
-        """Compute 19-feature vector from historical data.
+    def _build_team_index(self):
+        """Pre-index match history per team so feature computation is O(1).
 
-        Must mirror scripts/retrain_models.py:compute_features() exactly.
+        Replaces 7 full-DataFrame scans + iterrows() per fixture (seconds each
+        on Render's shared CPU) with dict lookups. Built once at load (~0.1s).
+        Lists preserve the DataFrame's date order, so tail-N slices match the
+        old `.tail(n)` semantics exactly.
+        """
+        self._team_games: Dict[str, list] = {}   # team -> [(scored, conceded), ...]
+        self._home_games: Dict[str, list] = {}   # team -> [(home_score, away_score), ...]
+        self._away_games: Dict[str, list] = {}   # team -> [(away_score, home_score), ...]
+        self._h2h_games: Dict[tuple, list] = {}  # sorted (a,b) -> [(home_team, hs, as), ...]
+
+        df = self.api_df
+        for home, away, hs, aw in zip(
+            df["home_team"], df["away_team"], df["home_score"], df["away_score"]
+        ):
+            if pd.isna(hs) or pd.isna(aw):
+                continue
+            self._team_games.setdefault(home, []).append((hs, aw))
+            self._team_games.setdefault(away, []).append((aw, hs))
+            self._home_games.setdefault(home, []).append((hs, aw))
+            self._away_games.setdefault(away, []).append((aw, hs))
+            key = (home, away) if home <= away else (away, home)
+            self._h2h_games.setdefault(key, []).append((home, hs, aw))
+
+        logger.info(f"Team index built: {len(self._team_games)} teams, {len(self._h2h_games)} h2h pairs")
+
+    def _compute_features(self, home: str, away: str, league_tier: int = 1) -> Optional[list]:
+        """Compute 19-feature vector from the pre-built team index.
+
+        Must mirror scripts/retrain_models.py:compute_features() exactly —
+        same formulas and same fallback defaults, just O(1) lookups instead
+        of full-DataFrame scans.
         """
         if self.api_df is None or len(self.api_df) == 0:
             return None
-
-        now = datetime.now()
-        df_past = self.api_df[self.api_df["date"] < pd.Timestamp(now)]
+        if not hasattr(self, "_team_games"):
+            self._build_team_index()
 
         def team_stats(team, n):
-            games = df_past[(df_past["home_team"] == team) | (df_past["away_team"] == team)].tail(n)
-            if len(games) == 0:
+            games = self._team_games.get(team, [])[-n:]
+            if not games:
                 return {"win_rate": 0.5, "draw_rate": 0.25, "goals_scored": 1.2, "goals_conceded": 1.2}
             wins = draws = gs = gc = 0
-            for _, r in games.iterrows():
-                if r["home_team"] == team:
-                    s, c = r["home_score"], r["away_score"]
-                else:
-                    s, c = r["away_score"], r["home_score"]
+            for s, c in games:
                 gs += s; gc += c
                 if s > c: wins += 1
                 elif s == c: draws += 1
@@ -198,32 +224,30 @@ class RealMLPredictionService:
                     "goals_scored": gs/n_g, "goals_conceded": gc/n_g}
 
         def home_stats(team, n):
-            games = df_past[df_past["home_team"] == team].tail(n)
-            if len(games) == 0:
+            games = self._home_games.get(team, [])[-n:]
+            if not games:
                 return {"win_rate": 0.5, "goals_scored": 1.5}
-            wins = sum(1 for _, r in games.iterrows() if r["home_score"] > r["away_score"])
-            goals = sum(r["home_score"] for _, r in games.iterrows())
+            wins = sum(1 for hs, aw in games if hs > aw)
+            goals = sum(hs for hs, _ in games)
             return {"win_rate": wins/len(games), "goals_scored": goals/len(games)}
 
         def away_stats(team, n):
-            games = df_past[df_past["away_team"] == team].tail(n)
-            if len(games) == 0:
+            games = self._away_games.get(team, [])[-n:]
+            if not games:
                 return {"win_rate": 0.35, "goals_scored": 1.1}
-            wins = sum(1 for _, r in games.iterrows() if r["away_score"] > r["home_score"])
-            goals = sum(r["away_score"] for _, r in games.iterrows())
+            wins = sum(1 for aw, hs in games if aw > hs)
+            goals = sum(aw for aw, _ in games)
             return {"win_rate": wins/len(games), "goals_scored": goals/len(games)}
 
         def h2h_stats(home_t, away_t, n):
-            h2h = df_past[
-                ((df_past["home_team"] == home_t) & (df_past["away_team"] == away_t)) |
-                ((df_past["home_team"] == away_t) & (df_past["away_team"] == home_t))
-            ].tail(n)
-            if len(h2h) == 0:
+            key = (home_t, away_t) if home_t <= away_t else (away_t, home_t)
+            h2h = self._h2h_games.get(key, [])[-n:]
+            if not h2h:
                 return {"home_win_rate": 0.45, "avg_goals": 2.5, "btts_rate": 0.5, "n": 0}
             hw = btts = tg = 0
-            for _, r in h2h.iterrows():
-                hg = r["home_score"] if r["home_team"] == home_t else r["away_score"]
-                ag = r["away_score"] if r["home_team"] == home_t else r["home_score"]
+            for match_home, hs, aw in h2h:
+                hg = hs if match_home == home_t else aw
+                ag = aw if match_home == home_t else hs
                 tg += hg + ag
                 if hg > ag: hw += 1
                 if hg > 0 and ag > 0: btts += 1
@@ -252,7 +276,9 @@ class RealMLPredictionService:
         """Check if a team has any historical data in matches.csv."""
         if self.api_df is None or len(self.api_df) == 0:
             return False
-        return ((self.api_df["home_team"] == team) | (self.api_df["away_team"] == team)).any()
+        if not hasattr(self, "_team_games"):
+            self._build_team_index()
+        return team in self._team_games
 
     def _odds_based_predictions(self, fixture: Dict[str, Any]) -> Dict[str, Any]:
         """Generate predictions from bookmaker odds when no historical data exists.
@@ -547,9 +573,103 @@ _predictions_cache: Dict[str, Any] = {"date": None, "data": None, "timestamp": N
 # API endpoints
 # ------------------------------------------------------------------
 
+# Guards duplicate background generation kicks from concurrent requests
+_generation_in_flight = {"date": None}
+
+
+def _read_predictions_from_db(today: str) -> Optional[Dict[str, Any]]:
+    """Reconstruct the /today response from stored DailyPrediction rows.
+
+    Returns None when nothing has been generated for the date yet.
+    """
+    from database import SessionLocal
+    from services.daily_predictions_service import DailyPrediction, DailyPredictionSummary
+
+    today_date = datetime.strptime(today, "%Y-%m-%d").date()
+    db = SessionLocal()
+    try:
+        summary = db.query(DailyPredictionSummary).filter(
+            DailyPredictionSummary.prediction_date == today_date
+        ).first()
+        if summary is None or summary.generation_status != "completed":
+            return None
+
+        rows = db.query(DailyPrediction).filter(
+            DailyPrediction.prediction_date == today_date
+        ).all()
+
+        predictions_results = []
+        for row in rows:
+            try:
+                predictions_results.append({
+                    "fixture_info": {
+                        "fixture_id": row.fixture_id,
+                        "home_team": row.home_team,
+                        "away_team": row.away_team,
+                        "league": row.league_name,
+                        "date": row.fixture_date.isoformat() if row.fixture_date else "",
+                        "status": row.fixture_status,
+                        "home_team_logo": "",
+                        "away_team_logo": "",
+                        "league_logo": "",
+                    },
+                    "ml_predictions": json.loads(row.ml_predictions or "{}"),
+                    "model_summary": {
+                        "total_predictions": row.total_models_used,
+                        "successful_predictions": row.total_models_used,
+                    },
+                })
+            except Exception as e:
+                logger.warning(f"Skipping malformed DB prediction row {row.id}: {e}")
+
+        return {
+            "status": "success",
+            "date": today,
+            "total_fixtures": summary.total_fixtures,
+            "upcoming_fixtures": summary.upcoming_fixtures,
+            "predictions_generated": len(predictions_results),
+            "models_used": summary.models_used,
+            "predictions": predictions_results,
+            "source": "database",
+            "cached": False,
+        }
+    finally:
+        db.close()
+
+
+def _kick_background_generation(today: str) -> None:
+    """Start prediction generation in a background thread (deduped per date).
+
+    The request path must never run ML inference inline: with a single
+    uvicorn worker, computing features for a full match day pins the worker
+    for a minute+ and every other request queues behind it.
+    """
+    import threading
+
+    if _generation_in_flight["date"] == today:
+        return
+    _generation_in_flight["date"] = today
+
+    def _run():
+        try:
+            from services.daily_predictions_service import DailyPredictionsService
+            DailyPredictionsService().generate_daily_predictions(today)
+        except Exception as e:
+            logger.error(f"Background generation failed: {e}")
+        finally:
+            _generation_in_flight["date"] = None
+
+    threading.Thread(target=_run, daemon=True, name=f"predict-gen-{today}").start()
+
+
 @router.get("/today")
 def get_todays_predictions(force_refresh: bool = Query(False)):
-    """Get today's fixtures with ML predictions."""
+    """Get today's ML predictions.
+
+    Serves from the in-process cache, then PostgreSQL. If nothing has been
+    generated yet, kicks off generation in the background and tells the
+    client to retry — it never computes predictions in the request path.
+    """
     try:
         today = datetime.now().strftime("%Y-%m-%d")
         now = datetime.now()
@@ -560,28 +680,24 @@ def get_todays_predictions(force_refresh: bool = Query(False)):
                 and (now - _predictions_cache["timestamp"]).total_seconds() < 1800):
             return _predictions_cache["data"]
 
-        all_fixtures = ml_service.fixture_service.get_daily_fixtures(today)
-        upcoming = [fx for fx in all_fixtures if fx.get("status") in ("NS", "TBD")]
+        db_result = _read_predictions_from_db(today)
+        if db_result is not None:
+            _predictions_cache.update(date=today, data=db_result, timestamp=now)
+            return db_result
 
-        predictions_results = []
-        for fixture in upcoming:
-            result = ml_service.generate_predictions_for_fixture(fixture)
-            if "error" not in result:
-                predictions_results.append(result)
-
-        result = {
-            "status": "success",
+        # Nothing in the DB yet — generate in the background, respond now
+        _kick_background_generation(today)
+        return {
+            "status": "generating",
             "date": today,
-            "total_fixtures": len(all_fixtures),
-            "upcoming_fixtures": len(upcoming),
-            "predictions_generated": len(predictions_results),
-            "models_used": len(ml_service.api_models),
-            "predictions": predictions_results,
-            "cached": False,
+            "total_fixtures": 0,
+            "upcoming_fixtures": 0,
+            "predictions_generated": 0,
+            "models_used": len(ml_service.api_models) if ml_service else 0,
+            "predictions": [],
+            "message": "Predictions are being generated — retry in ~60 seconds.",
+            "retry_after_seconds": 60,
         }
-
-        _predictions_cache.update(date=today, data=result, timestamp=now)
-        return result
 
     except Exception as e:
         logger.error(f"Error: {e}")

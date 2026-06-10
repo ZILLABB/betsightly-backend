@@ -49,6 +49,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# httpx logs full request URLs at INFO — the Telegram bot token is part of the
+# URL, so it would leak into production logs. Keep these loggers at WARNING.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+
 # Initialize database (skip for Railway deployment if no DATABASE_URL)
 try:
     database_url = os.getenv("DATABASE_URL")
@@ -143,20 +149,38 @@ except Exception as e:
 
 def _start_telegram_bot_thread():
     """
-    Spawn the Telegram bot polling loop in a daemon thread.
-    Uses its own asyncio event loop so it doesn't fight with uvicorn's.
+    Spawn the Telegram bot polling loop in a supervised daemon thread.
+
+    The bot crashes routinely during deploys (Telegram returns 409 Conflict
+    while old and new instances briefly poll simultaneously). Instead of
+    dying silently until the next deploy, restart with backoff — the old
+    instance exits within a minute and the retry then succeeds.
     """
     import threading
     import asyncio
+    import time as _time
+
+    MAX_RESTARTS = 10
 
     def _run():
-        try:
-            # The bot needs its own event loop inside this thread
-            asyncio.set_event_loop(asyncio.new_event_loop())
-            from telegram_bot import main as _bot_main
-            _bot_main()
-        except Exception as e:
-            logger.error(f"Telegram bot thread crashed: {e}", exc_info=True)
+        restarts = 0
+        while restarts <= MAX_RESTARTS:
+            try:
+                # The bot needs its own event loop inside this thread
+                asyncio.set_event_loop(asyncio.new_event_loop())
+                from telegram_bot import main as _bot_main
+                _bot_main()
+                logger.info("Telegram bot exited cleanly")
+                return
+            except Exception as e:
+                restarts += 1
+                backoff = min(30 * restarts, 300)  # 30s, 60s, ... capped at 5 min
+                logger.error(
+                    f"Telegram bot crashed ({restarts}/{MAX_RESTARTS}): {e} — "
+                    f"restarting in {backoff}s"
+                )
+                _time.sleep(backoff)
+        logger.error("Telegram bot exceeded max restarts — giving up until next deploy")
 
     if not os.getenv("TELEGRAM_BOT_TOKEN"):
         logger.info("Telegram bot disabled (TELEGRAM_BOT_TOKEN not set)")
@@ -164,7 +188,7 @@ def _start_telegram_bot_thread():
 
     t = threading.Thread(target=_run, daemon=True, name="telegram-bot")
     t.start()
-    logger.info("Telegram bot started in background thread")
+    logger.info("Telegram bot started in supervised background thread")
 
 
 try:
@@ -227,7 +251,12 @@ def root():
 
 @app.get("/api/health")
 def health_check():
-    """Basic health check endpoint."""
+    """Basic health check endpoint.
+
+    Intentionally duplicates the /api/health/ router route: this one answers
+    the no-trailing-slash form without a 307 redirect, which some load
+    balancer probes don't follow. Keep both.
+    """
     try:
         return {
             "status": "healthy",

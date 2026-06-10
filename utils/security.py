@@ -23,10 +23,14 @@ logger = logging.getLogger(__name__)
 class RateLimiter:
     """Rate limiter to prevent API abuse."""
     
+    # Hard cap on tracked clients — prevents unbounded memory growth from
+    # scrapers rotating User-Agents (each rotation creates a new client_id).
+    MAX_CLIENTS = 10_000
+
     def __init__(self, max_requests: int = 100, window_seconds: int = 3600):
         """
         Initialize rate limiter.
-        
+
         Args:
             max_requests: Maximum requests per window
             window_seconds: Time window in seconds
@@ -34,21 +38,43 @@ class RateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.requests = {}  # {client_id: [(timestamp, count), ...]}
-    
+        self._last_global_cleanup = time.time()
+
+    def _global_cleanup(self, window_start: float) -> None:
+        """Drop clients with no requests in the current window.
+
+        Runs at most once per 5 minutes, plus forcibly when MAX_CLIENTS is hit.
+        """
+        self.requests = {
+            cid: entries
+            for cid, entries in self.requests.items()
+            if entries and entries[-1][0] > window_start
+        }
+        self._last_global_cleanup = time.time()
+
     def is_allowed(self, client_id: str) -> bool:
         """
         Check if client is allowed to make a request.
-        
+
         Args:
             client_id: Unique client identifier
-            
+
         Returns:
             True if request is allowed, False otherwise
         """
         now = time.time()
         window_start = now - self.window_seconds
-        
-        # Clean old entries
+
+        # Periodic global cleanup of inactive clients
+        if now - self._last_global_cleanup > 300 or len(self.requests) >= self.MAX_CLIENTS:
+            self._global_cleanup(window_start)
+
+        # If still at cap after cleanup, fail open for unseen clients rather
+        # than letting the dict grow without bound. (Known clients still limited.)
+        if client_id not in self.requests and len(self.requests) >= self.MAX_CLIENTS:
+            return True
+
+        # Clean old entries for this client
         if client_id in self.requests:
             self.requests[client_id] = [
                 (timestamp, count) for timestamp, count in self.requests[client_id]
@@ -56,13 +82,13 @@ class RateLimiter:
             ]
         else:
             self.requests[client_id] = []
-        
+
         # Count requests in current window
         total_requests = sum(count for _, count in self.requests[client_id])
-        
+
         if total_requests >= self.max_requests:
             return False
-        
+
         # Add current request
         self.requests[client_id].append((now, 1))
         return True
@@ -319,31 +345,19 @@ def validate_api_key(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 
 def sanitize_input(data: Any) -> Any:
-    """
-    Sanitize input data to prevent injection attacks.
-    
-    Args:
-        data: Input data to sanitize
-        
-    Returns:
-        Sanitized data
+    """Cap input string lengths.
+
+    NOTE: this used to strip characters like quotes and angle brackets, which
+    silently mangled legitimate data (team names like "Nott'm Forest").
+    SQL injection is prevented by SQLAlchemy's bound parameters, and XSS is a
+    rendering concern for the frontend — neither is solved by stripping chars.
     """
     if isinstance(data, str):
-        # Remove potentially dangerous characters
-        dangerous_chars = ["<", ">", "&", "\"", "'", ";", "(", ")", "{", "}", "[", "]"]
-        for char in dangerous_chars:
-            data = data.replace(char, "")
-        
-        # Limit string length
-        if len(data) > 1000:
-            data = data[:1000]
-    
-    elif isinstance(data, dict):
+        return data[:1000]
+    if isinstance(data, dict):
         return {key: sanitize_input(value) for key, value in data.items()}
-    
-    elif isinstance(data, list):
+    if isinstance(data, list):
         return [sanitize_input(item) for item in data]
-    
     return data
 
 
