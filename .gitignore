@@ -62,3 +62,8 @@ catboost_info/
 .DS_Store
 Thumbs.db
 cache/
+
+# SQLite WAL/SHM sidecar files
+*.db-shm
+*.db-wal
+*.corrupt-backup

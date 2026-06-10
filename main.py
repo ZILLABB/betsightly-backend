@@ -139,12 +139,46 @@ try:
 except Exception as e:
     logger.warning(f"Could not ensure rollover_days table: {e}")
 
-# Start background results checker (every 6h)
+# Start background results checker (every 6h) — World Cup rollover chains
 try:
     from worldcup.results_checker import start_background_loop as _start_results_loop
     _start_results_loop()
 except Exception as e:
     logger.warning(f"Could not start results checker: {e}")
+
+
+def _start_prediction_settlement_loop():
+    """Settle main-pipeline predictions against real scores, once every 12h.
+
+    Scores yesterday + today (late finishers) so the public accuracy numbers
+    stay current. One football-data.org call per pass — no polling.
+    """
+    import threading
+    import time as _time
+
+    def _run():
+        _time.sleep(120)  # let the app finish booting
+        while True:
+            try:
+                from services.prediction_results_service import PredictionResultsService
+                from datetime import datetime as _dt, timedelta as _td
+                svc = PredictionResultsService()
+                yesterday = (_dt.now() - _td(days=1)).strftime("%Y-%m-%d")
+                today = _dt.now().strftime("%Y-%m-%d")
+                svc.settle_date(yesterday)
+                svc.settle_date(today)
+            except Exception as e:
+                logger.error(f"Prediction settlement failed: {e}")
+            _time.sleep(12 * 3600)
+
+    threading.Thread(target=_run, daemon=True, name="prediction-settlement").start()
+    logger.info("Prediction settlement loop started (12h interval)")
+
+
+try:
+    _start_prediction_settlement_loop()
+except Exception as e:
+    logger.warning(f"Could not start prediction settlement loop: {e}")
 
 
 def _start_telegram_bot_thread():

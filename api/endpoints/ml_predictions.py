@@ -127,6 +127,8 @@ class RealMLPredictionService:
         self.api_models: Dict[str, Any] = {}
         self.api_df: Optional[pd.DataFrame] = None
         self.models: Dict[str, Dict] = {}
+        self.ensemble_meta: Dict[str, Any] = {}   # per-target weights + classes
+        self.calibrators: Dict[str, Any] = {}     # per-target calibration payload
 
         self._load_api_football_models()
 
@@ -149,6 +151,16 @@ class RealMLPredictionService:
                     logger.warning(f"Skipping model {model_name}: {e}")
 
         logger.info(f"Loaded {len(self.api_models)} API-Football models")
+
+        # Load ensemble weights + calibrators (graceful if absent → old behavior)
+        self.ensemble_meta = meta.get("ensemble", {}) or {}
+        calib_path = self.models_dir / "calibrators.joblib"
+        if calib_path.exists():
+            try:
+                self.calibrators = joblib.load(calib_path)
+                logger.info(f"Loaded calibrators for {len(self.calibrators)} targets")
+            except Exception as e:
+                logger.warning(f"Could not load calibrators: {e}")
 
         # Populate self.models for backward-compat with daily_predictions_service
         self.models = {"api_football": {k: {"model": v} for k, v in self.api_models.items()}}
@@ -271,6 +283,73 @@ class RealMLPredictionService:
             min(h2h["n"], 10) / 10,
             league_tier / 2,
         ]
+
+    # Maps from integer class -> human label, per target
+    _CLASS_LABELS = {
+        "match_result": {0: "away_win", 1: "draw", 2: "home_win"},
+        "over_1_5": {0: "under_1_5", 1: "over_1_5"},
+        "over_2_5": {0: "under_2_5", 1: "over_2_5"},
+        "btts": {0: "no", 1: "yes"},
+    }
+
+    def _ensemble_for_target(self, label: str, X) -> Optional[Dict[str, Any]]:
+        """Weighted + calibrated ensemble prediction for one target.
+
+        Blends every base model's probability using the saved log-loss
+        weights, applies isotonic calibration, and returns the calibrated
+        winner. Returns None if the ensemble isn't available (pre-retrain
+        models) so callers fall back to per-model behavior.
+        """
+        meta = self.ensemble_meta.get(label)
+        if not meta:
+            return None
+        classes = meta.get("classes", [])
+        weights = meta.get("weights", {})
+        if not classes or not weights:
+            return None
+
+        agg = np.zeros(len(classes))
+        used = 0.0
+        for tag, w in weights.items():
+            model = self.api_models.get(f"{label}_{tag}")
+            if model is None:
+                continue
+            try:
+                p = model.predict_proba(X)[0]
+                model_classes = list(model.classes_)
+                aligned = np.zeros(len(classes))
+                for j, c in enumerate(classes):
+                    if c in model_classes:
+                        aligned[j] = p[model_classes.index(c)]
+                agg += w * aligned
+                used += w
+            except Exception as e:
+                logger.debug(f"Ensemble model {label}_{tag} failed: {e}")
+        if used == 0:
+            return None
+        agg /= used  # renormalize over models that actually fired
+
+        # Calibrate (per-class isotonic) if available
+        calib = self.calibrators.get(label)
+        if calib and calib.get("classes") == classes:
+            cal = np.array([
+                calib["calibrators"][j].predict([agg[j]])[0]
+                for j in range(len(classes))
+            ])
+            s = cal.sum()
+            if s > 0:
+                agg = cal / s
+
+        best_idx = int(np.argmax(agg))
+        best_class = classes[best_idx]
+        label_map = self._CLASS_LABELS.get(label, {})
+        return {
+            "prediction": label_map.get(best_class, str(best_class)),
+            "probabilities": agg.tolist(),
+            "confidence": float(agg[best_idx]),
+            "model_type": "ensemble",
+            "model_name": f"ensemble_{'result' if label == 'match_result' else label}",
+        }
 
     def _has_team_history(self, team: str) -> bool:
         """Check if a team has any historical data in matches.csv."""
@@ -468,6 +547,25 @@ class RealMLPredictionService:
                     }
                 except Exception as e:
                     logger.debug(f"Model {model_name} failed: {e}")
+
+            # Weighted + calibrated ensemble per target (the headline picks).
+            # These are what the accumulator and results loop prefer; the
+            # individual model entries above are kept for transparency.
+            for label in ("match_result", "over_1_5", "over_2_5", "btts"):
+                ens = self._ensemble_for_target(label, X)
+                if ens:
+                    ml_predictions[ens["model_name"]] = ens
+                    if label == "match_result":
+                        bma_inputs.append({
+                            "model_name": ens["model_name"],
+                            "prediction": ens["prediction"],
+                            "confidence": ens["confidence"],
+                            "probabilities": {
+                                "away_win": ens["probabilities"][0],
+                                "draw": ens["probabilities"][1],
+                                "home_win": ens["probabilities"][2],
+                            },
+                        })
 
             # Run ELO
             elo_gap = 0.0
@@ -758,3 +856,32 @@ def get_models_status():
         "dixon_coles_teams": len(_dixon_coles.teams) if _dixon_coles else 0,
         "bma_available": _bma is not None,
     }
+
+
+@router.get("/accuracy")
+def get_prediction_accuracy(days: int = Query(30, ge=1, le=365)):
+    """Real, settled prediction accuracy per market over the last N days.
+
+    Backed by the results loop: every stored prediction is scored against
+    the actual final score, so these numbers are measured, not estimated.
+    """
+    try:
+        from services.prediction_results_service import PredictionResultsService
+        return {
+            "status": "success",
+            **PredictionResultsService().get_accuracy(days=days),
+        }
+    except Exception as e:
+        logger.error(f"Accuracy endpoint error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to compute accuracy")
+
+
+@router.post("/results/settle")
+def settle_results(date: Optional[str] = Query(None, description="YYYY-MM-DD, default yesterday")):
+    """Manually trigger results settlement for a date (admin/debug)."""
+    try:
+        from services.prediction_results_service import PredictionResultsService
+        return {"status": "success", **PredictionResultsService().settle_date(date)}
+    except Exception as e:
+        logger.error(f"Settle endpoint error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to settle results")

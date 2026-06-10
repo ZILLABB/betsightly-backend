@@ -398,18 +398,21 @@ class AccumulatorBuilder:
         """
         mr_models = {}
 
-        # Check for odds-implied mode (single authoritative prediction)
-        if "odds_implied_result" in ml:
-            pd_oi = ml["odds_implied_result"]
-            prediction = pd_oi.get("prediction", "")
-            conf = pd_oi.get("confidence", 0)
-            if prediction in ("home_win", "draw", "away_win") and conf >= MIN_CONFIDENCE_MATCH_RESULT:
-                return self._make_candidate(
-                    fi, prediction, self._fmt_readable(prediction),
-                    conf, conf, 0.0, elo_gap, "match_result",
-                    models_agreed=1,
-                )
-            return None
+        # Prefer a single authoritative source when present:
+        #   ensemble_result   — calibrated weighted ensemble (normal fixtures)
+        #   odds_implied_result — bookmaker-implied (national teams / no history)
+        for src_key in ("ensemble_result", "odds_implied_result"):
+            if src_key in ml:
+                pd_src = ml[src_key]
+                prediction = pd_src.get("prediction", "")
+                conf = pd_src.get("confidence", 0)
+                if prediction in ("home_win", "draw", "away_win") and conf >= MIN_CONFIDENCE_MATCH_RESULT:
+                    return self._make_candidate(
+                        fi, prediction, self._fmt_readable(prediction),
+                        conf, conf, 0.0, elo_gap, "match_result",
+                        models_agreed=1,
+                    )
+                return None
 
         # Standard ML mode — multiple models must agree
         for key, pd in ml.items():
@@ -455,19 +458,20 @@ class AccumulatorBuilder:
 
         Also handles odds_implied_* from the odds-based prediction mode.
         """
-        # Check for odds-implied mode first
-        odds_key = f"odds_implied_{key_pattern}"
-        if odds_key in ml:
-            pd_oi = ml[odds_key]
-            prediction = pd_oi.get("prediction", "")
-            conf = pd_oi.get("confidence", 0)
-            if conf >= MIN_CONFIDENCE_BINARY:
-                readable = pos_readable if prediction == pos_label else neg_readable
-                return self._make_candidate(
-                    fi, prediction, readable, conf, conf, 0.0, elo_gap,
-                    key_pattern, models_agreed=1,
-                )
-            return None
+        # Prefer single authoritative source: calibrated ensemble, then
+        # odds-implied (national teams). Falls through to XGB+LGBM agreement.
+        for src_key in (f"ensemble_{key_pattern}", f"odds_implied_{key_pattern}"):
+            if src_key in ml:
+                pd_src = ml[src_key]
+                prediction = pd_src.get("prediction", "")
+                conf = pd_src.get("confidence", 0)
+                if conf >= MIN_CONFIDENCE_BINARY:
+                    readable = pos_readable if prediction == pos_label else neg_readable
+                    return self._make_candidate(
+                        fi, prediction, readable, conf, conf, 0.0, elo_gap,
+                        key_pattern, models_agreed=1,
+                    )
+                return None
 
         # Standard ML mode — XGB and LGBM must agree
         xgb_pred = None
