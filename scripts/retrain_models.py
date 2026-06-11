@@ -68,7 +68,28 @@ FEATURE_COLUMNS = [
     "away_away_win_rate_5", "away_away_goals_5",
     "h2h_home_win_rate", "h2h_avg_goals", "h2h_btts_rate",
     "h2h_meetings", "league_tier",
+    # Market features: bookmaker-implied probabilities (overround-removed).
+    # The pre-match price encodes injuries, motivation, tactics — information
+    # form stats can't see. has_odds lets the model discount the defaults.
+    "mkt_prob_home", "mkt_prob_draw", "mkt_prob_away", "mkt_has_odds",
 ]
+
+# Defaults when a match has no odds (~0.1% of training data): the global
+# base rates, with has_odds=0 so the model can ignore them.
+MKT_DEFAULTS = (0.44, 0.26, 0.30, 0.0)
+
+
+def market_features(odds_home, odds_draw, odds_away) -> tuple:
+    """(p_home, p_draw, p_away, has_odds) from decimal odds, overround-removed."""
+    try:
+        oh, od, oa = float(odds_home), float(odds_draw), float(odds_away)
+        if oh <= 1.0 or od <= 1.0 or oa <= 1.0 or any(map(pd.isna, (oh, od, oa))):
+            return MKT_DEFAULTS
+        ih, idr, ia = 1.0 / oh, 1.0 / od, 1.0 / oa
+        tot = ih + idr + ia
+        return (ih / tot, idr / tot, ia / tot, 1.0)
+    except (TypeError, ValueError):
+        return MKT_DEFAULTS
 
 
 def load_data() -> pd.DataFrame:
@@ -179,6 +200,9 @@ def build_dataset_fast(df: pd.DataFrame):
             else:
                 h2h_hwr, h2h_ag, h2h_btts, h2h_n = 0.45, 2.5, 0.5, 0
 
+            mh, md, ma, m_has = market_features(
+                r.get("avg_odds_home"), r.get("avg_odds_draw"), r.get("avg_odds_away")
+            )
             feats = [
                 h5["win_rate"], h10["win_rate"], h5["draw_rate"],
                 h5["goals_scored"], h5["goals_conceded"],
@@ -189,6 +213,7 @@ def build_dataset_fast(df: pd.DataFrame):
                 h2h_hwr, h2h_ag, h2h_btts,
                 min(h2h_n, 10) / 10,
                 tier / 2,
+                mh, md, ma, m_has,
             ]
             hg, ag = r["home_score"], r["away_score"]
             X.append(feats)

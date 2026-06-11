@@ -142,6 +142,11 @@ class RealMLPredictionService:
         with open(meta_path) as f:
             meta = json.load(f)
 
+        # Feature schema the saved models were trained with. Older bundles
+        # are 19 features; newer ones add 4 market features on the end.
+        self.feature_columns = meta.get("feature_columns", [])
+        self.expects_market_features = "mkt_prob_home" in self.feature_columns
+
         for model_name in meta.get("models", []):
             p = self.models_dir / f"{model_name}.joblib"
             if p.exists():
@@ -210,12 +215,33 @@ class RealMLPredictionService:
 
         logger.info(f"Team index built: {len(self._team_games)} teams, {len(self._h2h_games)} h2h pairs")
 
-    def _compute_features(self, home: str, away: str, league_tier: int = 1) -> Optional[list]:
-        """Compute 19-feature vector from the pre-built team index.
+    # Same defaults as scripts/retrain_models.py:MKT_DEFAULTS — global base
+    # rates with has_odds=0 so the model can discount them.
+    _MKT_DEFAULTS = (0.44, 0.26, 0.30, 0.0)
 
-        Must mirror scripts/retrain_models.py:compute_features() exactly —
+    @staticmethod
+    def _market_features(odds: Optional[Dict[str, Any]]) -> tuple:
+        """(p_home, p_draw, p_away, has_odds) from live bookmaker odds."""
+        try:
+            oh = float((odds or {}).get("home") or 0)
+            od = float((odds or {}).get("draw") or 0)
+            oa = float((odds or {}).get("away") or 0)
+            if oh <= 1.0 or od <= 1.0 or oa <= 1.0:
+                return RealMLPredictionService._MKT_DEFAULTS
+            ih, idr, ia = 1.0 / oh, 1.0 / od, 1.0 / oa
+            tot = ih + idr + ia
+            return (ih / tot, idr / tot, ia / tot, 1.0)
+        except (TypeError, ValueError):
+            return RealMLPredictionService._MKT_DEFAULTS
+
+    def _compute_features(self, home: str, away: str, league_tier: int = 1,
+                          odds: Optional[Dict[str, Any]] = None) -> Optional[list]:
+        """Compute the feature vector from the pre-built team index.
+
+        Must mirror scripts/retrain_models.py:build_dataset_fast() exactly —
         same formulas and same fallback defaults, just O(1) lookups instead
-        of full-DataFrame scans.
+        of full-DataFrame scans. Emits 19 features for legacy model bundles,
+        +4 market features (bookmaker-implied probabilities) for new ones.
         """
         if self.api_df is None or len(self.api_df) == 0:
             return None
@@ -272,7 +298,7 @@ class RealMLPredictionService:
         aa5 = away_stats(away, 5)
         h2h = h2h_stats(home, away, 10)
 
-        return [
+        feats = [
             h5["win_rate"], h10["win_rate"], h5["draw_rate"],
             h5["goals_scored"], h5["goals_conceded"],
             hh5["win_rate"], hh5["goals_scored"],
@@ -283,6 +309,9 @@ class RealMLPredictionService:
             min(h2h["n"], 10) / 10,
             league_tier / 2,
         ]
+        if getattr(self, "expects_market_features", False):
+            feats.extend(self._market_features(odds))
+        return feats
 
     # Maps from integer class -> human label, per target
     _CLASS_LABELS = {
@@ -501,7 +530,9 @@ class RealMLPredictionService:
             tier_2_leagues = {40, 62, 79, 136, 141}
             league_tier = 2 if league_id in tier_2_leagues else 1
 
-            features = self._compute_features(home_team, away_team, league_tier)
+            features = self._compute_features(
+                home_team, away_team, league_tier, odds=fixture.get("odds")
+            )
             if features is None:
                 return {"error": "Could not compute features (no historical data)"}
 

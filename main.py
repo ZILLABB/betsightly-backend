@@ -100,6 +100,7 @@ _defaults = [
     "https://betsightly.com",
     "https://www.betsightly.com",
     "http://localhost:3000",
+    "http://localhost:3777",
     "http://localhost:5173",
     "http://localhost:5180",
 ]
