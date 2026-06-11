@@ -115,10 +115,30 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
                         'recommendation': 'EXCLUDE'
                     }
         
+        # The rollover chain lives in its own store (worldcup.rollover_db),
+        # not in the per-fixture betting JSON — the DB path used to drop it,
+        # leaving the Rollover and Results pages with an empty chain. Merge
+        # it back in so both paths return the same shape as the WC fallback.
+        if accumulators.get('rollover', {}).get('selected'):
+            try:
+                from worldcup.rollover_db import load_chain
+                chain_days = load_chain(today.isoformat()).get("days", [])
+                cum_odds = 1.0
+                for d in chain_days:
+                    cum_odds *= d.get("combined_odds", 1.0)
+                accumulators['rollover'].update({
+                    'chain': chain_days,
+                    'chain_length': len(chain_days),
+                    'target_days': 10,
+                    'cumulative_odds': round(cum_odds, 2),
+                })
+            except Exception as chain_err:
+                logger.warning(f"Could not merge rollover chain: {chain_err}")
+
         # Generate summary
         selected_count = sum(1 for acc in accumulators.values() if acc.get('selected', False))
         total_games = sum(acc.get('num_games', 0) for acc in accumulators.values() if acc.get('selected', False))
-        
+
         return {
             "status": "success",
             "date": today.isoformat(),

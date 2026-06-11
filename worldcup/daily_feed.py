@@ -274,8 +274,12 @@ def build_daily_accumulators() -> dict:
     for g in over_picks:
         over_total *= g["estimated_odds"]
 
-    # ── Rollover: 1 safest pick from TODAY's games ──
-    rollover = _build_daily_rollover(day_preds, today)
+    # ── Rollover: 10-day chain (persists days to rollover_db) ──
+    # Must be the chain builder, not the single-day variant: the chain
+    # store feeds the Telegram 09:00 post and the Rollover/Results pages.
+    # _build_daily_rollover only produced today's picks, so the chain
+    # stayed empty forever and those consumers saw nothing.
+    rollover = _build_rollover(predictions, today)
 
     # Build response in frontend-expected format
     def mk_cat(games, total_odds, risk, selected=True, reason=None):
@@ -290,14 +294,26 @@ def build_daily_accumulators() -> dict:
             "reason": None,
         }
 
+    # On thin match days (e.g. a lone World Cup opener) the higher tiers
+    # can't be built honestly — they'd just repeat the same single pick at
+    # 1.1x while claiming "5 odds". Mark them unavailable with the reason
+    # instead of shipping a misleading slip.
+    n_matches = len({p["match_id"] for p in day_preds})
+    match_word = "match" if n_matches == 1 else "matches"
+    thin_reason = f"Only {n_matches} {match_word} today — not enough fixtures for this tier"
+    five_ok = len(five_odds_games) >= 3 and five_odds_total >= 2.5
+    ten_ok = len(ten_odds_games) >= 4 and ten_odds_total >= 4.0
+
     result = {
         "status": "success",
         "date": target_date,
         "source": "worldcup",
         "accumulators": {
             "2_odds": mk_cat(two_odds_games, two_odds_total, "Low"),
-            "5_odds": mk_cat(five_odds_games, five_odds_total, "Medium"),
-            "10_odds": mk_cat(ten_odds_games, ten_odds_total, "High"),
+            "5_odds": mk_cat(five_odds_games, five_odds_total, "Medium",
+                             selected=five_ok, reason=None if five_ok else thin_reason),
+            "10_odds": mk_cat(ten_odds_games, ten_odds_total, "High",
+                              selected=ten_ok, reason=None if ten_ok else thin_reason),
             "over_1_5": mk_cat(over_picks, over_total, "Very Safe"),
             "rollover": rollover,
         },
