@@ -72,11 +72,15 @@ FEATURE_COLUMNS = [
     # The pre-match price encodes injuries, motivation, tactics — information
     # form stats can't see. has_odds lets the model discount the defaults.
     "mkt_prob_home", "mkt_prob_draw", "mkt_prob_away", "mkt_has_odds",
+    # Over/Under 2.5 implied probability — the goals-market price. Main
+    # European leagues only in the training data; mkt_ou_has flags coverage.
+    "mkt_prob_over25", "mkt_ou_has",
 ]
 
 # Defaults when a match has no odds (~0.1% of training data): the global
 # base rates, with has_odds=0 so the model can ignore them.
 MKT_DEFAULTS = (0.44, 0.26, 0.30, 0.0)
+OU_DEFAULTS = (0.52, 0.0)  # global over-2.5 base rate, ou_has=0
 
 
 def market_features(odds_home, odds_draw, odds_away) -> tuple:
@@ -90,6 +94,18 @@ def market_features(odds_home, odds_draw, odds_away) -> tuple:
         return (ih / tot, idr / tot, ia / tot, 1.0)
     except (TypeError, ValueError):
         return MKT_DEFAULTS
+
+
+def ou_features(odds_over, odds_under) -> tuple:
+    """(p_over25, ou_has) from two-way O/U 2.5 odds, overround-removed."""
+    try:
+        oo, ou = float(odds_over), float(odds_under)
+        if oo <= 1.0 or ou <= 1.0 or any(map(pd.isna, (oo, ou))):
+            return OU_DEFAULTS
+        io_, iu = 1.0 / oo, 1.0 / ou
+        return (io_ / (io_ + iu), 1.0)
+    except (TypeError, ValueError):
+        return OU_DEFAULTS
 
 
 def load_data() -> pd.DataFrame:
@@ -203,6 +219,9 @@ def build_dataset_fast(df: pd.DataFrame):
             mh, md, ma, m_has = market_features(
                 r.get("avg_odds_home"), r.get("avg_odds_draw"), r.get("avg_odds_away")
             )
+            p_o25, ou_has = ou_features(
+                r.get("avg_odds_over25"), r.get("avg_odds_under25")
+            )
             feats = [
                 h5["win_rate"], h10["win_rate"], h5["draw_rate"],
                 h5["goals_scored"], h5["goals_conceded"],
@@ -214,6 +233,7 @@ def build_dataset_fast(df: pd.DataFrame):
                 min(h2h_n, 10) / 10,
                 tier / 2,
                 mh, md, ma, m_has,
+                p_o25, ou_has,
             ]
             hg, ag = r["home_score"], r["away_score"]
             X.append(feats)

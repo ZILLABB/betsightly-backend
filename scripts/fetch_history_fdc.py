@@ -39,6 +39,8 @@ CSV_COLUMNS = [
     "home_team_id", "away_team_id",
     # NEW — historical bookmaker odds (average closing odds)
     "avg_odds_home", "avg_odds_draw", "avg_odds_away",
+    # Over/Under 2.5 prices (main European leagues only; extras lack them)
+    "avg_odds_over25", "avg_odds_under25",
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (BetSightly ML pipeline)"}
@@ -194,6 +196,13 @@ def fetch_main_leagues(seasons: dict) -> list:
                     ["AvgD", "AvgCD", "PSD", "PSCD", "B365D", "B365CD"],
                     ["AvgA", "AvgCA", "PSA", "PSCA", "B365A", "B365CA"],
                 )
+                # Over/Under 2.5 goals prices (same bookmaker preference)
+                o25, u25, _ = _pick_odds(
+                    r,
+                    ["Avg>2.5", "AvgC>2.5", "P>2.5", "PC>2.5", "B365>2.5", "B365C>2.5"],
+                    ["Avg<2.5", "AvgC<2.5", "P<2.5", "PC<2.5", "B365<2.5", "B365C<2.5"],
+                    [],
+                )
 
                 all_rows.append({
                     "home_team":      home,
@@ -213,6 +222,8 @@ def fetch_main_leagues(seasons: dict) -> list:
                     "avg_odds_home":  oh,
                     "avg_odds_draw":  od,
                     "avg_odds_away":  oa,
+                    "avg_odds_over25": o25,
+                    "avg_odds_under25": u25,
                 })
                 rows_added += 1
 
@@ -292,6 +303,8 @@ def fetch_extra_leagues(min_season: int = 2019) -> list:
                 "avg_odds_home":  oh,
                 "avg_odds_draw":  od,
                 "avg_odds_away":  oa,
+                "avg_odds_over25": "",
+                "avg_odds_under25": "",
             })
             rows_added += 1
 

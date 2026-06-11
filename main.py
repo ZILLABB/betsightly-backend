@@ -231,43 +231,74 @@ try:
 except Exception as e:
     logger.warning(f"Could not start Telegram bot: {e}")
 
-def _auto_generate_predictions():
-    """Auto-generate today's predictions on startup (runs in background thread)."""
-    import time
-    time.sleep(5)  # Let the server finish booting first
-    try:
-        from services.daily_predictions_service import DailyPredictionsService
-        from database import SessionLocal
-        from services.daily_predictions_service import DailyPredictionSummary
+def _ensure_today_generated():
+    """Generate today's predictions + accumulator feed if missing.
 
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        today_date = datetime.now().date()
+    Idempotent: skips ML generation when the day's summary is completed,
+    and the accumulator feed reads odds through a 6h disk cache, so calling
+    this repeatedly is cheap.
+    """
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_date = datetime.now().date()
+
+    # 1) Daily ML predictions
+    try:
+        from services.daily_predictions_service import (
+            DailyPredictionsService, DailyPredictionSummary,
+        )
+        from database import SessionLocal
 
         db = SessionLocal()
         try:
             existing = db.query(DailyPredictionSummary).filter(
                 DailyPredictionSummary.prediction_date == today_date
             ).first()
-
-            if existing and existing.generation_status == "completed":
-                logger.info(f"Predictions for {today_str} already exist — skipping auto-generate")
-                return
-
-            logger.info(f"Auto-generating predictions for {today_str}...")
-            service = DailyPredictionsService()
-            result = service.generate_daily_predictions(today_str)
-            status = result.get("status", "unknown")
-            count = result.get("summary", {}).get("predictions_generated", 0)
-            logger.info(f"Auto-generate complete: status={status}, predictions={count}")
+            already_done = existing is not None and existing.generation_status == "completed"
         finally:
             db.close()
 
+        if already_done:
+            logger.debug(f"Predictions for {today_str} already exist")
+        else:
+            logger.info(f"Daily loop: generating predictions for {today_str}...")
+            result = DailyPredictionsService().generate_daily_predictions(today_str)
+            status = result.get("status", "unknown")
+            count = result.get("summary", {}).get("predictions_generated", 0)
+            logger.info(f"Daily loop: generation complete: status={status}, predictions={count}")
     except Exception as e:
-        logger.error(f"Auto-generate predictions failed: {e}")
+        logger.error(f"Daily loop: prediction generation failed: {e}")
 
-# Start auto-generation in background thread on app startup
-threading.Thread(target=_auto_generate_predictions, daemon=True).start()
-logger.info("Background prediction auto-generation scheduled")
+    # 2) Accumulator feed + rollover chain extension. Without this, the
+    # chain only grows when a user happens to hit /accumulators/today —
+    # the 09:00 Telegram post would find no picks on quiet mornings.
+    try:
+        from worldcup.daily_feed import build_daily_accumulators
+        build_daily_accumulators()
+    except Exception as e:
+        logger.error(f"Daily loop: accumulator feed build failed: {e}")
+
+
+def _start_daily_generation_loop():
+    """Keep each day's artifacts present, not just at boot.
+
+    The old startup-only generation left a gap: a server running past
+    midnight had no predictions for the new day until the first visitor.
+    Check every 30 minutes; the first pass after 00:00 generates the new
+    day, well before the 09:00 Telegram post.
+    """
+    import time as _time
+
+    def _run():
+        _time.sleep(5)  # let the server finish booting first
+        while True:
+            _ensure_today_generated()
+            _time.sleep(1800)
+
+    threading.Thread(target=_run, daemon=True, name="daily-generation").start()
+    logger.info("Daily generation loop started (30 min checks)")
+
+
+_start_daily_generation_loop()
 
 
 @app.get("/")

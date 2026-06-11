@@ -143,9 +143,11 @@ class RealMLPredictionService:
             meta = json.load(f)
 
         # Feature schema the saved models were trained with. Older bundles
-        # are 19 features; newer ones add 4 market features on the end.
+        # are 19 features; newer ones add market features on the end
+        # (4 for 1X2, then 2 for over/under 2.5).
         self.feature_columns = meta.get("feature_columns", [])
         self.expects_market_features = "mkt_prob_home" in self.feature_columns
+        self.expects_ou_features = "mkt_prob_over25" in self.feature_columns
 
         for model_name in meta.get("models", []):
             p = self.models_dir / f"{model_name}.joblib"
@@ -218,6 +220,20 @@ class RealMLPredictionService:
     # Same defaults as scripts/retrain_models.py:MKT_DEFAULTS — global base
     # rates with has_odds=0 so the model can discount them.
     _MKT_DEFAULTS = (0.44, 0.26, 0.30, 0.0)
+    _OU_DEFAULTS = (0.52, 0.0)
+
+    @staticmethod
+    def _ou_market_features(odds: Optional[Dict[str, Any]]) -> tuple:
+        """(p_over25, ou_has) from live over/under 2.5 odds."""
+        try:
+            oo = float((odds or {}).get("over_2_5") or 0)
+            ou = float((odds or {}).get("under_2_5") or 0)
+            if oo <= 1.0 or ou <= 1.0:
+                return RealMLPredictionService._OU_DEFAULTS
+            io_, iu = 1.0 / oo, 1.0 / ou
+            return (io_ / (io_ + iu), 1.0)
+        except (TypeError, ValueError):
+            return RealMLPredictionService._OU_DEFAULTS
 
     @staticmethod
     def _market_features(odds: Optional[Dict[str, Any]]) -> tuple:
@@ -311,6 +327,8 @@ class RealMLPredictionService:
         ]
         if getattr(self, "expects_market_features", False):
             feats.extend(self._market_features(odds))
+        if getattr(self, "expects_ou_features", False):
+            feats.extend(self._ou_market_features(odds))
         return feats
 
     # Maps from integer class -> human label, per target
