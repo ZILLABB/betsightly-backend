@@ -49,6 +49,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# httpx logs full request URLs at INFO — the Telegram bot token is part of the
+# URL, so it would leak into production logs. Keep these loggers at WARNING.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+
 # Initialize database (skip for Railway deployment if no DATABASE_URL)
 try:
     database_url = os.getenv("DATABASE_URL")
@@ -83,28 +89,35 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityMiddleware)
 
-# CORS — locked to known origins via ALLOWED_ORIGINS env var
+# CORS — accepts the production Vercel domain + any preview deploy
+# (betsightly-frontend.vercel.app and betsightly-frontend-HASH-XXX.vercel.app),
+# plus any explicit ALLOWED_ORIGINS env var, plus local dev.
 _allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
-_allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
-if not _allowed_origins:
-    # Sensible defaults — Vercel preview + production + local dev
-    _allowed_origins = [
-        "https://betsightly-frontend.vercel.app",
-        "https://betsightly.com",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:5180",
-    ]
+_explicit_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+
+_defaults = [
+    "https://betsightly-frontend.vercel.app",
+    "https://betsightly.com",
+    "https://www.betsightly.com",
+    "http://localhost:3000",
+    "http://localhost:3777",
+    "http://localhost:5173",
+    "http://localhost:5180",
+]
+_allowed_origins = list(set(_explicit_origins + _defaults))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_origin_regex=r"https://betsightly-frontend-.*\.vercel\.app",
+    # Matches: betsightly-frontend.vercel.app AND betsightly-frontend-anything.vercel.app
+    # (so all Vercel preview deploys work — they look like betsightly-frontend-abc123-team.vercel.app)
+    allow_origin_regex=r"https://betsightly-frontend([-.][^.]+)?\.vercel\.app",
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     max_age=3600,
 )
-logger.info(f"CORS locked to: {_allowed_origins} + Vercel preview subdomains")
+logger.info(f"CORS allows: {_allowed_origins} + betsightly-frontend*.vercel.app")
 
 # Phase 5: Re-enable exception handlers
 setup_exception_handlers(app)
@@ -127,50 +140,165 @@ try:
 except Exception as e:
     logger.warning(f"Could not ensure rollover_days table: {e}")
 
-# Start background results checker (every 6h)
+# Start background results checker (every 6h) — World Cup rollover chains
 try:
     from worldcup.results_checker import start_background_loop as _start_results_loop
     _start_results_loop()
 except Exception as e:
     logger.warning(f"Could not start results checker: {e}")
 
-def _auto_generate_predictions():
-    """Auto-generate today's predictions on startup (runs in background thread)."""
-    import time
-    time.sleep(5)  # Let the server finish booting first
-    try:
-        from services.daily_predictions_service import DailyPredictionsService
-        from database import SessionLocal
-        from services.daily_predictions_service import DailyPredictionSummary
 
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        today_date = datetime.now().date()
+def _start_prediction_settlement_loop():
+    """Settle main-pipeline predictions against real scores, once every 12h.
+
+    Scores yesterday + today (late finishers) so the public accuracy numbers
+    stay current. One football-data.org call per pass — no polling.
+    """
+    import threading
+    import time as _time
+
+    def _run():
+        _time.sleep(120)  # let the app finish booting
+        while True:
+            try:
+                from services.prediction_results_service import PredictionResultsService
+                from datetime import datetime as _dt, timedelta as _td
+                svc = PredictionResultsService()
+                yesterday = (_dt.now() - _td(days=1)).strftime("%Y-%m-%d")
+                today = _dt.now().strftime("%Y-%m-%d")
+                svc.settle_date(yesterday)
+                svc.settle_date(today)
+            except Exception as e:
+                logger.error(f"Prediction settlement failed: {e}")
+            _time.sleep(12 * 3600)
+
+    threading.Thread(target=_run, daemon=True, name="prediction-settlement").start()
+    logger.info("Prediction settlement loop started (12h interval)")
+
+
+try:
+    _start_prediction_settlement_loop()
+except Exception as e:
+    logger.warning(f"Could not start prediction settlement loop: {e}")
+
+
+def _start_telegram_bot_thread():
+    """
+    Spawn the Telegram bot polling loop in a supervised daemon thread.
+
+    The bot crashes routinely during deploys (Telegram returns 409 Conflict
+    while old and new instances briefly poll simultaneously). Instead of
+    dying silently until the next deploy, restart with backoff — the old
+    instance exits within a minute and the retry then succeeds.
+    """
+    import threading
+    import asyncio
+    import time as _time
+
+    MAX_RESTARTS = 10
+
+    def _run():
+        restarts = 0
+        while restarts <= MAX_RESTARTS:
+            try:
+                # The bot needs its own event loop inside this thread
+                asyncio.set_event_loop(asyncio.new_event_loop())
+                from telegram_bot import main as _bot_main
+                _bot_main()
+                logger.info("Telegram bot exited cleanly")
+                return
+            except Exception as e:
+                restarts += 1
+                backoff = min(30 * restarts, 300)  # 30s, 60s, ... capped at 5 min
+                logger.error(
+                    f"Telegram bot crashed ({restarts}/{MAX_RESTARTS}): {e} — "
+                    f"restarting in {backoff}s"
+                )
+                _time.sleep(backoff)
+        logger.error("Telegram bot exceeded max restarts — giving up until next deploy")
+
+    if not os.getenv("TELEGRAM_BOT_TOKEN"):
+        logger.info("Telegram bot disabled (TELEGRAM_BOT_TOKEN not set)")
+        return
+
+    t = threading.Thread(target=_run, daemon=True, name="telegram-bot")
+    t.start()
+    logger.info("Telegram bot started in supervised background thread")
+
+
+try:
+    _start_telegram_bot_thread()
+except Exception as e:
+    logger.warning(f"Could not start Telegram bot: {e}")
+
+def _ensure_today_generated():
+    """Generate today's predictions + accumulator feed if missing.
+
+    Idempotent: skips ML generation when the day's summary is completed,
+    and the accumulator feed reads odds through a 6h disk cache, so calling
+    this repeatedly is cheap.
+    """
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_date = datetime.now().date()
+
+    # 1) Daily ML predictions
+    try:
+        from services.daily_predictions_service import (
+            DailyPredictionsService, DailyPredictionSummary,
+        )
+        from database import SessionLocal
 
         db = SessionLocal()
         try:
             existing = db.query(DailyPredictionSummary).filter(
                 DailyPredictionSummary.prediction_date == today_date
             ).first()
-
-            if existing and existing.generation_status == "completed":
-                logger.info(f"Predictions for {today_str} already exist — skipping auto-generate")
-                return
-
-            logger.info(f"Auto-generating predictions for {today_str}...")
-            service = DailyPredictionsService()
-            result = service.generate_daily_predictions(today_str)
-            status = result.get("status", "unknown")
-            count = result.get("summary", {}).get("predictions_generated", 0)
-            logger.info(f"Auto-generate complete: status={status}, predictions={count}")
+            already_done = existing is not None and existing.generation_status == "completed"
         finally:
             db.close()
 
+        if already_done:
+            logger.debug(f"Predictions for {today_str} already exist")
+        else:
+            logger.info(f"Daily loop: generating predictions for {today_str}...")
+            result = DailyPredictionsService().generate_daily_predictions(today_str)
+            status = result.get("status", "unknown")
+            count = result.get("summary", {}).get("predictions_generated", 0)
+            logger.info(f"Daily loop: generation complete: status={status}, predictions={count}")
     except Exception as e:
-        logger.error(f"Auto-generate predictions failed: {e}")
+        logger.error(f"Daily loop: prediction generation failed: {e}")
 
-# Start auto-generation in background thread on app startup
-threading.Thread(target=_auto_generate_predictions, daemon=True).start()
-logger.info("Background prediction auto-generation scheduled")
+    # 2) Accumulator feed + rollover chain extension. Without this, the
+    # chain only grows when a user happens to hit /accumulators/today —
+    # the 09:00 Telegram post would find no picks on quiet mornings.
+    try:
+        from worldcup.daily_feed import build_daily_accumulators
+        build_daily_accumulators()
+    except Exception as e:
+        logger.error(f"Daily loop: accumulator feed build failed: {e}")
+
+
+def _start_daily_generation_loop():
+    """Keep each day's artifacts present, not just at boot.
+
+    The old startup-only generation left a gap: a server running past
+    midnight had no predictions for the new day until the first visitor.
+    Check every 30 minutes; the first pass after 00:00 generates the new
+    day, well before the 09:00 Telegram post.
+    """
+    import time as _time
+
+    def _run():
+        _time.sleep(5)  # let the server finish booting first
+        while True:
+            _ensure_today_generated()
+            _time.sleep(1800)
+
+    threading.Thread(target=_run, daemon=True, name="daily-generation").start()
+    logger.info("Daily generation loop started (30 min checks)")
+
+
+_start_daily_generation_loop()
 
 
 @app.get("/")
@@ -189,7 +317,12 @@ def root():
 
 @app.get("/api/health")
 def health_check():
-    """Basic health check endpoint."""
+    """Basic health check endpoint.
+
+    Intentionally duplicates the /api/health/ router route: this one answers
+    the no-trailing-slash form without a 307 redirect, which some load
+    balancer probes don't follow. Keep both.
+    """
     try:
         return {
             "status": "healthy",
@@ -204,26 +337,6 @@ def health_check():
             "status": "healthy",
             "service": "BetSightly API",
             "version": "1.0.0",
-            "error": str(e)
+            "error": "health check error"
         }
 
-@app.get("/api/debug/predictions")
-def debug_predictions():
-    """Debug endpoint to check predictions data."""
-    try:
-        # Simple debug endpoint for Railway deployment
-        return {
-            "status": "operational",
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "message": "Minimal deployment - ML services loading",
-            "endpoints": {
-                "health": "/api/health",
-                "predictions": "/api/predictions/",
-                "betting_codes": "/api/betting-codes/",
-                "punters": "/api/punters/"
-            },
-            "deployment": "railway-minimal"
-        }
-    except Exception as e:
-        logger.error(f"Error in debug predictions endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting debug predictions: {str(e)}")

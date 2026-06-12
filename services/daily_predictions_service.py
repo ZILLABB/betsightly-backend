@@ -12,9 +12,10 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Float, Boolean, 
 from sqlalchemy.ext.declarative import declarative_base
 
 from database import get_db, Base, engine
-from services.apifootball_service import APIFootballService
+from services.fixture_service import FixtureService
 from api.endpoints.ml_predictions import RealMLPredictionService
 from services.accumulator_builder import AccumulatorBuilder
+# OddsService no longer needed — odds come embedded in fixture data
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -79,9 +80,10 @@ class DailyPredictionsService:
     
     def __init__(self):
         """Initialize the service."""
-        self.apifootball_service = APIFootballService()
+        self.fixture_service = FixtureService()
         self.ml_service = RealMLPredictionService()
         self.accumulator_builder = AccumulatorBuilder()
+        # Odds come embedded in fixture data (no separate service needed)
 
         # Create tables
         Base.metadata.create_all(bind=engine)
@@ -136,12 +138,12 @@ class DailyPredictionsService:
             
             db.commit()
             
-            # Get fixtures for the date
-            all_fixtures = self.apifootball_service.get_daily_fixtures(target_date)
+            # Get fixtures for the date (from The Odds API via FixtureService)
+            all_fixtures = self.fixture_service.get_daily_fixtures(target_date)
             summary.total_fixtures = len(all_fixtures)
-            
-            # Filter for upcoming fixtures
-            upcoming_fixtures = self._filter_upcoming_fixtures(all_fixtures)
+
+            # All fixtures from Odds API are already upcoming (status=NS)
+            upcoming_fixtures = all_fixtures
             summary.upcoming_fixtures = len(upcoming_fixtures)
             
             logger.info(f"📊 Found {len(upcoming_fixtures)} upcoming fixtures")
@@ -169,9 +171,31 @@ class DailyPredictionsService:
                     logger.error(f"Error processing fixture {fixture.get('fixture_id')}: {str(e)}")
                     continue
 
-            # Build accumulators from all predictions
+            # Build odds map from fixture data (already fetched with fixtures)
+            odds_map = {}
+            for fx in upcoming_fixtures:
+                fx_odds = fx.get("odds", {})
+                if fx_odds and fx_odds.get("home"):
+                    fixture_id = fx.get("fixture_id")
+                    odds_map[fixture_id] = {
+                        "home_odds": fx_odds.get("home"),
+                        "draw_odds": fx_odds.get("draw"),
+                        "away_odds": fx_odds.get("away"),
+                        "over_2_5_odds": fx_odds.get("over_2_5"),
+                        "under_2_5_odds": fx_odds.get("under_2_5"),
+                        "bookmaker": fx_odds.get("bookmaker", ""),
+                    }
+            if odds_map:
+                logger.info(f"💰 Real odds available for {len(odds_map)}/{len(upcoming_fixtures)} fixtures")
+            else:
+                logger.info("📊 No real odds available — using confidence-based selection")
+
+            # Build accumulators from all predictions + real odds
             logger.info(f"🎯 Building accumulators from {len(all_predictions)} predictions")
-            accumulator_result = self.accumulator_builder.build_accumulators(all_predictions)
+            accumulator_result = self.accumulator_builder.build_accumulators(
+                all_predictions,
+                odds_map=odds_map if odds_map else None,
+            )
             accumulators = accumulator_result.get('accumulators', {})
 
             # Count successful accumulators
@@ -221,6 +245,23 @@ class DailyPredictionsService:
             db.commit()
 
             logger.info(f"✅ Generated {predictions_count} predictions for {target_date}")
+
+            # Notify subscribers
+            try:
+                from services.push_notification_service import notify_predictions_ready
+                notify_predictions_ready(
+                    prediction_date=target_date,
+                    predictions_count=predictions_count,
+                    categories={
+                        "2_odds": category_counts["2_odds"] > 0,
+                        "5_odds": category_counts["5_odds"] > 0,
+                        "10_odds": category_counts["10_odds"] > 0,
+                        "over_1.5": category_counts["over_1_5"] > 0,
+                        "rollover": category_counts["rollover"] > 0,
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send notifications: {e}")
 
             # Build response before closing session (object is still bound)
             result = {

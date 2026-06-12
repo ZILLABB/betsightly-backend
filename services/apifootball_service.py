@@ -36,8 +36,46 @@ CACHE_TTL_HOURS = 6
 STALE_CACHE_DAYS = 3  # auto-delete cache files older than this
 
 TARGET_LEAGUE_IDS = {
-    39, 40, 61, 62, 78, 79, 135, 136, 140, 141,
-    94, 88, 144, 203, 2, 3,
+    # ── European top flights (Aug-May) ──
+    39,   # Premier League (England)
+    40,   # Championship (England)
+    61,   # Ligue 1 (France)
+    62,   # Ligue 2 (France)
+    78,   # Bundesliga (Germany)
+    79,   # Bundesliga 2 (Germany)
+    135,  # Serie A (Italy)
+    136,  # Serie B (Italy)
+    140,  # La Liga (Spain)
+    141,  # La Liga 2 (Spain)
+    94,   # Liga Portugal
+    88,   # Eredivisie (Netherlands)
+    144,  # Belgian Pro League
+    203,  # Turkish Super Lig
+    179,  # Scottish Premiership
+    # ── European cups ──
+    2,    # Champions League
+    3,    # Europa League
+    848,  # Conference League
+    # ── Americas (year-round / summer) ──
+    253,  # MLS (USA/Canada) — Feb-Oct
+    71,   # Brasileirao Serie A — Apr-Dec
+    128,  # Argentine Primera — Feb-Dec
+    262,  # Liga MX (Mexico) — Jan-Dec
+    265,  # Chilean Primera — Feb-Nov
+    # ── Copa competitions ──
+    13,   # Copa Libertadores — Feb-Nov
+    11,   # Copa Sudamericana — Mar-Nov
+    # ── Nordic / Summer leagues (Mar-Nov) ──
+    103,  # Eliteserien (Norway)
+    113,  # Allsvenskan (Sweden)
+    244,  # Veikkausliiga (Finland)
+    119,  # Danish Superliga
+    # ── Asia / Other (year-round) ──
+    98,   # J1 League (Japan) — Feb-Dec
+    292,  # K League 1 (Korea) — Feb-Nov
+    307,  # Saudi Pro League — Aug-May
+    # ── World Cup ──
+    1,    # FIFA World Cup
 }
 
 

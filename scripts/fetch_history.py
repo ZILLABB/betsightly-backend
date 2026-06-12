@@ -1,16 +1,14 @@
 """
-Fetch 5 seasons of historical fixtures from API-Football.
+(DEPRECATED) Fetch historical fixtures from API-Football.
 
-Saves to data/api-football/matches.csv with team names that exactly
-match the live fixture API ? eliminating all name-mismatch issues.
+⚠️  Use fetch_history_fdc.py instead — it pulls from football-data.co.uk
+    which is free, has no API key requirement, no rate limits, and no
+    suspension risk.  This file is kept for reference only.
 
-Usage:
-    py scripts/fetch_history.py
+    py scripts/fetch_history_fdc.py --recent
 
-Resume-safe: tracks progress in data/api-football/progress.json so you
-can stop and restart without re-fetching completed league/season combos.
-
-API cost: ~80 requests (16 leagues ? 5 seasons). Free tier = 100/day.
+This script requires an API-Football key (api-sports.io), which has a
+100 requests/day free tier and seasons limited to 2022-2024.
 """
 
 import csv
@@ -24,7 +22,7 @@ from pathlib import Path
 import requests
 
 # ---------------------------------------------------------------------------
-API_KEY  = os.getenv("API_FOOTBALL_API_KEY", "bbfc08f4961fb2ef3476a129b8cb1cd9")
+API_KEY  = os.getenv("API_FOOTBALL_API_KEY", "")
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS  = {"x-apisports-key": API_KEY}
 
@@ -32,27 +30,52 @@ OUTPUT_DIR      = Path("data/api-football")
 OUTPUT_CSV      = OUTPUT_DIR / "matches.csv"
 PROGRESS_FILE   = OUTPUT_DIR / "progress.json"
 
-# Free plan allows 2022-2024 only
+# Seasons to fetch — free plan allows 2022-2024 only
 SEASONS = [2022, 2023, 2024]
 
-# League ID ? (display name, country, tier)
+# League ID → (display name, country, tier)
+#   tier 0 = continental cups, 1 = top flight, 2 = second division
 TARGET_LEAGUES = {
-    39:  ("Premier League",    "England",     1),
-    40:  ("Championship",      "England",     2),
-    61:  ("Ligue 1",           "France",      1),
-    62:  ("Ligue 2",           "France",      2),
-    78:  ("Bundesliga",        "Germany",     1),
-    79:  ("2. Bundesliga",     "Germany",     2),
-    135: ("Serie A",           "Italy",       1),
-    136: ("Serie B",           "Italy",       2),
-    140: ("La Liga",           "Spain",       1),
-    141: ("Segunda Division",  "Spain",       2),
-    94:  ("Primeira Liga",     "Portugal",    1),
-    88:  ("Eredivisie",        "Netherlands", 1),
-    144: ("Pro League",        "Belgium",     1),
-    203: ("Super Lig",         "Turkey",      1),
-    2:   ("Champions League",  "Europe",      0),
-    3:   ("Europa League",     "Europe",      0),
+    # ── European top flights (Aug-May) ──
+    39:  ("Premier League",    "England",       1),
+    40:  ("Championship",      "England",       2),
+    61:  ("Ligue 1",           "France",        1),
+    62:  ("Ligue 2",           "France",        2),
+    78:  ("Bundesliga",        "Germany",       1),
+    79:  ("2. Bundesliga",     "Germany",       2),
+    135: ("Serie A",           "Italy",         1),
+    136: ("Serie B",           "Italy",         2),
+    140: ("La Liga",           "Spain",         1),
+    141: ("Segunda Division",  "Spain",         2),
+    94:  ("Primeira Liga",     "Portugal",      1),
+    88:  ("Eredivisie",        "Netherlands",   1),
+    144: ("Pro League",        "Belgium",       1),
+    203: ("Super Lig",         "Turkey",        1),
+    179: ("Premiership",       "Scotland",      1),
+    # ── European cups ──
+    2:   ("Champions League",  "Europe",        0),
+    3:   ("Europa League",     "Europe",        0),
+    848: ("Conference League", "Europe",        0),
+    # ── Americas (year-round / summer) ──
+    253: ("MLS",               "USA",           1),
+    71:  ("Serie A",           "Brazil",        1),
+    128: ("Primera Division",  "Argentina",     1),
+    262: ("Liga MX",           "Mexico",        1),
+    265: ("Primera Division",  "Chile",         1),
+    # ── Copa competitions ──
+    13:  ("Copa Libertadores", "South America", 0),
+    11:  ("Copa Sudamericana", "South America", 0),
+    # ── Nordic / Summer leagues (Mar-Nov) ──
+    103: ("Eliteserien",       "Norway",        1),
+    113: ("Allsvenskan",       "Sweden",        1),
+    244: ("Veikkausliiga",     "Finland",       1),
+    119: ("Superliga",         "Denmark",       1),
+    # ── Asia ──
+    98:  ("J1 League",         "Japan",         1),
+    292: ("K League 1",        "South Korea",   1),
+    307: ("Pro League",        "Saudi Arabia",  1),
+    # ── World Cup ──
+    1:   ("World Cup",         "International", 0),
 }
 
 CSV_COLUMNS = [
@@ -145,6 +168,13 @@ def parse_fixture(f: dict, league_id: int, league_name: str,
 
 
 def main():
+    if not API_KEY:
+        print("ERROR: API_FOOTBALL_API_KEY not set.")
+        print("Set it via environment variable or in a .env file:")
+        print("  set API_FOOTBALL_API_KEY=your_key_here   (Windows)")
+        print("  export API_FOOTBALL_API_KEY=your_key_here (Linux/Mac)")
+        sys.exit(1)
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     done = load_progress()
 

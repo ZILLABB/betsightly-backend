@@ -80,6 +80,17 @@ class AccumulatorBuilder:
         """
         try:
             use_value = odds_map is not None and len(odds_map) > 0
+
+            # Check if all predictions are odds-implied (e.g., World Cup / international).
+            # In that case, value-based mode is useless (edge is always 0% because the
+            # model's probabilities are derived from the same odds).  Use confidence-based.
+            all_odds_implied = all(
+                p.get("prediction_mode") == "odds_implied" for p in predictions
+            ) if predictions else False
+            if all_odds_implied:
+                use_value = False
+                logger.info("All predictions are odds-implied — using confidence-based accumulator")
+
             strategy = "value_based" if use_value else "confidence_based"
 
             # Extract best selection per fixture (for general categories)
@@ -380,8 +391,30 @@ class AccumulatorBuilder:
     def _evaluate_match_result(
         self, ml: dict, fi: dict, disagreement: float, elo_gap: float
     ) -> Optional[Dict[str, Any]]:
-        """Check if match-result models produce a confident, unanimous pick."""
+        """Check if match-result models produce a confident, unanimous pick.
+
+        Also handles odds_implied_result from the odds-based prediction mode
+        (used for World Cup / international fixtures with no club history).
+        """
         mr_models = {}
+
+        # Prefer a single authoritative source when present:
+        #   ensemble_result   — calibrated weighted ensemble (normal fixtures)
+        #   odds_implied_result — bookmaker-implied (national teams / no history)
+        for src_key in ("ensemble_result", "odds_implied_result"):
+            if src_key in ml:
+                pd_src = ml[src_key]
+                prediction = pd_src.get("prediction", "")
+                conf = pd_src.get("confidence", 0)
+                if prediction in ("home_win", "draw", "away_win") and conf >= MIN_CONFIDENCE_MATCH_RESULT:
+                    return self._make_candidate(
+                        fi, prediction, self._fmt_readable(prediction),
+                        conf, conf, 0.0, elo_gap, "match_result",
+                        models_agreed=1,
+                    )
+                return None
+
+        # Standard ML mode — multiple models must agree
         for key, pd in ml.items():
             if "match_result" in key or key in ("elo_rating", "dixon_coles"):
                 prediction = pd.get("prediction", "")
@@ -421,7 +454,26 @@ class AccumulatorBuilder:
         key_pattern: str, pos_label: str, neg_label: str,
         pos_readable: str, neg_readable: str,
     ) -> Optional[Dict[str, Any]]:
-        """Check if XGB and LGBM agree on a binary prediction with high confidence."""
+        """Check if XGB and LGBM agree on a binary prediction with high confidence.
+
+        Also handles odds_implied_* from the odds-based prediction mode.
+        """
+        # Prefer single authoritative source: calibrated ensemble, then
+        # odds-implied (national teams). Falls through to XGB+LGBM agreement.
+        for src_key in (f"ensemble_{key_pattern}", f"odds_implied_{key_pattern}"):
+            if src_key in ml:
+                pd_src = ml[src_key]
+                prediction = pd_src.get("prediction", "")
+                conf = pd_src.get("confidence", 0)
+                if conf >= MIN_CONFIDENCE_BINARY:
+                    readable = pos_readable if prediction == pos_label else neg_readable
+                    return self._make_candidate(
+                        fi, prediction, readable, conf, conf, 0.0, elo_gap,
+                        key_pattern, models_agreed=1,
+                    )
+                return None
+
+        # Standard ML mode — XGB and LGBM must agree
         xgb_pred = None
         lgbm_pred = None
 

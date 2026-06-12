@@ -8,9 +8,6 @@ from sqlalchemy.orm import relationship
 
 from database import Base
 
-# Forward declaration to avoid circular imports
-prediction_table = None
-
 class Fixture(Base):
     """Fixture model for storing football match fixtures."""
 
@@ -31,8 +28,7 @@ class Fixture(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships will be set up after both classes are defined
-    predictions = []
+    predictions = relationship("Prediction", back_populates="fixture", lazy="select")
 
     def __repr__(self):
         return f"<Fixture {self.home_team} vs {self.away_team} on {self.date}>"

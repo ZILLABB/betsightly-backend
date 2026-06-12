@@ -148,7 +148,7 @@ def _load_club_predictions() -> list:
     """
     try:
         from worldcup.club_odds import get_active_matches
-        club_matches = get_active_matches(days_ahead=10)
+        club_matches = get_active_matches(days_ahead=2)
         return [_club_match_to_prediction(m) for m in club_matches]
     except Exception as e:
         logger.warning(f"Club odds unavailable: {e}")
@@ -171,35 +171,22 @@ def build_daily_accumulators() -> dict:
         return None
 
     today = datetime.now().strftime("%Y-%m-%d")
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Find next match day
-    match_dates = sorted(set(p["commence_time"][:10] for p in predictions))
-    next_dates = [d for d in match_dates if d >= today]
-    target_date = next_dates[0] if next_dates else (match_dates[-1] if match_dates else today)
+    # Strictly today's matches first, extend to tomorrow only if needed
+    day_preds = [p for p in predictions if p["commence_time"][:10] == today]
+    target_date = today
 
-    # Get predictions for target date
-    day_preds = [p for p in predictions if p["commence_time"].startswith(target_date)]
-
-    # If no matches on target date, use next available
-    if not day_preds and next_dates:
-        for nd in next_dates:
-            day_preds = [p for p in predictions if p["commence_time"].startswith(nd)]
-            if day_preds:
-                target_date = nd
-                break
-
+    # If no matches today, try tomorrow (but never further)
     if not day_preds:
-        day_preds = [p for p in predictions if p["commence_time"][:10] >= today][:15]
+        day_preds = [p for p in predictions if p["commence_time"][:10] == tomorrow]
+        if day_preds:
+            target_date = tomorrow
 
-    # Always include enough matches to build good accumulators
-    # Pull from next several days until we have at least 8 matches
-    all_upcoming = [p for p in predictions if p["commence_time"][:10] >= today]
-    if len(day_preds) < 8:
-        for p in all_upcoming:
-            if p not in day_preds:
-                day_preds.append(p)
-            if len(day_preds) >= 12:
-                break
+    # If still nothing within 2 days, return None so the caller knows
+    if not day_preds:
+        logger.info("No matches today or tomorrow — no daily accumulators")
+        return None
 
     # Sort by confidence
     day_preds.sort(key=lambda p: p.get("confidence", 0), reverse=True)
@@ -287,7 +274,11 @@ def build_daily_accumulators() -> dict:
     for g in over_picks:
         over_total *= g["estimated_odds"]
 
-    # ── Rollover: 1 pick per day at 2-3 odds, 10-day chain ──
+    # ── Rollover: 10-day chain (persists days to rollover_db) ──
+    # Must be the chain builder, not the single-day variant: the chain
+    # store feeds the Telegram 09:00 post and the Rollover/Results pages.
+    # _build_daily_rollover only produced today's picks, so the chain
+    # stayed empty forever and those consumers saw nothing.
     rollover = _build_rollover(predictions, today)
 
     # Build response in frontend-expected format
@@ -303,14 +294,26 @@ def build_daily_accumulators() -> dict:
             "reason": None,
         }
 
+    # On thin match days (e.g. a lone World Cup opener) the higher tiers
+    # can't be built honestly — they'd just repeat the same single pick at
+    # 1.1x while claiming "5 odds". Mark them unavailable with the reason
+    # instead of shipping a misleading slip.
+    n_matches = len({p["match_id"] for p in day_preds})
+    match_word = "match" if n_matches == 1 else "matches"
+    thin_reason = f"Only {n_matches} {match_word} today — not enough fixtures for this tier"
+    five_ok = len(five_odds_games) >= 3 and five_odds_total >= 2.5
+    ten_ok = len(ten_odds_games) >= 4 and ten_odds_total >= 4.0
+
     result = {
         "status": "success",
         "date": target_date,
         "source": "worldcup",
         "accumulators": {
             "2_odds": mk_cat(two_odds_games, two_odds_total, "Low"),
-            "5_odds": mk_cat(five_odds_games, five_odds_total, "Medium"),
-            "10_odds": mk_cat(ten_odds_games, ten_odds_total, "High"),
+            "5_odds": mk_cat(five_odds_games, five_odds_total, "Medium",
+                             selected=five_ok, reason=None if five_ok else thin_reason),
+            "10_odds": mk_cat(ten_odds_games, ten_odds_total, "High",
+                              selected=ten_ok, reason=None if ten_ok else thin_reason),
             "over_1_5": mk_cat(over_picks, over_total, "Very Safe"),
             "rollover": rollover,
         },
@@ -379,6 +382,81 @@ def _safest_pick(p: dict) -> dict | None:
         "odds": round(odds, 2),
         "confidence": round(prob, 3),
         "market": market,
+    }
+
+
+def _build_daily_rollover(day_preds: list, today: str) -> dict:
+    """
+    Daily rollover: pick the single SAFEST bet from today's matches.
+
+    Unlike the old 10-day chain, this gives users 1 strong pick per day
+    that they can roll their stake on. Fresh every day.
+    """
+    if not day_preds:
+        return {
+            "selected": False,
+            "games": [],
+            "total_odds": 0,
+            "risk_level": "Low",
+            "reason": "No matches today for rollover",
+        }
+
+    # Find safest pick across today's matches
+    candidates = []
+    for p in day_preds:
+        pick = _safest_pick(p)
+        if pick and pick["confidence"] >= 0.65:
+            candidates.append({"pred": p, "pick": pick})
+
+    if not candidates:
+        return {
+            "selected": False,
+            "games": [],
+            "total_odds": 0,
+            "risk_level": "Low",
+            "reason": "No confident enough picks for rollover today",
+        }
+
+    # Sort by confidence, take the best 1-2 picks
+    candidates.sort(key=lambda x: x["pick"]["confidence"], reverse=True)
+    chosen = candidates[:2]
+
+    games = []
+    total_odds = 1.0
+    for c in chosen:
+        p = c["pred"]
+        pick = c["pick"]
+        odds = pick.get("odds", 1.0)
+        total_odds *= odds
+        league_name = (p.get("data_quality") or {}).get("league") or "FIFA World Cup 2026"
+        games.append({
+            "fixture_id": hash(p.get("match_id", "")) % 1_000_000,
+            "home_team": p.get("home_team", ""),
+            "away_team": p.get("away_team", ""),
+            "league": league_name,
+            "date": p.get("commence_time", ""),
+            "prediction": pick["prediction"],
+            "prediction_type": pick.get("market", "match_result"),
+            "confidence": pick["confidence"],
+            "estimated_odds": odds,
+            "odds": odds,
+            "real_odds": odds,
+            "home_team_logo": p.get("home_team_logo"),
+            "away_team_logo": p.get("away_team_logo"),
+            "risk_level": "low",
+            "model_type": "rollover_daily",
+        })
+
+    avg_conf = sum(g["confidence"] for g in games) / len(games)
+    return {
+        "selected": True,
+        "games": games,
+        "total_odds": round(total_odds, 2),
+        "num_games": len(games),
+        "average_confidence": round(avg_conf, 4),
+        "risk_level": "LOW" if avg_conf >= 0.75 else "MEDIUM",
+        "recommendation": "INCLUDE",
+        "reason": None,
     }
 
 
@@ -507,7 +585,9 @@ def _build_rollover(predictions: list, today: str) -> dict:
 
         # Persist: DB primary, JSON fallback
         if db_available and _db_append:
-            _db_append(chain["start_date"], new_day)
+            if not _db_append(chain["start_date"], new_day):
+                logger.error(f"Rollover day {new_day['day_number']} ({new_day['date']}) NOT persisted — results checker won't see it")
+                _save("wc_rollover_chain.json", chain)
         else:
             _save("wc_rollover_chain.json", chain)
 

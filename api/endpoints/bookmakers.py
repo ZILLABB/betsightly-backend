@@ -58,7 +58,7 @@ def get_bookmakers(
         }
     except Exception as e:
         logger.error(f"Error getting bookmakers: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting bookmakers: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve bookmakers")
 
 @router.get("/{bookmaker_id}", response_model=BookmakerResponse)
 def get_bookmaker(
@@ -86,7 +86,7 @@ def get_bookmaker(
         raise
     except Exception as e:
         logger.error(f"Error getting bookmaker {bookmaker_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting bookmaker: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve bookmaker")
 
 @router.post("/", response_model=BookmakerResponse)
 def create_bookmaker(
@@ -129,7 +129,7 @@ def create_bookmaker(
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating bookmaker: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error creating bookmaker: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create bookmaker")
 
 @router.put("/{bookmaker_id}", response_model=BookmakerResponse)
 def update_bookmaker(
@@ -173,7 +173,7 @@ def update_bookmaker(
     except Exception as e:
         db.rollback()
         logger.error(f"Error updating bookmaker {bookmaker_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error updating bookmaker: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update bookmaker")
 
 @router.delete("/{bookmaker_id}")
 def delete_bookmaker(
@@ -206,7 +206,7 @@ def delete_bookmaker(
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting bookmaker {bookmaker_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error deleting bookmaker: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete bookmaker")
 
 @router.get("/name/{name}")
 def get_bookmaker_by_name(
@@ -234,4 +234,4 @@ def get_bookmaker_by_name(
         raise
     except Exception as e:
         logger.error(f"Error getting bookmaker by name {name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting bookmaker: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve bookmaker")

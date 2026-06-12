@@ -104,18 +104,25 @@ def detailed_health_check(db: Session = Depends(get_db)):
 
 
 def check_api_keys() -> Dict[str, Any]:
-    """Check if required API keys are configured."""
+    """Check if required API keys are configured.
+
+    Checks the same env vars the services actually read (FixtureService
+    uses FOOTBALL_DATA_KEY / ODDS_API_KEY via os.getenv) — the old check
+    looked at pydantic settings that never bind those names, so it
+    reported "missing" even when the keys were set on Render.
+    """
+    import os
     try:
         missing_keys = []
-        
-        # Check Football Data API key
-        if not settings.football_data.API_KEY:
-            missing_keys.append("FOOTBALL_DATA_API_KEY")
 
-        # Check API Football key
-        if not settings.api_football.API_KEY:
-            missing_keys.append("API_FOOTBALL_API_KEY")
-        
+        # Fixtures + results settlement (football-data.org, free tier)
+        if not (os.getenv("FOOTBALL_DATA_KEY") or settings.football_data.API_KEY):
+            missing_keys.append("FOOTBALL_DATA_KEY")
+
+        # Live odds (The Odds API) — the credit-based fallback/odds source
+        if not os.getenv("ODDS_API_KEY"):
+            missing_keys.append("ODDS_API_KEY")
+
         if missing_keys:
             return {
                 "status": "unhealthy",
@@ -263,7 +270,7 @@ def readiness_check(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Readiness check failed: {str(e)}")
-        raise HTTPException(status_code=503, detail=f"Service not ready: {str(e)}")
+        raise HTTPException(status_code=503, detail="Service not ready")
 
 
 @router.get("/live")

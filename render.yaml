@@ -21,6 +21,12 @@ services:
         sync: false
       - key: ODDS_API_KEY
         sync: false
+      - key: FOOTBALL_DATA_KEY
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
       - key: APIFOOTBALL_API_KEY
         sync: false
       - key: TELEGRAM_BOT_TOKEN

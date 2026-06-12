@@ -40,7 +40,7 @@ class Prediction(Base):
     # updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Removed due to migration issues
 
     # Relationships
-    fixture = relationship("Fixture")
+    fixture = relationship("Fixture", back_populates="predictions")
 
     def __repr__(self):
         return f"<Prediction for fixture {self.fixture_id}: {self.match_result_pred}>"
@@ -97,7 +97,7 @@ class Prediction(Base):
             "combo_id": self.combo_id,
             "rollover_day": self.rollover_day,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "updated_at": None,
 
             # Add prediction percentages
             "home_win_pct": home_win_pct,

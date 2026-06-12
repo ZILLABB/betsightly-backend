@@ -73,12 +73,28 @@ _refresh_lock = threading.Lock()
 _last_refresh: Optional[str] = None
 
 
+def _wc_snapshot_age_hours() -> float:
+    """Hours since wc_predictions.json was last written (inf if missing)."""
+    try:
+        p = DATA_DIR / "wc_predictions.json"
+        if not p.exists():
+            return float("inf")
+        return (time.time() - p.stat().st_mtime) / 3600
+    except Exception:
+        return float("inf")
+
+
 def _background_refresh():
-    """Auto-refresh odds every 6 hours."""
+    """Keep WC odds fresh: refresh when the snapshot is >6h old.
+
+    Checked every 30 minutes rather than sleeping a flat 6h — after a
+    deploy the committed snapshot can already be hours old, and the old
+    flat sleep served stale odds until the first cycle completed.
+    """
     global _last_refresh
+    time.sleep(120)  # let the app finish booting
     while True:
-        time.sleep(6 * 3600)  # 6 hours
-        if _refresh_lock.acquire(blocking=False):
+        if _wc_snapshot_age_hours() >= 6 and _refresh_lock.acquire(blocking=False):
             try:
                 logger.info("Auto-refreshing World Cup odds...")
                 from worldcup.fetch_data import fetch_odds
@@ -91,6 +107,7 @@ def _background_refresh():
                 logger.error(f"Auto-refresh failed: {e}")
             finally:
                 _refresh_lock.release()
+        time.sleep(1800)
 
 
 # Start auto-refresh thread on import

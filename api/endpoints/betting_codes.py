@@ -40,64 +40,33 @@ def get_betting_codes(
 ):
     """
     Get betting codes with optional filtering.
-
-    Args:
-        skip: Number of codes to skip
-        limit: Maximum number of codes to return
-        punter_id: Filter by punter ID
-        code: Filter by code value
-        featured: Filter by featured status
-        bookmaker_id: Filter by bookmaker ID
-        min_odds: Filter by minimum odds
-        max_odds: Filter by maximum odds
-        status: Filter by status
     """
     try:
-        # Start query
         query = db.query(BettingCode)
 
-        # Apply filters
         if punter_id is not None:
             query = query.filter(BettingCode.punter_id == punter_id)
-
         if code is not None:
             query = query.filter(BettingCode.code == code)
-
         if featured is not None:
             query = query.filter(BettingCode.featured == featured)
-
         if bookmaker_id is not None:
             query = query.filter(BettingCode.bookmaker_id == bookmaker_id)
-
         if min_odds is not None:
             query = query.filter(BettingCode.odds >= min_odds)
-
         if max_odds is not None:
             query = query.filter(BettingCode.odds <= max_odds)
-
         if status is not None:
             query = query.filter(BettingCode.status == status)
 
-        # Get total count with filters
         total = query.count()
-
-        # Get betting codes with pagination and load relationships
         codes = (
             query
-            .options(
-                joinedload(BettingCode.punter),
-                joinedload(BettingCode.bookmaker)
-            )
+            .options(joinedload(BettingCode.punter), joinedload(BettingCode.bookmaker))
             .order_by(desc(BettingCode.created_at))
-            .offset(skip)
-            .limit(limit)
-            .all()
+            .offset(skip).limit(limit).all()
         )
-
-        # Convert to dictionaries
         codes_dict = [code.to_dict() for code in codes]
-
-
 
         return {
             "status": "success",
@@ -108,7 +77,24 @@ def get_betting_codes(
         }
     except Exception as e:
         logger.error(f"Error getting betting codes: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting betting codes: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve betting codes")
+
+@router.get("/latest", response_model=BettingCodeResponse)
+@router.get("/latest/", response_model=BettingCodeResponse)
+def get_latest_betting_code(
+    db: Session = Depends(get_db)
+):
+    """Get the latest betting code."""
+    try:
+        code = db.query(BettingCode).order_by(desc(BettingCode.created_at)).first()
+        if not code:
+            raise HTTPException(status_code=404, detail="No betting codes found")
+        return {"status": "success", "betting_code": code.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting latest betting code: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve latest betting code")
 
 @router.get("/{code_id}", response_model=BettingCodeResponse)
 def get_betting_code(
@@ -136,7 +122,7 @@ def get_betting_code(
         raise
     except Exception as e:
         logger.error(f"Error getting betting code {code_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting betting code: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve betting code")
 
 @router.post("/", response_model=BettingCodeResponse)
 def create_betting_code(
@@ -190,7 +176,7 @@ def create_betting_code(
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating betting code: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error creating betting code: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create betting code")
 
 @router.put("/{code_id}", response_model=BettingCodeResponse)
 def update_betting_code(
@@ -248,7 +234,7 @@ def update_betting_code(
     except Exception as e:
         db.rollback()
         logger.error(f"Error updating betting code {code_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error updating betting code: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update betting code")
 
 @router.delete("/{code_id}")
 def delete_betting_code(
@@ -281,32 +267,5 @@ def delete_betting_code(
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting betting code {code_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error deleting betting code: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete betting code")
 
-@router.get("/latest", response_model=BettingCodeResponse)
-@router.get("/latest/", response_model=BettingCodeResponse)
-def get_latest_betting_code(
-    db: Session = Depends(get_db)
-):
-    """
-    Get the latest betting code.
-    """
-    try:
-        # Get latest betting code
-        code = db.query(BettingCode).order_by(desc(BettingCode.created_at)).first()
-
-        if not code:
-            logger.warning("No betting codes found in the database")
-            raise HTTPException(status_code=404, detail="No betting codes found")
-
-        return {
-            "status": "success",
-            "betting_code": code.to_dict()
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting latest betting code: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting latest betting code: {str(e)}")
-
-# Removed redundant endpoints to simplify the API

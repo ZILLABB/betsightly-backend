@@ -34,21 +34,46 @@ ODDS_CACHE_TTL_HOURS = 3  # Odds change frequently, shorter cache
 
 # Map our API-Football league IDs to The Odds API sport keys
 LEAGUE_TO_SPORT_KEY = {
-    39: "soccer_epl",                    # Premier League
-    40: "soccer_efl_champ",              # Championship
-    61: "soccer_france_ligue_one",       # Ligue 1
-    62: "soccer_france_ligue_two",       # Ligue 2
-    78: "soccer_germany_bundesliga",     # Bundesliga
-    79: "soccer_germany_bundesliga2",    # 2. Bundesliga
-    135: "soccer_italy_serie_a",         # Serie A
-    136: "soccer_italy_serie_b",         # Serie B
-    140: "soccer_spain_la_liga",         # La Liga
-    141: "soccer_spain_segunda_division", # Segunda División
-    94: "soccer_portugal_primeira_liga", # Primeira Liga
-    88: "soccer_belgium_first_div",      # Jupiler Pro League
-    144: "soccer_turkey_super_league",   # Süper Lig
-    2: "soccer_uefa_champs_league",      # Champions League
-    3: "soccer_uefa_europa_league",      # Europa League
+    # ── European top flights ──
+    39:  "soccer_epl",                     # Premier League
+    40:  "soccer_efl_champ",               # Championship
+    61:  "soccer_france_ligue_one",        # Ligue 1
+    62:  "soccer_france_ligue_two",        # Ligue 2
+    78:  "soccer_germany_bundesliga",      # Bundesliga
+    79:  "soccer_germany_bundesliga2",     # 2. Bundesliga
+    135: "soccer_italy_serie_a",           # Serie A
+    136: "soccer_italy_serie_b",           # Serie B
+    140: "soccer_spain_la_liga",           # La Liga
+    141: "soccer_spain_segunda_division",  # Segunda División
+    94:  "soccer_portugal_primeira_liga",  # Primeira Liga
+    88:  "soccer_netherlands_eredivisie",  # Eredivisie
+    144: "soccer_belgium_first_div",       # Belgian Pro League
+    203: "soccer_turkey_super_league",     # Süper Lig
+    179: "soccer_spl",                     # Scottish Premiership
+    # ── European cups ──
+    2:   "soccer_uefa_champs_league",      # Champions League
+    3:   "soccer_uefa_europa_league",      # Europa League
+    848: "soccer_uefa_europa_conference_league",  # Conference League
+    # ── Americas ──
+    253: "soccer_usa_mls",                 # MLS
+    71:  "soccer_brazil_campeonato",       # Brasileirao Serie A
+    128: "soccer_argentina_primera_division",  # Argentine Primera
+    262: "soccer_mexico_ligamx",           # Liga MX
+    265: "soccer_chile_campeonato",        # Chilean Primera
+    # ── Copa competitions ──
+    13:  "soccer_conmebol_copa_libertadores",   # Copa Libertadores
+    11:  "soccer_conmebol_copa_sudamericana",   # Copa Sudamericana
+    # ── Nordic / Summer leagues ──
+    103: "soccer_norway_eliteserien",      # Eliteserien
+    113: "soccer_sweden_allsvenskan",      # Allsvenskan
+    244: "soccer_finland_veikkausliiga",   # Veikkausliiga
+    119: "soccer_denmark_superliga",       # Danish Superliga
+    # ── Asia ──
+    98:  "soccer_japan_j_league",          # J1 League
+    292: "soccer_korea_kleague1",          # K League 1
+    307: "soccer_saudi_professional_league",  # Saudi Pro League
+    # ── World Cup ──
+    1:   "soccer_fifa_world_cup",          # FIFA World Cup
 }
 
 # Reverse mapping: sport key -> league ID

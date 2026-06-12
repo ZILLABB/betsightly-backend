@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from services.daily_predictions_service import DailyPrediction, DailyPredictionSummary
 from services.accumulator_builder import AccumulatorBuilder, format_accumulator_for_display
-from services.apifootball_service import APIFootballService
+from services.fixture_service import FixtureService
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -115,10 +115,30 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
                         'recommendation': 'EXCLUDE'
                     }
         
+        # The rollover chain lives in its own store (worldcup.rollover_db),
+        # not in the per-fixture betting JSON — the DB path used to drop it,
+        # leaving the Rollover and Results pages with an empty chain. Merge
+        # it back in so both paths return the same shape as the WC fallback.
+        if accumulators.get('rollover', {}).get('selected'):
+            try:
+                from worldcup.rollover_db import load_chain
+                chain_days = load_chain(today.isoformat()).get("days", [])
+                cum_odds = 1.0
+                for d in chain_days:
+                    cum_odds *= d.get("combined_odds", 1.0)
+                accumulators['rollover'].update({
+                    'chain': chain_days,
+                    'chain_length': len(chain_days),
+                    'target_days': 10,
+                    'cumulative_odds': round(cum_odds, 2),
+                })
+            except Exception as chain_err:
+                logger.warning(f"Could not merge rollover chain: {chain_err}")
+
         # Generate summary
         selected_count = sum(1 for acc in accumulators.values() if acc.get('selected', False))
         total_games = sum(acc.get('num_games', 0) for acc in accumulators.values() if acc.get('selected', False))
-        
+
         return {
             "status": "success",
             "date": today.isoformat(),
@@ -134,7 +154,7 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting today's accumulators: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve today's accumulators")
 
 @router.get("/2-odds")
 def get_2_odds_accumulator(db: Session = Depends(get_db)):
@@ -257,7 +277,7 @@ def _get_category_accumulator(category: str, db: Session):
 
     except Exception as e:
         logger.error(f"Error getting category accumulator: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve accumulator")
 
 @router.get("/summary")
 def get_accumulator_summary(db: Session = Depends(get_db)):
@@ -304,7 +324,7 @@ def get_accumulator_summary(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting accumulator summary: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve accumulator summary")
 
 
 # ---------------------------------------------------------------------------
@@ -368,9 +388,9 @@ def get_accumulator_results(
                 "categories": {},
             }
 
-        # Fetch actual fixture results from API-Football
-        apifootball = APIFootballService()
-        fixtures = apifootball.get_daily_fixtures(check_date.isoformat())
+        # Fetch actual fixture results
+        fixture_svc = FixtureService()
+        fixtures = fixture_svc.get_daily_fixtures(check_date.isoformat())
 
         # Build a lookup: fixture_id -> {home_score, away_score, status}
         score_lookup: Dict[int, Dict] = {}
@@ -455,7 +475,7 @@ def get_accumulator_results(
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
         logger.error(f"Error checking accumulator results: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to check accumulator results")
 
 
 @router.post("/rebuild")
@@ -534,4 +554,4 @@ def rebuild_accumulators(
         raise
     except Exception as e:
         logger.error(f"Error rebuilding accumulators: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to rebuild accumulators")

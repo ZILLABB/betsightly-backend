@@ -50,7 +50,7 @@ def get_punters(
         }
     except Exception as e:
         logger.error(f"Error getting punters: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting punters: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve punters")
 
 @router.get("/top", response_model=PunterListResponse)
 def get_top_punters(
@@ -75,7 +75,7 @@ def get_top_punters(
         }
     except Exception as e:
         logger.error(f"Error getting top punters: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting top punters: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve top punters")
 
 @router.get("/{punter_id}", response_model=PunterResponse)
 def get_punter(
@@ -102,7 +102,7 @@ def get_punter(
         raise
     except Exception as e:
         logger.error(f"Error getting punter {punter_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting punter: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve punter")
 
 @router.post("/", response_model=PunterResponse)
 def create_punter(
@@ -127,7 +127,7 @@ def create_punter(
         }
     except Exception as e:
         logger.error(f"Error creating punter: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error creating punter: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create punter")
 
 @router.put("/{punter_id}", response_model=PunterResponse)
 def update_punter(
@@ -156,7 +156,7 @@ def update_punter(
         raise
     except Exception as e:
         logger.error(f"Error updating punter {punter_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error updating punter: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update punter")
 
 @router.delete("/{punter_id}")
 def delete_punter(
@@ -183,7 +183,7 @@ def delete_punter(
         raise
     except Exception as e:
         logger.error(f"Error deleting punter {punter_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error deleting punter: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete punter")
 
 @router.get("/{punter_id}/predictions", response_model=PunterPredictionListResponse)
 def get_punter_predictions(
@@ -218,7 +218,7 @@ def get_punter_predictions(
         raise
     except Exception as e:
         logger.error(f"Error getting predictions for punter {punter_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting predictions: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve predictions")
 
 @router.get("/{punter_id}/performance")
 def get_punter_performance(
@@ -249,7 +249,7 @@ def get_punter_performance(
         raise
     except Exception as e:
         logger.error(f"Error getting performance for punter {punter_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting performance: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve performance metrics")
 
 
 
@@ -295,4 +295,4 @@ def update_prediction_status(
         raise
     except Exception as e:
         logger.error(f"Error updating prediction status: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error updating prediction status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update prediction status")
