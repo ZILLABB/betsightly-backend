@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
 
-# Map sport_key → friendly check (matches club_odds.ACTIVE_LEAGUES)
-SCORES_SPORTS = [
-    "soccer_fifa_world_cup",
+# Always check WC; club leagues only when there are pending club picks
+SCORES_SPORTS_WC = ["soccer_fifa_world_cup"]
+SCORES_SPORTS_CLUB = [
     "soccer_spain_segunda_division",
     "soccer_chile_campeonato",
     "soccer_finland_veikkausliiga",
@@ -114,15 +114,19 @@ def _normalize_name(name: str) -> str:
     return name.lower().strip()
 
 
-def _collect_finished_scores() -> Dict[str, Dict[str, Any]]:
+def _collect_finished_scores(has_club_picks: bool = True) -> Dict[str, Dict[str, Any]]:
     """
     Return {match_key: {home, away, home_score, away_score, completed}}.
 
     Uses both match_id AND a "home_lower|away_lower|date" composite key,
     so we can match picks even if match_id-formats differ between calls.
+
+    Only queries club-league endpoints when has_club_picks is True,
+    saving ~9 API calls per check when all pending picks are WC-only.
     """
+    sports = SCORES_SPORTS_WC + (SCORES_SPORTS_CLUB if has_club_picks else [])
     finished: Dict[str, Dict[str, Any]] = {}
-    for sk in SCORES_SPORTS:
+    for sk in sports:
         for fx in fetch_scores(sk, days_from=3):
             if not fx.get("completed"):
                 continue
@@ -198,15 +202,19 @@ def check_all_pending() -> Dict[str, int]:
     _sync_chain_to_db()
 
     try:
-        finished = _collect_finished_scores()
-        if not finished:
-            logger.info("Results check: no finished matches returned by Odds API")
-            return summary
-
         db = SessionLocal()
         try:
             pending = db.query(RolloverDay).filter(RolloverDay.status == "pending").all()
             summary["checked_chain_days"] = len(pending)
+
+            if not pending:
+                logger.info("Results check: no pending chain days in DB")
+                return summary
+
+            finished = _collect_finished_scores(has_club_picks=True)
+            if not finished:
+                logger.info("Results check: no finished matches returned by Odds API")
+                return summary
 
             for row in pending:
                 try:
@@ -274,8 +282,8 @@ def run_loop(interval_hours: float = 6.0):
 
 
 def start_background_loop():
-    """Spawn the background results-checker thread (checks every 3h during WC)."""
-    t = threading.Thread(target=run_loop, kwargs={"interval_hours": 3.0}, daemon=True)
+    """Spawn the background results-checker thread."""
+    t = threading.Thread(target=run_loop, daemon=True)
     t.start()
-    logger.info("Results checker background loop started (3h interval)")
+    logger.info("Results checker background loop started (6h interval)")
     return t
