@@ -164,6 +164,26 @@ def _collect_finished_scores() -> Dict[str, Dict[str, Any]]:
     return finished
 
 
+def _sync_chain_to_db():
+    """Ensure all chain days are persisted to the DB.
+
+    _build_rollover generates days in-memory on each API request, but
+    append_day may have silently failed for some. Trigger a chain build
+    (which calls append_day for any missing days) so the results checker
+    can find all pending days in the DB.
+    """
+    try:
+        from worldcup.daily_feed import build_daily_accumulators
+        result = build_daily_accumulators()
+        if result:
+            chain = (result.get("accumulators") or {}).get("rollover", {}).get("chain", [])
+            logger.info(f"Chain sync: {len(chain)} days in chain after rebuild")
+        else:
+            logger.info("Chain sync: no accumulators built (no predictions)")
+    except Exception as e:
+        logger.warning(f"Chain-to-DB sync failed: {e}")
+
+
 def check_all_pending() -> Dict[str, int]:
     """Scan all pending rollover days; mark won/lost where matches finished."""
     summary = {"checked_chain_days": 0, "marked_won": 0, "marked_lost": 0, "still_pending": 0}
@@ -173,6 +193,9 @@ def check_all_pending() -> Dict[str, int]:
     except Exception as e:
         logger.warning(f"Results check skipped — DB not available: {e}")
         return summary
+
+    # Ensure any in-memory-only chain days are persisted first
+    _sync_chain_to_db()
 
     try:
         finished = _collect_finished_scores()
