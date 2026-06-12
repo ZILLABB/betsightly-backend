@@ -231,14 +231,15 @@ def check_all_pending() -> Dict[str, int]:
 def run_loop(interval_hours: float = 6.0):
     """Background thread entry point — runs check_all_pending every N hours.
     Also runs old-chain cleanup once per ~28 loop iterations (~1 week)."""
+    time.sleep(60)  # let the app finish booting
     iteration = 0
     while True:
-        time.sleep(interval_hours * 3600)
         iteration += 1
         try:
             check_all_pending()
         except Exception as e:
             logger.error(f"Results check loop iteration failed: {e}")
+        time.sleep(interval_hours * 3600)
 
         # Weekly cleanup of old rollover chains
         if iteration % 28 == 0:
@@ -250,8 +251,8 @@ def run_loop(interval_hours: float = 6.0):
 
 
 def start_background_loop():
-    """Spawn the background results-checker thread."""
-    t = threading.Thread(target=run_loop, daemon=True)
+    """Spawn the background results-checker thread (checks every 3h during WC)."""
+    t = threading.Thread(target=run_loop, kwargs={"interval_hours": 3.0}, daemon=True)
     t.start()
-    logger.info("Results checker background loop started (6h interval)")
+    logger.info("Results checker background loop started (3h interval)")
     return t

@@ -585,7 +585,9 @@ def _build_rollover(predictions: list, today: str) -> dict:
 
         # Persist: DB primary, JSON fallback
         if db_available and _db_append:
-            _db_append(chain["start_date"], new_day)
+            if not _db_append(chain["start_date"], new_day):
+                logger.error(f"Rollover day {new_day['day_number']} ({new_day['date']}) NOT persisted — results checker won't see it")
+                _save("wc_rollover_chain.json", chain)
         else:
             _save("wc_rollover_chain.json", chain)
 

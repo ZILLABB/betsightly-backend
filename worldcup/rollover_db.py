@@ -56,6 +56,14 @@ def load_chain(default_start_date: str) -> Dict[str, Any]:
             days = [r for r in rows if r.chain_start_date == start_date]
             days.sort(key=lambda r: r.day_number)
 
+            # Deduplicate by day_number (keep the first / oldest row)
+            seen: set = set()
+            unique_days = []
+            for r in days:
+                if r.day_number not in seen:
+                    seen.add(r.day_number)
+                    unique_days.append(r)
+
             return {
                 "start_date": start_date,
                 "status": "active",
@@ -68,7 +76,7 @@ def load_chain(default_start_date: str) -> Dict[str, Any]:
                         "avg_confidence": r.avg_confidence,
                         "status": r.status,
                     }
-                    for r in days
+                    for r in unique_days
                 ],
             }
         finally:
@@ -79,10 +87,16 @@ def load_chain(default_start_date: str) -> Dict[str, Any]:
 
 
 def append_day(chain_start_date: str, day: Dict[str, Any]) -> bool:
-    """Append a single day-slot to the chain. Returns True on success."""
+    """Append a single day-slot to the chain. Idempotent — skips if already exists."""
     try:
         db = SessionLocal()
         try:
+            existing = db.query(RolloverDay).filter(
+                RolloverDay.chain_start_date == chain_start_date,
+                RolloverDay.day_number == day["day_number"],
+            ).first()
+            if existing:
+                return True
             row = RolloverDay(
                 chain_start_date=chain_start_date,
                 day_number=day["day_number"],
