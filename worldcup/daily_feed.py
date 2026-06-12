@@ -170,21 +170,40 @@ def build_daily_accumulators() -> dict:
     if not predictions:
         return None
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    now = datetime.utcnow()
+    today = now.strftime("%Y-%m-%d")
+    tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Strictly today's matches first, extend to tomorrow only if needed
-    day_preds = [p for p in predictions if p["commence_time"][:10] == today]
-    target_date = today
+    today_preds = [p for p in predictions if p["commence_time"][:10] == today]
+    tomorrow_preds = [p for p in predictions if p["commence_time"][:10] == tomorrow]
 
-    # If no matches today, try tomorrow (but never further)
-    if not day_preds:
-        day_preds = [p for p in predictions if p["commence_time"][:10] == tomorrow]
-        if day_preds:
-            target_date = tomorrow
+    # Check if all of today's games have already kicked off.
+    # If so, users need tomorrow's picks — today's are no longer actionable.
+    all_today_started = False
+    if today_preds:
+        try:
+            all_today_started = all(
+                datetime.fromisoformat(p["commence_time"].replace("Z", "+00:00")).replace(tzinfo=None) <= now
+                for p in today_preds
+            )
+        except Exception:
+            all_today_started = False
 
-    # If still nothing within 2 days, return None so the caller knows
-    if not day_preds:
+    if today_preds and not all_today_started:
+        # Some games haven't kicked off yet — show today
+        day_preds = today_preds
+        target_date = today
+    elif tomorrow_preds:
+        # All today's games started (or no games today) — show tomorrow
+        day_preds = tomorrow_preds
+        target_date = tomorrow
+        if all_today_started:
+            logger.info(f"All {len(today_preds)} games today already started — showing tomorrow's picks")
+    elif today_preds:
+        # No tomorrow preds available yet, keep showing today as fallback
+        day_preds = today_preds
+        target_date = today
+    else:
         logger.info("No matches today or tomorrow — no daily accumulators")
         return None
 
