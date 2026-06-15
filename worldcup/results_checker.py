@@ -23,7 +23,9 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
+
+def _get_api_key() -> str:
+    return os.getenv("ODDS_API_KEY", "")
 
 # Always check WC; club leagues only when there are pending club picks
 SCORES_SPORTS_WC = ["soccer_fifa_world_cup"]
@@ -42,12 +44,14 @@ SCORES_SPORTS_CLUB = [
 
 def fetch_scores(sport_key: str, days_from: int = 3) -> List[dict]:
     """Fetch finished match scores from The Odds API."""
-    if not ODDS_API_KEY:
+    api_key = _get_api_key()
+    if not api_key:
+        logger.warning("ODDS_API_KEY not set — skipping scores fetch")
         return []
     try:
         resp = requests.get(
             f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores",
-            params={"apiKey": ODDS_API_KEY, "daysFrom": days_from, "dateFormat": "iso"},
+            params={"apiKey": api_key, "daysFrom": days_from, "dateFormat": "iso"},
             timeout=15,
         )
         if resp.status_code != 200:
@@ -259,9 +263,9 @@ def check_all_pending() -> Dict[str, int]:
         return summary
 
 
-def run_loop(interval_hours: float = 6.0):
+def run_loop(interval_hours: float = 2.0):
     """Background thread entry point — runs check_all_pending every N hours.
-    Also runs old-chain cleanup once per ~28 loop iterations (~1 week)."""
+    Also runs old-chain cleanup once per ~84 loop iterations (~1 week)."""
     time.sleep(60)  # let the app finish booting
     iteration = 0
     while True:
@@ -272,8 +276,8 @@ def run_loop(interval_hours: float = 6.0):
             logger.error(f"Results check loop iteration failed: {e}")
         time.sleep(interval_hours * 3600)
 
-        # Weekly cleanup of old rollover chains
-        if iteration % 28 == 0:
+        # Weekly cleanup of old rollover chains (~84 iterations at 2h = ~1 week)
+        if iteration % 84 == 0:
             try:
                 from worldcup.rollover_db import cleanup_old_chains
                 cleanup_old_chains(keep_recent_chains=3)
@@ -285,5 +289,5 @@ def start_background_loop():
     """Spawn the background results-checker thread."""
     t = threading.Thread(target=run_loop, daemon=True)
     t.start()
-    logger.info("Results checker background loop started (6h interval)")
+    logger.info("Results checker background loop started (2h interval)")
     return t
