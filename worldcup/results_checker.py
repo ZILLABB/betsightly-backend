@@ -1,15 +1,13 @@
 """
 Results checker for picks (WC + club leagues).
 
-Periodically asks The Odds API /scores endpoint for finished matches,
-then marks each rollover-day's status as won/lost based on the picks
-within it.
+Smart scheduling: polls every hour but only calls the Odds API once
+all pending picks' games have finished (~3h after last kickoff).
+This keeps API usage to ~10 calls/day instead of ~60.
 
 Public entry points:
 - check_all_pending() — scan all unresolved chain days, update statuses
-- run_loop()          — background thread that calls check_all_pending every 6h
-
-Pure additive — never deletes data, never breaks the pipeline.
+- run_loop()          — background thread with smart scheduling
 """
 
 import os
@@ -27,7 +25,6 @@ logger = logging.getLogger(__name__)
 def _get_api_key() -> str:
     return os.getenv("ODDS_API_KEY", "")
 
-# Always check WC; club leagues only when there are pending club picks
 SCORES_SPORTS_WC = ["soccer_fifa_world_cup"]
 SCORES_SPORTS_CLUB = [
     "soccer_spain_segunda_division",
@@ -40,6 +37,8 @@ SCORES_SPORTS_CLUB = [
     "soccer_conmebol_copa_libertadores",
     "soccer_conmebol_copa_sudamericana",
 ]
+
+_last_successful_check: Optional[str] = None
 
 
 def fetch_scores(sport_key: str, days_from: int = 5) -> List[dict]:
@@ -83,7 +82,6 @@ def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
         return "void"
 
     if market == "double_chance":
-        # "X or Draw"
         if "or draw" in prediction:
             if home and home in prediction:
                 return "won" if diff >= 0 else "lost"
@@ -118,15 +116,69 @@ def _normalize_name(name: str) -> str:
     return name.lower().strip()
 
 
+def _get_latest_kickoff(pending_rows) -> Optional[datetime]:
+    """Find the latest commence_time across all pending picks."""
+    latest = None
+    for row in pending_rows:
+        try:
+            picks = json.loads(row.picks or "[]")
+        except Exception:
+            continue
+        for pick in picks:
+            ct = pick.get("commence_time", "")
+            if not ct:
+                continue
+            try:
+                dt = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                if latest is None or dt > latest:
+                    latest = dt
+            except Exception:
+                pass
+    return latest
+
+
+def _all_games_finished(pending_rows) -> bool:
+    """Check if all pending picks' games have had time to finish.
+
+    A football match takes ~2h. The Odds API typically marks scores
+    within 1h after FT. So we wait 3h after the last kickoff.
+    """
+    latest = _get_latest_kickoff(pending_rows)
+    if latest is None:
+        return True
+    now = datetime.now(timezone.utc)
+    ready_at = latest + timedelta(hours=3)
+    if now >= ready_at:
+        return True
+    logger.info(
+        f"Results check: last kickoff {latest.strftime('%H:%M UTC')} — "
+        f"waiting until {ready_at.strftime('%H:%M UTC')} "
+        f"({int((ready_at - now).total_seconds() / 60)}min left)"
+    )
+    return False
+
+
+def _already_checked_today(pending_rows) -> bool:
+    """Skip if we already did a successful check after today's last game."""
+    global _last_successful_check
+    if not _last_successful_check:
+        return False
+    latest = _get_latest_kickoff(pending_rows)
+    if not latest:
+        return False
+    try:
+        last_check = datetime.fromisoformat(_last_successful_check)
+        return last_check > latest + timedelta(hours=3)
+    except Exception:
+        return False
+
+
 def _collect_finished_scores(has_club_picks: bool = True) -> Dict[str, Dict[str, Any]]:
     """
     Return {match_key: {home, away, home_score, away_score, completed}}.
 
     Uses both match_id AND a "home_lower|away_lower|date" composite key,
     so we can match picks even if match_id-formats differ between calls.
-
-    Only queries club-league endpoints when has_club_picks is True,
-    saving ~9 API calls per check when all pending picks are WC-only.
     """
     sports = SCORES_SPORTS_WC + (SCORES_SPORTS_CLUB if has_club_picks else [])
     finished: Dict[str, Dict[str, Any]] = {}
@@ -161,7 +213,6 @@ def _collect_finished_scores(has_club_picks: bool = True) -> Dict[str, Dict[str,
                 "away_score": away_score,
                 "completed": True,
             }
-            # Index by match_id and by composite key
             mid = fx.get("id")
             if mid:
                 finished[mid] = payload
@@ -173,12 +224,7 @@ def _collect_finished_scores(has_club_picks: bool = True) -> Dict[str, Dict[str,
 
 
 def _sync_chain_to_db():
-    """Ensure all chain days are persisted to the DB.
-
-    Uses the cached build_daily_accumulators result (no extra API calls)
-    to make sure any in-memory-only chain days are written to Postgres
-    before the results checker queries for pending rows.
-    """
+    """Ensure all chain days are persisted to the DB (uses cached result, no API calls)."""
     try:
         from worldcup.daily_feed import build_daily_accumulators
         result = build_daily_accumulators(force=False)
@@ -193,7 +239,8 @@ def _sync_chain_to_db():
 
 def check_all_pending() -> Dict[str, int]:
     """Scan all pending rollover days; mark won/lost where matches finished."""
-    summary = {"checked_chain_days": 0, "marked_won": 0, "marked_lost": 0, "still_pending": 0}
+    global _last_successful_check
+    summary = {"checked_chain_days": 0, "marked_won": 0, "marked_lost": 0, "still_pending": 0, "api_calls": 0}
     try:
         from worldcup.rollover_db import RolloverDay
         from database import SessionLocal
@@ -201,7 +248,6 @@ def check_all_pending() -> Dict[str, int]:
         logger.warning(f"Results check skipped — DB not available: {e}")
         return summary
 
-    # Ensure any in-memory-only chain days are persisted first
     _sync_chain_to_db()
 
     try:
@@ -214,7 +260,17 @@ def check_all_pending() -> Dict[str, int]:
                 logger.info("Results check: no pending chain days in DB")
                 return summary
 
+            if not _all_games_finished(pending):
+                summary["still_pending"] = len(pending)
+                return summary
+
+            if _already_checked_today(pending):
+                logger.info("Results check: already checked after today's last game — skipping")
+                summary["still_pending"] = len(pending)
+                return summary
+
             finished = _collect_finished_scores(has_club_picks=True)
+            summary["api_calls"] = len(SCORES_SPORTS_WC) + len(SCORES_SPORTS_CLUB)
             if not finished:
                 logger.info("Results check: no finished matches returned by Odds API")
                 return summary
@@ -244,7 +300,6 @@ def check_all_pending() -> Dict[str, int]:
                     logger.info(f"Day {row.day_number}: {home} vs {away} → {match_data['home_score']}-{match_data['away_score']} → {r}")
                     pick_results.append(r)
 
-                # Day is "won" if all picks won, "lost" if any lost, else still pending
                 if any(r == "lost" for r in pick_results):
                     row.status = "lost"
                     summary["marked_lost"] += 1
@@ -255,6 +310,7 @@ def check_all_pending() -> Dict[str, int]:
                     summary["still_pending"] += 1
 
             db.commit()
+            _last_successful_check = datetime.now(timezone.utc).isoformat()
             logger.info(f"Results check: {summary}")
             return summary
         finally:
@@ -264,21 +320,30 @@ def check_all_pending() -> Dict[str, int]:
         return summary
 
 
-def run_loop(interval_hours: float = 6.0):
-    """Background thread entry point — runs check_all_pending every N hours.
-    Also runs old-chain cleanup once per ~28 loop iterations (~1 week)."""
+def run_loop():
+    """Background thread: check every hour, but only call API when games are done.
+
+    Hourly poll costs 0 API calls (just a DB query + time check).
+    Only when all pending games have finished (~3h after last kickoff)
+    does it actually call the Odds API (~10 calls). Then it won't
+    call again until new pending games appear.
+
+    Worst case: ~10 API calls/day = ~300/month.
+    """
     time.sleep(60)  # let the app finish booting
     iteration = 0
     while True:
         iteration += 1
         try:
-            check_all_pending()
+            result = check_all_pending()
+            api_used = result.get("api_calls", 0)
+            if api_used:
+                logger.info(f"Results check used {api_used} API calls this iteration")
         except Exception as e:
             logger.error(f"Results check loop iteration failed: {e}")
-        time.sleep(interval_hours * 3600)
+        time.sleep(3600)  # check every hour (0 API calls if games not done)
 
-        # Weekly cleanup of old rollover chains (~84 iterations at 2h = ~1 week)
-        if iteration % 28 == 0:
+        if iteration % 168 == 0:  # ~weekly at 1h interval
             try:
                 from worldcup.rollover_db import cleanup_old_chains
                 cleanup_old_chains(keep_recent_chains=3)
@@ -290,5 +355,5 @@ def start_background_loop():
     """Spawn the background results-checker thread."""
     t = threading.Thread(target=run_loop, daemon=True)
     t.start()
-    logger.info("Results checker background loop started (6h interval)")
+    logger.info("Results checker started (hourly poll, API calls only after games finish)")
     return t
