@@ -263,9 +263,9 @@ def check_all_pending() -> Dict[str, int]:
         return summary
 
 
-def run_loop(interval_hours: float = 2.0):
+def run_loop(interval_hours: float = 4.0):
     """Background thread entry point — runs check_all_pending every N hours.
-    Also runs old-chain cleanup once per ~84 loop iterations (~1 week)."""
+    Also runs old-chain cleanup once per ~42 loop iterations (~1 week)."""
     time.sleep(60)  # let the app finish booting
     iteration = 0
     while True:
@@ -277,7 +277,7 @@ def run_loop(interval_hours: float = 2.0):
         time.sleep(interval_hours * 3600)
 
         # Weekly cleanup of old rollover chains (~84 iterations at 2h = ~1 week)
-        if iteration % 84 == 0:
+        if iteration % 42 == 0:
             try:
                 from worldcup.rollover_db import cleanup_old_chains
                 cleanup_old_chains(keep_recent_chains=3)
@@ -289,5 +289,5 @@ def start_background_loop():
     """Spawn the background results-checker thread."""
     t = threading.Thread(target=run_loop, daemon=True)
     t.start()
-    logger.info("Results checker background loop started (2h interval)")
+    logger.info("Results checker background loop started (4h interval)")
     return t
