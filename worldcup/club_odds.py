@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
 CACHE_DIR = Path(__file__).parent.parent / "cache" / "odds"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-CACHE_TTL = timedelta(hours=6)
+CACHE_TTL = timedelta(hours=12)
 
 # Active club leagues (rotates with season)
 ACTIVE_LEAGUES = [

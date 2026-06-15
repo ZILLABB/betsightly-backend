@@ -175,14 +175,13 @@ def _collect_finished_scores(has_club_picks: bool = True) -> Dict[str, Dict[str,
 def _sync_chain_to_db():
     """Ensure all chain days are persisted to the DB.
 
-    _build_rollover generates days in-memory on each API request, but
-    append_day may have silently failed for some. Trigger a chain build
-    (which calls append_day for any missing days) so the results checker
-    can find all pending days in the DB.
+    Uses the cached build_daily_accumulators result (no extra API calls)
+    to make sure any in-memory-only chain days are written to Postgres
+    before the results checker queries for pending rows.
     """
     try:
         from worldcup.daily_feed import build_daily_accumulators
-        result = build_daily_accumulators()
+        result = build_daily_accumulators(force=False)
         if result:
             chain = (result.get("accumulators") or {}).get("rollover", {}).get("chain", [])
             logger.info(f"Chain sync: {len(chain)} days in chain after rebuild")
@@ -265,9 +264,9 @@ def check_all_pending() -> Dict[str, int]:
         return summary
 
 
-def run_loop(interval_hours: float = 4.0):
+def run_loop(interval_hours: float = 6.0):
     """Background thread entry point — runs check_all_pending every N hours.
-    Also runs old-chain cleanup once per ~42 loop iterations (~1 week)."""
+    Also runs old-chain cleanup once per ~28 loop iterations (~1 week)."""
     time.sleep(60)  # let the app finish booting
     iteration = 0
     while True:
@@ -279,7 +278,7 @@ def run_loop(interval_hours: float = 4.0):
         time.sleep(interval_hours * 3600)
 
         # Weekly cleanup of old rollover chains (~84 iterations at 2h = ~1 week)
-        if iteration % 42 == 0:
+        if iteration % 28 == 0:
             try:
                 from worldcup.rollover_db import cleanup_old_chains
                 cleanup_old_chains(keep_recent_chains=3)
@@ -291,5 +290,5 @@ def start_background_loop():
     """Spawn the background results-checker thread."""
     t = threading.Thread(target=run_loop, daemon=True)
     t.start()
-    logger.info("Results checker background loop started (4h interval)")
+    logger.info("Results checker background loop started (6h interval)")
     return t

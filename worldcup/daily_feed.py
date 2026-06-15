@@ -19,6 +19,9 @@ from typing import Dict, List, Any
 logger = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).parent / "data"
 
+_accum_cache: dict = {"result": None, "ts": 0}
+_ACCUM_CACHE_TTL = 3600  # 1 hour
+
 
 def _load(filename: str):
     path = DATA_DIR / filename
@@ -155,12 +158,18 @@ def _load_club_predictions() -> list:
         return []
 
 
-def build_daily_accumulators() -> dict:
+def build_daily_accumulators(force: bool = False) -> dict:
     """
     Build accumulator categories from WC + club predictions for today.
 
     Returns data in the exact format the frontend expects from /accumulators/today.
+    Cached for 1 hour to avoid burning API quota on every page load.
     """
+    import time as _time
+    now = _time.time()
+    if not force and _accum_cache["result"] and (now - _accum_cache["ts"]) < _ACCUM_CACHE_TTL:
+        return _accum_cache["result"]
+
     wc_predictions = _load("wc_predictions.json") or []
     club_predictions = _load_club_predictions()
 
@@ -338,6 +347,8 @@ def build_daily_accumulators() -> dict:
         },
     }
 
+    _accum_cache["result"] = result
+    _accum_cache["ts"] = _time.time()
     return result
 
 
