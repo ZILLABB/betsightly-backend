@@ -42,7 +42,7 @@ SCORES_SPORTS_CLUB = [
 ]
 
 
-def fetch_scores(sport_key: str, days_from: int = 3) -> List[dict]:
+def fetch_scores(sport_key: str, days_from: int = 5) -> List[dict]:
     """Fetch finished match scores from The Odds API."""
     api_key = _get_api_key()
     if not api_key:
@@ -131,7 +131,7 @@ def _collect_finished_scores(has_club_picks: bool = True) -> Dict[str, Dict[str,
     sports = SCORES_SPORTS_WC + (SCORES_SPORTS_CLUB if has_club_picks else [])
     finished: Dict[str, Dict[str, Any]] = {}
     for sk in sports:
-        for fx in fetch_scores(sk, days_from=3):
+        for fx in fetch_scores(sk, days_from=5):
             if not fx.get("completed"):
                 continue
             scores = fx.get("scores") or []
@@ -238,9 +238,11 @@ def check_all_pending() -> Dict[str, int]:
                     composite = f"{_normalize_name(home)}|{_normalize_name(away)}|{ct}"
                     match_data = finished.get(mid) or finished.get(composite)
                     if not match_data:
+                        logger.info(f"Day {row.day_number}: no score yet for {home} vs {away} (id={mid}, composite={composite})")
                         pick_results.append("pending")
                         continue
                     r = _evaluate_pick(pick, match_data["home_score"], match_data["away_score"])
+                    logger.info(f"Day {row.day_number}: {home} vs {away} → {match_data['home_score']}-{match_data['away_score']} → {r}")
                     pick_results.append(r)
 
                 # Day is "won" if all picks won, "lost" if any lost, else still pending
