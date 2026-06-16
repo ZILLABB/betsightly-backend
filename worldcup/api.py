@@ -506,28 +506,40 @@ async def trigger_results_check():
 
 @router.get("/debug-rollover")
 async def debug_rollover():
-    """Dump rollover DB state for debugging."""
+    """Dump rollover DB state + scores matching debug info."""
     try:
         from worldcup.rollover_db import RolloverDay
+        from worldcup.results_checker import fetch_scores, _normalize_name, _get_checkable_rows
         from database import SessionLocal
         import json as _json
+        from datetime import datetime, timezone
+
         db = SessionLocal()
         try:
             rows = db.query(RolloverDay).order_by(RolloverDay.day_number).all()
+            pending = [r for r in rows if r.status == "pending"]
+
+            # Check which rows are checkable
+            checkable = _get_checkable_rows(pending)
+            checkable_days = {r.day_number for r in checkable}
+
+            # Fetch WC scores to test matching
+            wc_scores = fetch_scores("soccer_fifa_world_cup", days_from=5)
+            completed_scores = [s for s in wc_scores if s.get("completed")]
+
             result = []
             for r in rows:
                 picks = _json.loads(r.picks or "[]")
                 result.append({
                     "day": r.day_number,
                     "date": r.date,
-                    "chain_start": r.chain_start_date,
                     "status": r.status,
-                    "combined_odds": r.combined_odds,
+                    "checkable": r.day_number in checkable_days,
                     "num_picks": len(picks),
                     "picks_summary": [
                         {
                             "match": f"{p.get('home_team')} vs {p.get('away_team')}",
-                            "match_id": p.get("match_id", "")[:20],
+                            "match_id": p.get("match_id", ""),
                             "commence_time": p.get("commence_time"),
                             "market": p.get("market"),
                             "prediction": p.get("prediction"),
@@ -535,11 +547,30 @@ async def debug_rollover():
                         for p in picks
                     ],
                 })
-            return {"total_rows": len(rows), "rows": result}
+
+            return {
+                "total_rows": len(rows),
+                "pending_count": len(pending),
+                "checkable_count": len(checkable),
+                "wc_scores_total": len(wc_scores),
+                "wc_scores_completed": len(completed_scores),
+                "sample_completed": [
+                    {
+                        "id": s.get("id", "")[:30],
+                        "home": s.get("home_team"),
+                        "away": s.get("away_team"),
+                        "scores": s.get("scores"),
+                        "commence_time": s.get("commence_time"),
+                    }
+                    for s in completed_scores[:5]
+                ],
+                "rows": result,
+            }
         finally:
             db.close()
     except Exception as e:
-        return {"error": str(e)}
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
 
 
 @router.post("/refresh")
