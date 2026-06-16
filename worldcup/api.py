@@ -504,6 +504,44 @@ async def trigger_results_check():
         raise HTTPException(500, str(e))
 
 
+@router.get("/debug-rollover")
+async def debug_rollover():
+    """Dump rollover DB state for debugging."""
+    try:
+        from worldcup.rollover_db import RolloverDay
+        from database import SessionLocal
+        import json as _json
+        db = SessionLocal()
+        try:
+            rows = db.query(RolloverDay).order_by(RolloverDay.day_number).all()
+            result = []
+            for r in rows:
+                picks = _json.loads(r.picks or "[]")
+                result.append({
+                    "day": r.day_number,
+                    "date": r.date,
+                    "chain_start": r.chain_start_date,
+                    "status": r.status,
+                    "combined_odds": r.combined_odds,
+                    "num_picks": len(picks),
+                    "picks_summary": [
+                        {
+                            "match": f"{p.get('home_team')} vs {p.get('away_team')}",
+                            "match_id": p.get("match_id", "")[:20],
+                            "commence_time": p.get("commence_time"),
+                            "market": p.get("market"),
+                            "prediction": p.get("prediction"),
+                        }
+                        for p in picks
+                    ],
+                })
+            return {"total_rows": len(rows), "rows": result}
+        finally:
+            db.close()
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.post("/refresh")
 async def refresh_predictions():
     """Re-fetch odds and regenerate predictions."""
