@@ -116,10 +116,48 @@ def _normalize_name(name: str) -> str:
     return name.lower().strip()
 
 
-def _get_latest_kickoff(pending_rows) -> Optional[datetime]:
-    """Find the latest commence_time across all pending picks."""
-    latest = None
+def _get_checkable_rows(pending_rows) -> list:
+    """Return only rows whose ALL picks have already kicked off (commence_time < now).
+
+    Future days (e.g. Day 7-10) are excluded — we can't check scores
+    for games that haven't started yet.
+    """
+    now = datetime.now(timezone.utc)
+    checkable = []
     for row in pending_rows:
+        try:
+            picks = json.loads(row.picks or "[]")
+        except Exception:
+            continue
+        if not picks:
+            continue
+        all_started = True
+        for pick in picks:
+            ct = pick.get("commence_time", "")
+            if not ct:
+                continue
+            try:
+                dt = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                if dt > now:
+                    all_started = False
+                    break
+            except Exception:
+                pass
+        if all_started:
+            checkable.append(row)
+    return checkable
+
+
+def _all_games_finished(rows) -> bool:
+    """Check if all picks in the given rows have had time to finish.
+
+    A football match takes ~2h. The Odds API typically marks scores
+    within 1h after FT. So we wait 3h after the last kickoff.
+    Only considers rows whose games have already kicked off.
+    """
+    now = datetime.now(timezone.utc)
+    latest = None
+    for row in rows:
         try:
             picks = json.loads(row.picks or "[]")
         except Exception:
@@ -134,36 +172,41 @@ def _get_latest_kickoff(pending_rows) -> Optional[datetime]:
                     latest = dt
             except Exception:
                 pass
-    return latest
-
-
-def _all_games_finished(pending_rows) -> bool:
-    """Check if all pending picks' games have had time to finish.
-
-    A football match takes ~2h. The Odds API typically marks scores
-    within 1h after FT. So we wait 3h after the last kickoff.
-    """
-    latest = _get_latest_kickoff(pending_rows)
     if latest is None:
         return True
-    now = datetime.now(timezone.utc)
     ready_at = latest + timedelta(hours=3)
     if now >= ready_at:
         return True
+    wait_min = int((ready_at - now).total_seconds() / 60)
     logger.info(
-        f"Results check: last kickoff {latest.strftime('%H:%M UTC')} — "
-        f"waiting until {ready_at.strftime('%H:%M UTC')} "
-        f"({int((ready_at - now).total_seconds() / 60)}min left)"
+        f"Results check: last started game kicked off {latest.strftime('%H:%M UTC')} — "
+        f"waiting until {ready_at.strftime('%H:%M UTC')} ({wait_min}min left)"
     )
     return False
 
 
-def _already_checked_today(pending_rows) -> bool:
-    """Skip if we already did a successful check after today's last game."""
+def _already_checked_today(rows) -> bool:
+    """Skip if we already did a successful check after these rows' last game."""
     global _last_successful_check
     if not _last_successful_check:
         return False
-    latest = _get_latest_kickoff(pending_rows)
+    now = datetime.now(timezone.utc)
+    latest = None
+    for row in rows:
+        try:
+            picks = json.loads(row.picks or "[]")
+        except Exception:
+            continue
+        for pick in picks:
+            ct = pick.get("commence_time", "")
+            if not ct:
+                continue
+            try:
+                dt = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                if latest is None or dt > latest:
+                    latest = dt
+            except Exception:
+                pass
     if not latest:
         return False
     try:
@@ -260,11 +303,21 @@ def check_all_pending() -> Dict[str, int]:
                 logger.info("Results check: no pending chain days in DB")
                 return summary
 
-            if not _all_games_finished(pending):
+            checkable = _get_checkable_rows(pending)
+            future_count = len(pending) - len(checkable)
+            if future_count:
+                logger.info(f"Results check: {len(checkable)} checkable rows, {future_count} future days skipped")
+
+            if not checkable:
+                logger.info("Results check: all pending days are future — nothing to check yet")
                 summary["still_pending"] = len(pending)
                 return summary
 
-            if _already_checked_today(pending):
+            if not _all_games_finished(checkable):
+                summary["still_pending"] = len(pending)
+                return summary
+
+            if _already_checked_today(checkable):
                 logger.info("Results check: already checked after today's last game — skipping")
                 summary["still_pending"] = len(pending)
                 return summary
@@ -275,7 +328,7 @@ def check_all_pending() -> Dict[str, int]:
                 logger.info("Results check: no finished matches returned by Odds API")
                 return summary
 
-            for row in pending:
+            for row in checkable:
                 try:
                     picks = json.loads(row.picks or "[]")
                 except Exception:

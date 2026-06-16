@@ -18,7 +18,6 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
 CACHE_DIR = Path(__file__).parent.parent / "cache" / "odds"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_TTL = timedelta(hours=12)
@@ -84,7 +83,8 @@ def fetch_league_odds(sport_key: str, force_refresh: bool = False) -> List[dict]
     if not force_refresh and _cache_fresh(cache_file):
         return _load_cache(cache_file)
 
-    if not ODDS_API_KEY:
+    api_key = os.getenv("ODDS_API_KEY", "")
+    if not api_key:
         logger.warning("ODDS_API_KEY missing — using stale cache or empty")
         return _load_cache(cache_file)
 
@@ -92,7 +92,7 @@ def fetch_league_odds(sport_key: str, force_refresh: bool = False) -> List[dict]
         resp = requests.get(
             f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
             params={
-                "apiKey": ODDS_API_KEY,
+                "apiKey": api_key,
                 "regions": "uk,eu",
                 "markets": "h2h,totals",
                 "oddsFormat": "decimal",

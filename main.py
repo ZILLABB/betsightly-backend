@@ -210,9 +210,11 @@ def _start_telegram_bot_thread():
             except Exception as e:
                 restarts += 1
                 backoff = min(30 * restarts, 300)  # 30s, 60s, ... capped at 5 min
-                logger.error(
-                    f"Telegram bot crashed ({restarts}/{MAX_RESTARTS}): {e} — "
-                    f"restarting in {backoff}s"
+                is_conflict = "Conflict" in str(e) or "409" in str(e)
+                log = logger.warning if is_conflict else logger.error
+                log(
+                    f"Telegram bot {'conflict' if is_conflict else 'crashed'} "
+                    f"({restarts}/{MAX_RESTARTS}): {e} — restarting in {backoff}s"
                 )
                 _time.sleep(backoff)
         logger.error("Telegram bot exceeded max restarts — giving up until next deploy")

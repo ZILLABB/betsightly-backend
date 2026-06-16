@@ -789,8 +789,8 @@ async def _daily_post_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 lines.append(f"  All {len(picks)} pick(s) must hit.")
                 lines.append("")
 
-        lines.append("View all picks: https://betsightly-frontend.vercel.app/predictions")
-        lines.append("Rollover chain: https://betsightly-frontend.vercel.app/rollover")
+        lines.append("View all picks: https://betsightly.com/predictions")
+        lines.append("Rollover chain: https://betsightly.com/rollover")
 
         await context.bot.send_message(chat_id=int(chat_id), text="\n".join(lines))
         logger.info(f"Posted daily picks to {chat_id}")
@@ -836,6 +836,7 @@ def main() -> None:
     import threading as _threading
     in_main_thread = _threading.current_thread() is _threading.main_thread()
     polling_kwargs: dict = {} if in_main_thread else {"stop_signals": None}
+    polling_kwargs["drop_pending_updates"] = True
 
     logger.info(f"BetSightly Bot starting (main_thread={in_main_thread})...")
     application.run_polling(**polling_kwargs)
