@@ -524,7 +524,7 @@ async def debug_rollover():
             checkable_days = {r.day_number for r in checkable}
 
             # Fetch WC scores to test matching
-            wc_scores = fetch_scores("soccer_fifa_world_cup", days_from=5)
+            wc_scores = fetch_scores("soccer_fifa_world_cup", days_from=3)
             completed_scores = [s for s in wc_scores if s.get("completed")]
 
             result = []

@@ -226,7 +226,7 @@ def _collect_finished_scores(has_club_picks: bool = True) -> Dict[str, Dict[str,
     sports = SCORES_SPORTS_WC + (SCORES_SPORTS_CLUB if has_club_picks else [])
     finished: Dict[str, Dict[str, Any]] = {}
     for sk in sports:
-        for fx in fetch_scores(sk, days_from=5):
+        for fx in fetch_scores(sk, days_from=3):
             if not fx.get("completed"):
                 continue
             scores = fx.get("scores") or []
