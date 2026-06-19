@@ -509,23 +509,20 @@ async def debug_rollover():
     """Dump rollover DB state + scores matching debug info."""
     try:
         from worldcup.rollover_db import RolloverDay
-        from worldcup.results_checker import fetch_scores, _normalize_name, _get_checkable_rows
+        from worldcup.results_checker import _normalize_name, _get_checkable_rows, _collect_finished_scores, _get_apifootball_key, _get_odds_api_key
         from database import SessionLocal
         import json as _json
-        from datetime import datetime, timezone
 
         db = SessionLocal()
         try:
             rows = db.query(RolloverDay).order_by(RolloverDay.day_number).all()
             pending = [r for r in rows if r.status == "pending"]
 
-            # Check which rows are checkable
             checkable = _get_checkable_rows(pending)
             checkable_days = {r.day_number for r in checkable}
 
-            # Fetch WC scores to test matching
-            wc_scores = fetch_scores("soccer_fifa_world_cup", days_from=3)
-            completed_scores = [s for s in wc_scores if s.get("completed")]
+            # Test scores collection
+            finished, source = _collect_finished_scores(checkable, has_club_picks=True) if checkable else ({}, "no_checkable")
 
             result = []
             for r in rows:
@@ -539,7 +536,6 @@ async def debug_rollover():
                     "picks_summary": [
                         {
                             "match": f"{p.get('home_team')} vs {p.get('away_team')}",
-                            "match_id": p.get("match_id", ""),
                             "commence_time": p.get("commence_time"),
                             "market": p.get("market"),
                             "prediction": p.get("prediction"),
@@ -552,17 +548,13 @@ async def debug_rollover():
                 "total_rows": len(rows),
                 "pending_count": len(pending),
                 "checkable_count": len(checkable),
-                "wc_scores_total": len(wc_scores),
-                "wc_scores_completed": len(completed_scores),
-                "sample_completed": [
-                    {
-                        "id": s.get("id", "")[:30],
-                        "home": s.get("home_team"),
-                        "away": s.get("away_team"),
-                        "scores": s.get("scores"),
-                        "commence_time": s.get("commence_time"),
-                    }
-                    for s in completed_scores[:5]
+                "scores_source": source,
+                "scores_found": len(finished),
+                "has_apifootball_key": bool(_get_apifootball_key()),
+                "has_odds_api_key": bool(_get_odds_api_key()),
+                "sample_scores": [
+                    {"key": k, "home": v["home"], "away": v["away"], "score": f"{v['home_score']}-{v['away_score']}"}
+                    for k, v in list(finished.items())[:8]
                 ],
                 "rows": result,
             }
