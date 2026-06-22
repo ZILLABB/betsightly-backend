@@ -56,37 +56,97 @@ SCORES_SPORTS_CLUB = [
 _last_successful_check: Optional[str] = None
 
 
-# ── API-Football scores fetcher (PRIMARY) ────────────────────
+# ── ESPN scores fetcher (PRIMARY — no API key needed) ────────
+
+ESPN_LEAGUE_SLUGS = {
+    "soccer_fifa_world_cup": "fifa.world",
+    "soccer_brazil_campeonato": "bra.1",
+    "soccer_chile_campeonato": "chi.1",
+    "soccer_conmebol_copa_libertadores": "conmebol.libertadores",
+    "soccer_conmebol_copa_sudamericana": "conmebol.sudamericana",
+}
+
+
+def _fetch_espn_scores(espn_slug: str, date_str: str) -> List[dict]:
+    """Fetch finished scores from ESPN for one date. No API key needed."""
+    try:
+        resp = requests.get(
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{espn_slug}/scoreboard",
+            params={"dates": date_str},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return []
+        return resp.json().get("events", [])
+    except Exception as e:
+        logger.error(f"ESPN fetch error {espn_slug}/{date_str}: {e}")
+        return []
+
+
+def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Fetch scores from ESPN (free, no key). Returns composite-keyed dict."""
+    finished: Dict[str, Dict[str, Any]] = {}
+    for sk in sport_keys:
+        espn_slug = ESPN_LEAGUE_SLUGS.get(sk)
+        if not espn_slug:
+            continue
+        for date_str in dates:
+            espn_date = date_str.replace("-", "")
+            for event in _fetch_espn_scores(espn_slug, espn_date):
+                comp = (event.get("competitions") or [{}])[0]
+                status = comp.get("status", {}).get("type", {}).get("name", "")
+                if status != "STATUS_FULL_TIME":
+                    continue
+                teams = comp.get("competitors", [])
+                if len(teams) < 2:
+                    continue
+                # ESPN: competitors[0] = home, competitors[1] = away
+                # But check homeAway field to be safe
+                home_data = next((t for t in teams if t.get("homeAway") == "home"), teams[0])
+                away_data = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
+                home = home_data.get("team", {}).get("displayName", "")
+                away = away_data.get("team", {}).get("displayName", "")
+                try:
+                    home_score = int(home_data.get("score", 0))
+                    away_score = int(away_data.get("score", 0))
+                except (ValueError, TypeError):
+                    continue
+
+                payload = {
+                    "home": home,
+                    "away": away,
+                    "home_score": home_score,
+                    "away_score": away_score,
+                    "completed": True,
+                }
+                ck = f"{_normalize_name(home)}|{_normalize_name(away)}|{date_str}"
+                finished[ck] = payload
+            time.sleep(0.2)
+    return finished
+
+
+# ── API-Football scores fetcher (SECONDARY) ─────────────────
 
 def _get_apifootball_key() -> str:
     return os.getenv("API_FOOTBALL_KEY", "")
 
 
 def _fetch_apifootball_scores(league_id: int, date_from: str, date_to: str) -> List[dict]:
-    """Fetch finished fixtures from API-Football. Returns normalized list."""
+    """Fetch finished fixtures from API-Football."""
     api_key = _get_apifootball_key()
     if not api_key:
         return []
     try:
         resp = requests.get(
             "https://v3.football.api-sports.io/fixtures",
-            params={
-                "league": league_id,
-                "season": 2026,
-                "from": date_from,
-                "to": date_to,
-                "status": "FT",
-            },
+            params={"league": league_id, "season": 2026, "from": date_from, "to": date_to, "status": "FT"},
             headers={"x-apisports-key": api_key},
             timeout=15,
         )
         if resp.status_code != 200:
-            logger.warning(f"API-Football league {league_id} → HTTP {resp.status_code}")
             return []
         data = resp.json()
-        errors = data.get("errors")
-        if errors:
-            logger.warning(f"API-Football league {league_id} errors: {errors}")
+        if data.get("errors"):
             return []
         return data.get("response", [])
     except Exception as e:
@@ -95,38 +155,23 @@ def _fetch_apifootball_scores(league_id: int, date_from: str, date_to: str) -> L
 
 
 def _collect_apifootball_scores(sport_keys: List[str], date_from: str, date_to: str) -> Dict[str, Dict[str, Any]]:
-    """Fetch scores from API-Football for the given sport keys.
-
-    Returns {composite_key: {home, away, home_score, away_score, completed}}.
-    Composite key = "home_lower|away_lower|date".
-    """
+    """Fetch scores from API-Football (needs API_FOOTBALL_KEY)."""
     finished: Dict[str, Dict[str, Any]] = {}
     for sk in sport_keys:
         league_id = APIFOOTBALL_LEAGUES.get(sk)
         if not league_id:
             continue
-        fixtures = _fetch_apifootball_scores(league_id, date_from, date_to)
-        for fx in fixtures:
+        for fx in _fetch_apifootball_scores(league_id, date_from, date_to):
             teams = fx.get("teams", {})
             goals = fx.get("goals", {})
             fixture_info = fx.get("fixture", {})
-
             home = teams.get("home", {}).get("name", "")
             away = teams.get("away", {}).get("name", "")
             home_score = goals.get("home")
             away_score = goals.get("away")
-
             if home_score is None or away_score is None:
                 continue
-
-            payload = {
-                "home": home,
-                "away": away,
-                "home_score": int(home_score),
-                "away_score": int(away_score),
-                "completed": True,
-            }
-
+            payload = {"home": home, "away": away, "home_score": int(home_score), "away_score": int(away_score), "completed": True}
             fixture_date = (fixture_info.get("date") or "")[:10]
             ck = f"{_normalize_name(home)}|{_normalize_name(away)}|{fixture_date}"
             finished[ck] = payload
@@ -207,8 +252,10 @@ def _collect_oddsapi_scores(sport_keys: List[str]) -> Dict[str, Dict[str, Any]]:
 def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tuple[Dict[str, Dict[str, Any]], str]:
     """Collect finished scores. Returns (finished_dict, source_name).
 
-    Priority: API-Football first, Odds API fallback.
-    Uses checkable_rows to determine the date range needed.
+    Priority:
+      1. ESPN (free, no key, no quota — covers WC + some club leagues)
+      2. API-Football (100 free calls/day, needs API_FOOTBALL_KEY)
+      3. The Odds API (500 calls/month, fallback only)
     """
     sports = SCORES_SPORTS_WC + (SCORES_SPORTS_CLUB if has_club_picks else [])
 
@@ -226,25 +273,31 @@ def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tup
     if not dates:
         return {}, "none"
 
+    date_list = sorted(dates)
     date_from = min(dates)
     date_to = max(dates)
 
-    # Try API-Football first
+    # 1. ESPN — free, no key, no quota
+    finished = _collect_espn_scores(sports, date_list)
+    if finished:
+        logger.info(f"Scores from ESPN: {len(finished)} completed matches")
+        return finished, "espn"
+
+    # 2. API-Football — needs key but generous free tier
     if _get_apifootball_key():
         finished = _collect_apifootball_scores(sports, date_from, date_to)
         if finished:
             logger.info(f"Scores from API-Football: {len(finished)} completed matches")
             return finished, "api-football"
-        logger.warning("API-Football returned no scores — trying Odds API fallback")
 
-    # Fallback: Odds API
+    # 3. Odds API — last resort (burns quota)
     if _get_odds_api_key():
         finished = _collect_oddsapi_scores(sports)
         if finished:
-            logger.info(f"Scores from Odds API fallback: {len(finished)} completed matches")
+            logger.info(f"Scores from Odds API: {len(finished)} completed matches")
             return finished, "odds-api"
-        logger.warning("Odds API also returned no scores")
 
+    logger.warning("No scores from any source (ESPN, API-Football, Odds API)")
     return {}, "none"
 
 

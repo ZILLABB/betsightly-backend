@@ -509,7 +509,7 @@ async def debug_rollover():
     """Dump rollover DB state + scores matching debug info."""
     try:
         from worldcup.rollover_db import RolloverDay
-        from worldcup.results_checker import _normalize_name, _get_checkable_rows, _collect_finished_scores, _get_apifootball_key, _get_odds_api_key
+        from worldcup.results_checker import _normalize_name, _get_checkable_rows, _collect_finished_scores, _get_apifootball_key, _get_odds_api_key, ESPN_LEAGUE_SLUGS
         from database import SessionLocal
         import json as _json
 
@@ -550,6 +550,7 @@ async def debug_rollover():
                 "checkable_count": len(checkable),
                 "scores_source": source,
                 "scores_found": len(finished),
+                "espn_available": bool(ESPN_LEAGUE_SLUGS),
                 "has_apifootball_key": bool(_get_apifootball_key()),
                 "has_odds_api_key": bool(_get_odds_api_key()),
                 "sample_scores": [
