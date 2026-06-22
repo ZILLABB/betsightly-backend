@@ -234,24 +234,34 @@ def build_daily_accumulators(force: bool = False) -> dict:
 
     def _build_category(pool, target_min, target_max, max_picks, min_conf, prefer_higher_odds=False):
         """Greedily select picks (one per match) to hit a target odds range."""
+        MARKET_PREF = {"match_result": 1.3, "goals": 1.0, "btts": 1.2, "double_chance": 0.7}
         eligible = [pk for pk in pool if pk["confidence"] >= min_conf and pk["odds"] >= 1.10]
-        if prefer_higher_odds:
-            # For higher tiers, sort by odds desc so we reach the target with fewer picks
-            eligible.sort(key=lambda x: x["odds"], reverse=True)
-        else:
-            eligible.sort(key=lambda x: x["confidence"], reverse=True)
+        for pk in eligible:
+            mw = MARKET_PREF.get(pk["market"], 1.0)
+            if prefer_higher_odds:
+                pk["_cat_score"] = pk["odds"] * mw
+            else:
+                pk["_cat_score"] = pk["confidence"] * mw
+        eligible.sort(key=lambda x: x["_cat_score"], reverse=True)
+
         chosen = []
-        used = set()
+        used_matches = set()
+        used_markets = {}  # market -> count (penalize repeats)
         combined = 1.0
         for pk in eligible:
             mid = pk["_match_id"]
-            if mid in used:
+            if mid in used_matches:
+                continue
+            mkt = pk["market"]
+            # Penalize picking the same market type more than twice
+            if used_markets.get(mkt, 0) >= 2:
                 continue
             new_combined = combined * pk["odds"]
             if new_combined > target_max + 2.0 and combined >= target_min:
                 break
             chosen.append(pk)
-            used.add(mid)
+            used_matches.add(mid)
+            used_markets[mkt] = used_markets.get(mkt, 0) + 1
             combined = new_combined
             if combined >= target_min and len(chosen) >= 3:
                 break
