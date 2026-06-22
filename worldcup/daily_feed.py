@@ -232,11 +232,14 @@ def build_daily_accumulators(force: bool = False) -> dict:
             pk["_pred"] = p
         pick_pool.extend(picks)
 
-    def _build_category(pool, target_min, target_max, max_picks, min_conf):
+    def _build_category(pool, target_min, target_max, max_picks, min_conf, prefer_higher_odds=False):
         """Greedily select picks (one per match) to hit a target odds range."""
-        # Sort by confidence descending — safest first
         eligible = [pk for pk in pool if pk["confidence"] >= min_conf and pk["odds"] >= 1.10]
-        eligible.sort(key=lambda x: x["confidence"], reverse=True)
+        if prefer_higher_odds:
+            # For higher tiers, sort by odds desc so we reach the target with fewer picks
+            eligible.sort(key=lambda x: x["odds"], reverse=True)
+        else:
+            eligible.sort(key=lambda x: x["confidence"], reverse=True)
         chosen = []
         used = set()
         combined = 1.0
@@ -245,11 +248,13 @@ def build_daily_accumulators(force: bool = False) -> dict:
             if mid in used:
                 continue
             new_combined = combined * pk["odds"]
-            if new_combined > target_max + 1.0 and combined >= target_min:
+            if new_combined > target_max + 2.0 and combined >= target_min:
                 break
             chosen.append(pk)
             used.add(mid)
             combined = new_combined
+            if combined >= target_min and len(chosen) >= 3:
+                break
             if len(chosen) >= max_picks:
                 break
         games = []
@@ -269,13 +274,13 @@ def build_daily_accumulators(force: bool = False) -> dict:
         return games, round(total, 2)
 
     # ── 2 Odds: 3-5 safest picks combining to ~2x ──
-    two_odds_games, two_odds_total = _build_category(pick_pool, 1.8, 3.0, 5, 0.55)
+    two_odds_games, two_odds_total = _build_category(pick_pool, 1.8, 3.5, 5, 0.55)
 
-    # ── 5 Odds: 4-6 picks combining to ~5x ──
-    five_odds_games, five_odds_total = _build_category(pick_pool, 4.0, 8.0, 6, 0.48)
+    # ── 5 Odds: 3-5 picks combining to ~5x (use higher-odds picks) ──
+    five_odds_games, five_odds_total = _build_category(pick_pool, 3.5, 8.0, 5, 0.45, prefer_higher_odds=True)
 
-    # ── 10 Odds: 5-7 riskier picks combining to ~10x ──
-    ten_odds_games, ten_odds_total = _build_category(pick_pool, 8.0, 15.0, 7, 0.40)
+    # ── 10 Odds: 4-6 riskier picks combining to ~10x ──
+    ten_odds_games, ten_odds_total = _build_category(pick_pool, 6.0, 18.0, 6, 0.38, prefer_higher_odds=True)
 
     # ── Over 1.5: safest goal picks ──
     over_picks = []
@@ -433,29 +438,33 @@ def _select_rollover_picks(day_matches: list) -> list:
     """
     Select 4-5 safe picks for one rollover day that combine to 2.0–3.0 odds.
 
-    Strategy: pick the safest option from each match (high confidence),
-    stack 4-5 of them so combined odds naturally land in 2-3x.
-    One best pick per match — no repeated matches.
+    Strategy: pick the best option per match, preferring markets with real
+    bookmaker odds (match_result, over/under 2.5) over estimated-odds markets.
+    Mix markets for variety — not all double_chance or all over 1.5.
     """
     match_candidates = []
     for m in day_matches:
         picks = _all_picks(m["pred"])
         if not picks:
             continue
-        # For each match, pick the SAFEST option with decent odds (>= 1.10)
         viable = [pk for pk in picks if pk["odds"] >= 1.10 and pk["confidence"] >= 0.55]
         if not viable:
-            viable = [pk for pk in picks if pk["confidence"] >= 0.55]
-        if not viable:
             continue
-        # Sort by confidence first (safest), break ties by odds
-        viable.sort(key=lambda x: (x["confidence"], x["odds"]), reverse=True)
+
+        # Prefer picks with real bookmaker odds and higher individual odds
+        # Score: odds contribute more than confidence (we want 2-3x combined)
+        for pk in viable:
+            has_real_odds = pk["market"] in ("match_result", "goals") and pk.get("odds", 0) > 1.15
+            pk["_score"] = pk["confidence"] * 0.6 + min(pk["odds"] / 3.0, 0.4) + (0.1 if has_real_odds else 0)
+
+        viable.sort(key=lambda x: x["_score"], reverse=True)
         match_candidates.append({"pred": m["pred"], "pick": viable[0]})
 
     if not match_candidates:
         return []
 
-    # Sort all matches by confidence descending — safest first
+    # Sort by confidence — safest first, but the per-match selection already
+    # balanced confidence vs odds
     match_candidates.sort(key=lambda x: x["pick"]["confidence"], reverse=True)
 
     chosen = []
@@ -464,12 +473,10 @@ def _select_rollover_picks(day_matches: list) -> list:
         if combined >= TARGET_DAY_ODDS_MAX:
             break
         new_combined = combined * mc["pick"]["odds"]
-        # Don't overshoot max by too much
         if new_combined > TARGET_DAY_ODDS_MAX + 0.5 and combined >= TARGET_DAY_ODDS_MIN:
             break
         chosen.append(mc)
         combined = new_combined
-        # Once we have 4+ picks and hit the target, stop
         if len(chosen) >= 4 and combined >= TARGET_DAY_ODDS_MIN:
             break
         if len(chosen) >= 6:
