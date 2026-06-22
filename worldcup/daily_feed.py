@@ -451,11 +451,12 @@ def _select_rollover_picks(day_matches: list) -> list:
         if not viable:
             continue
 
-        # Prefer picks with real bookmaker odds and higher individual odds
-        # Score: odds contribute more than confidence (we want 2-3x combined)
+        # Prefer match_result and BTTS over double_chance for variety.
+        # Double_chance is a fallback — safe but boring and low-odds.
+        MARKET_PREF = {"match_result": 1.3, "goals": 1.1, "btts": 1.2, "double_chance": 0.7}
         for pk in viable:
-            has_real_odds = pk["market"] in ("match_result", "goals") and pk.get("odds", 0) > 1.15
-            pk["_score"] = pk["confidence"] * 0.6 + min(pk["odds"] / 3.0, 0.4) + (0.1 if has_real_odds else 0)
+            mw = MARKET_PREF.get(pk["market"], 1.0)
+            pk["_score"] = pk["confidence"] * pk["odds"] * mw
 
         viable.sort(key=lambda x: x["_score"], reverse=True)
         match_candidates.append({"pred": m["pred"], "pick": viable[0]})
