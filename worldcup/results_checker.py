@@ -84,13 +84,33 @@ def _fetch_espn_scores(espn_slug: str, date_str: str) -> List[dict]:
 
 
 def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Fetch scores from ESPN (free, no key). Returns composite-keyed dict."""
+    """Fetch scores from ESPN (free, no key). Returns composite-keyed dict.
+
+    Also fetches ±1 day for each date because ESPN uses US Eastern dates,
+    so a 01:00 UTC game on June 16 appears under June 15 in ESPN.
+    """
+    # Expand dates to include ±1 day to catch timezone-shifted listings
+    expanded = set()
+    for d in dates:
+        try:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            expanded.add((dt - timedelta(days=1)).strftime("%Y-%m-%d"))
+            expanded.add(d)
+            expanded.add((dt + timedelta(days=1)).strftime("%Y-%m-%d"))
+        except Exception:
+            expanded.add(d)
+
     finished: Dict[str, Dict[str, Any]] = {}
+    fetched = set()
     for sk in sport_keys:
         espn_slug = ESPN_LEAGUE_SLUGS.get(sk)
         if not espn_slug:
             continue
-        for date_str in dates:
+        for date_str in sorted(expanded):
+            cache_key = f"{espn_slug}|{date_str}"
+            if cache_key in fetched:
+                continue
+            fetched.add(cache_key)
             espn_date = date_str.replace("-", "")
             for event in _fetch_espn_scores(espn_slug, espn_date):
                 comp = (event.get("competitions") or [{}])[0]
@@ -100,8 +120,6 @@ def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, D
                 teams = comp.get("competitors", [])
                 if len(teams) < 2:
                     continue
-                # ESPN: competitors[0] = home, competitors[1] = away
-                # But check homeAway field to be safe
                 home_data = next((t for t in teams if t.get("homeAway") == "home"), teams[0])
                 away_data = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
                 home = home_data.get("team", {}).get("displayName", "")
@@ -119,8 +137,15 @@ def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, D
                     "away_score": away_score,
                     "completed": True,
                 }
+                # Index under BOTH the ESPN date and the original requested dates
+                # so matching works regardless of timezone shift
                 ck = f"{_normalize_name(home)}|{_normalize_name(away)}|{date_str}"
                 finished[ck] = payload
+                # Also index under all requested dates for this home/away pair
+                for orig_date in dates:
+                    alt_ck = f"{_normalize_name(home)}|{_normalize_name(away)}|{orig_date}"
+                    if alt_ck not in finished:
+                        finished[alt_ck] = payload
             time.sleep(0.2)
     return finished
 
@@ -351,6 +376,27 @@ def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
     return "void"
 
 
+TEAM_ALIASES = {
+    "usa": "united states",
+    "united states": "usa",
+    "dr congo": "congo dr",
+    "congo dr": "dr congo",
+    "bosnia & herzegovina": "bosnia-herzegovina",
+    "bosnia-herzegovina": "bosnia & herzegovina",
+    "bosnia and herzegovina": "bosnia-herzegovina",
+    "türkiye": "turkey",
+    "turkey": "türkiye",
+    "czechia": "czech republic",
+    "czech republic": "czechia",
+    "korea republic": "south korea",
+    "south korea": "korea republic",
+    "ivory coast": "cote d'ivoire",
+    "cote d'ivoire": "ivory coast",
+    "cabo verde": "cape verde",
+    "cape verde": "cabo verde",
+}
+
+
 def _normalize_name(name: str) -> str:
     if not name:
         return ""
@@ -569,13 +615,29 @@ def check_all_pending() -> Dict[str, int]:
                     # Try exact match first
                     match_data = finished.get(mid) or finished.get(composite)
 
-                    # Fuzzy match if exact fails (different team name formats)
+                    # Try with aliased team names (ESPN vs Odds API naming)
+                    if not match_data:
+                        home_alias = TEAM_ALIASES.get(_normalize_name(home), "")
+                        away_alias = TEAM_ALIASES.get(_normalize_name(away), "")
+                        for h in [_normalize_name(home), home_alias]:
+                            for a in [_normalize_name(away), away_alias]:
+                                if not h or not a:
+                                    continue
+                                alias_key = f"{h}|{a}|{ct}"
+                                match_data = finished.get(alias_key)
+                                if match_data:
+                                    logger.info(f"Day {row.day_number}: alias matched '{home} vs {away}' → '{alias_key}'")
+                                    break
+                            if match_data:
+                                break
+
+                    # Fuzzy word-match if alias also fails
                     if not match_data:
                         fuzzy_key = _fuzzy_match_team(home, [k for k in score_keys if ct in k])
                         if fuzzy_key:
                             match_data = finished.get(fuzzy_key)
                             if match_data:
-                                logger.info(f"Day {row.day_number}: fuzzy matched '{home} vs {away}' → key '{fuzzy_key}'")
+                                logger.info(f"Day {row.day_number}: fuzzy matched '{home} vs {away}' → '{fuzzy_key}'")
 
                     if not match_data:
                         logger.info(f"Day {row.day_number}: no score yet for {home} vs {away} (composite={composite})")
