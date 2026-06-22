@@ -2,22 +2,28 @@
 World Cup 2026 — Prediction Model
 
 Combines:
-1. Bookmaker implied probabilities (strongest signal — wisdom of markets)
-2. WC 2022 team performance profiles (form, goals, defense)
-3. World Cup-specific base rates (home advantage, goal rates)
+1. Bookmaker implied probabilities (market wisdom)
+2. National team ELO ratings (independent strength signal)
+3. Attack/defense ratings (goals model)
+4. WC 2022 team performance profiles (form)
+5. World Cup-specific base rates (home advantage, goal rates)
 
-For teams WITHOUT WC 2022 data: uses bookmaker odds only + WC average stats.
-For teams WITH WC 2022 data: adjusts odds by ±15% based on form.
+ELO provides a second opinion independent of bookmaker odds.
+When ELO and bookmaker agree, confidence is high.
+When they disagree, we trust the stronger signal for the specific market.
 """
 
 import json
 import logging
+import math
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 DATA_DIR = Path(__file__).parent / "data"
+
+_NATIONAL_ELO = None
 
 
 def _load(filename: str):
@@ -26,6 +32,76 @@ def _load(filename: str):
         return {} if filename.endswith("json") else []
     with open(path) as f:
         return json.load(f)
+
+
+def _load_national_elo():
+    global _NATIONAL_ELO
+    if _NATIONAL_ELO is not None:
+        return _NATIONAL_ELO
+    _NATIONAL_ELO = _load("national_elo.json")
+    if _NATIONAL_ELO:
+        logger.info(f"Loaded national ELO for {len(_NATIONAL_ELO.get('ratings', {}))} teams")
+    return _NATIONAL_ELO
+
+
+def _elo_match_probs(home: str, away: str) -> Optional[Dict[str, float]]:
+    """Compute match outcome probabilities from national ELO ratings."""
+    elo = _load_national_elo()
+    if not elo:
+        return None
+    ratings = elo.get("ratings", {})
+    h_elo = ratings.get(home)
+    a_elo = ratings.get(away)
+    if h_elo is None or a_elo is None:
+        return None
+
+    home_adv = elo.get("home_advantage", 60)
+    diff = (h_elo + home_adv) - a_elo
+
+    expected = 1.0 / (1.0 + math.pow(10, -diff / 400.0))
+    draw_prob = max(0.08, min(0.30, 0.30 - abs(diff) / 1200.0))
+    p_home = max(0.03, expected - 0.5 * draw_prob)
+    p_away = max(0.03, 1.0 - p_home - draw_prob)
+
+    total = p_home + draw_prob + p_away
+    return {
+        "home_win": p_home / total,
+        "draw": draw_prob / total,
+        "away_win": p_away / total,
+    }
+
+
+def _elo_expected_goals(home: str, away: str) -> Optional[Dict[str, float]]:
+    """Estimate expected goals from attack/defense ratings."""
+    elo = _load_national_elo()
+    if not elo:
+        return None
+    attack = elo.get("attack_rating", {})
+    defense = elo.get("defense_rating", {})
+    if home not in attack or away not in attack:
+        return None
+
+    h_atk = attack[home]
+    a_atk = attack[away]
+    h_def = defense.get(home, 0.6)
+    a_def = defense.get(away, 0.6)
+
+    # Expected goals: strong attack + weak opposing defense = more goals
+    h_goals = 1.35 * h_atk * (1.0 + (1.0 - a_def))
+    a_goals = 1.35 * a_atk * (1.0 + (1.0 - h_def))
+
+    # ELO gap amplifies: dominant teams score more
+    ratings = elo.get("ratings", {})
+    h_elo = ratings.get(home, 1500)
+    a_elo = ratings.get(away, 1500)
+    gap = (h_elo - a_elo) / 400.0
+    h_goals *= (1.0 + gap * 0.15)
+    a_goals *= (1.0 - gap * 0.15)
+
+    h_goals = max(0.3, min(3.5, h_goals))
+    a_goals = max(0.2, min(2.5, a_goals))
+
+    return {"home": round(h_goals, 2), "away": round(a_goals, 2), "total": round(h_goals + a_goals, 2)}
 
 
 # Default profile for teams with no WC history
@@ -49,97 +125,123 @@ def predict_match(
     """
     Predict a single WC match.
 
-    Weighting:
-    - Bookmaker odds: 75% weight (they have massive data teams)
-    - Team form: 15% weight (WC 2022 performance)
-    - WC base rates: 10% weight (tournament-specific patterns)
+    Weighting (with ELO available):
+    - Bookmaker odds: 50% (market wisdom)
+    - National ELO:   25% (independent strength rating)
+    - Team form:      15% (WC 2022 performance)
+    - WC base rates:  10%
+    Without ELO: bookmaker gets 70%, form 20%, base 10%.
     """
 
-    # === 1. Bookmaker probabilities (75% weight) ===
+    # === 1. Bookmaker probabilities ===
     bk_home = implied_probs.get("home_win") or 0.33
     bk_draw = implied_probs.get("draw") or 0.28
     bk_away = implied_probs.get("away_win") or 0.33
 
-    # Remove bookmaker margin (normalize)
     bk_total = bk_home + bk_draw + bk_away
     if bk_total > 0:
         bk_home /= bk_total
         bk_draw /= bk_total
         bk_away /= bk_total
 
-    # === 2. Team form signal (15% weight) ===
+    # === 2. National ELO probabilities ===
+    elo_probs = _elo_match_probs(home_team, away_team)
+    has_elo = elo_probs is not None
+    if has_elo:
+        elo_home = elo_probs["home_win"]
+        elo_draw = elo_probs["draw"]
+        elo_away = elo_probs["away_win"]
+    else:
+        elo_home, elo_draw, elo_away = bk_home, bk_draw, bk_away
+
+    # === 3. Team form signal ===
     home_has_data = home_profile.get("matches", 0) > 0
     away_has_data = away_profile.get("matches", 0) > 0
 
     if home_has_data and away_has_data:
-        # Both teams have WC data — use form differential
         form_home = home_profile["win_rate"]
         form_away = away_profile["win_rate"]
         form_draw = (home_profile["draw_rate"] + away_profile["draw_rate"]) / 2
-
         form_total = form_home + form_draw + form_away
         if form_total > 0:
             form_home /= form_total
             form_draw /= form_total
             form_away /= form_total
     else:
-        # Use bookmaker odds as form proxy
-        form_home = bk_home
-        form_draw = bk_draw
-        form_away = bk_away
+        form_home, form_draw, form_away = bk_home, bk_draw, bk_away
 
-    # === 3. WC base rates (10% weight) ===
+    # === 4. WC base rates ===
     base_home = wc_stats.get("home_win_rate", 0.45)
     base_draw = wc_stats.get("draw_rate", 0.23)
     base_away = wc_stats.get("away_win_rate", 0.32)
 
     # === Weighted combination ===
-    final_home = 0.75 * bk_home + 0.15 * form_home + 0.10 * base_home
-    final_draw = 0.75 * bk_draw + 0.15 * form_draw + 0.10 * base_draw
-    final_away = 0.75 * bk_away + 0.15 * form_away + 0.10 * base_away
+    if has_elo:
+        final_home = 0.50 * bk_home + 0.25 * elo_home + 0.15 * form_home + 0.10 * base_home
+        final_draw = 0.50 * bk_draw + 0.25 * elo_draw + 0.15 * form_draw + 0.10 * base_draw
+        final_away = 0.50 * bk_away + 0.25 * elo_away + 0.15 * form_away + 0.10 * base_away
+    else:
+        final_home = 0.70 * bk_home + 0.20 * form_home + 0.10 * base_home
+        final_draw = 0.70 * bk_draw + 0.20 * form_draw + 0.10 * base_draw
+        final_away = 0.70 * bk_away + 0.20 * form_away + 0.10 * base_away
 
-    # Normalize
     total = final_home + final_draw + final_away
     final_home /= total
     final_draw /= total
     final_away /= total
 
-    # === Goals prediction ===
+    # === Goals prediction (ELO-aware) ===
     wc_avg_total = wc_stats.get("avg_goals_per_match", 2.69)
     wc_avg_home = wc_stats.get("avg_home_goals", 1.58)
     wc_avg_away = wc_stats.get("avg_away_goals", 1.11)
+
+    elo_goals = _elo_expected_goals(home_team, away_team)
 
     home_attack = home_profile.get("goals_scored_avg", wc_avg_home)
     away_attack = away_profile.get("goals_scored_avg", wc_avg_away)
     home_defense = home_profile.get("goals_conceded_avg", wc_avg_away)
     away_defense = away_profile.get("goals_conceded_avg", wc_avg_home)
 
-    # Expected goals — blend team data with WC averages
-    exp_home = (home_attack + away_defense + wc_avg_home) / 3
-    exp_away = (away_attack + home_defense + wc_avg_away) / 3
+    form_exp_home = (home_attack + away_defense + wc_avg_home) / 3
+    form_exp_away = (away_attack + home_defense + wc_avg_away) / 3
+
+    if elo_goals:
+        # Blend ELO goals (50%) with form-based (30%) and WC average (20%)
+        exp_home = 0.50 * elo_goals["home"] + 0.30 * form_exp_home + 0.20 * wc_avg_home
+        exp_away = 0.50 * elo_goals["away"] + 0.30 * form_exp_away + 0.20 * wc_avg_away
+    else:
+        exp_home = (form_exp_home + wc_avg_home) / 2
+        exp_away = (form_exp_away + wc_avg_away) / 2
     exp_total = exp_home + exp_away
 
-    # Over/Under from bookmakers (if available) or calculated
-    over_2_5_prob = implied_probs.get("over_2_5")
-    under_2_5_prob = implied_probs.get("under_2_5")
-    if over_2_5_prob and under_2_5_prob:
-        # Normalize bookmaker over/under
-        ou_total = over_2_5_prob + under_2_5_prob
-        over_2_5_prob /= ou_total
-        under_2_5_prob /= ou_total
+    # Poisson CDF helper for goal probabilities
+    def _poisson_over(threshold, lam):
+        """P(goals > threshold) using Poisson distribution."""
+        cum = 0.0
+        for k in range(int(threshold) + 1):
+            cum += (lam ** k) * math.exp(-lam) / math.factorial(k)
+        return 1.0 - cum
+
+    # Over/Under 2.5 — Poisson from expected goals, blended with bookmaker
+    elo_over_2_5 = _poisson_over(2, exp_total)
+    bk_over_2_5 = implied_probs.get("over_2_5")
+    bk_under_2_5 = implied_probs.get("under_2_5")
+    if bk_over_2_5 and bk_under_2_5:
+        ou_total = bk_over_2_5 + bk_under_2_5
+        bk_over_norm = bk_over_2_5 / ou_total
+        over_2_5_prob = 0.50 * elo_over_2_5 + 0.50 * bk_over_norm
     else:
-        # Estimate from expected goals (Poisson-ish)
-        over_2_5_prob = min(0.85, max(0.15, 0.3 + (exp_total - 2.5) * 0.2))
-        under_2_5_prob = 1 - over_2_5_prob
+        over_2_5_prob = elo_over_2_5
+    under_2_5_prob = 1 - over_2_5_prob
 
-    # BTTS
-    btts_prob = min(0.75, max(0.20,
-        (1 - home_profile.get("clean_sheet_rate", 0.2)) *
-        (1 - away_profile.get("clean_sheet_rate", 0.2)) * 0.7
-    ))
+    # BTTS — Poisson: P(each team scores >= 1)
+    p_home_scores = 1.0 - math.exp(-exp_home)
+    p_away_scores = 1.0 - math.exp(-exp_away)
+    btts_prob = p_home_scores * p_away_scores
 
-    # Over 1.5 (for safer bets)
-    over_1_5_prob = min(0.92, max(0.40, 0.5 + (exp_total - 1.5) * 0.25))
+    # Over 1.5 — Poisson: P(total >= 2)
+    over_1_5_prob = _poisson_over(1, exp_total)
+    over_1_5_prob = min(0.95, max(0.40, over_1_5_prob))
 
     # === Match result probabilities ===
     result_probs = {"home_win": final_home, "draw": final_draw, "away_win": final_away}

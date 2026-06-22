@@ -232,39 +232,33 @@ def build_daily_accumulators(force: bool = False) -> dict:
             pk["_pred"] = p
         pick_pool.extend(picks)
 
-    def _build_category(pool, target_min, target_max, max_picks, min_conf, prefer_higher_odds=False):
-        """Greedily select picks (one per match) to hit a target odds range."""
-        MARKET_PREF = {"match_result": 1.3, "goals": 1.0, "btts": 1.2, "double_chance": 0.7}
-        eligible = [pk for pk in pool if pk["confidence"] >= min_conf and pk["odds"] >= 1.10]
+    def _build_category(pool, target_max, max_picks):
+        """Stack safe picks (all >70% confidence, one per match) up to a target."""
+        MARKET_PREF = {"match_result": 1.3, "goals": 1.1, "btts": 1.2, "double_chance": 0.7}
+        eligible = [pk for pk in pool if pk["confidence"] >= 0.70 and pk["odds"] >= 1.10]
         for pk in eligible:
             mw = MARKET_PREF.get(pk["market"], 1.0)
-            if prefer_higher_odds:
-                pk["_cat_score"] = pk["odds"] * mw
-            else:
-                pk["_cat_score"] = pk["confidence"] * mw
+            pk["_cat_score"] = pk["confidence"] * pk["odds"] * mw
         eligible.sort(key=lambda x: x["_cat_score"], reverse=True)
 
         chosen = []
         used_matches = set()
-        used_markets = {}  # market -> count (penalize repeats)
+        used_markets = {}
         combined = 1.0
         for pk in eligible:
             mid = pk["_match_id"]
             if mid in used_matches:
                 continue
             mkt = pk["market"]
-            # Penalize picking the same market type more than twice
             if used_markets.get(mkt, 0) >= 2:
                 continue
             new_combined = combined * pk["odds"]
-            if new_combined > target_max + 2.0 and combined >= target_min:
+            if new_combined > target_max + 2.0:
                 break
             chosen.append(pk)
             used_matches.add(mid)
             used_markets[mkt] = used_markets.get(mkt, 0) + 1
             combined = new_combined
-            if combined >= target_min and len(chosen) >= 3:
-                break
             if len(chosen) >= max_picks:
                 break
         games = []
@@ -283,14 +277,15 @@ def build_daily_accumulators(force: bool = False) -> dict:
             total *= g["estimated_odds"]
         return games, round(total, 2)
 
-    # ── 2 Odds: 3-5 safest picks combining to ~2x ──
-    two_odds_games, two_odds_total = _build_category(pick_pool, 1.8, 3.5, 5, 0.55)
+    # All tiers use >70% confidence — higher tiers just stack MORE picks
+    # ── 2 Odds: 3-4 safe picks ──
+    two_odds_games, two_odds_total = _build_category(pick_pool, 3.5, 4)
 
-    # ── 5 Odds: 3-5 picks combining to ~5x (use higher-odds picks) ──
-    five_odds_games, five_odds_total = _build_category(pick_pool, 3.5, 8.0, 5, 0.45, prefer_higher_odds=True)
+    # ── 5 Odds: 5-7 safe picks ──
+    five_odds_games, five_odds_total = _build_category(pick_pool, 8.0, 7)
 
-    # ── 10 Odds: 4-6 riskier picks combining to ~10x ──
-    ten_odds_games, ten_odds_total = _build_category(pick_pool, 6.0, 18.0, 6, 0.38, prefer_higher_odds=True)
+    # ── 10 Odds: 8-10 safe picks ──
+    ten_odds_games, ten_odds_total = _build_category(pick_pool, 15.0, 10)
 
     # ── Over 1.5: safest goal picks ──
     over_picks = []
@@ -341,8 +336,8 @@ def build_daily_accumulators(force: bool = False) -> dict:
     n_matches = len({p["match_id"] for p in day_preds})
     match_word = "match" if n_matches == 1 else "matches"
     thin_reason = f"Only {n_matches} {match_word} today — not enough fixtures for this tier"
-    five_ok = len(five_odds_games) >= 3 and five_odds_total >= 3.0
-    ten_ok = len(ten_odds_games) >= 3 and ten_odds_total >= 5.0
+    five_ok = len(five_odds_games) >= 4 and five_odds_total >= 3.0
+    ten_ok = len(ten_odds_games) >= 6 and ten_odds_total >= 5.0
 
     result = {
         "status": "success",
@@ -380,42 +375,42 @@ def _all_picks(p: dict) -> list[dict]:
     for key, odds_key in [("home_win", "home_win"), ("away_win", "away_win")]:
         prob = probs.get(key, 0)
         odds = bo.get(odds_key)
-        if prob >= 0.50 and odds and odds >= 1.10:
+        if prob >= 0.60 and odds and odds >= 1.10:
             label = f"{p['home_team']} Win" if key == "home_win" else f"{p['away_team']} Win"
             candidates.append({"confidence": round(prob, 3), "odds": round(odds, 2), "prediction": label, "market": "match_result"})
 
-    # Over 2.5 Goals — real odds from bookmaker
+    # Over 2.5 Goals — only when model is confident (>60%)
     o25 = g.get("over_2_5_prob", 0)
     o25_odds = bo.get("over_2_5")
-    if o25 >= 0.50 and o25_odds and o25_odds >= 1.10:
+    if o25 >= 0.60 and o25_odds and o25_odds >= 1.10:
         candidates.append({"confidence": round(o25, 3), "odds": round(o25_odds, 2), "prediction": "Over 2.5 Goals", "market": "goals"})
 
-    # Under 2.5 Goals — real odds from bookmaker
+    # Under 2.5 Goals — only when model is confident (>60%)
     u25 = g.get("under_2_5_prob", 0)
     u25_odds = bo.get("under_2_5")
-    if u25 >= 0.50 and u25_odds and u25_odds >= 1.10:
+    if u25 >= 0.60 and u25_odds and u25_odds >= 1.10:
         candidates.append({"confidence": round(u25, 3), "odds": round(u25_odds, 2), "prediction": "Under 2.5 Goals", "market": "goals"})
 
-    # Over 1.5 Goals — no bookmaker odds usually, estimate from prob
+    # Over 1.5 Goals — estimate odds from probability
     o15 = g.get("over_1_5_prob", 0)
     if o15 >= 0.70:
         est = round(1.0 / max(o15, 0.62), 2)
         if est >= 1.10:
             candidates.append({"confidence": round(o15, 3), "odds": est, "prediction": "Over 1.5 Goals", "market": "goals"})
 
-    # BTTS Yes
+    # BTTS Yes — only when genuinely confident
     btts = g.get("btts_prob", 0)
-    if btts >= 0.55:
+    if btts >= 0.60:
         est = round(1.0 / max(btts, 0.40), 2)
         candidates.append({"confidence": round(btts, 3), "odds": round(est, 2), "prediction": "Both Teams to Score", "market": "btts"})
 
     # BTTS No
     btts_no = 1.0 - btts if btts else 0
-    if btts_no >= 0.55:
+    if btts_no >= 0.60:
         est = round(1.0 / max(btts_no, 0.40), 2)
         candidates.append({"confidence": round(btts_no, 3), "odds": round(est, 2), "prediction": "BTTS No", "market": "btts"})
 
-    # Double chance — only as fallback, lower priority
+    # Double chance — fallback for genuinely tight matches
     hw = probs.get("home_win", 0)
     aw = probs.get("away_win", 0)
     dr = probs.get("draw", 0)

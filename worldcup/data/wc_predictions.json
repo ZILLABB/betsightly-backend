@@ -9,41 +9,41 @@
     "prediction": "Mexico Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.651,
+    "confidence": 0.681,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Mexico Win",
         "market": "match_result",
-        "confidence": 0.651,
+        "confidence": 0.681,
         "odds": 1.47
       },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.545,
+        "confidence": 0.555,
         "odds": 1.97
       },
       {
         "tip": "Mexico or Draw",
         "market": "double_chance",
-        "confidence": 0.869,
+        "confidence": 0.865,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.651,
-      "draw": 0.218,
-      "away_win": 0.131
+      "home_win": 0.681,
+      "draw": 0.184,
+      "away_win": 0.135
     },
     "goals": {
-      "expected_home": 1.18,
-      "expected_away": 1.1,
-      "expected_total": 2.29,
-      "over_2_5_prob": 0.455,
-      "under_2_5_prob": 0.545,
-      "over_1_5_prob": 0.697,
-      "btts_prob": 0.448
+      "expected_home": 1.42,
+      "expected_away": 1.0,
+      "expected_total": 2.42,
+      "over_2_5_prob": 0.445,
+      "under_2_5_prob": 0.555,
+      "over_1_5_prob": 0.696,
+      "btts_prob": 0.48
     },
     "best_odds": {
       "home_win": 1.47,
@@ -57,19 +57,19 @@
         "bet": "South Africa Win",
         "market": "match_result",
         "odds": 9.6,
-        "our_prob": 0.131,
+        "our_prob": 0.135,
         "implied_prob": 0.104,
-        "edge": 0.027,
-        "expected_value": 0.261
+        "edge": 0.031,
+        "expected_value": 0.297
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 1.97,
-        "our_prob": 0.545,
+        "our_prob": 0.555,
         "implied_prob": 0.508,
-        "edge": 0.038,
-        "expected_value": 0.074
+        "edge": 0.047,
+        "expected_value": 0.093
       }
     ],
     "data_quality": {
@@ -86,44 +86,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/17.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/773.png",
     "commence_time": "2026-06-12T02:00:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
-    "prediction_market": "goals",
-    "confidence": 0.828,
-    "risk_level": "very_low",
+    "prediction": "Both Teams to Score (GG)",
+    "prediction_key": "btts_yes",
+    "prediction_market": "btts",
+    "confidence": 0.515,
+    "risk_level": "medium",
     "top_tips": [
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.828,
-        "odds": null
-      },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.476,
+        "confidence": 0.515,
         "odds": null
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.547,
+        "odds": 2.12
       },
       {
         "tip": "South Korea or Draw",
         "market": "double_chance",
-        "confidence": 0.663,
+        "confidence": 0.703,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.366,
-      "draw": 0.297,
-      "away_win": 0.337
+      "home_win": 0.446,
+      "draw": 0.257,
+      "away_win": 0.297
     },
     "goals": {
       "expected_home": 1.38,
-      "expected_away": 1.44,
-      "expected_total": 2.81,
-      "over_2_5_prob": 0.438,
-      "under_2_5_prob": 0.562,
-      "over_1_5_prob": 0.828,
-      "btts_prob": 0.476
+      "expected_away": 1.16,
+      "expected_total": 2.55,
+      "over_2_5_prob": 0.453,
+      "under_2_5_prob": 0.547,
+      "over_1_5_prob": 0.722,
+      "btts_prob": 0.515
     },
     "best_odds": {
       "home_win": 2.8,
@@ -134,13 +134,31 @@
     },
     "value_bets": [
       {
+        "bet": "South Korea Win",
+        "market": "match_result",
+        "odds": 2.8,
+        "our_prob": 0.446,
+        "implied_prob": 0.357,
+        "edge": 0.089,
+        "expected_value": 0.25
+      },
+      {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.12,
-        "our_prob": 0.562,
+        "our_prob": 0.547,
         "implied_prob": 0.472,
-        "edge": 0.091,
-        "expected_value": 0.192
+        "edge": 0.075,
+        "expected_value": 0.16
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.32,
+        "our_prob": 0.453,
+        "implied_prob": 0.431,
+        "edge": 0.022,
+        "expected_value": 0.051
       }
     ],
     "data_quality": {
@@ -160,41 +178,41 @@
     "prediction": "Canada Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.519,
-    "risk_level": "medium",
+    "confidence": 0.564,
+    "risk_level": "low",
     "top_tips": [
       {
         "tip": "Canada Win",
         "market": "match_result",
-        "confidence": 0.519,
+        "confidence": 0.564,
         "odds": 1.86
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.56,
+        "confidence": 0.512,
         "odds": null
       },
       {
-        "tip": "Over 1.5 Goals",
+        "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.808,
-        "odds": null
+        "confidence": 0.554,
+        "odds": 1.96
       }
     ],
     "probabilities": {
-      "home_win": 0.519,
-      "draw": 0.263,
-      "away_win": 0.218
+      "home_win": 0.564,
+      "draw": 0.227,
+      "away_win": 0.208
     },
     "goals": {
-      "expected_home": 1.18,
-      "expected_away": 1.55,
-      "expected_total": 2.73,
-      "over_2_5_prob": 0.432,
-      "under_2_5_prob": 0.568,
-      "over_1_5_prob": 0.808,
-      "btts_prob": 0.56
+      "expected_home": 1.32,
+      "expected_away": 1.2,
+      "expected_total": 2.52,
+      "over_2_5_prob": 0.446,
+      "under_2_5_prob": 0.554,
+      "over_1_5_prob": 0.716,
+      "btts_prob": 0.512
     },
     "best_odds": {
       "home_win": 1.86,
@@ -208,10 +226,19 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 1.96,
-        "our_prob": 0.568,
+        "our_prob": 0.554,
         "implied_prob": 0.51,
-        "edge": 0.058,
-        "expected_value": 0.114
+        "edge": 0.044,
+        "expected_value": 0.086
+      },
+      {
+        "bet": "Canada Win",
+        "market": "match_result",
+        "odds": 1.86,
+        "our_prob": 0.564,
+        "implied_prob": 0.538,
+        "edge": 0.027,
+        "expected_value": 0.05
       }
     ],
     "data_quality": {
@@ -231,41 +258,41 @@
     "prediction": "USA Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.479,
-    "risk_level": "medium",
+    "confidence": 0.561,
+    "risk_level": "low",
     "top_tips": [
       {
         "tip": "USA Win",
         "market": "match_result",
-        "confidence": 0.479,
+        "confidence": 0.561,
         "odds": 2.04
       },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.554,
+        "confidence": 0.56,
         "odds": 2.18
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.566,
+        "confidence": 0.482,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.479,
-      "draw": 0.274,
-      "away_win": 0.247
+      "home_win": 0.561,
+      "draw": 0.224,
+      "away_win": 0.215
     },
     "goals": {
-      "expected_home": 1.21,
-      "expected_away": 1.1,
-      "expected_total": 2.31,
-      "over_2_5_prob": 0.446,
-      "under_2_5_prob": 0.554,
-      "over_1_5_prob": 0.703,
-      "btts_prob": 0.434
+      "expected_home": 1.39,
+      "expected_away": 1.02,
+      "expected_total": 2.42,
+      "over_2_5_prob": 0.44,
+      "under_2_5_prob": 0.56,
+      "over_1_5_prob": 0.695,
+      "btts_prob": 0.482
     },
     "best_odds": {
       "home_win": 2.04,
@@ -279,10 +306,19 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.18,
-        "our_prob": 0.554,
+        "our_prob": 0.56,
         "implied_prob": 0.459,
-        "edge": 0.095,
-        "expected_value": 0.208
+        "edge": 0.101,
+        "expected_value": 0.22
+      },
+      {
+        "bet": "USA Win",
+        "market": "match_result",
+        "odds": 2.04,
+        "our_prob": 0.561,
+        "implied_prob": 0.49,
+        "edge": 0.07,
+        "expected_value": 0.144
       }
     ],
     "data_quality": {
@@ -302,41 +338,41 @@
     "prediction": "Switzerland Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.764,
+    "confidence": 0.716,
     "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "Switzerland Win",
         "market": "match_result",
-        "confidence": 0.764,
+        "confidence": 0.716,
         "odds": 1.27
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.595,
+        "confidence": 0.516,
         "odds": null
       },
       {
-        "tip": "Over 1.5 Goals",
+        "tip": "Over 2.5 Goals",
         "market": "goals",
-        "confidence": 0.863,
-        "odds": null
+        "confidence": 0.518,
+        "odds": 2.1
       }
     ],
     "probabilities": {
-      "home_win": 0.1,
-      "draw": 0.136,
-      "away_win": 0.764
+      "home_win": 0.138,
+      "draw": 0.147,
+      "away_win": 0.716
     },
     "goals": {
-      "expected_home": 1.39,
-      "expected_away": 1.56,
-      "expected_total": 2.95,
-      "over_2_5_prob": 0.566,
-      "under_2_5_prob": 0.434,
-      "over_1_5_prob": 0.863,
-      "btts_prob": 0.595
+      "expected_home": 1.15,
+      "expected_away": 1.41,
+      "expected_total": 2.56,
+      "over_2_5_prob": 0.518,
+      "under_2_5_prob": 0.482,
+      "over_1_5_prob": 0.724,
+      "btts_prob": 0.516
     },
     "best_odds": {
       "home_win": 15.5,
@@ -350,19 +386,28 @@
         "bet": "Qatar Win",
         "market": "match_result",
         "odds": 15.5,
-        "our_prob": 0.1,
+        "our_prob": 0.138,
         "implied_prob": 0.065,
-        "edge": 0.035,
-        "expected_value": 0.543
+        "edge": 0.073,
+        "expected_value": 1.136
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 2.28,
+        "our_prob": 0.482,
+        "implied_prob": 0.439,
+        "edge": 0.043,
+        "expected_value": 0.098
       },
       {
         "bet": "Over 2.5 Goals",
         "market": "goals",
         "odds": 2.1,
-        "our_prob": 0.566,
+        "our_prob": 0.518,
         "implied_prob": 0.476,
-        "edge": 0.09,
-        "expected_value": 0.188
+        "edge": 0.042,
+        "expected_value": 0.089
       }
     ],
     "data_quality": {
@@ -382,41 +427,41 @@
     "prediction": "Brazil Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.558,
+    "confidence": 0.598,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Brazil Win",
         "market": "match_result",
-        "confidence": 0.558,
+        "confidence": 0.598,
         "odds": 1.66
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.582,
-        "odds": null
       },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.519,
+        "confidence": 0.538,
         "odds": 2.08
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.484,
+        "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.558,
-      "draw": 0.236,
-      "away_win": 0.206
+      "home_win": 0.598,
+      "draw": 0.199,
+      "away_win": 0.203
     },
     "goals": {
-      "expected_home": 1.3,
-      "expected_away": 0.86,
-      "expected_total": 2.15,
-      "over_2_5_prob": 0.481,
-      "under_2_5_prob": 0.519,
-      "over_1_5_prob": 0.663,
-      "btts_prob": 0.418
+      "expected_home": 1.45,
+      "expected_away": 1.0,
+      "expected_total": 2.45,
+      "over_2_5_prob": 0.462,
+      "under_2_5_prob": 0.538,
+      "over_1_5_prob": 0.702,
+      "btts_prob": 0.484
     },
     "best_odds": {
       "home_win": 1.66,
@@ -430,19 +475,19 @@
         "bet": "Morocco Win",
         "market": "match_result",
         "odds": 6.2,
-        "our_prob": 0.206,
+        "our_prob": 0.203,
         "implied_prob": 0.161,
-        "edge": 0.045,
-        "expected_value": 0.279
+        "edge": 0.041,
+        "expected_value": 0.256
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.08,
-        "our_prob": 0.519,
+        "our_prob": 0.538,
         "implied_prob": 0.481,
-        "edge": 0.038,
-        "expected_value": 0.08
+        "edge": 0.057,
+        "expected_value": 0.119
       }
     ],
     "data_quality": {
@@ -462,41 +507,41 @@
     "prediction": "Scotland Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.607,
+    "confidence": 0.613,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Scotland Win",
         "market": "match_result",
-        "confidence": 0.607,
+        "confidence": 0.613,
         "odds": 1.54
       },
       {
-        "tip": "Over 1.5 Goals",
+        "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.766,
-        "odds": null
+        "confidence": 0.541,
+        "odds": 1.93
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.552,
+        "confidence": 0.472,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.175,
-      "draw": 0.219,
-      "away_win": 0.607
+      "home_win": 0.186,
+      "draw": 0.202,
+      "away_win": 0.613
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.502,
-      "under_2_5_prob": 0.498,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.04,
+      "expected_away": 1.3,
+      "expected_total": 2.35,
+      "over_2_5_prob": 0.459,
+      "under_2_5_prob": 0.541,
+      "over_1_5_prob": 0.68,
+      "btts_prob": 0.472
     },
     "best_odds": {
       "home_win": 7.1,
@@ -510,10 +555,19 @@
         "bet": "Haiti Win",
         "market": "match_result",
         "odds": 7.1,
-        "our_prob": 0.175,
+        "our_prob": 0.186,
         "implied_prob": 0.141,
-        "edge": 0.034,
-        "expected_value": 0.242
+        "edge": 0.045,
+        "expected_value": 0.318
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 1.93,
+        "our_prob": 0.541,
+        "implied_prob": 0.518,
+        "edge": 0.023,
+        "expected_value": 0.043
       }
     ],
     "data_quality": {
@@ -530,44 +584,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/20.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/777.png",
     "commence_time": "2026-06-14T04:00:00Z",
-    "prediction": "Turkey Win",
-    "prediction_key": "away_win",
-    "prediction_market": "match_result",
-    "confidence": 0.513,
+    "prediction": "Both Teams to Score (GG)",
+    "prediction_key": "btts_yes",
+    "prediction_market": "btts",
+    "confidence": 0.505,
     "risk_level": "medium",
     "top_tips": [
       {
-        "tip": "Turkey Win",
-        "market": "match_result",
-        "confidence": 0.513,
-        "odds": 1.82
-      },
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.766,
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.505,
         "odds": null
       },
       {
-        "tip": "Both Teams to Score (GG)",
-        "market": "btts",
-        "confidence": 0.476,
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.54,
+        "odds": 1.85
+      },
+      {
+        "tip": "Turkey or Draw",
+        "market": "double_chance",
+        "confidence": 0.687,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.226,
-      "draw": 0.261,
-      "away_win": 0.513
+      "home_win": 0.313,
+      "draw": 0.247,
+      "away_win": 0.44
     },
     "goals": {
-      "expected_home": 1.29,
-      "expected_away": 1.27,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.469,
-      "under_2_5_prob": 0.531,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.476
+      "expected_home": 1.28,
+      "expected_away": 1.2,
+      "expected_total": 2.48,
+      "over_2_5_prob": 0.46,
+      "under_2_5_prob": 0.54,
+      "over_1_5_prob": 0.709,
+      "btts_prob": 0.505
     },
     "best_odds": {
       "home_win": 5.4,
@@ -581,10 +635,10 @@
         "bet": "Australia Win",
         "market": "match_result",
         "odds": 5.4,
-        "our_prob": 0.226,
+        "our_prob": 0.313,
         "implied_prob": 0.185,
-        "edge": 0.041,
-        "expected_value": 0.221
+        "edge": 0.128,
+        "expected_value": 0.691
       }
     ],
     "data_quality": {
@@ -614,9 +668,9 @@
         "odds": 1.06
       },
       {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.863,
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.563,
         "odds": null
       },
       {
@@ -632,13 +686,13 @@
       "away_win": 0.048
     },
     "goals": {
-      "expected_home": 1.63,
-      "expected_away": 1.33,
-      "expected_total": 2.95,
-      "over_2_5_prob": 0.553,
-      "under_2_5_prob": 0.447,
-      "over_1_5_prob": 0.863,
-      "btts_prob": 0.448
+      "expected_home": 1.6,
+      "expected_away": 1.22,
+      "expected_total": 2.82,
+      "over_2_5_prob": 0.544,
+      "under_2_5_prob": 0.456,
+      "over_1_5_prob": 0.773,
+      "btts_prob": 0.563
     },
     "best_odds": {
       "home_win": 1.06,
@@ -661,10 +715,10 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 4.8,
-        "our_prob": 0.447,
+        "our_prob": 0.456,
         "implied_prob": 0.208,
-        "edge": 0.239,
-        "expected_value": 1.146
+        "edge": 0.247,
+        "expected_value": 1.187
       },
       {
         "bet": "Draw",
@@ -679,10 +733,10 @@
         "bet": "Over 2.5 Goals",
         "market": "goals",
         "odds": 2.15,
-        "our_prob": 0.553,
+        "our_prob": 0.544,
         "implied_prob": 0.465,
-        "edge": 0.088,
-        "expected_value": 0.189
+        "edge": 0.079,
+        "expected_value": 0.17
       }
     ],
     "data_quality": {
@@ -702,41 +756,41 @@
     "prediction": "Netherlands Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.468,
+    "confidence": 0.514,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Netherlands Win",
         "market": "match_result",
-        "confidence": 0.468,
+        "confidence": 0.514,
         "odds": 2.05
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.62,
+        "confidence": 0.521,
         "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.77,
+        "confidence": 0.737,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.468,
-      "draw": 0.256,
-      "away_win": 0.276
+      "home_win": 0.514,
+      "draw": 0.227,
+      "away_win": 0.259
     },
     "goals": {
-      "expected_home": 1.53,
-      "expected_away": 1.05,
-      "expected_total": 2.58,
-      "over_2_5_prob": 0.496,
-      "under_2_5_prob": 0.504,
-      "over_1_5_prob": 0.77,
-      "btts_prob": 0.38
+      "expected_home": 1.52,
+      "expected_away": 1.1,
+      "expected_total": 2.62,
+      "over_2_5_prob": 0.492,
+      "under_2_5_prob": 0.508,
+      "over_1_5_prob": 0.737,
+      "btts_prob": 0.521
     },
     "best_odds": {
       "home_win": 2.05,
@@ -747,13 +801,13 @@
     },
     "value_bets": [
       {
-        "bet": "Japan Win",
+        "bet": "Netherlands Win",
         "market": "match_result",
-        "odds": 4.05,
-        "our_prob": 0.276,
-        "implied_prob": 0.247,
-        "edge": 0.029,
-        "expected_value": 0.117
+        "odds": 2.05,
+        "our_prob": 0.514,
+        "implied_prob": 0.488,
+        "edge": 0.026,
+        "expected_value": 0.054
       }
     ],
     "data_quality": {
@@ -770,44 +824,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/1533.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/2382.png",
     "commence_time": "2026-06-14T23:00:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
-    "prediction_market": "goals",
-    "confidence": 0.752,
-    "risk_level": "very_low",
+    "prediction": "Both Teams to Score (GG)",
+    "prediction_key": "btts_yes",
+    "prediction_market": "btts",
+    "confidence": 0.507,
+    "risk_level": "medium",
     "top_tips": [
       {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.752,
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.507,
         "odds": null
       },
       {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.552,
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.711,
         "odds": null
       },
       {
         "tip": "Ecuador or Draw",
         "market": "double_chance",
-        "confidence": 0.721,
+        "confidence": 0.708,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.279,
-      "draw": 0.322,
-      "away_win": 0.399
+      "home_win": 0.292,
+      "draw": 0.305,
+      "away_win": 0.403
     },
     "goals": {
-      "expected_home": 1.26,
+      "expected_home": 1.24,
       "expected_away": 1.25,
-      "expected_total": 2.51,
-      "over_2_5_prob": 0.523,
-      "under_2_5_prob": 0.477,
-      "over_1_5_prob": 0.752,
-      "btts_prob": 0.448
+      "expected_total": 2.49,
+      "over_2_5_prob": 0.488,
+      "under_2_5_prob": 0.512,
+      "over_1_5_prob": 0.711,
+      "btts_prob": 0.507
     },
     "best_odds": {
       "home_win": 3.9,
@@ -821,28 +875,28 @@
         "bet": "Over 2.5 Goals",
         "market": "goals",
         "odds": 2.78,
-        "our_prob": 0.523,
+        "our_prob": 0.488,
         "implied_prob": 0.36,
-        "edge": 0.164,
-        "expected_value": 0.455
+        "edge": 0.129,
+        "expected_value": 0.358
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.43,
-        "our_prob": 0.477,
+        "our_prob": 0.512,
         "implied_prob": 0.412,
-        "edge": 0.065,
-        "expected_value": 0.159
+        "edge": 0.1,
+        "expected_value": 0.243
       },
       {
         "bet": "Ivory Coast Win",
         "market": "match_result",
         "odds": 3.9,
-        "our_prob": 0.279,
+        "our_prob": 0.292,
         "implied_prob": 0.256,
-        "edge": 0.023,
-        "expected_value": 0.089
+        "edge": 0.035,
+        "expected_value": 0.137
       }
     ],
     "data_quality": {
@@ -862,41 +916,41 @@
     "prediction": "Sweden Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.488,
+    "confidence": 0.466,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Sweden Win",
         "market": "match_result",
-        "confidence": 0.488,
+        "confidence": 0.466,
         "odds": 2.0
       },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.554,
+        "confidence": 0.583,
         "odds": 2.25
       },
       {
         "tip": "BTTS No",
         "market": "btts",
-        "confidence": 0.552,
+        "confidence": 0.548,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.488,
-      "draw": 0.277,
-      "away_win": 0.235
+      "home_win": 0.466,
+      "draw": 0.276,
+      "away_win": 0.258
     },
     "goals": {
-      "expected_home": 1.04,
-      "expected_away": 0.91,
-      "expected_total": 1.95,
-      "over_2_5_prob": 0.446,
-      "under_2_5_prob": 0.554,
-      "over_1_5_prob": 0.613,
-      "btts_prob": 0.448
+      "expected_home": 1.19,
+      "expected_away": 1.05,
+      "expected_total": 2.24,
+      "over_2_5_prob": 0.417,
+      "under_2_5_prob": 0.583,
+      "over_1_5_prob": 0.655,
+      "btts_prob": 0.452
     },
     "best_odds": {
       "home_win": 2.0,
@@ -910,10 +964,19 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.25,
-        "our_prob": 0.554,
+        "our_prob": 0.583,
         "implied_prob": 0.444,
-        "edge": 0.11,
-        "expected_value": 0.247
+        "edge": 0.139,
+        "expected_value": 0.313
+      },
+      {
+        "bet": "Tunisia Win",
+        "market": "match_result",
+        "odds": 4.5,
+        "our_prob": 0.258,
+        "implied_prob": 0.222,
+        "edge": 0.036,
+        "expected_value": 0.163
       }
     ],
     "data_quality": {
@@ -933,41 +996,41 @@
     "prediction": "Spain Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.837,
+    "confidence": 0.841,
     "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "Spain Win",
         "market": "match_result",
-        "confidence": 0.837,
+        "confidence": 0.841,
         "odds": 1.11
-      },
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.807,
-        "odds": null
       },
       {
         "tip": "Spain or Draw",
         "market": "double_chance",
-        "confidence": 0.938,
+        "confidence": 0.94,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.749,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.837,
-      "draw": 0.101,
-      "away_win": 0.062
+      "home_win": 0.841,
+      "draw": 0.099,
+      "away_win": 0.06
     },
     "goals": {
-      "expected_home": 1.71,
-      "expected_away": 1.02,
-      "expected_total": 2.73,
-      "over_2_5_prob": 0.555,
-      "under_2_5_prob": 0.445,
-      "over_1_5_prob": 0.807,
-      "btts_prob": 0.434
+      "expected_home": 1.91,
+      "expected_away": 0.78,
+      "expected_total": 2.69,
+      "over_2_5_prob": 0.529,
+      "under_2_5_prob": 0.471,
+      "over_1_5_prob": 0.749,
+      "btts_prob": 0.461
     },
     "best_odds": {
       "home_win": 1.11,
@@ -981,37 +1044,28 @@
         "bet": "Cape Verde Win",
         "market": "match_result",
         "odds": 44.0,
-        "our_prob": 0.062,
+        "our_prob": 0.06,
         "implied_prob": 0.023,
-        "edge": 0.039,
-        "expected_value": 1.709
-      },
-      {
-        "bet": "Draw",
-        "market": "match_result",
-        "odds": 14.0,
-        "our_prob": 0.101,
-        "implied_prob": 0.071,
-        "edge": 0.03,
-        "expected_value": 0.417
+        "edge": 0.038,
+        "expected_value": 1.654
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 3.15,
-        "our_prob": 0.445,
+        "our_prob": 0.471,
         "implied_prob": 0.317,
-        "edge": 0.128,
-        "expected_value": 0.402
+        "edge": 0.153,
+        "expected_value": 0.483
       },
       {
-        "bet": "Over 2.5 Goals",
-        "market": "goals",
-        "odds": 1.92,
-        "our_prob": 0.555,
-        "implied_prob": 0.521,
-        "edge": 0.034,
-        "expected_value": 0.066
+        "bet": "Draw",
+        "market": "match_result",
+        "odds": 14.0,
+        "our_prob": 0.099,
+        "implied_prob": 0.071,
+        "edge": 0.027,
+        "expected_value": 0.383
       }
     ],
     "data_quality": {
@@ -1031,41 +1085,41 @@
     "prediction": "Belgium Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.556,
+    "confidence": 0.615,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Belgium Win",
         "market": "match_result",
-        "confidence": 0.556,
+        "confidence": 0.615,
         "odds": 1.74
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.552,
-        "odds": null
       },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.518,
+        "confidence": 0.545,
         "odds": 1.9
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.473,
+        "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.556,
-      "draw": 0.246,
-      "away_win": 0.198
+      "home_win": 0.615,
+      "draw": 0.204,
+      "away_win": 0.182
     },
     "goals": {
-      "expected_home": 1.07,
+      "expected_home": 1.41,
       "expected_away": 0.99,
-      "expected_total": 2.06,
-      "over_2_5_prob": 0.482,
-      "under_2_5_prob": 0.518,
-      "over_1_5_prob": 0.641,
-      "btts_prob": 0.448
+      "expected_total": 2.39,
+      "over_2_5_prob": 0.455,
+      "under_2_5_prob": 0.545,
+      "over_1_5_prob": 0.69,
+      "btts_prob": 0.473
     },
     "best_odds": {
       "home_win": 1.74,
@@ -1076,13 +1130,13 @@
     },
     "value_bets": [
       {
-        "bet": "Egypt Win",
+        "bet": "Belgium Win",
         "market": "match_result",
-        "odds": 5.8,
-        "our_prob": 0.198,
-        "implied_prob": 0.172,
-        "edge": 0.026,
-        "expected_value": 0.151
+        "odds": 1.74,
+        "our_prob": 0.615,
+        "implied_prob": 0.575,
+        "edge": 0.04,
+        "expected_value": 0.069
       }
     ],
     "data_quality": {
@@ -1114,29 +1168,29 @@
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.504,
+        "confidence": 0.486,
         "odds": null
       },
       {
-        "tip": "Over 2.5 Goals",
+        "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.505,
-        "odds": 1.98
+        "confidence": 0.53,
+        "odds": 1.92
       }
     ],
     "probabilities": {
-      "home_win": 0.207,
-      "draw": 0.218,
+      "home_win": 0.221,
+      "draw": 0.203,
       "away_win": 0.576
     },
     "goals": {
-      "expected_home": 1.08,
-      "expected_away": 1.15,
-      "expected_total": 2.23,
-      "over_2_5_prob": 0.505,
-      "under_2_5_prob": 0.495,
-      "over_1_5_prob": 0.683,
-      "btts_prob": 0.504
+      "expected_home": 1.06,
+      "expected_away": 1.36,
+      "expected_total": 2.42,
+      "over_2_5_prob": 0.47,
+      "under_2_5_prob": 0.53,
+      "over_1_5_prob": 0.695,
+      "btts_prob": 0.486
     },
     "best_odds": {
       "home_win": 7.8,
@@ -1150,10 +1204,10 @@
         "bet": "Saudi Arabia Win",
         "market": "match_result",
         "odds": 7.8,
-        "our_prob": 0.207,
+        "our_prob": 0.221,
         "implied_prob": 0.128,
-        "edge": 0.079,
-        "expected_value": 0.612
+        "edge": 0.093,
+        "expected_value": 0.727
       }
     ],
     "data_quality": {
@@ -1170,44 +1224,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/22.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/1571.png",
     "commence_time": "2026-06-16T01:00:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
-    "prediction_market": "goals",
-    "confidence": 0.863,
-    "risk_level": "very_low",
+    "prediction": "Iran Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.573,
+    "risk_level": "low",
     "top_tips": [
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.863,
-        "odds": null
-      },
       {
         "tip": "Iran Win",
         "market": "match_result",
-        "confidence": 0.496,
+        "confidence": 0.573,
         "odds": 1.99
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.556,
+        "odds": 2.14
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.504,
+        "confidence": 0.488,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.496,
-      "draw": 0.273,
-      "away_win": 0.231
+      "home_win": 0.573,
+      "draw": 0.224,
+      "away_win": 0.203
     },
     "goals": {
-      "expected_home": 1.4,
-      "expected_away": 1.55,
-      "expected_total": 2.95,
-      "over_2_5_prob": 0.445,
-      "under_2_5_prob": 0.555,
-      "over_1_5_prob": 0.863,
-      "btts_prob": 0.504
+      "expected_home": 1.41,
+      "expected_away": 1.04,
+      "expected_total": 2.45,
+      "over_2_5_prob": 0.444,
+      "under_2_5_prob": 0.556,
+      "over_1_5_prob": 0.702,
+      "btts_prob": 0.488
     },
     "best_odds": {
       "home_win": 1.99,
@@ -1221,10 +1275,19 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.14,
-        "our_prob": 0.555,
+        "our_prob": 0.556,
         "implied_prob": 0.467,
-        "edge": 0.088,
-        "expected_value": 0.188
+        "edge": 0.089,
+        "expected_value": 0.19
+      },
+      {
+        "bet": "Iran Win",
+        "market": "match_result",
+        "odds": 1.99,
+        "our_prob": 0.573,
+        "implied_prob": 0.503,
+        "edge": 0.07,
+        "expected_value": 0.14
       }
     ],
     "data_quality": {
@@ -1244,41 +1307,41 @@
     "prediction": "France Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.626,
+    "confidence": 0.673,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "France Win",
         "market": "match_result",
-        "confidence": 0.626,
+        "confidence": 0.673,
         "odds": 1.47
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.538,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.885,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.558,
+        "confidence": 0.771,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.626,
-      "draw": 0.188,
-      "away_win": 0.186
+      "home_win": 0.673,
+      "draw": 0.156,
+      "away_win": 0.172
     },
     "goals": {
-      "expected_home": 1.87,
-      "expected_away": 1.17,
-      "expected_total": 3.04,
-      "over_2_5_prob": 0.518,
-      "under_2_5_prob": 0.482,
-      "over_1_5_prob": 0.885,
-      "btts_prob": 0.442
+      "expected_home": 1.76,
+      "expected_away": 1.05,
+      "expected_total": 2.81,
+      "over_2_5_prob": 0.525,
+      "under_2_5_prob": 0.475,
+      "over_1_5_prob": 0.771,
+      "btts_prob": 0.538
     },
     "best_odds": {
       "home_win": 1.47,
@@ -1292,10 +1355,10 @@
         "bet": "Senegal Win",
         "market": "match_result",
         "odds": 8.2,
-        "our_prob": 0.186,
+        "our_prob": 0.172,
         "implied_prob": 0.122,
-        "edge": 0.064,
-        "expected_value": 0.525
+        "edge": 0.05,
+        "expected_value": 0.409
       }
     ],
     "data_quality": {
@@ -1315,41 +1378,41 @@
     "prediction": "Norway Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.736,
-    "risk_level": "very_low",
+    "confidence": 0.665,
+    "risk_level": "low",
     "top_tips": [
       {
         "tip": "Norway Win",
         "market": "match_result",
-        "confidence": 0.736,
+        "confidence": 0.665,
         "odds": 1.25
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.506,
+        "odds": null
       },
       {
         "tip": "Over 2.5 Goals",
         "market": "goals",
-        "confidence": 0.585,
+        "confidence": 0.521,
         "odds": 1.94
-      },
-      {
-        "tip": "Norway or Draw",
-        "market": "double_chance",
-        "confidence": 0.89,
-        "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.11,
-      "draw": 0.154,
-      "away_win": 0.736
+      "home_win": 0.16,
+      "draw": 0.176,
+      "away_win": 0.665
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.585,
-      "under_2_5_prob": 0.415,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.14,
+      "expected_away": 1.36,
+      "expected_total": 2.5,
+      "over_2_5_prob": 0.521,
+      "under_2_5_prob": 0.479,
+      "over_1_5_prob": 0.713,
+      "btts_prob": 0.506
     },
     "best_odds": {
       "home_win": 17.0,
@@ -1363,19 +1426,28 @@
         "bet": "Iraq Win",
         "market": "match_result",
         "odds": 17.0,
-        "our_prob": 0.11,
+        "our_prob": 0.16,
         "implied_prob": 0.059,
-        "edge": 0.051,
-        "expected_value": 0.869
+        "edge": 0.101,
+        "expected_value": 1.712
       },
       {
-        "bet": "Over 2.5 Goals",
+        "bet": "Draw",
+        "market": "match_result",
+        "odds": 7.25,
+        "our_prob": 0.176,
+        "implied_prob": 0.138,
+        "edge": 0.038,
+        "expected_value": 0.275
+      },
+      {
+        "bet": "Under 2.5 Goals",
         "market": "goals",
-        "odds": 1.94,
-        "our_prob": 0.585,
-        "implied_prob": 0.515,
+        "odds": 2.44,
+        "our_prob": 0.479,
+        "implied_prob": 0.41,
         "edge": 0.069,
-        "expected_value": 0.134
+        "expected_value": 0.17
       }
     ],
     "data_quality": {
@@ -1395,41 +1467,41 @@
     "prediction": "Argentina Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.659,
-    "risk_level": "low",
+    "confidence": 0.711,
+    "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "Argentina Win",
         "market": "match_result",
-        "confidence": 0.659,
+        "confidence": 0.711,
         "odds": 1.43
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.517,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.831,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.584,
+        "confidence": 0.762,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.659,
-      "draw": 0.211,
-      "away_win": 0.131
+      "home_win": 0.711,
+      "draw": 0.178,
+      "away_win": 0.111
     },
     "goals": {
-      "expected_home": 1.67,
-      "expected_away": 1.15,
-      "expected_total": 2.82,
-      "over_2_5_prob": 0.506,
-      "under_2_5_prob": 0.494,
-      "over_1_5_prob": 0.831,
-      "btts_prob": 0.416
+      "expected_home": 1.79,
+      "expected_away": 0.97,
+      "expected_total": 2.76,
+      "over_2_5_prob": 0.513,
+      "under_2_5_prob": 0.487,
+      "over_1_5_prob": 0.762,
+      "btts_prob": 0.517
     },
     "best_odds": {
       "home_win": 1.43,
@@ -1438,17 +1510,7 @@
       "over_2_5": 1.97,
       "under_2_5": 1.98
     },
-    "value_bets": [
-      {
-        "bet": "Algeria Win",
-        "market": "match_result",
-        "odds": 10.0,
-        "our_prob": 0.131,
-        "implied_prob": 0.1,
-        "edge": 0.031,
-        "expected_value": 0.308
-      }
-    ],
+    "value_bets": [],
     "data_quality": {
       "home_has_wc_data": true,
       "away_has_wc_data": false,
@@ -1466,41 +1528,41 @@
     "prediction": "Austria Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.696,
+    "confidence": 0.665,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Austria Win",
         "market": "match_result",
-        "confidence": 0.696,
+        "confidence": 0.665,
         "odds": 1.35
       },
       {
-        "tip": "Over 2.5 Goals",
-        "market": "goals",
-        "confidence": 0.571,
-        "odds": 2.08
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.48,
+        "odds": null
       },
       {
         "tip": "Austria or Draw",
         "market": "double_chance",
-        "confidence": 0.878,
+        "confidence": 0.849,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.696,
-      "draw": 0.182,
-      "away_win": 0.122
+      "home_win": 0.665,
+      "draw": 0.184,
+      "away_win": 0.151
     },
     "goals": {
       "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.571,
-      "under_2_5_prob": 0.429,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_away": 1.04,
+      "expected_total": 2.4,
+      "over_2_5_prob": 0.5,
+      "under_2_5_prob": 0.5,
+      "over_1_5_prob": 0.691,
+      "btts_prob": 0.48
     },
     "best_odds": {
       "home_win": 1.35,
@@ -1514,19 +1576,19 @@
         "bet": "Jordan Win",
         "market": "match_result",
         "odds": 10.5,
-        "our_prob": 0.122,
+        "our_prob": 0.151,
         "implied_prob": 0.095,
-        "edge": 0.027,
-        "expected_value": 0.282
+        "edge": 0.056,
+        "expected_value": 0.587
       },
       {
-        "bet": "Over 2.5 Goals",
+        "bet": "Under 2.5 Goals",
         "market": "goals",
-        "odds": 2.08,
-        "our_prob": 0.571,
-        "implied_prob": 0.481,
-        "edge": 0.09,
-        "expected_value": 0.187
+        "odds": 2.32,
+        "our_prob": 0.5,
+        "implied_prob": 0.431,
+        "edge": 0.069,
+        "expected_value": 0.16
       }
     ],
     "data_quality": {
@@ -1546,41 +1608,41 @@
     "prediction": "Portugal Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.719,
+    "confidence": 0.754,
     "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "Portugal Win",
         "market": "match_result",
-        "confidence": 0.719,
+        "confidence": 0.754,
         "odds": 1.31
       },
       {
-        "tip": "Over 1.5 Goals",
+        "tip": "Over 2.5 Goals",
         "market": "goals",
-        "confidence": 0.857,
-        "odds": null
+        "confidence": 0.541,
+        "odds": 2.1
       },
       {
         "tip": "Portugal or Draw",
         "market": "double_chance",
-        "confidence": 0.892,
+        "confidence": 0.906,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.719,
-      "draw": 0.173,
-      "away_win": 0.108
+      "home_win": 0.754,
+      "draw": 0.151,
+      "away_win": 0.094
     },
     "goals": {
-      "expected_home": 1.76,
-      "expected_away": 1.17,
-      "expected_total": 2.93,
-      "over_2_5_prob": 0.565,
-      "under_2_5_prob": 0.435,
-      "over_1_5_prob": 0.857,
-      "btts_prob": 0.459
+      "expected_home": 1.8,
+      "expected_away": 0.94,
+      "expected_total": 2.74,
+      "over_2_5_prob": 0.541,
+      "under_2_5_prob": 0.459,
+      "over_1_5_prob": 0.759,
+      "btts_prob": 0.508
     },
     "best_odds": {
       "home_win": 1.31,
@@ -1594,19 +1656,19 @@
         "bet": "DR Congo Win",
         "market": "match_result",
         "odds": 13.5,
-        "our_prob": 0.108,
+        "our_prob": 0.094,
         "implied_prob": 0.074,
-        "edge": 0.034,
-        "expected_value": 0.461
+        "edge": 0.02,
+        "expected_value": 0.273
       },
       {
         "bet": "Over 2.5 Goals",
         "market": "goals",
         "odds": 2.1,
-        "our_prob": 0.565,
+        "our_prob": 0.541,
         "implied_prob": 0.476,
-        "edge": 0.089,
-        "expected_value": 0.187
+        "edge": 0.065,
+        "expected_value": 0.136
       }
     ],
     "data_quality": {
@@ -1626,41 +1688,41 @@
     "prediction": "England Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.529,
-    "risk_level": "medium",
+    "confidence": 0.553,
+    "risk_level": "low",
     "top_tips": [
       {
         "tip": "England Win",
         "market": "match_result",
-        "confidence": 0.529,
+        "confidence": 0.553,
         "odds": 1.78
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.533,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.811,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.605,
+        "confidence": 0.749,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.529,
-      "draw": 0.259,
+      "home_win": 0.553,
+      "draw": 0.235,
       "away_win": 0.212
     },
     "goals": {
-      "expected_home": 1.73,
-      "expected_away": 1.02,
-      "expected_total": 2.74,
-      "over_2_5_prob": 0.466,
-      "under_2_5_prob": 0.534,
-      "over_1_5_prob": 0.811,
-      "btts_prob": 0.395
+      "expected_home": 1.56,
+      "expected_away": 1.12,
+      "expected_total": 2.69,
+      "over_2_5_prob": 0.484,
+      "under_2_5_prob": 0.516,
+      "over_1_5_prob": 0.749,
+      "btts_prob": 0.533
     },
     "best_odds": {
       "home_win": 1.78,
@@ -1676,17 +1738,8 @@
         "odds": 5.3,
         "our_prob": 0.212,
         "implied_prob": 0.189,
-        "edge": 0.024,
-        "expected_value": 0.126
-      },
-      {
-        "bet": "Under 2.5 Goals",
-        "market": "goals",
-        "odds": 1.98,
-        "our_prob": 0.534,
-        "implied_prob": 0.505,
-        "edge": 0.029,
-        "expected_value": 0.057
+        "edge": 0.023,
+        "expected_value": 0.123
       }
     ],
     "data_quality": {
@@ -1703,44 +1756,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/1532.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/1583.png",
     "commence_time": "2026-06-17T23:00:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
-    "prediction_market": "goals",
-    "confidence": 0.891,
-    "risk_level": "very_low",
+    "prediction": "Ghana Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.502,
+    "risk_level": "medium",
     "top_tips": [
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.891,
-        "odds": null
-      },
       {
         "tip": "Ghana Win",
         "market": "match_result",
-        "confidence": 0.465,
+        "confidence": 0.502,
         "odds": 2.12
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.504,
+        "confidence": 0.51,
         "odds": null
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.54,
+        "odds": 2.3
       }
     ],
     "probabilities": {
-      "home_win": 0.465,
-      "draw": 0.27,
-      "away_win": 0.265
+      "home_win": 0.502,
+      "draw": 0.245,
+      "away_win": 0.253
     },
     "goals": {
-      "expected_home": 1.52,
-      "expected_away": 1.55,
-      "expected_total": 3.06,
-      "over_2_5_prob": 0.457,
-      "under_2_5_prob": 0.543,
-      "over_1_5_prob": 0.891,
-      "btts_prob": 0.504
+      "expected_home": 1.39,
+      "expected_away": 1.14,
+      "expected_total": 2.53,
+      "over_2_5_prob": 0.46,
+      "under_2_5_prob": 0.54,
+      "over_1_5_prob": 0.718,
+      "btts_prob": 0.51
     },
     "best_odds": {
       "home_win": 2.12,
@@ -1754,10 +1807,19 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.3,
-        "our_prob": 0.543,
+        "our_prob": 0.54,
         "implied_prob": 0.435,
-        "edge": 0.109,
-        "expected_value": 0.25
+        "edge": 0.105,
+        "expected_value": 0.242
+      },
+      {
+        "bet": "Ghana Win",
+        "market": "match_result",
+        "odds": 2.12,
+        "our_prob": 0.502,
+        "implied_prob": 0.472,
+        "edge": 0.031,
+        "expected_value": 0.065
       }
     ],
     "data_quality": {
@@ -1777,41 +1839,41 @@
     "prediction": "Colombia Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.638,
+    "confidence": 0.66,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Colombia Win",
         "market": "match_result",
-        "confidence": 0.638,
+        "confidence": 0.66,
         "odds": 1.44
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.506,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.766,
-        "odds": null
-      },
-      {
-        "tip": "Colombia or Draw",
-        "market": "double_chance",
-        "confidence": 0.848,
+        "confidence": 0.716,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.152,
-      "draw": 0.21,
-      "away_win": 0.638
+      "home_win": 0.159,
+      "draw": 0.181,
+      "away_win": 0.66
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.5,
-      "under_2_5_prob": 0.5,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.11,
+      "expected_away": 1.41,
+      "expected_total": 2.52,
+      "over_2_5_prob": 0.48,
+      "under_2_5_prob": 0.52,
+      "over_1_5_prob": 0.716,
+      "btts_prob": 0.506
     },
     "best_odds": {
       "home_win": 9.6,
@@ -1825,10 +1887,10 @@
         "bet": "Uzbekistan Win",
         "market": "match_result",
         "odds": 9.6,
-        "our_prob": 0.152,
+        "our_prob": 0.159,
         "implied_prob": 0.104,
-        "edge": 0.048,
-        "expected_value": 0.46
+        "edge": 0.055,
+        "expected_value": 0.526
       }
     ],
     "data_quality": {
@@ -1848,41 +1910,41 @@
     "prediction": "Czech Republic Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.475,
+    "confidence": 0.489,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Czech Republic Win",
         "market": "match_result",
-        "confidence": 0.475,
+        "confidence": 0.489,
         "odds": 2.02
       },
       {
-        "tip": "Over 1.5 Goals",
+        "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.766,
-        "odds": null
+        "confidence": 0.564,
+        "odds": 2.25
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.552,
+        "confidence": 0.487,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.475,
-      "draw": 0.282,
-      "away_win": 0.242
+      "home_win": 0.489,
+      "draw": 0.265,
+      "away_win": 0.247
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.438,
-      "under_2_5_prob": 0.562,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.32,
+      "expected_away": 1.09,
+      "expected_total": 2.41,
+      "over_2_5_prob": 0.436,
+      "under_2_5_prob": 0.564,
+      "over_1_5_prob": 0.694,
+      "btts_prob": 0.487
     },
     "best_odds": {
       "home_win": 2.02,
@@ -1896,19 +1958,19 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.25,
-        "our_prob": 0.562,
+        "our_prob": 0.564,
         "implied_prob": 0.444,
-        "edge": 0.117,
-        "expected_value": 0.264
+        "edge": 0.12,
+        "expected_value": 0.269
       },
       {
         "bet": "South Africa Win",
         "market": "match_result",
         "odds": 4.5,
-        "our_prob": 0.242,
+        "our_prob": 0.247,
         "implied_prob": 0.222,
-        "edge": 0.02,
-        "expected_value": 0.091
+        "edge": 0.024,
+        "expected_value": 0.11
       }
     ],
     "data_quality": {
@@ -1928,41 +1990,41 @@
     "prediction": "Switzerland Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.582,
+    "confidence": 0.633,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Switzerland Win",
         "market": "match_result",
-        "confidence": 0.582,
+        "confidence": 0.633,
         "odds": 1.65
-      },
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.849,
-        "odds": null
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.476,
+        "confidence": 0.514,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.724,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.582,
-      "draw": 0.238,
-      "away_win": 0.18
+      "home_win": 0.633,
+      "draw": 0.198,
+      "away_win": 0.168
     },
     "goals": {
-      "expected_home": 1.38,
-      "expected_away": 1.52,
-      "expected_total": 2.9,
-      "over_2_5_prob": 0.474,
-      "under_2_5_prob": 0.526,
-      "over_1_5_prob": 0.849,
-      "btts_prob": 0.476
+      "expected_home": 1.43,
+      "expected_away": 1.12,
+      "expected_total": 2.56,
+      "over_2_5_prob": 0.472,
+      "under_2_5_prob": 0.528,
+      "over_1_5_prob": 0.724,
+      "btts_prob": 0.514
     },
     "best_odds": {
       "home_win": 1.65,
@@ -1971,7 +2033,17 @@
       "over_2_5": 2.06,
       "under_2_5": 1.8
     },
-    "value_bets": [],
+    "value_bets": [
+      {
+        "bet": "Switzerland Win",
+        "market": "match_result",
+        "odds": 1.65,
+        "our_prob": 0.633,
+        "implied_prob": 0.606,
+        "edge": 0.027,
+        "expected_value": 0.045
+      }
+    ],
     "data_quality": {
       "home_has_wc_data": true,
       "away_has_wc_data": false,
@@ -1989,41 +2061,41 @@
     "prediction": "Canada Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.684,
+    "confidence": 0.664,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Canada Win",
         "market": "match_result",
-        "confidence": 0.684,
+        "confidence": 0.664,
         "odds": 1.38
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.7,
+        "confidence": 0.503,
         "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.821,
+        "confidence": 0.715,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.684,
-      "draw": 0.196,
-      "away_win": 0.121
+      "home_win": 0.664,
+      "draw": 0.186,
+      "away_win": 0.15
     },
     "goals": {
-      "expected_home": 1.53,
-      "expected_away": 1.26,
-      "expected_total": 2.78,
-      "over_2_5_prob": 0.485,
-      "under_2_5_prob": 0.515,
-      "over_1_5_prob": 0.821,
-      "btts_prob": 0.7
+      "expected_home": 1.43,
+      "expected_away": 1.08,
+      "expected_total": 2.51,
+      "over_2_5_prob": 0.472,
+      "under_2_5_prob": 0.528,
+      "over_1_5_prob": 0.715,
+      "btts_prob": 0.503
     },
     "best_odds": {
       "home_win": 1.38,
@@ -2037,10 +2109,10 @@
         "bet": "Qatar Win",
         "market": "match_result",
         "odds": 11.0,
-        "our_prob": 0.121,
+        "our_prob": 0.15,
         "implied_prob": 0.091,
-        "edge": 0.03,
-        "expected_value": 0.328
+        "edge": 0.059,
+        "expected_value": 0.647
       }
     ],
     "data_quality": {
@@ -2060,41 +2132,41 @@
     "prediction": "Mexico Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.49,
+    "confidence": 0.498,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Mexico Win",
         "market": "match_result",
-        "confidence": 0.49,
+        "confidence": 0.498,
         "odds": 1.87
-      },
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.759,
-        "odds": null
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.476,
+        "confidence": 0.51,
         "odds": null
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.546,
+        "odds": 2.25
       }
     ],
     "probabilities": {
-      "home_win": 0.49,
-      "draw": 0.28,
-      "away_win": 0.23
+      "home_win": 0.498,
+      "draw": 0.263,
+      "away_win": 0.239
     },
     "goals": {
-      "expected_home": 1.42,
-      "expected_away": 1.12,
-      "expected_total": 2.54,
-      "over_2_5_prob": 0.446,
-      "under_2_5_prob": 0.554,
-      "over_1_5_prob": 0.759,
-      "btts_prob": 0.476
+      "expected_home": 1.39,
+      "expected_away": 1.14,
+      "expected_total": 2.52,
+      "over_2_5_prob": 0.454,
+      "under_2_5_prob": 0.546,
+      "over_1_5_prob": 0.718,
+      "btts_prob": 0.51
     },
     "best_odds": {
       "home_win": 1.87,
@@ -2108,19 +2180,19 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.25,
-        "our_prob": 0.554,
+        "our_prob": 0.546,
         "implied_prob": 0.444,
-        "edge": 0.109,
-        "expected_value": 0.246
+        "edge": 0.101,
+        "expected_value": 0.228
       },
       {
         "bet": "South Korea Win",
         "market": "match_result",
         "odds": 4.9,
-        "our_prob": 0.23,
+        "our_prob": 0.239,
         "implied_prob": 0.204,
-        "edge": 0.026,
-        "expected_value": 0.127
+        "edge": 0.035,
+        "expected_value": 0.169
       }
     ],
     "data_quality": {
@@ -2140,41 +2212,41 @@
     "prediction": "USA Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.491,
+    "confidence": 0.501,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "USA Win",
         "market": "match_result",
-        "confidence": 0.491,
+        "confidence": 0.501,
         "odds": 1.78
       },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.535,
+        "confidence": 0.548,
         "odds": 1.79
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.539,
+        "confidence": 0.49,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.491,
-      "draw": 0.25,
-      "away_win": 0.259
+      "home_win": 0.501,
+      "draw": 0.235,
+      "away_win": 0.264
     },
     "goals": {
-      "expected_home": 1.28,
-      "expected_away": 1.04,
-      "expected_total": 2.31,
-      "over_2_5_prob": 0.465,
-      "under_2_5_prob": 0.535,
-      "over_1_5_prob": 0.703,
-      "btts_prob": 0.461
+      "expected_home": 1.36,
+      "expected_away": 1.08,
+      "expected_total": 2.44,
+      "over_2_5_prob": 0.452,
+      "under_2_5_prob": 0.548,
+      "over_1_5_prob": 0.7,
+      "btts_prob": 0.49
     },
     "best_odds": {
       "home_win": 1.78,
@@ -2188,10 +2260,10 @@
         "bet": "Australia Win",
         "market": "match_result",
         "odds": 5.1,
-        "our_prob": 0.259,
+        "our_prob": 0.264,
         "implied_prob": 0.196,
-        "edge": 0.063,
-        "expected_value": 0.32
+        "edge": 0.068,
+        "expected_value": 0.348
       }
     ],
     "data_quality": {
@@ -2211,41 +2283,41 @@
     "prediction": "Morocco Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.456,
+    "confidence": 0.471,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Morocco Win",
         "market": "match_result",
-        "confidence": 0.456,
+        "confidence": 0.471,
         "odds": 2.07
       },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.569,
+        "confidence": 0.577,
         "odds": 2.28
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.56,
+        "confidence": 0.476,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.259,
-      "draw": 0.285,
-      "away_win": 0.456
+      "home_win": 0.262,
+      "draw": 0.267,
+      "away_win": 0.471
     },
     "goals": {
-      "expected_home": 1.16,
-      "expected_away": 1.09,
-      "expected_total": 2.25,
-      "over_2_5_prob": 0.431,
-      "under_2_5_prob": 0.569,
-      "over_1_5_prob": 0.688,
-      "btts_prob": 0.44
+      "expected_home": 1.12,
+      "expected_away": 1.22,
+      "expected_total": 2.34,
+      "over_2_5_prob": 0.423,
+      "under_2_5_prob": 0.577,
+      "over_1_5_prob": 0.679,
+      "btts_prob": 0.476
     },
     "best_odds": {
       "home_win": 4.3,
@@ -2259,19 +2331,19 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.28,
-        "our_prob": 0.569,
+        "our_prob": 0.577,
         "implied_prob": 0.439,
-        "edge": 0.13,
-        "expected_value": 0.297
+        "edge": 0.138,
+        "expected_value": 0.315
       },
       {
         "bet": "Scotland Win",
         "market": "match_result",
         "odds": 4.3,
-        "our_prob": 0.259,
+        "our_prob": 0.262,
         "implied_prob": 0.233,
-        "edge": 0.026,
-        "expected_value": 0.113
+        "edge": 0.03,
+        "expected_value": 0.128
       }
     ],
     "data_quality": {
@@ -2291,41 +2363,41 @@
     "prediction": "Brazil Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.849,
+    "confidence": 0.85,
     "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "Brazil Win",
         "market": "match_result",
-        "confidence": 0.849,
+        "confidence": 0.85,
         "odds": 1.09
-      },
-      {
-        "tip": "Over 2.5 Goals",
-        "market": "goals",
-        "confidence": 0.564,
-        "odds": 2.27
       },
       {
         "tip": "Brazil or Draw",
         "market": "double_chance",
-        "confidence": 0.941,
+        "confidence": 0.942,
         "odds": null
+      },
+      {
+        "tip": "Over 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.531,
+        "odds": 2.27
       }
     ],
     "probabilities": {
-      "home_win": 0.849,
+      "home_win": 0.85,
       "draw": 0.092,
-      "away_win": 0.059
+      "away_win": 0.058
     },
     "goals": {
-      "expected_home": 1.49,
-      "expected_away": 0.97,
-      "expected_total": 2.46,
-      "over_2_5_prob": 0.564,
-      "under_2_5_prob": 0.436,
-      "over_1_5_prob": 0.741,
-      "btts_prob": 0.426
+      "expected_home": 1.91,
+      "expected_away": 0.76,
+      "expected_total": 2.67,
+      "over_2_5_prob": 0.531,
+      "under_2_5_prob": 0.469,
+      "over_1_5_prob": 0.745,
+      "btts_prob": 0.453
     },
     "best_odds": {
       "home_win": 1.09,
@@ -2339,19 +2411,19 @@
         "bet": "Haiti Win",
         "market": "match_result",
         "odds": 46.0,
-        "our_prob": 0.059,
+        "our_prob": 0.058,
         "implied_prob": 0.022,
-        "edge": 0.037,
-        "expected_value": 1.694
+        "edge": 0.036,
+        "expected_value": 1.674
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 3.75,
-        "our_prob": 0.436,
+        "our_prob": 0.469,
         "implied_prob": 0.267,
-        "edge": 0.169,
-        "expected_value": 0.633
+        "edge": 0.202,
+        "expected_value": 0.757
       },
       {
         "bet": "Draw",
@@ -2366,10 +2438,10 @@
         "bet": "Over 2.5 Goals",
         "market": "goals",
         "odds": 2.27,
-        "our_prob": 0.564,
+        "our_prob": 0.531,
         "implied_prob": 0.441,
-        "edge": 0.124,
-        "expected_value": 0.281
+        "edge": 0.091,
+        "expected_value": 0.206
       }
     ],
     "data_quality": {
@@ -2386,44 +2458,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/777.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/1574.png",
     "commence_time": "2026-06-20T03:00:00Z",
-    "prediction": "Under 2.5 Goals",
-    "prediction_key": "under_2_5",
-    "prediction_market": "goals",
-    "confidence": 0.579,
-    "risk_level": "low",
+    "prediction": "Turkey Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.486,
+    "risk_level": "medium",
     "top_tips": [
+      {
+        "tip": "Turkey Win",
+        "market": "match_result",
+        "confidence": 0.486,
+        "odds": 2.28
+      },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.579,
+        "confidence": 0.566,
         "odds": 1.79
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.552,
-        "odds": null
-      },
-      {
-        "tip": "Turkey or Draw",
-        "market": "double_chance",
-        "confidence": 0.718,
+        "confidence": 0.495,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.426,
-      "draw": 0.292,
-      "away_win": 0.282
+      "home_win": 0.486,
+      "draw": 0.255,
+      "away_win": 0.259
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.421,
-      "under_2_5_prob": 0.579,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.37,
+      "expected_away": 1.09,
+      "expected_total": 2.46,
+      "over_2_5_prob": 0.434,
+      "under_2_5_prob": 0.566,
+      "over_1_5_prob": 0.705,
+      "btts_prob": 0.495
     },
     "best_odds": {
       "home_win": 2.28,
@@ -2432,7 +2504,17 @@
       "over_2_5": 2.35,
       "under_2_5": 1.79
     },
-    "value_bets": [],
+    "value_bets": [
+      {
+        "bet": "Turkey Win",
+        "market": "match_result",
+        "odds": 2.28,
+        "our_prob": 0.486,
+        "implied_prob": 0.439,
+        "edge": 0.048,
+        "expected_value": 0.109
+      }
+    ],
     "data_quality": {
       "home_has_wc_data": false,
       "away_has_wc_data": false,
@@ -2450,41 +2532,41 @@
     "prediction": "Netherlands Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.564,
+    "confidence": 0.624,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Netherlands Win",
         "market": "match_result",
-        "confidence": 0.564,
+        "confidence": 0.624,
         "odds": 1.68
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.505,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.791,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.608,
+        "confidence": 0.734,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.564,
-      "draw": 0.24,
-      "away_win": 0.196
+      "home_win": 0.624,
+      "draw": 0.2,
+      "away_win": 0.176
     },
     "goals": {
-      "expected_home": 1.63,
-      "expected_away": 1.04,
-      "expected_total": 2.66,
-      "over_2_5_prob": 0.499,
-      "under_2_5_prob": 0.501,
-      "over_1_5_prob": 0.791,
-      "btts_prob": 0.392
+      "expected_home": 1.61,
+      "expected_away": 1.0,
+      "expected_total": 2.61,
+      "over_2_5_prob": 0.491,
+      "under_2_5_prob": 0.509,
+      "over_1_5_prob": 0.734,
+      "btts_prob": 0.505
     },
     "best_odds": {
       "home_win": 1.68,
@@ -2493,7 +2575,17 @@
       "over_2_5": 1.97,
       "under_2_5": 1.88
     },
-    "value_bets": [],
+    "value_bets": [
+      {
+        "bet": "Netherlands Win",
+        "market": "match_result",
+        "odds": 1.68,
+        "our_prob": 0.624,
+        "implied_prob": 0.595,
+        "edge": 0.029,
+        "expected_value": 0.048
+      }
+    ],
     "data_quality": {
       "home_has_wc_data": true,
       "away_has_wc_data": false,
@@ -2511,41 +2603,41 @@
     "prediction": "Germany Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.601,
+    "confidence": 0.664,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Germany Win",
         "market": "match_result",
-        "confidence": 0.601,
+        "confidence": 0.664,
         "odds": 1.56
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.54,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.863,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.552,
+        "confidence": 0.768,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.601,
-      "draw": 0.224,
-      "away_win": 0.175
+      "home_win": 0.664,
+      "draw": 0.188,
+      "away_win": 0.148
     },
     "goals": {
-      "expected_home": 1.63,
-      "expected_away": 1.33,
-      "expected_total": 2.95,
-      "over_2_5_prob": 0.525,
-      "under_2_5_prob": 0.475,
-      "over_1_5_prob": 0.863,
-      "btts_prob": 0.448
+      "expected_home": 1.72,
+      "expected_away": 1.07,
+      "expected_total": 2.79,
+      "over_2_5_prob": 0.527,
+      "under_2_5_prob": 0.473,
+      "over_1_5_prob": 0.768,
+      "btts_prob": 0.54
     },
     "best_odds": {
       "home_win": 1.56,
@@ -2556,22 +2648,22 @@
     },
     "value_bets": [
       {
-        "bet": "Ivory Coast Win",
-        "market": "match_result",
-        "odds": 6.5,
-        "our_prob": 0.175,
-        "implied_prob": 0.154,
-        "edge": 0.021,
-        "expected_value": 0.138
-      },
-      {
         "bet": "Over 2.5 Goals",
         "market": "goals",
         "odds": 1.99,
-        "our_prob": 0.525,
+        "our_prob": 0.527,
         "implied_prob": 0.503,
-        "edge": 0.022,
-        "expected_value": 0.045
+        "edge": 0.025,
+        "expected_value": 0.049
+      },
+      {
+        "bet": "Germany Win",
+        "market": "match_result",
+        "odds": 1.56,
+        "our_prob": 0.664,
+        "implied_prob": 0.641,
+        "edge": 0.023,
+        "expected_value": 0.036
       }
     ],
     "data_quality": {
@@ -2601,10 +2693,10 @@
         "odds": 1.28
       },
       {
-        "tip": "Over 2.5 Goals",
-        "market": "goals",
-        "confidence": 0.553,
-        "odds": 1.9
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.519,
+        "odds": null
       },
       {
         "tip": "Ecuador or Draw",
@@ -2619,13 +2711,13 @@
       "away_win": 0.101
     },
     "goals": {
-      "expected_home": 1.4,
-      "expected_away": 1.1,
-      "expected_total": 2.51,
-      "over_2_5_prob": 0.553,
-      "under_2_5_prob": 0.447,
-      "over_1_5_prob": 0.752,
-      "btts_prob": 0.448
+      "expected_home": 1.49,
+      "expected_away": 1.11,
+      "expected_total": 2.6,
+      "over_2_5_prob": 0.517,
+      "under_2_5_prob": 0.483,
+      "over_1_5_prob": 0.732,
+      "btts_prob": 0.519
     },
     "best_odds": {
       "home_win": 1.28,
@@ -2654,13 +2746,13 @@
         "expected_value": 0.151
       },
       {
-        "bet": "Over 2.5 Goals",
+        "bet": "Under 2.5 Goals",
         "market": "goals",
-        "odds": 1.9,
-        "our_prob": 0.553,
-        "implied_prob": 0.526,
-        "edge": 0.027,
-        "expected_value": 0.052
+        "odds": 2.2,
+        "our_prob": 0.483,
+        "implied_prob": 0.455,
+        "edge": 0.028,
+        "expected_value": 0.062
       }
     ],
     "data_quality": {
@@ -2680,41 +2772,41 @@
     "prediction": "Japan Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.496,
+    "confidence": 0.47,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Japan Win",
         "market": "match_result",
-        "confidence": 0.496,
+        "confidence": 0.47,
         "odds": 1.88
       },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.552,
+        "confidence": 0.576,
         "odds": 2.33
       },
       {
         "tip": "BTTS No",
         "market": "btts",
-        "confidence": 0.566,
+        "confidence": 0.537,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.237,
-      "draw": 0.266,
-      "away_win": 0.496
+      "home_win": 0.265,
+      "draw": 0.265,
+      "away_win": 0.47
     },
     "goals": {
-      "expected_home": 0.97,
-      "expected_away": 0.9,
-      "expected_total": 1.87,
-      "over_2_5_prob": 0.448,
-      "under_2_5_prob": 0.552,
-      "over_1_5_prob": 0.592,
-      "btts_prob": 0.434
+      "expected_home": 1.12,
+      "expected_away": 1.17,
+      "expected_total": 2.28,
+      "over_2_5_prob": 0.424,
+      "under_2_5_prob": 0.576,
+      "over_1_5_prob": 0.665,
+      "btts_prob": 0.463
     },
     "best_odds": {
       "home_win": 5.1,
@@ -2725,22 +2817,22 @@
     },
     "value_bets": [
       {
-        "bet": "Under 2.5 Goals",
-        "market": "goals",
-        "odds": 2.33,
-        "our_prob": 0.552,
-        "implied_prob": 0.429,
-        "edge": 0.123,
-        "expected_value": 0.286
-      },
-      {
         "bet": "Tunisia Win",
         "market": "match_result",
         "odds": 5.1,
-        "our_prob": 0.237,
+        "our_prob": 0.265,
         "implied_prob": 0.196,
-        "edge": 0.041,
-        "expected_value": 0.21
+        "edge": 0.069,
+        "expected_value": 0.353
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 2.33,
+        "our_prob": 0.576,
+        "implied_prob": 0.429,
+        "edge": 0.147,
+        "expected_value": 0.343
       }
     ],
     "data_quality": {
@@ -2760,41 +2852,41 @@
     "prediction": "Spain Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.732,
+    "confidence": 0.737,
     "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "Spain Win",
         "market": "match_result",
-        "confidence": 0.732,
+        "confidence": 0.737,
         "odds": 1.13
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.822,
+        "confidence": 0.746,
         "odds": null
       },
       {
         "tip": "Spain or Draw",
         "market": "double_chance",
-        "confidence": 0.878,
+        "confidence": 0.877,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.732,
-      "draw": 0.146,
-      "away_win": 0.122
+      "home_win": 0.737,
+      "draw": 0.14,
+      "away_win": 0.123
     },
     "goals": {
-      "expected_home": 1.83,
-      "expected_away": 0.95,
-      "expected_total": 2.79,
-      "over_2_5_prob": 0.461,
-      "under_2_5_prob": 0.539,
-      "over_1_5_prob": 0.822,
-      "btts_prob": 0.488
+      "expected_home": 1.78,
+      "expected_away": 0.89,
+      "expected_total": 2.67,
+      "over_2_5_prob": 0.48,
+      "under_2_5_prob": 0.52,
+      "over_1_5_prob": 0.746,
+      "btts_prob": 0.489
     },
     "best_odds": {
       "home_win": 1.13,
@@ -2808,28 +2900,37 @@
         "bet": "Saudi Arabia Win",
         "market": "match_result",
         "odds": 29.0,
-        "our_prob": 0.122,
+        "our_prob": 0.123,
         "implied_prob": 0.034,
-        "edge": 0.088,
-        "expected_value": 2.541
+        "edge": 0.089,
+        "expected_value": 2.577
       },
       {
         "bet": "Draw",
         "market": "match_result",
         "odds": 11.0,
-        "our_prob": 0.146,
+        "our_prob": 0.14,
         "implied_prob": 0.091,
-        "edge": 0.055,
-        "expected_value": 0.601
+        "edge": 0.049,
+        "expected_value": 0.538
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.5,
-        "our_prob": 0.539,
+        "our_prob": 0.52,
         "implied_prob": 0.4,
-        "edge": 0.139,
-        "expected_value": 0.348
+        "edge": 0.12,
+        "expected_value": 0.3
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.21,
+        "our_prob": 0.48,
+        "implied_prob": 0.452,
+        "edge": 0.027,
+        "expected_value": 0.06
       }
     ],
     "data_quality": {
@@ -2849,41 +2950,41 @@
     "prediction": "Belgium Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.609,
+    "confidence": 0.625,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Belgium Win",
         "market": "match_result",
-        "confidence": 0.609,
+        "confidence": 0.625,
         "odds": 1.44
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.504,
+        "confidence": 0.494,
         "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.738,
+        "confidence": 0.714,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.609,
-      "draw": 0.208,
-      "away_win": 0.183
+      "home_win": 0.625,
+      "draw": 0.183,
+      "away_win": 0.191
     },
     "goals": {
-      "expected_home": 1.41,
-      "expected_away": 1.04,
-      "expected_total": 2.45,
-      "over_2_5_prob": 0.51,
-      "under_2_5_prob": 0.49,
-      "over_1_5_prob": 0.738,
-      "btts_prob": 0.504
+      "expected_home": 1.5,
+      "expected_away": 1.01,
+      "expected_total": 2.51,
+      "over_2_5_prob": 0.484,
+      "under_2_5_prob": 0.516,
+      "over_1_5_prob": 0.714,
+      "btts_prob": 0.494
     },
     "best_odds": {
       "home_win": 1.44,
@@ -2897,10 +2998,10 @@
         "bet": "Iran Win",
         "market": "match_result",
         "odds": 9.0,
-        "our_prob": 0.183,
+        "our_prob": 0.191,
         "implied_prob": 0.111,
-        "edge": 0.072,
-        "expected_value": 0.647
+        "edge": 0.08,
+        "expected_value": 0.723
       }
     ],
     "data_quality": {
@@ -2920,41 +3021,41 @@
     "prediction": "Uruguay Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.635,
+    "confidence": 0.694,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Uruguay Win",
         "market": "match_result",
-        "confidence": 0.635,
+        "confidence": 0.694,
         "odds": 1.51
       },
       {
         "tip": "Uruguay or Draw",
         "market": "double_chance",
-        "confidence": 0.852,
+        "confidence": 0.877,
         "odds": null
       },
       {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.552,
-        "odds": null
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.537,
+        "odds": 1.91
       }
     ],
     "probabilities": {
-      "home_win": 0.635,
-      "draw": 0.217,
-      "away_win": 0.148
+      "home_win": 0.694,
+      "draw": 0.183,
+      "away_win": 0.123
     },
     "goals": {
-      "expected_home": 1.18,
-      "expected_away": 0.99,
-      "expected_total": 2.18,
-      "over_2_5_prob": 0.496,
-      "under_2_5_prob": 0.504,
-      "over_1_5_prob": 0.669,
-      "btts_prob": 0.448
+      "expected_home": 1.6,
+      "expected_away": 0.8,
+      "expected_total": 2.4,
+      "over_2_5_prob": 0.463,
+      "under_2_5_prob": 0.537,
+      "over_1_5_prob": 0.692,
+      "btts_prob": 0.44
     },
     "best_odds": {
       "home_win": 1.51,
@@ -2965,13 +3066,13 @@
     },
     "value_bets": [
       {
-        "bet": "Cape Verde Win",
+        "bet": "Uruguay Win",
         "market": "match_result",
-        "odds": 8.0,
-        "our_prob": 0.148,
-        "implied_prob": 0.125,
-        "edge": 0.023,
-        "expected_value": 0.183
+        "odds": 1.51,
+        "our_prob": 0.694,
+        "implied_prob": 0.662,
+        "edge": 0.032,
+        "expected_value": 0.048
       }
     ],
     "data_quality": {
@@ -2991,41 +3092,41 @@
     "prediction": "Egypt Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.529,
+    "confidence": 0.532,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Egypt Win",
         "market": "match_result",
-        "confidence": 0.529,
+        "confidence": 0.532,
         "odds": 1.77
       },
       {
-        "tip": "Over 1.5 Goals",
+        "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.766,
-        "odds": null
+        "confidence": 0.576,
+        "odds": 1.85
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.552,
+        "confidence": 0.472,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.215,
-      "draw": 0.256,
-      "away_win": 0.529
+      "home_win": 0.226,
+      "draw": 0.242,
+      "away_win": 0.532
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.435,
-      "under_2_5_prob": 0.565,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.09,
+      "expected_away": 1.24,
+      "expected_total": 2.33,
+      "over_2_5_prob": 0.424,
+      "under_2_5_prob": 0.576,
+      "over_1_5_prob": 0.676,
+      "btts_prob": 0.472
     },
     "best_odds": {
       "home_win": 5.36,
@@ -3039,19 +3140,19 @@
         "bet": "New Zealand Win",
         "market": "match_result",
         "odds": 5.36,
-        "our_prob": 0.215,
+        "our_prob": 0.226,
         "implied_prob": 0.187,
-        "edge": 0.028,
-        "expected_value": 0.151
+        "edge": 0.04,
+        "expected_value": 0.212
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 1.85,
-        "our_prob": 0.565,
+        "our_prob": 0.576,
         "implied_prob": 0.541,
-        "edge": 0.024,
-        "expected_value": 0.045
+        "edge": 0.036,
+        "expected_value": 0.066
       }
     ],
     "data_quality": {
@@ -3071,41 +3172,41 @@
     "prediction": "Argentina Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.56,
+    "confidence": 0.64,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Argentina Win",
         "market": "match_result",
-        "confidence": 0.56,
+        "confidence": 0.64,
         "odds": 1.7
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.52,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.831,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.584,
+        "confidence": 0.765,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.56,
-      "draw": 0.249,
-      "away_win": 0.191
+      "home_win": 0.64,
+      "draw": 0.206,
+      "away_win": 0.154
     },
     "goals": {
-      "expected_home": 1.67,
-      "expected_away": 1.15,
-      "expected_total": 2.82,
-      "over_2_5_prob": 0.485,
-      "under_2_5_prob": 0.515,
-      "over_1_5_prob": 0.831,
-      "btts_prob": 0.416
+      "expected_home": 1.81,
+      "expected_away": 0.97,
+      "expected_total": 2.78,
+      "over_2_5_prob": 0.505,
+      "under_2_5_prob": 0.495,
+      "over_1_5_prob": 0.765,
+      "btts_prob": 0.52
     },
     "best_odds": {
       "home_win": 1.7,
@@ -3114,7 +3215,17 @@
       "over_2_5": 1.98,
       "under_2_5": 1.85
     },
-    "value_bets": [],
+    "value_bets": [
+      {
+        "bet": "Argentina Win",
+        "market": "match_result",
+        "odds": 1.7,
+        "our_prob": 0.64,
+        "implied_prob": 0.588,
+        "edge": 0.051,
+        "expected_value": 0.087
+      }
+    ],
     "data_quality": {
       "home_has_wc_data": true,
       "away_has_wc_data": false,
@@ -3132,41 +3243,41 @@
     "prediction": "France Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.806,
+    "confidence": 0.818,
     "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "France Win",
         "market": "match_result",
-        "confidence": 0.806,
+        "confidence": 0.818,
         "odds": 1.14
-      },
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.843,
-        "odds": null
       },
       {
         "tip": "France or Draw",
         "market": "double_chance",
-        "confidence": 0.931,
+        "confidence": 0.934,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.765,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.806,
-      "draw": 0.125,
-      "away_win": 0.069
+      "home_win": 0.818,
+      "draw": 0.116,
+      "away_win": 0.066
     },
     "goals": {
-      "expected_home": 1.72,
-      "expected_away": 1.15,
-      "expected_total": 2.87,
-      "over_2_5_prob": 0.452,
-      "under_2_5_prob": 0.548,
-      "over_1_5_prob": 0.843,
-      "btts_prob": 0.416
+      "expected_home": 1.91,
+      "expected_away": 0.87,
+      "expected_total": 2.78,
+      "over_2_5_prob": 0.489,
+      "under_2_5_prob": 0.511,
+      "over_1_5_prob": 0.765,
+      "btts_prob": 0.494
     },
     "best_odds": {
       "home_win": 1.14,
@@ -3180,28 +3291,28 @@
         "bet": "Iraq Win",
         "market": "match_result",
         "odds": 28.0,
-        "our_prob": 0.069,
+        "our_prob": 0.066,
         "implied_prob": 0.036,
-        "edge": 0.033,
-        "expected_value": 0.93
+        "edge": 0.03,
+        "expected_value": 0.84
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.4,
-        "our_prob": 0.548,
+        "our_prob": 0.511,
         "implied_prob": 0.417,
-        "edge": 0.131,
-        "expected_value": 0.315
+        "edge": 0.094,
+        "expected_value": 0.226
       },
       {
-        "bet": "Draw",
-        "market": "match_result",
-        "odds": 10.15,
-        "our_prob": 0.125,
-        "implied_prob": 0.099,
-        "edge": 0.027,
-        "expected_value": 0.27
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.27,
+        "our_prob": 0.489,
+        "implied_prob": 0.441,
+        "edge": 0.048,
+        "expected_value": 0.11
       }
     ],
     "data_quality": {
@@ -3218,44 +3329,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/1090.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/1531.png",
     "commence_time": "2026-06-23T00:00:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
-    "prediction_market": "goals",
-    "confidence": 0.807,
-    "risk_level": "very_low",
+    "prediction": "Both Teams to Score (GG)",
+    "prediction_key": "btts_yes",
+    "prediction_market": "btts",
+    "confidence": 0.536,
+    "risk_level": "medium",
     "top_tips": [
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.807,
-        "odds": null
-      },
-      {
-        "tip": "Norway Win",
-        "market": "match_result",
-        "confidence": 0.452,
-        "odds": 2.18
-      },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.476,
+        "confidence": 0.536,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.741,
+        "odds": null
+      },
+      {
+        "tip": "Norway or Draw",
+        "market": "double_chance",
+        "confidence": 0.702,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.452,
-      "draw": 0.269,
-      "away_win": 0.279
+      "home_win": 0.426,
+      "draw": 0.276,
+      "away_win": 0.298
     },
     "goals": {
-      "expected_home": 1.51,
-      "expected_away": 1.22,
-      "expected_total": 2.73,
-      "over_2_5_prob": 0.487,
-      "under_2_5_prob": 0.513,
-      "over_1_5_prob": 0.807,
-      "btts_prob": 0.476
+      "expected_home": 1.4,
+      "expected_away": 1.24,
+      "expected_total": 2.64,
+      "over_2_5_prob": 0.49,
+      "under_2_5_prob": 0.51,
+      "over_1_5_prob": 0.741,
+      "btts_prob": 0.536
     },
     "best_odds": {
       "home_win": 2.18,
@@ -3282,41 +3393,41 @@
     "prediction": "Algeria Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.568,
-    "risk_level": "low",
+    "confidence": 0.525,
+    "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Algeria Win",
         "market": "match_result",
-        "confidence": 0.568,
+        "confidence": 0.525,
         "odds": 1.65
       },
       {
-        "tip": "Over 1.5 Goals",
+        "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.766,
-        "odds": null
+        "confidence": 0.542,
+        "odds": 1.88
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.552,
+        "confidence": 0.484,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.194,
-      "draw": 0.239,
-      "away_win": 0.568
+      "home_win": 0.23,
+      "draw": 0.245,
+      "away_win": 0.525
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.491,
-      "under_2_5_prob": 0.509,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.17,
+      "expected_away": 1.21,
+      "expected_total": 2.38,
+      "over_2_5_prob": 0.458,
+      "under_2_5_prob": 0.542,
+      "over_1_5_prob": 0.688,
+      "btts_prob": 0.484
     },
     "best_odds": {
       "home_win": 6.05,
@@ -3330,10 +3441,10 @@
         "bet": "Jordan Win",
         "market": "match_result",
         "odds": 6.05,
-        "our_prob": 0.194,
+        "our_prob": 0.23,
         "implied_prob": 0.165,
-        "edge": 0.029,
-        "expected_value": 0.173
+        "edge": 0.065,
+        "expected_value": 0.392
       }
     ],
     "data_quality": {
@@ -3353,41 +3464,41 @@
     "prediction": "Portugal Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.728,
+    "confidence": 0.761,
     "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "Portugal Win",
         "market": "match_result",
-        "confidence": 0.728,
+        "confidence": 0.761,
         "odds": 1.32
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.857,
+        "confidence": 0.756,
         "odds": null
       },
       {
         "tip": "Portugal or Draw",
         "market": "double_chance",
-        "confidence": 0.892,
+        "confidence": 0.906,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.728,
-      "draw": 0.165,
-      "away_win": 0.108
+      "home_win": 0.761,
+      "draw": 0.145,
+      "away_win": 0.094
     },
     "goals": {
-      "expected_home": 1.76,
-      "expected_away": 1.17,
-      "expected_total": 2.93,
-      "over_2_5_prob": 0.453,
-      "under_2_5_prob": 0.547,
-      "over_1_5_prob": 0.857,
-      "btts_prob": 0.459
+      "expected_home": 1.8,
+      "expected_away": 0.92,
+      "expected_total": 2.73,
+      "over_2_5_prob": 0.483,
+      "under_2_5_prob": 0.517,
+      "over_1_5_prob": 0.756,
+      "btts_prob": 0.503
     },
     "best_odds": {
       "home_win": 1.32,
@@ -3398,31 +3509,22 @@
     },
     "value_bets": [
       {
-        "bet": "Uzbekistan Win",
-        "market": "match_result",
-        "odds": 12.75,
-        "our_prob": 0.108,
-        "implied_prob": 0.078,
-        "edge": 0.029,
-        "expected_value": 0.372
-      },
-      {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.4,
-        "our_prob": 0.547,
+        "our_prob": 0.517,
         "implied_prob": 0.417,
-        "edge": 0.131,
-        "expected_value": 0.314
+        "edge": 0.101,
+        "expected_value": 0.241
       },
       {
         "bet": "Over 2.5 Goals",
         "market": "goals",
         "odds": 2.37,
-        "our_prob": 0.453,
+        "our_prob": 0.483,
         "implied_prob": 0.422,
-        "edge": 0.031,
-        "expected_value": 0.073
+        "edge": 0.061,
+        "expected_value": 0.144
       }
     ],
     "data_quality": {
@@ -3442,41 +3544,41 @@
     "prediction": "England Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.668,
-    "risk_level": "low",
+    "confidence": 0.711,
+    "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "England Win",
         "market": "match_result",
-        "confidence": 0.668,
+        "confidence": 0.711,
         "odds": 1.36
-      },
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.92,
-        "odds": null
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.479,
+        "confidence": 0.539,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.788,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.668,
-      "draw": 0.174,
-      "away_win": 0.158
+      "home_win": 0.711,
+      "draw": 0.148,
+      "away_win": 0.14
     },
     "goals": {
-      "expected_home": 2.17,
-      "expected_away": 1.19,
-      "expected_total": 3.36,
+      "expected_home": 1.92,
+      "expected_away": 1.0,
+      "expected_total": 2.92,
       "over_2_5_prob": 0.558,
       "under_2_5_prob": 0.442,
-      "over_1_5_prob": 0.92,
-      "btts_prob": 0.479
+      "over_1_5_prob": 0.788,
+      "btts_prob": 0.539
     },
     "best_odds": {
       "home_win": 1.36,
@@ -3490,10 +3592,10 @@
         "bet": "Ghana Win",
         "market": "match_result",
         "odds": 10.25,
-        "our_prob": 0.158,
+        "our_prob": 0.14,
         "implied_prob": 0.098,
-        "edge": 0.061,
-        "expected_value": 0.622
+        "edge": 0.043,
+        "expected_value": 0.439
       }
     ],
     "data_quality": {
@@ -3513,41 +3615,41 @@
     "prediction": "Croatia Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.599,
+    "confidence": 0.644,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Croatia Win",
         "market": "match_result",
-        "confidence": 0.599,
+        "confidence": 0.644,
         "odds": 1.54
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.584,
+        "confidence": 0.493,
         "odds": null
       },
       {
-        "tip": "Over 1.5 Goals",
+        "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.736,
-        "odds": null
+        "confidence": 0.535,
+        "odds": 1.81
       }
     ],
     "probabilities": {
-      "home_win": 0.168,
-      "draw": 0.233,
-      "away_win": 0.599
+      "home_win": 0.162,
+      "draw": 0.195,
+      "away_win": 0.644
     },
     "goals": {
-      "expected_home": 1.26,
-      "expected_away": 1.18,
-      "expected_total": 2.44,
-      "over_2_5_prob": 0.48,
-      "under_2_5_prob": 0.52,
-      "over_1_5_prob": 0.736,
-      "btts_prob": 0.416
+      "expected_home": 1.04,
+      "expected_away": 1.44,
+      "expected_total": 2.48,
+      "over_2_5_prob": 0.465,
+      "under_2_5_prob": 0.535,
+      "over_1_5_prob": 0.708,
+      "btts_prob": 0.493
     },
     "best_odds": {
       "home_win": 7.6,
@@ -3561,10 +3663,10 @@
         "bet": "Panama Win",
         "market": "match_result",
         "odds": 7.6,
-        "our_prob": 0.168,
+        "our_prob": 0.162,
         "implied_prob": 0.132,
-        "edge": 0.036,
-        "expected_value": 0.277
+        "edge": 0.03,
+        "expected_value": 0.229
       }
     ],
     "data_quality": {
@@ -3584,41 +3686,41 @@
     "prediction": "Colombia Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.623,
+    "confidence": 0.675,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Colombia Win",
         "market": "match_result",
-        "confidence": 0.623,
+        "confidence": 0.675,
         "odds": 1.51
       },
       {
-        "tip": "Over 1.5 Goals",
+        "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.766,
-        "odds": null
+        "confidence": 0.542,
+        "odds": 1.89
       },
       {
-        "tip": "Colombia or Draw",
-        "market": "double_chance",
-        "confidence": 0.853,
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.492,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.623,
-      "draw": 0.23,
-      "away_win": 0.147
+      "home_win": 0.675,
+      "draw": 0.192,
+      "away_win": 0.133
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.452,
-      "under_2_5_prob": 0.548,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.54,
+      "expected_away": 0.98,
+      "expected_total": 2.53,
+      "over_2_5_prob": 0.458,
+      "under_2_5_prob": 0.542,
+      "over_1_5_prob": 0.718,
+      "btts_prob": 0.492
     },
     "best_odds": {
       "home_win": 1.51,
@@ -3627,17 +3729,7 @@
       "over_2_5": 2.2,
       "under_2_5": 1.89
     },
-    "value_bets": [
-      {
-        "bet": "DR Congo Win",
-        "market": "match_result",
-        "odds": 8.6,
-        "our_prob": 0.147,
-        "implied_prob": 0.116,
-        "edge": 0.031,
-        "expected_value": 0.264
-      }
-    ],
+    "value_bets": [],
     "data_quality": {
       "home_has_wc_data": false,
       "away_has_wc_data": false,
@@ -3655,41 +3747,41 @@
     "prediction": "Bosnia & Herzegovina Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.583,
-    "risk_level": "low",
+    "confidence": 0.53,
+    "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Bosnia & Herzegovina Win",
         "market": "match_result",
-        "confidence": 0.583,
+        "confidence": 0.53,
         "odds": 1.64
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.548,
+        "odds": 1.83
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.56,
-        "odds": null
-      },
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.779,
+        "confidence": 0.478,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.583,
-      "draw": 0.241,
-      "away_win": 0.176
+      "home_win": 0.53,
+      "draw": 0.251,
+      "away_win": 0.218
     },
     "goals": {
-      "expected_home": 1.7,
-      "expected_away": 0.91,
-      "expected_total": 2.62,
-      "over_2_5_prob": 0.472,
-      "under_2_5_prob": 0.528,
-      "over_1_5_prob": 0.779,
-      "btts_prob": 0.56
+      "expected_home": 1.39,
+      "expected_away": 1.01,
+      "expected_total": 2.4,
+      "over_2_5_prob": 0.452,
+      "under_2_5_prob": 0.548,
+      "over_1_5_prob": 0.692,
+      "btts_prob": 0.478
     },
     "best_odds": {
       "home_win": 1.64,
@@ -3698,7 +3790,17 @@
       "over_2_5": 2.05,
       "under_2_5": 1.83
     },
-    "value_bets": [],
+    "value_bets": [
+      {
+        "bet": "Qatar Win",
+        "market": "match_result",
+        "odds": 6.25,
+        "our_prob": 0.218,
+        "implied_prob": 0.16,
+        "edge": 0.058,
+        "expected_value": 0.363
+      }
+    ],
     "data_quality": {
       "home_has_wc_data": false,
       "away_has_wc_data": true,
@@ -3716,41 +3818,41 @@
     "prediction": "Switzerland Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.535,
-    "risk_level": "medium",
+    "confidence": 0.572,
+    "risk_level": "low",
     "top_tips": [
       {
         "tip": "Switzerland Win",
         "market": "match_result",
-        "confidence": 0.535,
+        "confidence": 0.572,
         "odds": 2.18
-      },
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.891,
-        "odds": null
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.595,
+        "confidence": 0.528,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.739,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.535,
-      "draw": 0.237,
-      "away_win": 0.228
+      "home_win": 0.572,
+      "draw": 0.212,
+      "away_win": 0.217
     },
     "goals": {
-      "expected_home": 1.72,
-      "expected_away": 1.34,
-      "expected_total": 3.06,
-      "over_2_5_prob": 0.455,
-      "under_2_5_prob": 0.545,
-      "over_1_5_prob": 0.891,
-      "btts_prob": 0.595
+      "expected_home": 1.49,
+      "expected_away": 1.15,
+      "expected_total": 2.63,
+      "over_2_5_prob": 0.472,
+      "under_2_5_prob": 0.528,
+      "over_1_5_prob": 0.739,
+      "btts_prob": 0.528
     },
     "best_odds": {
       "home_win": 2.18,
@@ -3764,19 +3866,10 @@
         "bet": "Switzerland Win",
         "market": "match_result",
         "odds": 2.18,
-        "our_prob": 0.535,
+        "our_prob": 0.572,
         "implied_prob": 0.459,
-        "edge": 0.076,
-        "expected_value": 0.166
-      },
-      {
-        "bet": "Under 2.5 Goals",
-        "market": "goals",
-        "odds": 1.96,
-        "our_prob": 0.545,
-        "implied_prob": 0.51,
-        "edge": 0.035,
-        "expected_value": 0.068
+        "edge": 0.113,
+        "expected_value": 0.246
       }
     ],
     "data_quality": {
@@ -3796,41 +3889,41 @@
     "prediction": "Brazil Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.609,
+    "confidence": 0.647,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Brazil Win",
         "market": "match_result",
-        "confidence": 0.609,
+        "confidence": 0.647,
         "odds": 1.53
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.515,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.741,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.574,
+        "confidence": 0.731,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.179,
-      "draw": 0.211,
-      "away_win": 0.609
+      "home_win": 0.174,
+      "draw": 0.179,
+      "away_win": 0.647
     },
     "goals": {
-      "expected_home": 1.13,
-      "expected_away": 1.34,
-      "expected_total": 2.46,
-      "over_2_5_prob": 0.515,
-      "under_2_5_prob": 0.485,
-      "over_1_5_prob": 0.741,
-      "btts_prob": 0.426
+      "expected_home": 1.08,
+      "expected_away": 1.51,
+      "expected_total": 2.59,
+      "over_2_5_prob": 0.497,
+      "under_2_5_prob": 0.503,
+      "over_1_5_prob": 0.731,
+      "btts_prob": 0.515
     },
     "best_odds": {
       "home_win": 7.1,
@@ -3844,10 +3937,10 @@
         "bet": "Scotland Win",
         "market": "match_result",
         "odds": 7.1,
-        "our_prob": 0.179,
+        "our_prob": 0.174,
         "implied_prob": 0.141,
-        "edge": 0.038,
-        "expected_value": 0.272
+        "edge": 0.033,
+        "expected_value": 0.233
       }
     ],
     "data_quality": {
@@ -3867,41 +3960,41 @@
     "prediction": "Morocco Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.701,
+    "confidence": 0.742,
     "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "Morocco Win",
         "market": "match_result",
-        "confidence": 0.701,
+        "confidence": 0.742,
         "odds": 1.35
-      },
-      {
-        "tip": "Over 2.5 Goals",
-        "market": "goals",
-        "confidence": 0.562,
-        "odds": 1.91
       },
       {
         "tip": "Morocco or Draw",
         "market": "double_chance",
-        "confidence": 0.883,
+        "confidence": 0.899,
+        "odds": null
+      },
+      {
+        "tip": "BTTS No",
+        "market": "btts",
+        "confidence": 0.57,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.701,
-      "draw": 0.182,
-      "away_win": 0.117
+      "home_win": 0.742,
+      "draw": 0.158,
+      "away_win": 0.101
     },
     "goals": {
-      "expected_home": 1.25,
-      "expected_away": 1.01,
-      "expected_total": 2.25,
-      "over_2_5_prob": 0.562,
-      "under_2_5_prob": 0.438,
-      "over_1_5_prob": 0.688,
-      "btts_prob": 0.44
+      "expected_home": 1.56,
+      "expected_away": 0.79,
+      "expected_total": 2.34,
+      "over_2_5_prob": 0.489,
+      "under_2_5_prob": 0.511,
+      "over_1_5_prob": 0.679,
+      "btts_prob": 0.43
     },
     "best_odds": {
       "home_win": 1.35,
@@ -3912,31 +4005,13 @@
     },
     "value_bets": [
       {
-        "bet": "Haiti Win",
-        "market": "match_result",
-        "odds": 12.0,
-        "our_prob": 0.117,
-        "implied_prob": 0.083,
-        "edge": 0.034,
-        "expected_value": 0.402
-      },
-      {
-        "bet": "Draw",
-        "market": "match_result",
-        "odds": 6.25,
-        "our_prob": 0.182,
-        "implied_prob": 0.16,
-        "edge": 0.022,
-        "expected_value": 0.136
-      },
-      {
-        "bet": "Over 2.5 Goals",
+        "bet": "Under 2.5 Goals",
         "market": "goals",
-        "odds": 1.91,
-        "our_prob": 0.562,
-        "implied_prob": 0.524,
-        "edge": 0.038,
-        "expected_value": 0.073
+        "odds": 2.23,
+        "our_prob": 0.511,
+        "implied_prob": 0.448,
+        "edge": 0.063,
+        "expected_value": 0.14
       }
     ],
     "data_quality": {
@@ -3956,41 +4031,41 @@
     "prediction": "Mexico Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.487,
+    "confidence": 0.502,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Mexico Win",
         "market": "match_result",
-        "confidence": 0.487,
+        "confidence": 0.502,
         "odds": 1.95
       },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.545,
+        "confidence": 0.556,
         "odds": 1.98
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.552,
+        "confidence": 0.49,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.244,
-      "draw": 0.27,
-      "away_win": 0.487
+      "home_win": 0.247,
+      "draw": 0.251,
+      "away_win": 0.502
     },
     "goals": {
-      "expected_home": 1.26,
-      "expected_away": 1.03,
-      "expected_total": 2.29,
-      "over_2_5_prob": 0.455,
-      "under_2_5_prob": 0.545,
-      "over_1_5_prob": 0.697,
-      "btts_prob": 0.448
+      "expected_home": 1.18,
+      "expected_away": 1.22,
+      "expected_total": 2.41,
+      "over_2_5_prob": 0.444,
+      "under_2_5_prob": 0.556,
+      "over_1_5_prob": 0.694,
+      "btts_prob": 0.49
     },
     "best_odds": {
       "home_win": 4.83,
@@ -4004,19 +4079,19 @@
         "bet": "Czech Republic Win",
         "market": "match_result",
         "odds": 4.83,
-        "our_prob": 0.244,
+        "our_prob": 0.247,
         "implied_prob": 0.207,
-        "edge": 0.037,
-        "expected_value": 0.176
+        "edge": 0.04,
+        "expected_value": 0.193
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 1.98,
-        "our_prob": 0.545,
+        "our_prob": 0.556,
         "implied_prob": 0.505,
-        "edge": 0.04,
-        "expected_value": 0.079
+        "edge": 0.051,
+        "expected_value": 0.101
       }
     ],
     "data_quality": {
@@ -4033,44 +4108,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/1538.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/17.png",
     "commence_time": "2026-06-25T01:00:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
-    "prediction_market": "goals",
-    "confidence": 0.828,
-    "risk_level": "very_low",
+    "prediction": "South Korea Win",
+    "prediction_key": "away_win",
+    "prediction_market": "match_result",
+    "confidence": 0.471,
+    "risk_level": "medium",
     "top_tips": [
       {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.828,
-        "odds": null
+        "tip": "South Korea Win",
+        "market": "match_result",
+        "confidence": 0.471,
+        "odds": 2.08
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.476,
+        "confidence": 0.521,
         "odds": null
       },
       {
-        "tip": "South Korea or Draw",
-        "market": "double_chance",
-        "confidence": 0.729,
-        "odds": null
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.541,
+        "odds": 1.94
       }
     ],
     "probabilities": {
-      "home_win": 0.271,
-      "draw": 0.279,
-      "away_win": 0.45
+      "home_win": 0.269,
+      "draw": 0.26,
+      "away_win": 0.471
     },
     "goals": {
-      "expected_home": 1.59,
-      "expected_away": 1.22,
-      "expected_total": 2.81,
-      "over_2_5_prob": 0.446,
-      "under_2_5_prob": 0.554,
-      "over_1_5_prob": 0.828,
-      "btts_prob": 0.476
+      "expected_home": 1.26,
+      "expected_away": 1.29,
+      "expected_total": 2.56,
+      "over_2_5_prob": 0.459,
+      "under_2_5_prob": 0.541,
+      "over_1_5_prob": 0.724,
+      "btts_prob": 0.521
     },
     "best_odds": {
       "home_win": 4.1,
@@ -4084,19 +4159,19 @@
         "bet": "South Africa Win",
         "market": "match_result",
         "odds": 4.1,
-        "our_prob": 0.271,
+        "our_prob": 0.269,
         "implied_prob": 0.244,
-        "edge": 0.028,
-        "expected_value": 0.113
+        "edge": 0.025,
+        "expected_value": 0.104
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 1.94,
-        "our_prob": 0.554,
+        "our_prob": 0.541,
         "implied_prob": 0.515,
-        "edge": 0.038,
-        "expected_value": 0.074
+        "edge": 0.026,
+        "expected_value": 0.05
       }
     ],
     "data_quality": {
@@ -4126,15 +4201,15 @@
         "odds": 1.33
       },
       {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.766,
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.528,
         "odds": null
       },
       {
-        "tip": "Ivory Coast or Draw",
-        "market": "double_chance",
-        "confidence": 0.863,
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.738,
         "odds": null
       }
     ],
@@ -4144,13 +4219,13 @@
       "away_win": 0.677
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.52,
-      "under_2_5_prob": 0.48,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.47,
+      "expected_away": 1.16,
+      "expected_total": 2.63,
+      "over_2_5_prob": 0.504,
+      "under_2_5_prob": 0.496,
+      "over_1_5_prob": 0.738,
+      "btts_prob": 0.528
     },
     "best_odds": {
       "home_win": 11.75,
@@ -4187,41 +4262,41 @@
     "prediction": "Germany Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.503,
+    "confidence": 0.528,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Germany Win",
         "market": "match_result",
-        "confidence": 0.503,
+        "confidence": 0.528,
         "odds": 1.68
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.554,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.849,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.552,
+        "confidence": 0.759,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.238,
-      "draw": 0.258,
-      "away_win": 0.503
+      "home_win": 0.237,
+      "draw": 0.234,
+      "away_win": 0.528
     },
     "goals": {
-      "expected_home": 1.53,
-      "expected_away": 1.37,
-      "expected_total": 2.9,
-      "over_2_5_prob": 0.503,
-      "under_2_5_prob": 0.497,
-      "over_1_5_prob": 0.849,
-      "btts_prob": 0.448
+      "expected_home": 1.27,
+      "expected_away": 1.47,
+      "expected_total": 2.74,
+      "over_2_5_prob": 0.51,
+      "under_2_5_prob": 0.49,
+      "over_1_5_prob": 0.759,
+      "btts_prob": 0.554
     },
     "best_odds": {
       "home_win": 5.35,
@@ -4235,10 +4310,10 @@
         "bet": "Ecuador Win",
         "market": "match_result",
         "odds": 5.35,
-        "our_prob": 0.238,
+        "our_prob": 0.237,
         "implied_prob": 0.187,
-        "edge": 0.052,
-        "expected_value": 0.276
+        "edge": 0.051,
+        "expected_value": 0.271
       }
     ],
     "data_quality": {
@@ -4258,41 +4333,41 @@
     "prediction": "Japan Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.455,
+    "confidence": 0.511,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Japan Win",
         "market": "match_result",
-        "confidence": 0.455,
+        "confidence": 0.511,
         "odds": 2.1
       },
       {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.745,
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.5,
         "odds": null
       },
       {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.566,
-        "odds": null
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.542,
+        "odds": 2.02
       }
     ],
     "probabilities": {
-      "home_win": 0.455,
-      "draw": 0.274,
-      "away_win": 0.272
+      "home_win": 0.511,
+      "draw": 0.24,
+      "away_win": 0.25
     },
     "goals": {
-      "expected_home": 1.38,
-      "expected_away": 1.1,
-      "expected_total": 2.48,
-      "over_2_5_prob": 0.462,
-      "under_2_5_prob": 0.538,
-      "over_1_5_prob": 0.745,
-      "btts_prob": 0.434
+      "expected_home": 1.41,
+      "expected_away": 1.08,
+      "expected_total": 2.49,
+      "over_2_5_prob": 0.458,
+      "under_2_5_prob": 0.542,
+      "over_1_5_prob": 0.711,
+      "btts_prob": 0.5
     },
     "best_odds": {
       "home_win": 2.1,
@@ -4306,10 +4381,19 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.02,
-        "our_prob": 0.538,
+        "our_prob": 0.542,
         "implied_prob": 0.495,
-        "edge": 0.043,
-        "expected_value": 0.087
+        "edge": 0.047,
+        "expected_value": 0.095
+      },
+      {
+        "bet": "Japan Win",
+        "market": "match_result",
+        "odds": 2.1,
+        "our_prob": 0.511,
+        "implied_prob": 0.476,
+        "edge": 0.034,
+        "expected_value": 0.072
       }
     ],
     "data_quality": {
@@ -4329,41 +4413,41 @@
     "prediction": "Netherlands Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.564,
+    "confidence": 0.567,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Netherlands Win",
         "market": "match_result",
-        "confidence": 0.564,
+        "confidence": 0.567,
         "odds": 1.61
       },
       {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.608,
-        "odds": null
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.533,
+        "odds": 1.95
       },
       {
-        "tip": "Over 2.5 Goals",
-        "market": "goals",
-        "confidence": 0.502,
-        "odds": 1.88
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.481,
+        "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.198,
-      "draw": 0.238,
-      "away_win": 0.564
+      "home_win": 0.21,
+      "draw": 0.222,
+      "away_win": 0.567
     },
     "goals": {
-      "expected_home": 0.9,
-      "expected_away": 1.15,
-      "expected_total": 2.05,
-      "over_2_5_prob": 0.502,
-      "under_2_5_prob": 0.498,
-      "over_1_5_prob": 0.637,
-      "btts_prob": 0.392
+      "expected_home": 1.04,
+      "expected_away": 1.37,
+      "expected_total": 2.4,
+      "over_2_5_prob": 0.467,
+      "under_2_5_prob": 0.533,
+      "over_1_5_prob": 0.692,
+      "btts_prob": 0.481
     },
     "best_odds": {
       "home_win": 7.0,
@@ -4377,10 +4461,19 @@
         "bet": "Tunisia Win",
         "market": "match_result",
         "odds": 7.0,
-        "our_prob": 0.198,
+        "our_prob": 0.21,
         "implied_prob": 0.143,
-        "edge": 0.055,
-        "expected_value": 0.385
+        "edge": 0.067,
+        "expected_value": 0.471
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 1.95,
+        "our_prob": 0.533,
+        "implied_prob": 0.513,
+        "edge": 0.02,
+        "expected_value": 0.04
       }
     ],
     "data_quality": {
@@ -4400,41 +4493,41 @@
     "prediction": "Under 2.5 Goals",
     "prediction_key": "under_2_5",
     "prediction_market": "goals",
-    "confidence": 0.573,
+    "confidence": 0.566,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.573,
+        "confidence": 0.566,
         "odds": 1.83
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.476,
+        "confidence": 0.496,
         "odds": null
       },
       {
         "tip": "Paraguay or Draw",
         "market": "double_chance",
-        "confidence": 0.721,
+        "confidence": 0.652,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.434,
-      "draw": 0.287,
-      "away_win": 0.279
+      "home_win": 0.387,
+      "draw": 0.266,
+      "away_win": 0.348
     },
     "goals": {
-      "expected_home": 1.43,
-      "expected_away": 1.14,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.427,
-      "under_2_5_prob": 0.573,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.476
+      "expected_home": 1.24,
+      "expected_away": 1.19,
+      "expected_total": 2.44,
+      "over_2_5_prob": 0.434,
+      "under_2_5_prob": 0.566,
+      "over_1_5_prob": 0.7,
+      "btts_prob": 0.496
     },
     "best_odds": {
       "home_win": 2.2,
@@ -4445,13 +4538,22 @@
     },
     "value_bets": [
       {
+        "bet": "Australia Win",
+        "market": "match_result",
+        "odds": 3.65,
+        "our_prob": 0.348,
+        "implied_prob": 0.274,
+        "edge": 0.074,
+        "expected_value": 0.268
+      },
+      {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 1.83,
-        "our_prob": 0.573,
+        "our_prob": 0.566,
         "implied_prob": 0.546,
-        "edge": 0.026,
-        "expected_value": 0.048
+        "edge": 0.02,
+        "expected_value": 0.037
       }
     ],
     "data_quality": {
@@ -4468,44 +4570,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/777.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/2384.png",
     "commence_time": "2026-06-26T02:00:00Z",
-    "prediction": "BTTS No",
-    "prediction_key": "btts_no",
+    "prediction": "Both Teams to Score (GG)",
+    "prediction_key": "btts_yes",
     "prediction_market": "btts",
-    "confidence": 0.566,
-    "risk_level": "low",
+    "confidence": 0.499,
+    "risk_level": "medium",
     "top_tips": [
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.566,
+        "confidence": 0.499,
         "odds": null
       },
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.526,
+        "confidence": 0.541,
         "odds": 1.82
       },
       {
         "tip": "USA or Draw",
         "market": "double_chance",
-        "confidence": 0.643,
+        "confidence": 0.657,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.357,
-      "draw": 0.275,
-      "away_win": 0.368
+      "home_win": 0.343,
+      "draw": 0.268,
+      "away_win": 0.389
     },
     "goals": {
-      "expected_home": 1.26,
-      "expected_away": 1.05,
-      "expected_total": 2.31,
-      "over_2_5_prob": 0.474,
-      "under_2_5_prob": 0.526,
+      "expected_home": 1.25,
+      "expected_away": 1.2,
+      "expected_total": 2.45,
+      "over_2_5_prob": 0.459,
+      "under_2_5_prob": 0.541,
       "over_1_5_prob": 0.703,
-      "btts_prob": 0.434
+      "btts_prob": 0.499
     },
     "best_odds": {
       "home_win": 2.75,
@@ -4532,41 +4634,41 @@
     "prediction": "France Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.498,
-    "risk_level": "medium",
+    "confidence": 0.571,
+    "risk_level": "low",
     "top_tips": [
       {
         "tip": "France Win",
         "market": "match_result",
-        "confidence": 0.498,
+        "confidence": 0.571,
         "odds": 1.86
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.559,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.843,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.584,
+        "confidence": 0.772,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.241,
-      "draw": 0.261,
-      "away_win": 0.498
+      "home_win": 0.215,
+      "draw": 0.215,
+      "away_win": 0.571
     },
     "goals": {
-      "expected_home": 1.31,
-      "expected_away": 1.57,
-      "expected_total": 2.87,
-      "over_2_5_prob": 0.479,
-      "under_2_5_prob": 0.521,
-      "over_1_5_prob": 0.843,
-      "btts_prob": 0.416
+      "expected_home": 1.19,
+      "expected_away": 1.63,
+      "expected_total": 2.82,
+      "over_2_5_prob": 0.507,
+      "under_2_5_prob": 0.493,
+      "over_1_5_prob": 0.772,
+      "btts_prob": 0.559
     },
     "best_odds": {
       "home_win": 4.75,
@@ -4577,13 +4679,13 @@
     },
     "value_bets": [
       {
-        "bet": "Norway Win",
+        "bet": "France Win",
         "market": "match_result",
-        "odds": 4.75,
-        "our_prob": 0.241,
-        "implied_prob": 0.211,
-        "edge": 0.031,
-        "expected_value": 0.146
+        "odds": 1.86,
+        "our_prob": 0.571,
+        "implied_prob": 0.538,
+        "edge": 0.033,
+        "expected_value": 0.061
       }
     ],
     "data_quality": {
@@ -4603,41 +4705,41 @@
     "prediction": "Senegal Win",
     "prediction_key": "home_win",
     "prediction_market": "match_result",
-    "confidence": 0.628,
+    "confidence": 0.66,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Senegal Win",
         "market": "match_result",
-        "confidence": 0.628,
+        "confidence": 0.66,
         "odds": 1.53
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.496,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.808,
-        "odds": null
-      },
-      {
-        "tip": "Senegal or Draw",
-        "market": "double_chance",
-        "confidence": 0.847,
+        "confidence": 0.715,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.628,
-      "draw": 0.219,
-      "away_win": 0.153
+      "home_win": 0.66,
+      "draw": 0.186,
+      "away_win": 0.154
     },
     "goals": {
-      "expected_home": 1.38,
-      "expected_away": 1.35,
-      "expected_total": 2.73,
-      "over_2_5_prob": 0.503,
-      "under_2_5_prob": 0.497,
-      "over_1_5_prob": 0.808,
-      "btts_prob": 0.476
+      "expected_home": 1.49,
+      "expected_away": 1.02,
+      "expected_total": 2.51,
+      "over_2_5_prob": 0.481,
+      "under_2_5_prob": 0.519,
+      "over_1_5_prob": 0.715,
+      "btts_prob": 0.496
     },
     "best_odds": {
       "home_win": 1.53,
@@ -4646,7 +4748,17 @@
       "over_2_5": 1.91,
       "under_2_5": 1.91
     },
-    "value_bets": [],
+    "value_bets": [
+      {
+        "bet": "Iraq Win",
+        "market": "match_result",
+        "odds": 7.5,
+        "our_prob": 0.154,
+        "implied_prob": 0.133,
+        "edge": 0.021,
+        "expected_value": 0.158
+      }
+    ],
     "data_quality": {
       "home_has_wc_data": true,
       "away_has_wc_data": false,
@@ -4661,44 +4773,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/1536.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/23.png",
     "commence_time": "2026-06-27T00:00:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
+    "prediction": "Under 2.5 Goals",
+    "prediction_key": "under_2_5",
     "prediction_market": "goals",
-    "confidence": 0.78,
-    "risk_level": "very_low",
+    "confidence": 0.577,
+    "risk_level": "low",
     "top_tips": [
       {
-        "tip": "Over 1.5 Goals",
+        "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.78,
-        "odds": null
+        "confidence": 0.577,
+        "odds": 1.84
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.504,
+        "confidence": 0.472,
         "odds": null
       },
       {
-        "tip": "Cape Verde or Draw",
+        "tip": "Saudi Arabia or Draw",
         "market": "double_chance",
-        "confidence": 0.664,
+        "confidence": 0.66,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.381,
-      "draw": 0.283,
-      "away_win": 0.336
+      "home_win": 0.34,
+      "draw": 0.255,
+      "away_win": 0.405
     },
     "goals": {
-      "expected_home": 1.48,
-      "expected_away": 1.14,
-      "expected_total": 2.62,
-      "over_2_5_prob": 0.436,
-      "under_2_5_prob": 0.564,
-      "over_1_5_prob": 0.78,
-      "btts_prob": 0.504
+      "expected_home": 1.12,
+      "expected_away": 1.2,
+      "expected_total": 2.32,
+      "over_2_5_prob": 0.423,
+      "under_2_5_prob": 0.577,
+      "over_1_5_prob": 0.675,
+      "btts_prob": 0.472
     },
     "best_odds": {
       "home_win": 2.64,
@@ -4709,13 +4821,22 @@
     },
     "value_bets": [
       {
+        "bet": "Saudi Arabia Win",
+        "market": "match_result",
+        "odds": 3.0,
+        "our_prob": 0.405,
+        "implied_prob": 0.333,
+        "edge": 0.072,
+        "expected_value": 0.216
+      },
+      {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 1.84,
-        "our_prob": 0.564,
+        "our_prob": 0.577,
         "implied_prob": 0.543,
-        "edge": 0.02,
-        "expected_value": 0.038
+        "edge": 0.033,
+        "expected_value": 0.061
       }
     ],
     "data_quality": {
@@ -4735,41 +4856,41 @@
     "prediction": "Spain Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.5,
+    "confidence": 0.472,
     "risk_level": "medium",
     "top_tips": [
       {
         "tip": "Spain Win",
         "market": "match_result",
-        "confidence": 0.5,
+        "confidence": 0.472,
         "odds": 1.66
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.566,
+        "confidence": 0.513,
         "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.711,
+        "confidence": 0.719,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.232,
-      "draw": 0.267,
-      "away_win": 0.5
+      "home_win": 0.259,
+      "draw": 0.269,
+      "away_win": 0.472
     },
     "goals": {
-      "expected_home": 1.0,
-      "expected_away": 1.34,
-      "expected_total": 2.34,
-      "over_2_5_prob": 0.489,
-      "under_2_5_prob": 0.511,
-      "over_1_5_prob": 0.711,
-      "btts_prob": 0.434
+      "expected_home": 1.18,
+      "expected_away": 1.35,
+      "expected_total": 2.53,
+      "over_2_5_prob": 0.477,
+      "under_2_5_prob": 0.523,
+      "over_1_5_prob": 0.719,
+      "btts_prob": 0.513
     },
     "best_odds": {
       "home_win": 5.65,
@@ -4783,10 +4904,10 @@
         "bet": "Uruguay Win",
         "market": "match_result",
         "odds": 5.65,
-        "our_prob": 0.232,
+        "our_prob": 0.259,
         "implied_prob": 0.177,
-        "edge": 0.055,
-        "expected_value": 0.312
+        "edge": 0.082,
+        "expected_value": 0.463
       }
     ],
     "data_quality": {
@@ -4806,41 +4927,41 @@
     "prediction": "Belgium Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.687,
-    "risk_level": "low",
+    "confidence": 0.716,
+    "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "Belgium Win",
         "market": "match_result",
-        "confidence": 0.687,
+        "confidence": 0.716,
         "odds": 1.31
-      },
-      {
-        "tip": "Over 2.5 Goals",
-        "market": "goals",
-        "confidence": 0.551,
-        "odds": 1.89
       },
       {
         "tip": "Belgium or Draw",
         "market": "double_chance",
-        "confidence": 0.863,
+        "confidence": 0.869,
+        "odds": null
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.471,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.137,
-      "draw": 0.175,
-      "away_win": 0.687
+      "home_win": 0.131,
+      "draw": 0.153,
+      "away_win": 0.716
     },
     "goals": {
-      "expected_home": 1.15,
-      "expected_away": 0.91,
-      "expected_total": 2.06,
-      "over_2_5_prob": 0.551,
-      "under_2_5_prob": 0.449,
-      "over_1_5_prob": 0.641,
-      "btts_prob": 0.448
+      "expected_home": 0.97,
+      "expected_away": 1.42,
+      "expected_total": 2.39,
+      "over_2_5_prob": 0.49,
+      "under_2_5_prob": 0.51,
+      "over_1_5_prob": 0.69,
+      "btts_prob": 0.471
     },
     "best_odds": {
       "home_win": 11.0,
@@ -4854,19 +4975,19 @@
         "bet": "New Zealand Win",
         "market": "match_result",
         "odds": 11.0,
-        "our_prob": 0.137,
+        "our_prob": 0.131,
         "implied_prob": 0.091,
-        "edge": 0.046,
-        "expected_value": 0.509
+        "edge": 0.04,
+        "expected_value": 0.442
       },
       {
-        "bet": "Over 2.5 Goals",
+        "bet": "Under 2.5 Goals",
         "market": "goals",
-        "odds": 1.89,
-        "our_prob": 0.551,
-        "implied_prob": 0.529,
-        "edge": 0.022,
-        "expected_value": 0.042
+        "odds": 2.15,
+        "our_prob": 0.51,
+        "implied_prob": 0.465,
+        "edge": 0.045,
+        "expected_value": 0.097
       }
     ],
     "data_quality": {
@@ -4883,44 +5004,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/1534.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/22.png",
     "commence_time": "2026-06-27T03:00:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
-    "prediction_market": "goals",
-    "confidence": 0.863,
-    "risk_level": "very_low",
+    "prediction": "Both Teams to Score (GG)",
+    "prediction_key": "btts_yes",
+    "prediction_market": "btts",
+    "confidence": 0.508,
+    "risk_level": "medium",
     "top_tips": [
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.863,
-        "odds": null
-      },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.504,
+        "confidence": 0.508,
         "odds": null
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.537,
+        "odds": 2.56
       },
       {
         "tip": "Egypt or Draw",
         "market": "double_chance",
-        "confidence": 0.716,
+        "confidence": 0.699,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.413,
-      "draw": 0.304,
-      "away_win": 0.284
+      "home_win": 0.398,
+      "draw": 0.301,
+      "away_win": 0.301
     },
     "goals": {
-      "expected_home": 1.7,
-      "expected_away": 1.25,
-      "expected_total": 2.95,
-      "over_2_5_prob": 0.467,
-      "under_2_5_prob": 0.533,
-      "over_1_5_prob": 0.863,
-      "btts_prob": 0.504
+      "expected_home": 1.36,
+      "expected_away": 1.15,
+      "expected_total": 2.51,
+      "over_2_5_prob": 0.463,
+      "under_2_5_prob": 0.537,
+      "over_1_5_prob": 0.714,
+      "btts_prob": 0.508
     },
     "best_odds": {
       "home_win": 2.4,
@@ -4934,19 +5055,28 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.56,
-        "our_prob": 0.533,
+        "our_prob": 0.537,
         "implied_prob": 0.391,
-        "edge": 0.142,
-        "expected_value": 0.364
+        "edge": 0.147,
+        "expected_value": 0.375
       },
       {
         "bet": "Over 2.5 Goals",
         "market": "goals",
         "odds": 2.5,
-        "our_prob": 0.467,
+        "our_prob": 0.463,
         "implied_prob": 0.4,
-        "edge": 0.067,
-        "expected_value": 0.168
+        "edge": 0.063,
+        "expected_value": 0.157
+      },
+      {
+        "bet": "Iran Win",
+        "market": "match_result",
+        "odds": 3.62,
+        "our_prob": 0.301,
+        "implied_prob": 0.276,
+        "edge": 0.025,
+        "expected_value": 0.09
       }
     ],
     "data_quality": {
@@ -4963,44 +5093,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/3.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/1532.png",
     "commence_time": "2026-06-27T21:00:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
-    "prediction_market": "goals",
-    "confidence": 0.861,
-    "risk_level": "very_low",
+    "prediction": "Croatia Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.572,
+    "risk_level": "low",
     "top_tips": [
-      {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.861,
-        "odds": null
-      },
       {
         "tip": "Croatia Win",
         "market": "match_result",
-        "confidence": 0.5,
+        "confidence": 0.572,
         "odds": 1.78
       },
       {
         "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.468,
+        "confidence": 0.526,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.752,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.5,
-      "draw": 0.266,
-      "away_win": 0.234
+      "home_win": 0.572,
+      "draw": 0.221,
+      "away_win": 0.207
     },
     "goals": {
-      "expected_home": 1.68,
-      "expected_away": 1.26,
-      "expected_total": 2.94,
-      "over_2_5_prob": 0.457,
-      "under_2_5_prob": 0.543,
-      "over_1_5_prob": 0.861,
-      "btts_prob": 0.468
+      "expected_home": 1.66,
+      "expected_away": 1.05,
+      "expected_total": 2.71,
+      "over_2_5_prob": 0.483,
+      "under_2_5_prob": 0.517,
+      "over_1_5_prob": 0.752,
+      "btts_prob": 0.526
     },
     "best_odds": {
       "home_win": 1.78,
@@ -5009,26 +5139,7 @@
       "over_2_5": 2.12,
       "under_2_5": 1.97
     },
-    "value_bets": [
-      {
-        "bet": "Ghana Win",
-        "market": "match_result",
-        "odds": 5.0,
-        "our_prob": 0.234,
-        "implied_prob": 0.2,
-        "edge": 0.034,
-        "expected_value": 0.17
-      },
-      {
-        "bet": "Under 2.5 Goals",
-        "market": "goals",
-        "odds": 1.97,
-        "our_prob": 0.543,
-        "implied_prob": 0.508,
-        "edge": 0.035,
-        "expected_value": 0.069
-      }
-    ],
+    "value_bets": [],
     "data_quality": {
       "home_has_wc_data": true,
       "away_has_wc_data": true,
@@ -5046,41 +5157,41 @@
     "prediction": "England Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.685,
-    "risk_level": "low",
+    "confidence": 0.722,
+    "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "England Win",
         "market": "match_result",
-        "confidence": 0.685,
+        "confidence": 0.722,
         "odds": 1.32
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.515,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.841,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.574,
+        "confidence": 0.751,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.146,
-      "draw": 0.169,
-      "away_win": 0.685
+      "home_win": 0.129,
+      "draw": 0.149,
+      "away_win": 0.722
     },
     "goals": {
-      "expected_home": 1.19,
-      "expected_away": 1.67,
-      "expected_total": 2.86,
-      "over_2_5_prob": 0.471,
-      "under_2_5_prob": 0.529,
-      "over_1_5_prob": 0.841,
-      "btts_prob": 0.426
+      "expected_home": 0.99,
+      "expected_away": 1.7,
+      "expected_total": 2.7,
+      "over_2_5_prob": 0.489,
+      "under_2_5_prob": 0.511,
+      "over_1_5_prob": 0.751,
+      "btts_prob": 0.515
     },
     "best_odds": {
       "home_win": 10.0,
@@ -5094,28 +5205,28 @@
         "bet": "Panama Win",
         "market": "match_result",
         "odds": 10.0,
-        "our_prob": 0.146,
+        "our_prob": 0.129,
         "implied_prob": 0.1,
-        "edge": 0.046,
-        "expected_value": 0.456
-      },
-      {
-        "bet": "Under 2.5 Goals",
-        "market": "goals",
-        "odds": 2.2,
-        "our_prob": 0.529,
-        "implied_prob": 0.455,
-        "edge": 0.074,
-        "expected_value": 0.163
+        "edge": 0.029,
+        "expected_value": 0.293
       },
       {
         "bet": "Over 2.5 Goals",
         "market": "goals",
         "odds": 2.35,
-        "our_prob": 0.471,
+        "our_prob": 0.489,
         "implied_prob": 0.426,
-        "edge": 0.046,
-        "expected_value": 0.108
+        "edge": 0.063,
+        "expected_value": 0.148
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 2.2,
+        "our_prob": 0.511,
+        "implied_prob": 0.455,
+        "edge": 0.057,
+        "expected_value": 0.125
       }
     ],
     "data_quality": {
@@ -5132,44 +5243,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/1572.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/27.png",
     "commence_time": "2026-06-27T23:30:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
-    "prediction_market": "goals",
-    "confidence": 0.858,
-    "risk_level": "very_low",
+    "prediction": "Both Teams to Score (GG)",
+    "prediction_key": "btts_yes",
+    "prediction_market": "btts",
+    "confidence": 0.554,
+    "risk_level": "low",
     "top_tips": [
       {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.858,
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.554,
         "odds": null
       },
       {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.541,
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.758,
         "odds": null
       },
       {
         "tip": "Portugal or Draw",
         "market": "double_chance",
-        "confidence": 0.706,
+        "confidence": 0.698,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.294,
-      "draw": 0.282,
-      "away_win": 0.424
+      "home_win": 0.302,
+      "draw": 0.277,
+      "away_win": 0.421
     },
     "goals": {
-      "expected_home": 1.33,
-      "expected_away": 1.6,
-      "expected_total": 2.93,
-      "over_2_5_prob": 0.455,
-      "under_2_5_prob": 0.545,
-      "over_1_5_prob": 0.858,
-      "btts_prob": 0.459
+      "expected_home": 1.29,
+      "expected_away": 1.45,
+      "expected_total": 2.74,
+      "over_2_5_prob": 0.485,
+      "under_2_5_prob": 0.515,
+      "over_1_5_prob": 0.758,
+      "btts_prob": 0.554
     },
     "best_odds": {
       "home_win": 3.5,
@@ -5178,17 +5289,7 @@
       "over_2_5": 2.12,
       "under_2_5": 1.98
     },
-    "value_bets": [
-      {
-        "bet": "Under 2.5 Goals",
-        "market": "goals",
-        "odds": 1.98,
-        "our_prob": 0.545,
-        "implied_prob": 0.505,
-        "edge": 0.04,
-        "expected_value": 0.079
-      }
-    ],
+    "value_bets": [],
     "data_quality": {
       "home_has_wc_data": false,
       "away_has_wc_data": true,
@@ -5206,41 +5307,41 @@
     "prediction": "Under 2.5 Goals",
     "prediction_key": "under_2_5",
     "prediction_market": "goals",
-    "confidence": 0.571,
+    "confidence": 0.578,
     "risk_level": "low",
     "top_tips": [
       {
         "tip": "Under 2.5 Goals",
         "market": "goals",
-        "confidence": 0.571,
+        "confidence": 0.578,
         "odds": 1.86
       },
       {
-        "tip": "BTTS No",
+        "tip": "Both Teams to Score (GG)",
         "market": "btts",
-        "confidence": 0.552,
+        "confidence": 0.474,
         "odds": null
       },
       {
         "tip": "DR Congo or Draw",
         "market": "double_chance",
-        "confidence": 0.686,
+        "confidence": 0.694,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.4,
-      "draw": 0.286,
-      "away_win": 0.314
+      "home_win": 0.421,
+      "draw": 0.273,
+      "away_win": 0.306
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.429,
-      "under_2_5_prob": 0.571,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.25,
+      "expected_away": 1.09,
+      "expected_total": 2.34,
+      "over_2_5_prob": 0.422,
+      "under_2_5_prob": 0.578,
+      "over_1_5_prob": 0.679,
+      "btts_prob": 0.474
     },
     "best_odds": {
       "home_win": 2.52,
@@ -5254,9 +5355,18 @@
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 1.86,
-        "our_prob": 0.571,
+        "our_prob": 0.578,
         "implied_prob": 0.538,
-        "edge": 0.033,
+        "edge": 0.04,
+        "expected_value": 0.075
+      },
+      {
+        "bet": "DR Congo Win",
+        "market": "match_result",
+        "odds": 2.52,
+        "our_prob": 0.421,
+        "implied_prob": 0.397,
+        "edge": 0.024,
         "expected_value": 0.061
       }
     ],
@@ -5274,44 +5384,44 @@
     "home_team_logo": "https://media.api-sports.io/football/teams/1530.png",
     "away_team_logo": "https://media.api-sports.io/football/teams/775.png",
     "commence_time": "2026-06-28T02:00:00Z",
-    "prediction": "Over 1.5 Goals",
-    "prediction_key": "over_1_5",
-    "prediction_market": "goals",
-    "confidence": 0.766,
-    "risk_level": "very_low",
+    "prediction": "Both Teams to Score (GG)",
+    "prediction_key": "btts_yes",
+    "prediction_market": "btts",
+    "confidence": 0.504,
+    "risk_level": "medium",
     "top_tips": [
       {
-        "tip": "Over 1.5 Goals",
-        "market": "goals",
-        "confidence": 0.766,
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.504,
         "odds": null
       },
       {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.552,
-        "odds": null
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.551,
+        "odds": 1.96
       },
       {
         "tip": "Austria or Draw",
         "market": "double_chance",
-        "confidence": 0.702,
+        "confidence": 0.648,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.298,
-      "draw": 0.289,
-      "away_win": 0.413
+      "home_win": 0.352,
+      "draw": 0.274,
+      "away_win": 0.374
     },
     "goals": {
-      "expected_home": 1.36,
-      "expected_away": 1.2,
-      "expected_total": 2.56,
-      "over_2_5_prob": 0.446,
-      "under_2_5_prob": 0.554,
-      "over_1_5_prob": 0.766,
-      "btts_prob": 0.448
+      "expected_home": 1.31,
+      "expected_away": 1.17,
+      "expected_total": 2.48,
+      "over_2_5_prob": 0.449,
+      "under_2_5_prob": 0.551,
+      "over_1_5_prob": 0.709,
+      "btts_prob": 0.504
     },
     "best_odds": {
       "home_win": 3.5,
@@ -5322,13 +5432,22 @@
     },
     "value_bets": [
       {
+        "bet": "Algeria Win",
+        "market": "match_result",
+        "odds": 3.5,
+        "our_prob": 0.352,
+        "implied_prob": 0.286,
+        "edge": 0.066,
+        "expected_value": 0.233
+      },
+      {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 1.96,
-        "our_prob": 0.554,
+        "our_prob": 0.551,
         "implied_prob": 0.51,
-        "edge": 0.044,
-        "expected_value": 0.086
+        "edge": 0.041,
+        "expected_value": 0.081
       }
     ],
     "data_quality": {
@@ -5348,41 +5467,41 @@
     "prediction": "Argentina Win",
     "prediction_key": "away_win",
     "prediction_market": "match_result",
-    "confidence": 0.736,
+    "confidence": 0.762,
     "risk_level": "very_low",
     "top_tips": [
       {
         "tip": "Argentina Win",
         "market": "match_result",
-        "confidence": 0.736,
+        "confidence": 0.762,
         "odds": 1.22
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.524,
+        "odds": null
       },
       {
         "tip": "Over 1.5 Goals",
         "market": "goals",
-        "confidence": 0.831,
-        "odds": null
-      },
-      {
-        "tip": "BTTS No",
-        "market": "btts",
-        "confidence": 0.584,
+        "confidence": 0.759,
         "odds": null
       }
     ],
     "probabilities": {
-      "home_win": 0.115,
-      "draw": 0.15,
-      "away_win": 0.736
+      "home_win": 0.103,
+      "draw": 0.135,
+      "away_win": 0.762
     },
     "goals": {
-      "expected_home": 1.31,
-      "expected_away": 1.52,
-      "expected_total": 2.82,
-      "over_2_5_prob": 0.473,
-      "under_2_5_prob": 0.527,
-      "over_1_5_prob": 0.831,
-      "btts_prob": 0.416
+      "expected_home": 1.01,
+      "expected_away": 1.73,
+      "expected_total": 2.75,
+      "over_2_5_prob": 0.495,
+      "under_2_5_prob": 0.505,
+      "over_1_5_prob": 0.759,
+      "btts_prob": 0.524
     },
     "best_odds": {
       "home_win": 15.0,
@@ -5396,28 +5515,28 @@
         "bet": "Jordan Win",
         "market": "match_result",
         "odds": 15.0,
-        "our_prob": 0.115,
+        "our_prob": 0.103,
         "implied_prob": 0.067,
-        "edge": 0.048,
-        "expected_value": 0.722
+        "edge": 0.036,
+        "expected_value": 0.545
       },
       {
         "bet": "Under 2.5 Goals",
         "market": "goals",
         "odds": 2.38,
-        "our_prob": 0.527,
+        "our_prob": 0.505,
         "implied_prob": 0.42,
-        "edge": 0.107,
-        "expected_value": 0.255
+        "edge": 0.085,
+        "expected_value": 0.202
       },
       {
         "bet": "Over 2.5 Goals",
         "market": "goals",
         "odds": 2.35,
-        "our_prob": 0.473,
+        "our_prob": 0.495,
         "implied_prob": 0.426,
-        "edge": 0.047,
-        "expected_value": 0.111
+        "edge": 0.07,
+        "expected_value": 0.163
       }
     ],
     "data_quality": {
