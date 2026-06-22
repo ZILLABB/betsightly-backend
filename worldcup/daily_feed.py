@@ -219,67 +219,63 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # Sort by confidence
     day_preds.sort(key=lambda p: p.get("confidence", 0), reverse=True)
 
-    # Collect all tips
-    all_tips = []
+    # Build a pool of all viable picks across today's matches (one best per match)
+    # Uses _all_picks which reads real bookmaker odds + model probabilities
+    pick_pool = []
     for p in day_preds:
-        for tip in p.get("top_tips", [{"tip": p["prediction"], "market": p.get("prediction_market", "match_result"), "confidence": p["confidence"]}]):
-            all_tips.append({"pred": p, "tip": tip})
-
-    all_tips.sort(key=lambda x: x["tip"]["confidence"], reverse=True)
-
-    # ── 2 Odds: 2-3 safest picks combining to ~2x ──
-    two_odds_picks = []
-    used_2 = set()
-    for t in all_tips:
-        mid = t["pred"]["match_id"]
-        if mid in used_2:
+        picks = _all_picks(p)
+        if not picks:
             continue
-        if t["tip"]["confidence"] >= 0.55:
-            two_odds_picks.append(t)
-            used_2.add(mid)
-        if len(two_odds_picks) >= 3:
-            break
+        # Keep all picks from this match, tagged with match_id
+        for pk in picks:
+            pk["_match_id"] = p["match_id"]
+            pk["_pred"] = p
+        pick_pool.extend(picks)
 
-    two_odds_games = [_to_game(t["pred"], t["tip"]) for t in two_odds_picks]
-    two_odds_total = 1.0
-    for g in two_odds_games:
-        two_odds_total *= g["estimated_odds"]
+    def _build_category(pool, target_min, target_max, max_picks, min_conf):
+        """Greedily select picks (one per match) to hit a target odds range."""
+        # Sort by confidence descending — safest first
+        eligible = [pk for pk in pool if pk["confidence"] >= min_conf and pk["odds"] >= 1.10]
+        eligible.sort(key=lambda x: x["confidence"], reverse=True)
+        chosen = []
+        used = set()
+        combined = 1.0
+        for pk in eligible:
+            mid = pk["_match_id"]
+            if mid in used:
+                continue
+            new_combined = combined * pk["odds"]
+            if new_combined > target_max + 1.0 and combined >= target_min:
+                break
+            chosen.append(pk)
+            used.add(mid)
+            combined = new_combined
+            if len(chosen) >= max_picks:
+                break
+        games = []
+        for pk in chosen:
+            p = pk["_pred"]
+            game = _to_game(p)
+            game["prediction"] = pk["prediction"]
+            game["prediction_type"] = pk["market"]
+            game["confidence"] = pk["confidence"]
+            game["estimated_odds"] = pk["odds"]
+            game["odds"] = pk["odds"]
+            game["real_odds"] = pk["odds"]
+            games.append(game)
+        total = 1.0
+        for g in games:
+            total *= g["estimated_odds"]
+        return games, round(total, 2)
 
-    # ── 5 Odds: 4-5 picks combining to ~5x ──
-    five_odds_picks = []
-    used_5 = set()
-    for t in all_tips:
-        mid = t["pred"]["match_id"]
-        if mid in used_5:
-            continue
-        if t["tip"]["confidence"] >= 0.45:
-            five_odds_picks.append(t)
-            used_5.add(mid)
-        if len(five_odds_picks) >= 5:
-            break
+    # ── 2 Odds: 3-5 safest picks combining to ~2x ──
+    two_odds_games, two_odds_total = _build_category(pick_pool, 1.8, 3.0, 5, 0.55)
 
-    five_odds_games = [_to_game(t["pred"], t["tip"]) for t in five_odds_picks]
-    five_odds_total = 1.0
-    for g in five_odds_games:
-        five_odds_total *= g["estimated_odds"]
+    # ── 5 Odds: 4-6 picks combining to ~5x ──
+    five_odds_games, five_odds_total = _build_category(pick_pool, 4.0, 8.0, 6, 0.48)
 
-    # ── 10 Odds: 5-7 riskier picks ──
-    ten_odds_picks = []
-    used_10 = set()
-    for t in all_tips:
-        mid = t["pred"]["match_id"]
-        if mid in used_10:
-            continue
-        if t["tip"]["confidence"] >= 0.35:
-            ten_odds_picks.append(t)
-            used_10.add(mid)
-        if len(ten_odds_picks) >= 7:
-            break
-
-    ten_odds_games = [_to_game(t["pred"], t["tip"]) for t in ten_odds_picks]
-    ten_odds_total = 1.0
-    for g in ten_odds_games:
-        ten_odds_total *= g["estimated_odds"]
+    # ── 10 Odds: 5-7 riskier picks combining to ~10x ──
+    ten_odds_games, ten_odds_total = _build_category(pick_pool, 8.0, 15.0, 7, 0.40)
 
     # ── Over 1.5: safest goal picks ──
     over_picks = []
@@ -287,12 +283,13 @@ def build_daily_accumulators(force: bool = False) -> dict:
     for p in day_preds:
         if p["match_id"] in used_o:
             continue
-        if p["goals"]["over_1_5_prob"] >= 0.65:
+        o15 = p.get("goals", {}).get("over_1_5_prob", 0)
+        if o15 >= 0.65:
             game = _to_game(p)
             game["prediction"] = "Over 1.5 Goals"
             game["prediction_type"] = "over_1_5"
-            game["confidence"] = p["goals"]["over_1_5_prob"]
-            game["estimated_odds"] = round(1.0 / max(p["goals"]["over_1_5_prob"], 0.1), 2)
+            game["confidence"] = o15
+            game["estimated_odds"] = round(1.0 / max(o15, 0.1), 2)
             over_picks.append(game)
             used_o.add(p["match_id"])
         if len(over_picks) >= 5:
@@ -329,8 +326,8 @@ def build_daily_accumulators(force: bool = False) -> dict:
     n_matches = len({p["match_id"] for p in day_preds})
     match_word = "match" if n_matches == 1 else "matches"
     thin_reason = f"Only {n_matches} {match_word} today — not enough fixtures for this tier"
-    five_ok = len(five_odds_games) >= 3 and five_odds_total >= 2.5
-    ten_ok = len(ten_odds_games) >= 4 and ten_odds_total >= 4.0
+    five_ok = len(five_odds_games) >= 3 and five_odds_total >= 3.0
+    ten_ok = len(ten_odds_games) >= 3 and ten_odds_total >= 5.0
 
     result = {
         "status": "success",
@@ -352,67 +349,133 @@ def build_daily_accumulators(force: bool = False) -> dict:
     return result
 
 
-def _safest_pick(p: dict) -> dict | None:
+def _all_picks(p: dict) -> list[dict]:
     """
-    Find the single SAFEST tip for a match (highest confidence, not value).
+    Return ALL viable picks for a match using the model's full output.
 
-    Considers (in preference order, all must clear confidence threshold):
-    - Over 1.5 Goals (typically highest hit rate)
-    - Strong favorite win (>=60% prob)
-    - Double chance favorite-or-draw (very safe)
+    Uses real bookmaker odds when available, estimated odds as fallback.
+    Covers: match result, over/under 2.5, over 1.5, BTTS, double chance.
     """
     bo = p.get("best_odds", {})
     g = p.get("goals", {})
     probs = p.get("probabilities", {})
     candidates = []
 
-    # Over 1.5 Goals — typically the safest single bet in football
+    # Home/Away Win — use REAL bookmaker odds
+    for key, odds_key in [("home_win", "home_win"), ("away_win", "away_win")]:
+        prob = probs.get(key, 0)
+        odds = bo.get(odds_key)
+        if prob >= 0.50 and odds and odds >= 1.10:
+            label = f"{p['home_team']} Win" if key == "home_win" else f"{p['away_team']} Win"
+            candidates.append({"confidence": round(prob, 3), "odds": round(odds, 2), "prediction": label, "market": "match_result"})
+
+    # Over 2.5 Goals — real odds from bookmaker
+    o25 = g.get("over_2_5_prob", 0)
+    o25_odds = bo.get("over_2_5")
+    if o25 >= 0.50 and o25_odds and o25_odds >= 1.10:
+        candidates.append({"confidence": round(o25, 3), "odds": round(o25_odds, 2), "prediction": "Over 2.5 Goals", "market": "goals"})
+
+    # Under 2.5 Goals — real odds from bookmaker
+    u25 = g.get("under_2_5_prob", 0)
+    u25_odds = bo.get("under_2_5")
+    if u25 >= 0.50 and u25_odds and u25_odds >= 1.10:
+        candidates.append({"confidence": round(u25, 3), "odds": round(u25_odds, 2), "prediction": "Under 2.5 Goals", "market": "goals"})
+
+    # Over 1.5 Goals — no bookmaker odds usually, estimate from prob
     o15 = g.get("over_1_5_prob", 0)
     if o15 >= 0.70:
-        est = round(1.0 / max(o15, 0.62), 2)  # Crude odds estimate
+        est = round(1.0 / max(o15, 0.62), 2)
         if est >= 1.10:
-            candidates.append((o15, est, "Over 1.5 Goals", "goals"))
+            candidates.append({"confidence": round(o15, 3), "odds": est, "prediction": "Over 1.5 Goals", "market": "goals"})
 
-    # Strong favorite Win
-    for key, label, odds_key in [
-        ("home_win", f"{p['home_team']} Win", "home_win"),
-        ("away_win", f"{p['away_team']} Win", "away_win"),
-    ]:
-        odds = bo.get(odds_key)
-        prob = probs.get(key, 0)
-        if odds and odds >= 1.05 and prob >= 0.60:
-            candidates.append((prob, odds, label, "match_result"))
+    # BTTS Yes
+    btts = g.get("btts_prob", 0)
+    if btts >= 0.55:
+        est = round(1.0 / max(btts, 0.40), 2)
+        candidates.append({"confidence": round(btts, 3), "odds": round(est, 2), "prediction": "Both Teams to Score", "market": "btts"})
 
-    # Double chance (very safe)
+    # BTTS No
+    btts_no = 1.0 - btts if btts else 0
+    if btts_no >= 0.55:
+        est = round(1.0 / max(btts_no, 0.40), 2)
+        candidates.append({"confidence": round(btts_no, 3), "odds": round(est, 2), "prediction": "BTTS No", "market": "btts"})
+
+    # Double chance — only as fallback, lower priority
     hw = probs.get("home_win", 0)
     aw = probs.get("away_win", 0)
     dr = probs.get("draw", 0)
     home_or_draw = min(0.95, hw + dr)
     away_or_draw = min(0.95, aw + dr)
-
     if home_or_draw >= 0.75:
         est = round(1.0 / max(home_or_draw, 0.55), 2)
-        candidates.append((home_or_draw, est, f"{p['home_team']} or Draw", "double_chance"))
+        candidates.append({"confidence": round(home_or_draw, 3), "odds": est, "prediction": f"{p['home_team']} or Draw", "market": "double_chance"})
     if away_or_draw >= 0.75:
         est = round(1.0 / max(away_or_draw, 0.55), 2)
-        candidates.append((away_or_draw, est, f"{p['away_team']} or Draw", "double_chance"))
+        candidates.append({"confidence": round(away_or_draw, 3), "odds": est, "prediction": f"{p['away_team']} or Draw", "market": "double_chance"})
 
-    # Under 2.5 / BTTS only when extremely confident
-    if g.get("under_2_5_prob", 0) >= 0.65 and bo.get("under_2_5"):
-        candidates.append((g["under_2_5_prob"], bo["under_2_5"], "Under 2.5 Goals", "goals"))
+    return candidates
 
-    if not candidates:
+
+def _safest_pick(p: dict) -> dict | None:
+    """Return the single highest-confidence pick for a match."""
+    picks = _all_picks(p)
+    if not picks:
         return None
+    picks.sort(key=lambda x: x["confidence"], reverse=True)
+    return picks[0]
 
-    # Pick the highest confidence option
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    prob, odds, label, market = candidates[0]
-    return {
-        "prediction": label,
-        "odds": round(odds, 2),
-        "confidence": round(prob, 3),
-        "market": market,
-    }
+
+TARGET_DAY_ODDS_MIN = 2.0
+TARGET_DAY_ODDS_MAX = 3.0
+
+
+def _select_rollover_picks(day_matches: list) -> list:
+    """
+    Select 4-5 safe picks for one rollover day that combine to 2.0–3.0 odds.
+
+    Strategy: pick the safest option from each match (high confidence),
+    stack 4-5 of them so combined odds naturally land in 2-3x.
+    One best pick per match — no repeated matches.
+    """
+    match_candidates = []
+    for m in day_matches:
+        picks = _all_picks(m["pred"])
+        if not picks:
+            continue
+        # For each match, pick the SAFEST option with decent odds (>= 1.10)
+        viable = [pk for pk in picks if pk["odds"] >= 1.10 and pk["confidence"] >= 0.55]
+        if not viable:
+            viable = [pk for pk in picks if pk["confidence"] >= 0.55]
+        if not viable:
+            continue
+        # Sort by confidence first (safest), break ties by odds
+        viable.sort(key=lambda x: (x["confidence"], x["odds"]), reverse=True)
+        match_candidates.append({"pred": m["pred"], "pick": viable[0]})
+
+    if not match_candidates:
+        return []
+
+    # Sort all matches by confidence descending — safest first
+    match_candidates.sort(key=lambda x: x["pick"]["confidence"], reverse=True)
+
+    chosen = []
+    combined = 1.0
+    for mc in match_candidates:
+        if combined >= TARGET_DAY_ODDS_MAX:
+            break
+        new_combined = combined * mc["pick"]["odds"]
+        # Don't overshoot max by too much
+        if new_combined > TARGET_DAY_ODDS_MAX + 0.5 and combined >= TARGET_DAY_ODDS_MIN:
+            break
+        chosen.append(mc)
+        combined = new_combined
+        # Once we have 4+ picks and hit the target, stop
+        if len(chosen) >= 4 and combined >= TARGET_DAY_ODDS_MIN:
+            break
+        if len(chosen) >= 6:
+            break
+
+    return chosen
 
 
 def _build_daily_rollover(day_preds: list, today: str) -> dict:
@@ -558,14 +621,13 @@ def _build_rollover(predictions: list, today: str) -> dict:
         key=lambda p: p["commence_time"]
     )
 
-    # Group by date, attach safe-pick
+    # Group upcoming predictions by date
     by_date: dict[str, list] = {}
     for p in upcoming:
-        pick = _safest_pick(p)
-        if not pick:
+        if not _all_picks(p):
             continue
         date = p["commence_time"][:10]
-        by_date.setdefault(date, []).append({"pred": p, "pick": pick})
+        by_date.setdefault(date, []).append({"pred": p})
 
     # Don't add days before the last chain date
     last_date = chain["days"][-1]["date"] if chain.get("days") else ""
@@ -579,10 +641,8 @@ def _build_rollover(predictions: list, today: str) -> dict:
         if date <= last_date:
             continue
 
-        # Sort matches by pick confidence, take top 1-3
-        day_matches = sorted(by_date[date], key=lambda x: x["pick"]["confidence"], reverse=True)
-        # Cap: 3 picks max; 1 pick if the day has only 1 viable match
-        chosen = day_matches[:3]
+        # Select picks that combine to 2.0–3.0 daily odds
+        chosen = _select_rollover_picks(by_date[date])
 
         if not chosen:
             continue
