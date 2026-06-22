@@ -537,6 +537,13 @@ def _build_rollover(predictions: list, today: str) -> dict:
             _db_reset(chain.get("start_date", today))
         chain = {"start_date": today, "days": [], "status": "active"}
 
+    # Start a new chain if the current one is complete (all 10 days resolved)
+    if len(chain.get("days", [])) >= 10:
+        all_resolved = all(d.get("status") in ("won", "lost", "void") for d in chain["days"])
+        if all_resolved:
+            logger.info(f"Chain complete ({chain.get('start_date')}): all 10 days resolved — starting new chain")
+            chain = {"start_date": today, "days": [], "status": "active"}
+
     # Track match IDs already used in the chain
     used_match_ids = set()
     for day in chain.get("days", []):
