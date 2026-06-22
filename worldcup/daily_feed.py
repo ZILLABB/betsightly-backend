@@ -294,7 +294,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
         if p["match_id"] in used_o:
             continue
         o15 = p.get("goals", {}).get("over_1_5_prob", 0)
-        if o15 >= 0.65:
+        if o15 >= 0.70:
             game = _to_game(p)
             game["prediction"] = "Over 1.5 Goals"
             game["prediction_type"] = "over_1_5"
@@ -452,7 +452,7 @@ def _select_rollover_picks(day_matches: list) -> list:
         picks = _all_picks(m["pred"])
         if not picks:
             continue
-        viable = [pk for pk in picks if pk["odds"] >= 1.10 and pk["confidence"] >= 0.55]
+        viable = [pk for pk in picks if pk["odds"] >= 1.10 and pk["confidence"] >= 0.70]
         if not viable:
             continue
 
