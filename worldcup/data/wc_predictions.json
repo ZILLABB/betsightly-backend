@@ -5545,5 +5545,1259 @@
       "home_wc_matches": 0,
       "away_wc_matches": 7
     }
+  },
+  {
+    "match_id": "69c557fcefdf21f61799ff65540e295e",
+    "home_team": "Brazil",
+    "away_team": "Japan",
+    "home_team_logo": "https://media.api-sports.io/football/teams/6.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/12.png",
+    "commence_time": "2026-06-29T17:00:00Z",
+    "prediction": "Brazil Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.709,
+    "risk_level": "very_low",
+    "top_tips": [
+      {
+        "tip": "Brazil Win",
+        "market": "match_result",
+        "confidence": 0.709,
+        "odds": 1.32
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.513,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.735,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.709,
+      "draw": 0.109,
+      "away_win": 0.183
+    },
+    "goals": {
+      "expected_home": 1.57,
+      "expected_away": 1.04,
+      "expected_total": 2.61,
+      "over_2_5_prob": 0.498,
+      "under_2_5_prob": 0.502,
+      "over_1_5_prob": 0.735,
+      "btts_prob": 0.513
+    },
+    "best_odds": {
+      "home_win": 1.32,
+      "draw": 13.12,
+      "away_win": 8.31,
+      "over_2_5": 2.05,
+      "under_2_5": 2.15
+    },
+    "value_bets": [
+      {
+        "bet": "Japan Win",
+        "market": "match_result",
+        "odds": 8.31,
+        "our_prob": 0.183,
+        "implied_prob": 0.12,
+        "edge": 0.062,
+        "expected_value": 0.517
+      },
+      {
+        "bet": "Draw",
+        "market": "match_result",
+        "odds": 13.12,
+        "our_prob": 0.109,
+        "implied_prob": 0.076,
+        "edge": 0.033,
+        "expected_value": 0.429
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 2.15,
+        "our_prob": 0.502,
+        "implied_prob": 0.465,
+        "edge": 0.036,
+        "expected_value": 0.078
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": true,
+      "home_wc_matches": 5,
+      "away_wc_matches": 4
+    }
+  },
+  {
+    "match_id": "6e14667a5b5b17e33f264011e6fd6cb3",
+    "home_team": "Germany",
+    "away_team": "Paraguay",
+    "home_team_logo": "https://media.api-sports.io/football/teams/25.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/1574.png",
+    "commence_time": "2026-06-29T20:30:00Z",
+    "prediction": "Germany Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.835,
+    "risk_level": "very_low",
+    "top_tips": [
+      {
+        "tip": "Germany Win",
+        "market": "match_result",
+        "confidence": 0.835,
+        "odds": 1.2
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.528,
+        "odds": null
+      },
+      {
+        "tip": "Germany or Draw",
+        "market": "double_chance",
+        "confidence": 0.929,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.835,
+      "draw": 0.094,
+      "away_win": 0.071
+    },
+    "goals": {
+      "expected_home": 1.72,
+      "expected_away": 1.03,
+      "expected_total": 2.75,
+      "over_2_5_prob": 0.507,
+      "under_2_5_prob": 0.493,
+      "over_1_5_prob": 0.761,
+      "btts_prob": 0.528
+    },
+    "best_odds": {
+      "home_win": 1.2,
+      "draw": 13.39,
+      "away_win": 21.0,
+      "over_2_5": 2.12,
+      "under_2_5": 2.08
+    },
+    "value_bets": [
+      {
+        "bet": "Paraguay Win",
+        "market": "match_result",
+        "odds": 21.0,
+        "our_prob": 0.071,
+        "implied_prob": 0.048,
+        "edge": 0.023,
+        "expected_value": 0.482
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.12,
+        "our_prob": 0.507,
+        "implied_prob": 0.472,
+        "edge": 0.036,
+        "expected_value": 0.075
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": false,
+      "home_wc_matches": 3,
+      "away_wc_matches": 0
+    }
+  },
+  {
+    "match_id": "1d71630e8021e94fa36a172fe5670d28",
+    "home_team": "Netherlands",
+    "away_team": "Morocco",
+    "home_team_logo": "https://media.api-sports.io/football/teams/1118.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/31.png",
+    "commence_time": "2026-06-30T01:00:00Z",
+    "prediction": "Netherlands Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.566,
+    "risk_level": "low",
+    "top_tips": [
+      {
+        "tip": "Netherlands Win",
+        "market": "match_result",
+        "confidence": 0.566,
+        "odds": 1.72
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.555,
+        "odds": 1.88
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.492,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.566,
+      "draw": 0.188,
+      "away_win": 0.246
+    },
+    "goals": {
+      "expected_home": 1.42,
+      "expected_away": 1.05,
+      "expected_total": 2.46,
+      "over_2_5_prob": 0.445,
+      "under_2_5_prob": 0.555,
+      "over_1_5_prob": 0.705,
+      "btts_prob": 0.492
+    },
+    "best_odds": {
+      "home_win": 1.72,
+      "draw": 6.43,
+      "away_win": 4.62,
+      "over_2_5": 2.37,
+      "under_2_5": 1.88
+    },
+    "value_bets": [
+      {
+        "bet": "Draw",
+        "market": "match_result",
+        "odds": 6.43,
+        "our_prob": 0.188,
+        "implied_prob": 0.156,
+        "edge": 0.033,
+        "expected_value": 0.211
+      },
+      {
+        "bet": "Morocco Win",
+        "market": "match_result",
+        "odds": 4.62,
+        "our_prob": 0.246,
+        "implied_prob": 0.216,
+        "edge": 0.03,
+        "expected_value": 0.136
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.37,
+        "our_prob": 0.445,
+        "implied_prob": 0.422,
+        "edge": 0.023,
+        "expected_value": 0.054
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 1.88,
+        "our_prob": 0.555,
+        "implied_prob": 0.532,
+        "edge": 0.023,
+        "expected_value": 0.044
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": true,
+      "home_wc_matches": 5,
+      "away_wc_matches": 7
+    }
+  },
+  {
+    "match_id": "69be7b4f64e833653425586a6089b395",
+    "home_team": "Ivory Coast",
+    "away_team": "Norway",
+    "home_team_logo": "https://media.api-sports.io/football/teams/1533.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/1090.png",
+    "commence_time": "2026-06-30T17:00:00Z",
+    "prediction": "Both Teams to Score (GG)",
+    "prediction_key": "btts_yes",
+    "prediction_market": "btts",
+    "confidence": 0.526,
+    "risk_level": "medium",
+    "top_tips": [
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.526,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.729,
+        "odds": null
+      },
+      {
+        "tip": "Norway or Draw",
+        "market": "double_chance",
+        "confidence": 0.652,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.348,
+      "draw": 0.265,
+      "away_win": 0.386
+    },
+    "goals": {
+      "expected_home": 1.28,
+      "expected_away": 1.3,
+      "expected_total": 2.58,
+      "over_2_5_prob": 0.473,
+      "under_2_5_prob": 0.527,
+      "over_1_5_prob": 0.729,
+      "btts_prob": 0.526
+    },
+    "best_odds": {
+      "home_win": 3.09,
+      "draw": 3.99,
+      "away_win": 2.64,
+      "over_2_5": 2.24,
+      "under_2_5": 1.98
+    },
+    "value_bets": [
+      {
+        "bet": "Ivory Coast Win",
+        "market": "match_result",
+        "odds": 3.09,
+        "our_prob": 0.348,
+        "implied_prob": 0.324,
+        "edge": 0.025,
+        "expected_value": 0.077
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.24,
+        "our_prob": 0.473,
+        "implied_prob": 0.446,
+        "edge": 0.027,
+        "expected_value": 0.06
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 1.98,
+        "our_prob": 0.527,
+        "implied_prob": 0.505,
+        "edge": 0.022,
+        "expected_value": 0.043
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": false,
+      "away_has_wc_data": false,
+      "home_wc_matches": 0,
+      "away_wc_matches": 0
+    }
+  },
+  {
+    "match_id": "4dedb3d8c00b73e5b336b0362ec1a6ee",
+    "home_team": "France",
+    "away_team": "Sweden",
+    "home_team_logo": "https://media.api-sports.io/football/teams/2.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/1091.png",
+    "commence_time": "2026-06-30T21:00:00Z",
+    "prediction": "France Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.835,
+    "risk_level": "very_low",
+    "top_tips": [
+      {
+        "tip": "France Win",
+        "market": "match_result",
+        "confidence": 0.835,
+        "odds": 1.2
+      },
+      {
+        "tip": "France or Draw",
+        "market": "double_chance",
+        "confidence": 0.929,
+        "odds": null
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.517,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.835,
+      "draw": 0.094,
+      "away_win": 0.071
+    },
+    "goals": {
+      "expected_home": 1.77,
+      "expected_away": 0.98,
+      "expected_total": 2.75,
+      "over_2_5_prob": 0.511,
+      "under_2_5_prob": 0.489,
+      "over_1_5_prob": 0.759,
+      "btts_prob": 0.517
+    },
+    "best_odds": {
+      "home_win": 1.2,
+      "draw": 13.39,
+      "away_win": 21.0,
+      "over_2_5": 2.08,
+      "under_2_5": 2.12
+    },
+    "value_bets": [
+      {
+        "bet": "Sweden Win",
+        "market": "match_result",
+        "odds": 21.0,
+        "our_prob": 0.071,
+        "implied_prob": 0.048,
+        "edge": 0.023,
+        "expected_value": 0.482
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.08,
+        "our_prob": 0.511,
+        "implied_prob": 0.481,
+        "edge": 0.03,
+        "expected_value": 0.063
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": false,
+      "home_wc_matches": 7,
+      "away_wc_matches": 0
+    }
+  },
+  {
+    "match_id": "ed64a51631c6eec554227d855e313a4c",
+    "home_team": "Mexico",
+    "away_team": "Ecuador",
+    "home_team_logo": "https://media.api-sports.io/football/teams/16.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/2382.png",
+    "commence_time": "2026-07-01T01:00:00Z",
+    "prediction": "Mexico Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.574,
+    "risk_level": "low",
+    "top_tips": [
+      {
+        "tip": "Mexico Win",
+        "market": "match_result",
+        "confidence": 0.574,
+        "odds": 1.64
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.562,
+        "odds": 1.87
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.49,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.574,
+      "draw": 0.188,
+      "away_win": 0.237
+    },
+    "goals": {
+      "expected_home": 1.31,
+      "expected_away": 1.12,
+      "expected_total": 2.42,
+      "over_2_5_prob": 0.438,
+      "under_2_5_prob": 0.562,
+      "over_1_5_prob": 0.696,
+      "btts_prob": 0.49
+    },
+    "best_odds": {
+      "home_win": 1.64,
+      "draw": 7.16,
+      "away_win": 4.97,
+      "over_2_5": 2.39,
+      "under_2_5": 1.87
+    },
+    "value_bets": [
+      {
+        "bet": "Draw",
+        "market": "match_result",
+        "odds": 7.16,
+        "our_prob": 0.188,
+        "implied_prob": 0.14,
+        "edge": 0.049,
+        "expected_value": 0.349
+      },
+      {
+        "bet": "Ecuador Win",
+        "market": "match_result",
+        "odds": 4.97,
+        "our_prob": 0.237,
+        "implied_prob": 0.201,
+        "edge": 0.036,
+        "expected_value": 0.179
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 1.87,
+        "our_prob": 0.562,
+        "implied_prob": 0.535,
+        "edge": 0.028,
+        "expected_value": 0.052
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": true,
+      "home_wc_matches": 3,
+      "away_wc_matches": 3
+    }
+  },
+  {
+    "match_id": "999b5f32ae3c714efa166dcd34e88da0",
+    "home_team": "England",
+    "away_team": "DR Congo",
+    "home_team_logo": "https://media.api-sports.io/football/teams/10.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/1535.png",
+    "commence_time": "2026-07-01T16:00:00Z",
+    "prediction": "England Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.837,
+    "risk_level": "very_low",
+    "top_tips": [
+      {
+        "tip": "England Win",
+        "market": "match_result",
+        "confidence": 0.837,
+        "odds": 1.2
+      },
+      {
+        "tip": "England or Draw",
+        "market": "double_chance",
+        "confidence": 0.93,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.758,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.837,
+      "draw": 0.093,
+      "away_win": 0.07
+    },
+    "goals": {
+      "expected_home": 1.85,
+      "expected_away": 0.89,
+      "expected_total": 2.74,
+      "over_2_5_prob": 0.509,
+      "under_2_5_prob": 0.491,
+      "over_1_5_prob": 0.758,
+      "btts_prob": 0.496
+    },
+    "best_odds": {
+      "home_win": 1.2,
+      "draw": 13.64,
+      "away_win": 21.0,
+      "over_2_5": 2.09,
+      "under_2_5": 2.11
+    },
+    "value_bets": [
+      {
+        "bet": "DR Congo Win",
+        "market": "match_result",
+        "odds": 21.0,
+        "our_prob": 0.07,
+        "implied_prob": 0.048,
+        "edge": 0.022,
+        "expected_value": 0.466
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.09,
+        "our_prob": 0.509,
+        "implied_prob": 0.478,
+        "edge": 0.03,
+        "expected_value": 0.063
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": false,
+      "home_wc_matches": 5,
+      "away_wc_matches": 0
+    }
+  },
+  {
+    "match_id": "b15d8d77ab0dc63811d3d768ac640145",
+    "home_team": "Belgium",
+    "away_team": "Senegal",
+    "home_team_logo": "https://media.api-sports.io/football/teams/1.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/1531.png",
+    "commence_time": "2026-07-01T20:00:00Z",
+    "prediction": "Belgium Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.62,
+    "risk_level": "low",
+    "top_tips": [
+      {
+        "tip": "Belgium Win",
+        "market": "match_result",
+        "confidence": 0.62,
+        "odds": 1.49
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.501,
+        "odds": null
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.533,
+        "odds": 2.01
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.62,
+      "draw": 0.138,
+      "away_win": 0.241
+    },
+    "goals": {
+      "expected_home": 1.42,
+      "expected_away": 1.08,
+      "expected_total": 2.5,
+      "over_2_5_prob": 0.467,
+      "under_2_5_prob": 0.533,
+      "over_1_5_prob": 0.713,
+      "btts_prob": 0.501
+    },
+    "best_odds": {
+      "home_win": 1.49,
+      "draw": 9.26,
+      "away_win": 5.72,
+      "over_2_5": 2.2,
+      "under_2_5": 2.01
+    },
+    "value_bets": [
+      {
+        "bet": "Senegal Win",
+        "market": "match_result",
+        "odds": 5.72,
+        "our_prob": 0.241,
+        "implied_prob": 0.175,
+        "edge": 0.067,
+        "expected_value": 0.381
+      },
+      {
+        "bet": "Draw",
+        "market": "match_result",
+        "odds": 9.26,
+        "our_prob": 0.138,
+        "implied_prob": 0.108,
+        "edge": 0.03,
+        "expected_value": 0.281
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 2.01,
+        "our_prob": 0.533,
+        "implied_prob": 0.498,
+        "edge": 0.035,
+        "expected_value": 0.071
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": true,
+      "home_wc_matches": 3,
+      "away_wc_matches": 4
+    }
+  },
+  {
+    "match_id": "bad3f744d847ff3a58355c82859dc277",
+    "home_team": "USA",
+    "away_team": "Bosnia & Herzegovina",
+    "home_team_logo": "https://media.api-sports.io/football/teams/2384.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/23.png",
+    "commence_time": "2026-07-02T00:00:00Z",
+    "prediction": "USA Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.78,
+    "risk_level": "very_low",
+    "top_tips": [
+      {
+        "tip": "USA Win",
+        "market": "match_result",
+        "confidence": 0.78,
+        "odds": 1.29
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.566,
+        "odds": 1.84
+      },
+      {
+        "tip": "USA or Draw",
+        "market": "double_chance",
+        "confidence": 0.875,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.78,
+      "draw": 0.095,
+      "away_win": 0.125
+    },
+    "goals": {
+      "expected_home": 1.41,
+      "expected_away": 1.02,
+      "expected_total": 2.43,
+      "over_2_5_prob": 0.434,
+      "under_2_5_prob": 0.566,
+      "over_1_5_prob": 0.698,
+      "btts_prob": 0.484
+    },
+    "best_odds": {
+      "home_win": 1.29,
+      "draw": 13.12,
+      "away_win": 10.12,
+      "over_2_5": 2.45,
+      "under_2_5": 1.84
+    },
+    "value_bets": [
+      {
+        "bet": "Bosnia & Herzegovina Win",
+        "market": "match_result",
+        "odds": 10.12,
+        "our_prob": 0.125,
+        "implied_prob": 0.099,
+        "edge": 0.026,
+        "expected_value": 0.26
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.45,
+        "our_prob": 0.434,
+        "implied_prob": 0.408,
+        "edge": 0.026,
+        "expected_value": 0.063
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 1.84,
+        "our_prob": 0.566,
+        "implied_prob": 0.543,
+        "edge": 0.023,
+        "expected_value": 0.042
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": false,
+      "home_wc_matches": 4,
+      "away_wc_matches": 0
+    }
+  },
+  {
+    "match_id": "8563bc5303080c05e017e22cd33050f7",
+    "home_team": "Spain",
+    "away_team": "Austria",
+    "home_team_logo": "https://media.api-sports.io/football/teams/9.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/775.png",
+    "commence_time": "2026-07-02T19:00:00Z",
+    "prediction": "Spain Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.823,
+    "risk_level": "very_low",
+    "top_tips": [
+      {
+        "tip": "Spain Win",
+        "market": "match_result",
+        "confidence": 0.823,
+        "odds": 1.21
+      },
+      {
+        "tip": "Spain or Draw",
+        "market": "double_chance",
+        "confidence": 0.919,
+        "odds": null
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.506,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.823,
+      "draw": 0.095,
+      "away_win": 0.081
+    },
+    "goals": {
+      "expected_home": 1.71,
+      "expected_away": 0.96,
+      "expected_total": 2.67,
+      "over_2_5_prob": 0.494,
+      "under_2_5_prob": 0.506,
+      "over_1_5_prob": 0.746,
+      "btts_prob": 0.506
+    },
+    "best_odds": {
+      "home_win": 1.21,
+      "draw": 13.12,
+      "away_win": 18.82,
+      "over_2_5": 2.15,
+      "under_2_5": 2.05
+    },
+    "value_bets": [
+      {
+        "bet": "Austria Win",
+        "market": "match_result",
+        "odds": 18.82,
+        "our_prob": 0.081,
+        "implied_prob": 0.053,
+        "edge": 0.028,
+        "expected_value": 0.532
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.15,
+        "our_prob": 0.494,
+        "implied_prob": 0.465,
+        "edge": 0.029,
+        "expected_value": 0.063
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": false,
+      "home_wc_matches": 4,
+      "away_wc_matches": 0
+    }
+  },
+  {
+    "match_id": "3a011fceb3e470e5bc3f796bea79c64b",
+    "home_team": "Portugal",
+    "away_team": "Croatia",
+    "home_team_logo": "https://media.api-sports.io/football/teams/27.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/3.png",
+    "commence_time": "2026-07-02T23:00:00Z",
+    "prediction": "Portugal Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.552,
+    "risk_level": "low",
+    "top_tips": [
+      {
+        "tip": "Portugal Win",
+        "market": "match_result",
+        "confidence": 0.552,
+        "odds": 1.82
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.54,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.751,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.552,
+      "draw": 0.2,
+      "away_win": 0.248
+    },
+    "goals": {
+      "expected_home": 1.52,
+      "expected_away": 1.17,
+      "expected_total": 2.7,
+      "over_2_5_prob": 0.497,
+      "under_2_5_prob": 0.503,
+      "over_1_5_prob": 0.751,
+      "btts_prob": 0.54
+    },
+    "best_odds": {
+      "home_win": 1.82,
+      "draw": 5.83,
+      "away_win": 4.31,
+      "over_2_5": 2.15,
+      "under_2_5": 2.06
+    },
+    "value_bets": [
+      {
+        "bet": "Draw",
+        "market": "match_result",
+        "odds": 5.83,
+        "our_prob": 0.2,
+        "implied_prob": 0.172,
+        "edge": 0.028,
+        "expected_value": 0.166
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.15,
+        "our_prob": 0.497,
+        "implied_prob": 0.465,
+        "edge": 0.032,
+        "expected_value": 0.069
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": true,
+      "home_wc_matches": 5,
+      "away_wc_matches": 7
+    }
+  },
+  {
+    "match_id": "074f67c4994001ab183157255829cb1b",
+    "home_team": "Switzerland",
+    "away_team": "Algeria",
+    "home_team_logo": "https://media.api-sports.io/football/teams/15.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/1530.png",
+    "commence_time": "2026-07-03T03:00:00Z",
+    "prediction": "Switzerland Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.635,
+    "risk_level": "low",
+    "top_tips": [
+      {
+        "tip": "Switzerland Win",
+        "market": "match_result",
+        "confidence": 0.635,
+        "odds": 1.6
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.519,
+        "odds": null
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.561,
+        "odds": 1.77
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.635,
+      "draw": 0.153,
+      "away_win": 0.212
+    },
+    "goals": {
+      "expected_home": 1.38,
+      "expected_away": 1.18,
+      "expected_total": 2.56,
+      "over_2_5_prob": 0.439,
+      "under_2_5_prob": 0.561,
+      "over_1_5_prob": 0.725,
+      "btts_prob": 0.519
+    },
+    "best_odds": {
+      "home_win": 1.6,
+      "draw": 7.59,
+      "away_win": 5.15,
+      "over_2_5": 2.58,
+      "under_2_5": 1.77
+    },
+    "value_bets": [
+      {
+        "bet": "Draw",
+        "market": "match_result",
+        "odds": 7.59,
+        "our_prob": 0.153,
+        "implied_prob": 0.132,
+        "edge": 0.021,
+        "expected_value": 0.16
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.58,
+        "our_prob": 0.439,
+        "implied_prob": 0.388,
+        "edge": 0.051,
+        "expected_value": 0.133
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": false,
+      "home_wc_matches": 4,
+      "away_wc_matches": 0
+    }
+  },
+  {
+    "match_id": "26b90ab200ef617f032d62891b92b256",
+    "home_team": "Australia",
+    "away_team": "Egypt",
+    "home_team_logo": "https://media.api-sports.io/football/teams/20.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/1534.png",
+    "commence_time": "2026-07-03T18:00:00Z",
+    "prediction": "Australia Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.577,
+    "risk_level": "low",
+    "top_tips": [
+      {
+        "tip": "Australia Win",
+        "market": "match_result",
+        "confidence": 0.577,
+        "odds": 1.77
+      },
+      {
+        "tip": "Under 2.5 Goals",
+        "market": "goals",
+        "confidence": 0.587,
+        "odds": 1.72
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.493,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.577,
+      "draw": 0.183,
+      "away_win": 0.241
+    },
+    "goals": {
+      "expected_home": 1.28,
+      "expected_away": 1.15,
+      "expected_total": 2.43,
+      "over_2_5_prob": 0.413,
+      "under_2_5_prob": 0.587,
+      "over_1_5_prob": 0.697,
+      "btts_prob": 0.493
+    },
+    "best_odds": {
+      "home_win": 1.77,
+      "draw": 6.12,
+      "away_win": 4.46,
+      "over_2_5": 2.7,
+      "under_2_5": 1.72
+    },
+    "value_bets": [
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.7,
+        "our_prob": 0.413,
+        "implied_prob": 0.37,
+        "edge": 0.043,
+        "expected_value": 0.116
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": false,
+      "home_wc_matches": 4,
+      "away_wc_matches": 0
+    }
+  },
+  {
+    "match_id": "741530641d23599ab39fbc96de45399d",
+    "home_team": "Argentina",
+    "away_team": "Cape Verde",
+    "home_team_logo": "https://media.api-sports.io/football/teams/26.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/1536.png",
+    "commence_time": "2026-07-03T22:00:00Z",
+    "prediction": "Argentina Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.841,
+    "risk_level": "very_low",
+    "top_tips": [
+      {
+        "tip": "Argentina Win",
+        "market": "match_result",
+        "confidence": 0.841,
+        "odds": 1.19
+      },
+      {
+        "tip": "Argentina or Draw",
+        "market": "double_chance",
+        "confidence": 0.931,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.774,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.841,
+      "draw": 0.091,
+      "away_win": 0.069
+    },
+    "goals": {
+      "expected_home": 2.03,
+      "expected_away": 0.8,
+      "expected_total": 2.83,
+      "over_2_5_prob": 0.545,
+      "under_2_5_prob": 0.455,
+      "over_1_5_prob": 0.774,
+      "btts_prob": 0.477
+    },
+    "best_odds": {
+      "home_win": 1.19,
+      "draw": 14.1,
+      "away_win": 21.0,
+      "over_2_5": 1.9,
+      "under_2_5": 2.35
+    },
+    "value_bets": [
+      {
+        "bet": "Cape Verde Win",
+        "market": "match_result",
+        "odds": 21.0,
+        "our_prob": 0.069,
+        "implied_prob": 0.048,
+        "edge": 0.021,
+        "expected_value": 0.439
+      },
+      {
+        "bet": "Under 2.5 Goals",
+        "market": "goals",
+        "odds": 2.35,
+        "our_prob": 0.455,
+        "implied_prob": 0.426,
+        "edge": 0.029,
+        "expected_value": 0.069
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": true,
+      "away_has_wc_data": false,
+      "home_wc_matches": 7,
+      "away_wc_matches": 0
+    }
+  },
+  {
+    "match_id": "ede7b15022c6870fba42e756c62fb775",
+    "home_team": "Colombia",
+    "away_team": "Ghana",
+    "home_team_logo": "https://media.api-sports.io/football/teams/1572.png",
+    "away_team_logo": "https://media.api-sports.io/football/teams/1532.png",
+    "commence_time": "2026-07-04T01:30:00Z",
+    "prediction": "Colombia Win",
+    "prediction_key": "home_win",
+    "prediction_market": "match_result",
+    "confidence": 0.767,
+    "risk_level": "very_low",
+    "top_tips": [
+      {
+        "tip": "Colombia Win",
+        "market": "match_result",
+        "confidence": 0.767,
+        "odds": 1.31
+      },
+      {
+        "tip": "Both Teams to Score (GG)",
+        "market": "btts",
+        "confidence": 0.536,
+        "odds": null
+      },
+      {
+        "tip": "Over 1.5 Goals",
+        "market": "goals",
+        "confidence": 0.755,
+        "odds": null
+      }
+    ],
+    "probabilities": {
+      "home_win": 0.767,
+      "draw": 0.095,
+      "away_win": 0.138
+    },
+    "goals": {
+      "expected_home": 1.62,
+      "expected_away": 1.1,
+      "expected_total": 2.72,
+      "over_2_5_prob": 0.488,
+      "under_2_5_prob": 0.512,
+      "over_1_5_prob": 0.755,
+      "btts_prob": 0.536
+    },
+    "best_odds": {
+      "home_win": 1.31,
+      "draw": 13.12,
+      "away_win": 8.86,
+      "over_2_5": 2.26,
+      "under_2_5": 1.96
+    },
+    "value_bets": [
+      {
+        "bet": "Ghana Win",
+        "market": "match_result",
+        "odds": 8.86,
+        "our_prob": 0.138,
+        "implied_prob": 0.113,
+        "edge": 0.025,
+        "expected_value": 0.221
+      },
+      {
+        "bet": "Over 2.5 Goals",
+        "market": "goals",
+        "odds": 2.26,
+        "our_prob": 0.488,
+        "implied_prob": 0.442,
+        "edge": 0.045,
+        "expected_value": 0.102
+      }
+    ],
+    "data_quality": {
+      "home_has_wc_data": false,
+      "away_has_wc_data": true,
+      "home_wc_matches": 0,
+      "away_wc_matches": 3
+    }
   }
 ]
