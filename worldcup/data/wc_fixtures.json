@@ -28420,5 +28420,165 @@
       "over_2_5": 2.26,
       "under_2_5": 1.96
     }
+  },
+  {
+    "home_team": "Canada",
+    "away_team": "Morocco",
+    "commence_time": "2026-07-04T17:00:00Z",
+    "id": "b1a141b50745f69a8f70fb8bf49547f8",
+    "implied_prob": {
+      "home_win": 0.2898,
+      "draw": 0.2217,
+      "away_win": 0.4886,
+      "over_2_5": 0.4174,
+      "under_2_5": 0.5826
+    },
+    "best_odds": {
+      "home_win": 3.62,
+      "draw": 4.74,
+      "away_win": 2.15,
+      "over_2_5": 2.52,
+      "under_2_5": 1.8
+    }
+  },
+  {
+    "home_team": "Paraguay",
+    "away_team": "France",
+    "commence_time": "2026-07-04T21:00:00Z",
+    "id": "5577d24d502c23fb2eb9060eb65d9cad",
+    "implied_prob": {
+      "home_win": 0.05,
+      "draw": 0.08,
+      "away_win": 0.87,
+      "over_2_5": 0.5146,
+      "under_2_5": 0.4854
+    },
+    "best_odds": {
+      "home_win": 21.0,
+      "draw": 13.12,
+      "away_win": 1.21,
+      "over_2_5": 2.04,
+      "under_2_5": 2.16
+    }
+  },
+  {
+    "home_team": "Brazil",
+    "away_team": "Norway",
+    "commence_time": "2026-07-05T20:00:00Z",
+    "id": "165f324ac03fc4c5dc47d0a61612a1eb",
+    "implied_prob": {
+      "home_win": 0.8591,
+      "draw": 0.08,
+      "away_win": 0.0609,
+      "over_2_5": 0.5355,
+      "under_2_5": 0.4645
+    },
+    "best_odds": {
+      "home_win": 1.22,
+      "draw": 13.12,
+      "away_win": 17.25,
+      "over_2_5": 1.96,
+      "under_2_5": 2.26
+    }
+  },
+  {
+    "home_team": "Mexico",
+    "away_team": "England",
+    "commence_time": "2026-07-06T00:00:00Z",
+    "id": "0fdfe67e021682078001666a04c6d5ce",
+    "implied_prob": {
+      "home_win": 0.2439,
+      "draw": 0.18,
+      "away_win": 0.5761,
+      "over_2_5": 0.4921,
+      "under_2_5": 0.5079
+    },
+    "best_odds": {
+      "home_win": 4.31,
+      "draw": 5.83,
+      "away_win": 1.82,
+      "over_2_5": 2.13,
+      "under_2_5": 2.07
+    }
+  },
+  {
+    "home_team": "Portugal",
+    "away_team": "Spain",
+    "commence_time": "2026-07-06T19:00:00Z",
+    "id": "33e35d883a233870b11df4f25d882c9d",
+    "implied_prob": {
+      "home_win": 0.3971,
+      "draw": 0.2633,
+      "away_win": 0.3396,
+      "over_2_5": 0.4982,
+      "under_2_5": 0.5018
+    },
+    "best_odds": {
+      "home_win": 2.64,
+      "draw": 3.99,
+      "away_win": 3.09,
+      "over_2_5": 2.11,
+      "under_2_5": 2.09
+    }
+  },
+  {
+    "home_team": "USA",
+    "away_team": "Belgium",
+    "commence_time": "2026-07-07T00:00:00Z",
+    "id": "bbd48662c7175e56e72d64d8a60f8280",
+    "implied_prob": {
+      "home_win": 0.3294,
+      "draw": 0.255,
+      "away_win": 0.4156,
+      "over_2_5": 0.4795,
+      "under_2_5": 0.5205
+    },
+    "best_odds": {
+      "home_win": 3.19,
+      "draw": 4.12,
+      "away_win": 2.53,
+      "over_2_5": 2.19,
+      "under_2_5": 2.02
+    }
+  },
+  {
+    "home_team": "Argentina",
+    "away_team": "Egypt",
+    "commence_time": "2026-07-07T16:00:00Z",
+    "id": "2ebff93021ad70457b4f70fb6f54437c",
+    "implied_prob": {
+      "home_win": 0.8739,
+      "draw": 0.0776,
+      "away_win": 0.0485,
+      "over_2_5": 0.5,
+      "under_2_5": 0.5
+    },
+    "best_odds": {
+      "home_win": 1.2,
+      "draw": 13.53,
+      "away_win": 21.0,
+      "over_2_5": 2.1,
+      "under_2_5": 2.1
+    }
+  },
+  {
+    "home_team": "Switzerland",
+    "away_team": "Colombia",
+    "commence_time": "2026-07-07T20:00:00Z",
+    "id": "bcff47fca9bd4a43a14ec500216feca2",
+    "implied_prob": {
+      "home_win": 0.36,
+      "draw": 0.28,
+      "away_win": 0.36,
+      "over_2_5": 0.4309,
+      "under_2_5": 0.5691
+    },
+    "best_odds": {
+      "home_win": 2.92,
+      "draw": 3.75,
+      "away_win": 2.92,
+      "over_2_5": 2.44,
+      "under_2_5": 1.85
+    }
   }
 ]

@@ -170,6 +170,14 @@ def build_daily_accumulators(force: bool = False) -> dict:
     if not force and _accum_cache["result"] and (now - _accum_cache["ts"]) < _ACCUM_CACHE_TTL:
         return _accum_cache["result"]
 
+    # Auto-refresh fixtures from ESPN (knockout rounds arrive as groups finish).
+    # Throttled internally to once per 6h; regenerates predictions when it adds any.
+    try:
+        from worldcup.auto_fixtures import ensure_upcoming_fixtures
+        ensure_upcoming_fixtures()
+    except Exception as e:
+        logger.warning(f"Fixture auto-refresh skipped: {e}")
+
     wc_predictions = _load("wc_predictions.json") or []
     club_predictions = _load_club_predictions()
 
@@ -619,14 +627,6 @@ def _build_rollover(predictions: list, today: str) -> dict:
         if all_resolved:
             logger.info(f"Chain complete ({chain.get('start_date')}): all 10 days resolved — starting new chain")
             chain = {"start_date": today, "days": [], "status": "active"}
-
-    # Reset if all pending days were built with old logic (< 4 picks per day)
-    pending_days = [d for d in chain.get("days", []) if d.get("status") == "pending"]
-    if pending_days and all(len(d.get("picks", [])) < 4 for d in pending_days):
-        logger.info(f"Resetting chain — pending days have too few picks (old logic)")
-        if db_available and _db_reset:
-            _db_reset(chain.get("start_date", today))
-        chain = {"start_date": today, "days": [], "status": "active"}
 
     # Track match IDs already used in the chain
     used_match_ids = set()
