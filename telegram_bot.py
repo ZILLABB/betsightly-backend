@@ -321,7 +321,7 @@ async def wctips_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         import json
         from pathlib import Path
 
-        data_dir = Path(__file__).parent / "worldcup" / "data"
+        data_dir = Path(__file__).parent / "leagues" / "data"
         preds_path = data_dir / "wc_predictions.json"
 
         if not preds_path.exists():
@@ -380,7 +380,7 @@ async def wcacca_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         import json
         from pathlib import Path
 
-        data_dir = Path(__file__).parent / "worldcup" / "data"
+        data_dir = Path(__file__).parent / "leagues" / "data"
         preds_path = data_dir / "wc_predictions.json"
 
         if not preds_path.exists():
@@ -734,7 +734,7 @@ async def _daily_post_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not chat_id:
         return
     try:
-        from worldcup.daily_feed import build_daily_accumulators
+        from leagues.daily_feed import build_daily_accumulators
 
         result = build_daily_accumulators()
         if not result:

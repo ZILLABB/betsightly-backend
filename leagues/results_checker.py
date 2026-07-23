@@ -558,7 +558,7 @@ def _fuzzy_match_team(pick_name: str, score_keys: list[str]) -> Optional[str]:
 def _sync_chain_to_db():
     """Ensure all chain days are persisted to the DB (uses cached result, no API calls)."""
     try:
-        from worldcup.daily_feed import build_daily_accumulators
+        from leagues.daily_feed import build_daily_accumulators
         result = build_daily_accumulators(force=False)
         if result:
             chain = (result.get("accumulators") or {}).get("rollover", {}).get("chain", [])
@@ -574,7 +574,7 @@ def check_all_pending() -> Dict[str, int]:
     global _last_successful_check
     summary = {"checked_chain_days": 0, "marked_won": 0, "marked_lost": 0, "still_pending": 0, "api_calls": 0, "source": "none"}
     try:
-        from worldcup.rollover_db import RolloverDay
+        from leagues.rollover_db import RolloverDay
         from database import SessionLocal
     except Exception as e:
         logger.warning(f"Results check skipped — DB not available: {e}")
@@ -708,7 +708,7 @@ def run_loop():
 
         if iteration % 168 == 0:
             try:
-                from worldcup.rollover_db import cleanup_old_chains
+                from leagues.rollover_db import cleanup_old_chains
                 cleanup_old_chains(keep_recent_chains=3)
             except Exception as e:
                 logger.error(f"Rollover cleanup failed: {e}")

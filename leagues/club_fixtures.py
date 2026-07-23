@@ -76,7 +76,7 @@ CLUB_ALIASES = {
 def _resolve_name(team: dict) -> str:
     """Pick the ESPN team-name variant that resolves in the ELO registry.
     Falls back to displayName when none match (the pick then gets skipped)."""
-    from worldcup.ml_overlay import is_known_team
+    from leagues.ml_overlay import is_known_team
 
     display = team.get("displayName", "")
     if display in CLUB_ALIASES:
@@ -111,7 +111,7 @@ def _fetch_league_day(slug: str, date_str: str) -> list[dict]:
 def _build_prediction(home: str, away: str, commence: str, league_name: str,
                       home_logo: str | None, away_logo: str | None) -> dict | None:
     """ELO probabilities + Poisson goals -> WC-prediction-schema dict."""
-    from worldcup.ml_overlay import elo_probabilities, get_team_rating
+    from leagues.ml_overlay import elo_probabilities, get_team_rating
 
     probs = elo_probabilities(home, away)
     if not probs:

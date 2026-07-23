@@ -125,24 +125,26 @@ setup_exception_handlers(app)
 # Include API router
 app.include_router(api_router, prefix="/api")
 
-# World Cup 2026 endpoints
+# Multi-league prediction engine endpoints
 try:
-    from worldcup.api import router as worldcup_router
-    app.include_router(worldcup_router)
-    logger.info("World Cup 2026 API endpoints registered")
+    from leagues.api import router as leagues_router
+    app.include_router(leagues_router, prefix="/api/leagues")
+    # Back-compat alias for older frontend builds that call /api/worldcup/*
+    app.include_router(leagues_router, prefix="/api/worldcup", include_in_schema=False)
+    logger.info("Leagues API endpoints registered")
 except ImportError as e:
-    logger.warning(f"World Cup module not available: {e}")
+    logger.warning(f"Leagues module not available: {e}")
 
 # Ensure rollover-chain table exists in PostgreSQL
 try:
-    from worldcup.rollover_db import ensure_table as _rollover_ensure_table
+    from leagues.rollover_db import ensure_table as _rollover_ensure_table
     _rollover_ensure_table()
 except Exception as e:
     logger.warning(f"Could not ensure rollover_days table: {e}")
 
 # Start background results checker (every 6h) — World Cup rollover chains
 try:
-    from worldcup.results_checker import start_background_loop as _start_results_loop
+    from leagues.results_checker import start_background_loop as _start_results_loop
     _start_results_loop()
 except Exception as e:
     logger.warning(f"Could not start results checker: {e}")
@@ -274,7 +276,7 @@ def _ensure_today_generated():
     # chain only grows when a user happens to hit /accumulators/today —
     # the 09:00 Telegram post would find no picks on quiet mornings.
     try:
-        from worldcup.daily_feed import build_daily_accumulators
+        from leagues.daily_feed import build_daily_accumulators
         build_daily_accumulators()
     except Exception as e:
         logger.error(f"Daily loop: accumulator feed build failed: {e}")

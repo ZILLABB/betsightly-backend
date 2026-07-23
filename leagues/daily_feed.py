@@ -1,13 +1,13 @@
 """
-World Cup Daily Feed
+Daily Feed — multi-league accumulator builder
 
-Generates daily accumulator data from WC predictions in the same format
-the frontend expects from /accumulators/today.
+Generates daily accumulator data from club-league predictions (ESPN fixtures
++ ELO ratings, plus bookmaker odds when the Odds API quota allows) in the
+format the frontend expects from /accumulators/today.
 
-This fills the 2_odds, 5_odds, 10_odds, over_1_5, and rollover categories
-using World Cup match predictions when regular league data is unavailable.
-
-Rollover: 1 pick per day at 2-3 odds, 10-day rolling chain.
+Fills the 2_odds, 5_odds, 10_odds, over_1_5, and rollover categories.
+Rollover: 2-5 safe picks per day (>=70% confidence) combining to 2-3x,
+10-day rolling chain.
 """
 
 import json
@@ -61,7 +61,7 @@ def _to_game(p: dict, tip: dict = None) -> dict:
         odds = tip.get("odds")
 
     # League name: from prediction's data_quality (club) or default to WC
-    league_name = (p.get("data_quality") or {}).get("league") or "FIFA World Cup 2026"
+    league_name = (p.get("data_quality") or {}).get("league") or "Football"
     is_club = (p.get("data_quality") or {}).get("source") == "club_odds"
 
     return {
@@ -83,7 +83,7 @@ def _to_game(p: dict, tip: dict = None) -> dict:
         "models_agreed": 3,
         "edge": 0.05,
         "expected_value": 0.1,
-        "model_type": "club_odds" if is_club else "worldcup_ensemble",
+        "model_type": "club_odds" if is_club else "elo_engine",
         "home_team_logo": p.get("home_team_logo"),
         "away_team_logo": p.get("away_team_logo"),
         "league_logo": p.get("_league_logo") or "https://media.api-sports.io/football/leagues/1.png",
@@ -151,7 +151,7 @@ def _load_club_predictions() -> list:
     """
     club_preds = []
     try:
-        from worldcup.club_odds import get_active_matches
+        from leagues.club_odds import get_active_matches
         club_matches = get_active_matches(days_ahead=2)
         club_preds = [_club_match_to_prediction(m) for m in club_matches]
     except Exception as e:
@@ -159,7 +159,7 @@ def _load_club_predictions() -> list:
 
     # ESPN + ELO source (no Odds API dependency). Merge, de-duped by teams+date.
     try:
-        from worldcup.club_fixtures import get_club_predictions
+        from leagues.club_fixtures import get_club_predictions
         seen = {f"{p['home_team']}|{p['away_team']}|{p['commence_time'][:10]}" for p in club_preds}
         for p in get_club_predictions(days_ahead=2):
             key = f"{p['home_team']}|{p['away_team']}|{p['commence_time'][:10]}"
@@ -184,19 +184,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
     if not force and _accum_cache["result"] and (now - _accum_cache["ts"]) < _ACCUM_CACHE_TTL:
         return _accum_cache["result"]
 
-    # Auto-refresh fixtures from ESPN (knockout rounds arrive as groups finish).
-    # Throttled internally to once per 6h; regenerates predictions when it adds any.
-    try:
-        from worldcup.auto_fixtures import ensure_upcoming_fixtures
-        ensure_upcoming_fixtures()
-    except Exception as e:
-        logger.warning(f"Fixture auto-refresh skipped: {e}")
-
-    wc_predictions = _load("wc_predictions.json") or []
-    club_predictions = _load_club_predictions()
-
-    # Merge: club matches first (they're closer to today), then WC
-    predictions = club_predictions + wc_predictions
+    predictions = _load_club_predictions()
 
     if not predictions:
         return None
@@ -364,7 +352,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
     result = {
         "status": "success",
         "date": target_date,
-        "source": "worldcup",
+        "source": "leagues",
         "accumulators": {
             "2_odds": mk_cat(two_odds_games, two_odds_total, "Low"),
             "5_odds": mk_cat(five_odds_games, five_odds_total, "Medium",
@@ -556,7 +544,7 @@ def _build_daily_rollover(day_preds: list, today: str) -> dict:
         pick = c["pick"]
         odds = pick.get("odds", 1.0)
         total_odds *= odds
-        league_name = (p.get("data_quality") or {}).get("league") or "FIFA World Cup 2026"
+        league_name = (p.get("data_quality") or {}).get("league") or "Football"
         games.append({
             "fixture_id": hash(p.get("match_id", "")) % 1_000_000,
             "home_team": p.get("home_team", ""),
@@ -604,7 +592,7 @@ def _build_rollover(predictions: list, today: str) -> dict:
     # Primary store: Postgres (survives Render redeploys).
     # Fallback: legacy JSON file on disk (still works locally / when DB unreachable).
     try:
-        from worldcup.rollover_db import load_chain as _db_load, append_day as _db_append, reset_chain as _db_reset
+        from leagues.rollover_db import load_chain as _db_load, append_day as _db_append, reset_chain as _db_reset
         db_available = True
     except Exception:
         db_available = False
@@ -645,7 +633,7 @@ def _build_rollover(predictions: list, today: str) -> dict:
             logger.info(f"Voiding stale pending rollover day {day.get('date')}")
             if db_available:
                 try:
-                    from worldcup.rollover_db import update_day_status as _db_update
+                    from leagues.rollover_db import update_day_status as _db_update
                     _db_update(day["date"], "void")
                 except Exception as e:
                     logger.warning(f"Could not persist void for {day.get('date')}: {e}")
@@ -752,7 +740,7 @@ def _build_rollover(predictions: list, today: str) -> dict:
                 "fixture_id": hash(pk.get("match_id", "")) % 1_000_000,
                 "home_team": pk.get("home_team", ""),
                 "away_team": pk.get("away_team", ""),
-                "league": "FIFA World Cup 2026",
+                "league": "Football",
                 "date": pk.get("commence_time", ""),
                 "prediction": pk.get("prediction", ""),
                 "prediction_type": pk.get("market", "match_result"),
@@ -762,7 +750,7 @@ def _build_rollover(predictions: list, today: str) -> dict:
                 "home_team_logo": pk.get("home_team_logo"),
                 "away_team_logo": pk.get("away_team_logo"),
                 "risk_level": "low",
-                "model_type": "worldcup_safe",
+                "model_type": "leagues_safe",
             })
 
     return {

@@ -230,7 +230,7 @@ def safest_pick(match: dict) -> Optional[dict]:
     - Picks ML can't evaluate (unknown team OR goals market) keep their
       bookmaker confidence and ml_verified=False.
     """
-    from worldcup.ml_overlay import check_agreement
+    from leagues.ml_overlay import check_agreement
 
     p = match.get("probabilities", {})
     bo = match.get("best_odds", {})
