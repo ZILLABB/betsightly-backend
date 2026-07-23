@@ -149,13 +149,27 @@ def _load_club_predictions() -> list:
     Pull club matches via The Odds API and convert to prediction schema.
     Returns empty list on any failure — caller falls back to WC-only.
     """
+    club_preds = []
     try:
         from worldcup.club_odds import get_active_matches
         club_matches = get_active_matches(days_ahead=2)
-        return [_club_match_to_prediction(m) for m in club_matches]
+        club_preds = [_club_match_to_prediction(m) for m in club_matches]
     except Exception as e:
         logger.warning(f"Club odds unavailable: {e}")
-        return []
+
+    # ESPN + ELO source (no Odds API dependency). Merge, de-duped by teams+date.
+    try:
+        from worldcup.club_fixtures import get_club_predictions
+        seen = {f"{p['home_team']}|{p['away_team']}|{p['commence_time'][:10]}" for p in club_preds}
+        for p in get_club_predictions(days_ahead=2):
+            key = f"{p['home_team']}|{p['away_team']}|{p['commence_time'][:10]}"
+            if key not in seen:
+                club_preds.append(p)
+                seen.add(key)
+    except Exception as e:
+        logger.warning(f"ESPN+ELO club fixtures unavailable: {e}")
+
+    return club_preds
 
 
 def build_daily_accumulators(force: bool = False) -> dict:
@@ -620,6 +634,21 @@ def _build_rollover(predictions: list, today: str) -> dict:
         if db_available and _db_reset:
             _db_reset(chain.get("start_date", today))
         chain = {"start_date": today, "days": [], "status": "active"}
+
+    # Void pending days stuck more than 2 days in the past — their matches
+    # finished long ago; if the results checker couldn't resolve them by now
+    # (name mismatch, source gap) they'd jam the chain forever otherwise.
+    stale_cutoff = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d")
+    for day in chain.get("days", []):
+        if day.get("status") == "pending" and day.get("date", "") < stale_cutoff:
+            day["status"] = "void"
+            logger.info(f"Voiding stale pending rollover day {day.get('date')}")
+            if db_available:
+                try:
+                    from worldcup.rollover_db import update_day_status as _db_update
+                    _db_update(day["date"], "void")
+                except Exception as e:
+                    logger.warning(f"Could not persist void for {day.get('date')}: {e}")
 
     # Start a new chain if the current one is complete (all 10 days resolved)
     if len(chain.get("days", [])) >= 10:

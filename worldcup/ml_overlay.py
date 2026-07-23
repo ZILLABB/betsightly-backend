@@ -15,6 +15,7 @@ Pure addition — does not modify any existing endpoint or pipeline.
 import json
 import logging
 import math
+import re
 import unicodedata
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -33,6 +34,8 @@ def _normalize(name: str) -> str:
     n = unicodedata.normalize("NFKD", name)
     n = "".join(c for c in n if not unicodedata.combining(c))
     n = n.lower().strip()
+    # Drop parenthetical qualifiers: "belgrano (cordoba)" -> "belgrano"
+    n = re.sub(r"\s*\([^)]*\)", "", n).strip()
     # Drop common club prefixes/suffixes
     for token in ["fc ", "cd ", "cf ", "sc ", "ac ", "as ", "ss ", "rc ", "ud ",
                   "ca ", "real ", "club ", "deportivo ", "athletic ", "1. fc "]:
