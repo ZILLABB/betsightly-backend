@@ -242,19 +242,30 @@ def build_daily_accumulators(force: bool = False) -> dict:
             pk["_pred"] = p
         pick_pool.extend(picks)
 
-    def _build_category(pool, target_max, max_picks):
-        """Stack safe picks (all >70% confidence, one per match) up to a target."""
-        MARKET_PREF = {"match_result": 1.3, "goals": 1.1, "btts": 1.2, "double_chance": 0.7}
-        eligible = [pk for pk in pool if pk["confidence"] >= 0.70 and pk["odds"] >= 1.10]
+    def _build_category(pool, target_max, max_picks, min_conf, min_joint,
+                        prefer_higher_odds=False):
+        """Build one tier, stopping before the slip's joint probability
+        falls below min_joint.
+
+        With fairly-priced legs a slip's payout is roughly 1/(joint
+        probability), so a 5x slip is inherently a ~20% shot no matter how
+        it is assembled — there is no way to stack safe picks into a big
+        multiplier. What we can control is leg count: each leg adds its own
+        margin, so higher tiers reach their target with fewer, longer-priced
+        picks rather than a pile of near-certainties.
+        """
+        MARKET_PREF = {"match_result": 1.25, "goals": 1.05, "btts": 1.1, "double_chance": 0.85}
+        eligible = [pk for pk in pool if pk["confidence"] >= min_conf and pk["odds"] >= 1.05]
         for pk in eligible:
             mw = MARKET_PREF.get(pk["market"], 1.0)
-            pk["_cat_score"] = pk["confidence"] * pk["odds"] * mw
+            pk["_cat_score"] = (pk["odds"] if prefer_higher_odds else pk["confidence"]) * mw
         eligible.sort(key=lambda x: x["_cat_score"], reverse=True)
 
         chosen = []
         used_matches = set()
         used_markets = {}
         combined = 1.0
+        joint = 1.0
         for pk in eligible:
             mid = pk["_match_id"]
             if mid in used_matches:
@@ -262,13 +273,17 @@ def build_daily_accumulators(force: bool = False) -> dict:
             mkt = pk["market"]
             if used_markets.get(mkt, 0) >= 2:
                 continue
+            new_joint = joint * pk["confidence"]
+            if chosen and new_joint < min_joint:
+                break
             new_combined = combined * pk["odds"]
-            if new_combined > target_max + 2.0:
+            if chosen and new_combined > target_max:
                 break
             chosen.append(pk)
             used_matches.add(mid)
             used_markets[mkt] = used_markets.get(mkt, 0) + 1
             combined = new_combined
+            joint = new_joint
             if len(chosen) >= max_picks:
                 break
         games = []
@@ -285,17 +300,21 @@ def build_daily_accumulators(force: bool = False) -> dict:
         total = 1.0
         for g in games:
             total *= g["estimated_odds"]
-        return games, round(total, 2)
+        return games, round(total, 2), round(joint if chosen else 0.0, 3)
 
-    # All tiers use >70% confidence — higher tiers just stack MORE picks
-    # ── 2 Odds: 3-4 safe picks ──
-    two_odds_games, two_odds_total = _build_category(pick_pool, 3.5, 4)
+    # Higher tiers pay more because they are genuinely less likely to land,
+    # and the floors below are set to what each multiplier can actually
+    # support (~1/payout) rather than to a comfortable-sounding number.
+    two_odds_games, two_odds_total, two_odds_prob = _build_category(
+        pick_pool, target_max=2.4, max_picks=4, min_conf=0.72, min_joint=0.42)
 
-    # ── 5 Odds: 5-7 safe picks ──
-    five_odds_games, five_odds_total = _build_category(pick_pool, 8.0, 7)
+    five_odds_games, five_odds_total, five_odds_prob = _build_category(
+        pick_pool, target_max=6.5, max_picks=4, min_conf=0.50, min_joint=0.14,
+        prefer_higher_odds=True)
 
-    # ── 10 Odds: 8-10 safe picks ──
-    ten_odds_games, ten_odds_total = _build_category(pick_pool, 15.0, 10)
+    ten_odds_games, ten_odds_total, ten_odds_prob = _build_category(
+        pick_pool, target_max=14.0, max_picks=6, min_conf=0.40, min_joint=0.055,
+        prefer_higher_odds=True)
 
     # ── Over 1.5: safest goal picks ──
     over_picks = []
@@ -327,37 +346,42 @@ def build_daily_accumulators(force: bool = False) -> dict:
     rollover = _build_rollover(predictions, today)
 
     # Build response in frontend-expected format
-    def mk_cat(games, total_odds, risk, selected=True, reason=None):
+    def mk_cat(games, total_odds, risk, hit_prob=None, selected=True, reason=None):
         if not selected or not games:
             return {"selected": False, "games": [], "total_odds": 0, "risk_level": risk, "reason": reason or "No picks available"}
-        avg_conf = sum(g["confidence"] for g in games) / len(games) if games else 0
+        if hit_prob is None:
+            hit_prob = 1.0
+            for g in games:
+                hit_prob *= g["confidence"]
         return {
             "selected": True,
             "games": games,
             "total_odds": round(total_odds, 2),
             "risk_level": risk,
+            # Chance every leg lands. Shown so a 10x slip reads as the
+            # long shot it is instead of implying all picks are equally safe.
+            "hit_probability": round(hit_prob, 3),
             "reason": None,
         }
 
-    # On thin match days (e.g. a lone World Cup opener) the higher tiers
-    # can't be built honestly — they'd just repeat the same single pick at
-    # 1.1x while claiming "5 odds". Mark them unavailable with the reason
-    # instead of shipping a misleading slip.
+    # On thin match days the higher tiers can't be built honestly — they'd
+    # repeat the same single pick at 1.1x while claiming "5 odds". Mark them
+    # unavailable with the reason instead of shipping a misleading slip.
     n_matches = len({p["match_id"] for p in day_preds})
     match_word = "match" if n_matches == 1 else "matches"
     thin_reason = f"Only {n_matches} {match_word} today — not enough fixtures for this tier"
-    five_ok = len(five_odds_games) >= 4 and five_odds_total >= 3.0
-    ten_ok = len(ten_odds_games) >= 6 and ten_odds_total >= 5.0
+    five_ok = len(five_odds_games) >= 3 and five_odds_total >= 3.0
+    ten_ok = len(ten_odds_games) >= 4 and ten_odds_total >= 5.0
 
     result = {
         "status": "success",
         "date": target_date,
         "source": "leagues",
         "accumulators": {
-            "2_odds": mk_cat(two_odds_games, two_odds_total, "Low"),
-            "5_odds": mk_cat(five_odds_games, five_odds_total, "Medium",
+            "2_odds": mk_cat(two_odds_games, two_odds_total, "Low", two_odds_prob),
+            "5_odds": mk_cat(five_odds_games, five_odds_total, "Medium", five_odds_prob,
                              selected=five_ok, reason=None if five_ok else thin_reason),
-            "10_odds": mk_cat(ten_odds_games, ten_odds_total, "High",
+            "10_odds": mk_cat(ten_odds_games, ten_odds_total, "High", ten_odds_prob,
                               selected=ten_ok, reason=None if ten_ok else thin_reason),
             "over_1_5": mk_cat(over_picks, over_total, "Very Safe"),
             "rollover": rollover,
@@ -445,57 +469,51 @@ def _safest_pick(p: dict) -> dict | None:
     return picks[0]
 
 
-TARGET_DAY_ODDS_MIN = 2.0
-TARGET_DAY_ODDS_MAX = 3.0
+# Rollover is judged on how often a day actually lands, not on how big the
+# multiplier looks. Stacking picks multiplies odds but multiplies risk the
+# same way: four 73% legs is 0.73^4 = 28%, which is why every club day in
+# late July lost. Cap the stack at 3 and require a realistic joint hit rate.
+ROLLOVER_MAX_PICKS = 3
+ROLLOVER_MIN_JOINT_PROB = 0.50   # a day must be more likely to win than not
+ROLLOVER_MIN_PICK_CONF = 0.78
 
 
 def _select_rollover_picks(day_matches: list) -> list:
     """
-    Select 4-5 safe picks for one rollover day that combine to 2.0–3.0 odds.
+    Pick up to 3 legs for one rollover day, keeping the day's joint
+    probability above ROLLOVER_MIN_JOINT_PROB.
 
-    Strategy: pick the best option per match, preferring markets with real
-    bookmaker odds (match_result, over/under 2.5) over estimated-odds markets.
-    Mix markets for variety — not all double_chance or all over 1.5.
+    Legs are added strongest-first and only while the running joint
+    probability stays above the floor, so the multiplier is whatever honest
+    picks produce rather than a target we stretch risk to hit.
     """
     match_candidates = []
     for m in day_matches:
         picks = _all_picks(m["pred"])
         if not picks:
             continue
-        viable = [pk for pk in picks if pk["odds"] >= 1.10 and pk["confidence"] >= 0.70]
+        viable = [pk for pk in picks
+                  if pk["odds"] >= 1.05 and pk["confidence"] >= ROLLOVER_MIN_PICK_CONF]
         if not viable:
             continue
-
-        # Prefer match_result and BTTS over double_chance for variety.
-        # Double_chance is a fallback — safe but boring and low-odds.
-        MARKET_PREF = {"match_result": 1.3, "goals": 1.1, "btts": 1.2, "double_chance": 0.7}
-        for pk in viable:
-            mw = MARKET_PREF.get(pk["market"], 1.0)
-            pk["_score"] = pk["confidence"] * pk["odds"] * mw
-
-        viable.sort(key=lambda x: x["_score"], reverse=True)
+        viable.sort(key=lambda x: x["confidence"], reverse=True)
         match_candidates.append({"pred": m["pred"], "pick": viable[0]})
 
     if not match_candidates:
         return []
 
-    # Sort by confidence — safest first, but the per-match selection already
-    # balanced confidence vs odds
     match_candidates.sort(key=lambda x: x["pick"]["confidence"], reverse=True)
 
     chosen = []
-    combined = 1.0
+    joint = 1.0
     for mc in match_candidates:
-        if combined >= TARGET_DAY_ODDS_MAX:
-            break
-        new_combined = combined * mc["pick"]["odds"]
-        if new_combined > TARGET_DAY_ODDS_MAX + 0.5 and combined >= TARGET_DAY_ODDS_MIN:
+        conf = mc["pick"]["confidence"]
+        new_joint = joint * conf
+        if chosen and new_joint < ROLLOVER_MIN_JOINT_PROB:
             break
         chosen.append(mc)
-        combined = new_combined
-        if len(chosen) >= 4 and combined >= TARGET_DAY_ODDS_MIN:
-            break
-        if len(chosen) >= 6:
+        joint = new_joint
+        if len(chosen) >= ROLLOVER_MAX_PICKS:
             break
 
     return chosen

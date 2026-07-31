@@ -41,55 +41,23 @@ APIFOOTBALL_LEAGUES = {
 }
 
 SCORES_SPORTS_WC = ["soccer_fifa_world_cup"]
-SCORES_SPORTS_CLUB = [
-    "soccer_spain_segunda_division",
-    "soccer_chile_campeonato",
-    "soccer_finland_veikkausliiga",
-    "soccer_league_of_ireland",
-    "soccer_brazil_campeonato",
-    "soccer_norway_eliteserien",
-    "soccer_sweden_allsvenskan",
-    "soccer_conmebol_copa_libertadores",
-    "soccer_conmebol_copa_sudamericana",
-    "soccer_argentina_primera",
-    "soccer_usa_mls",
-    "soccer_mexico_ligamx",
-    "soccer_japan_j_league",
-    "soccer_korea_kleague1",
-    "soccer_epl",
-    "soccer_spain_la_liga",
-    "soccer_germany_bundesliga",
-    "soccer_italy_serie_a",
-    "soccer_france_ligue_one",
-]
 
 _last_successful_check: Optional[str] = None
 
 
 # ── ESPN scores fetcher (PRIMARY — no API key needed) ────────
 
-ESPN_LEAGUE_SLUGS = {
-    "soccer_fifa_world_cup": "fifa.world",
-    "soccer_brazil_campeonato": "bra.1",
-    "soccer_chile_campeonato": "chi.1",
-    "soccer_conmebol_copa_libertadores": "conmebol.libertadores",
-    "soccer_conmebol_copa_sudamericana": "conmebol.sudamericana",
-    "soccer_finland_veikkausliiga": "fin.1",
-    "soccer_norway_eliteserien": "nor.1",
-    "soccer_sweden_allsvenskan": "swe.1",
-    "soccer_league_of_ireland": "irl.1",
-    "soccer_spain_segunda_division": "esp.2",
-    "soccer_argentina_primera": "arg.1",
-    "soccer_usa_mls": "usa.1",
-    "soccer_mexico_ligamx": "mex.1",
-    "soccer_japan_j_league": "jpn.1",
-    "soccer_korea_kleague1": "kor.1",
-    "soccer_epl": "eng.1",
-    "soccer_spain_la_liga": "esp.1",
-    "soccer_germany_bundesliga": "ger.1",
-    "soccer_italy_serie_a": "ita.1",
-    "soccer_france_ligue_one": "fra.1",
-}
+# Derived from the league list we actually publish picks for, so a pick can
+# never be created in a league whose results we cannot then check.
+def _build_espn_slug_map():
+    try:
+        from leagues.club_fixtures import ESPN_CLUB_LEAGUES
+        return {f"soccer_{slug}": slug for slug in ESPN_CLUB_LEAGUES}
+    except Exception:
+        return {}
+
+ESPN_LEAGUE_SLUGS = _build_espn_slug_map()
+SCORES_SPORTS_CLUB = list(ESPN_LEAGUE_SLUGS.keys())
 
 
 def _fetch_espn_scores(espn_slug: str, date_str: str) -> List[dict]:
