@@ -306,10 +306,15 @@ def _build_rollover(all_picks: list, today: str) -> dict:
                 "model_type": "market_poisson",
             })
 
+    today_odds = today_day.get("combined_odds", 0) if today_day else 0
+
     return {
         "selected": bool(games),
         "games": games,
-        "total_odds": round(cumulative, 2),
+        # The multiplier for today's slot — the number a user actually stakes
+        # against. The compounded figure is `cumulative_odds`; publishing that
+        # as total_odds made the category tab advertise "1746x".
+        "total_odds": round(today_odds, 2),
         "risk_level": "Challenge",
         "reason": None if games else "No safe rollover slot for today",
         "chain": chain.get("days", []),
