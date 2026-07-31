@@ -780,6 +780,62 @@ def settle_published_slips() -> Dict[str, int]:
     return {"slips_checked": len(slips), "won": won, "lost": lost, "still_pending": still}
 
 
+def _collect_espn_scores_ranged(start_date: str, end_date: str) -> Dict[str, Dict[str, Any]]:
+    """Finished scores across every tracked league for a date range.
+
+    ESPN accepts dates=YYYYMMDD-YYYYMMDD, so each league costs one request
+    instead of one per day, and the leagues run concurrently. Keyed by
+    "home|away|date" plus a looser "home|away" so callers can match either way.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=1)
+        end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+    except Exception:
+        return {}
+    rng = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
+
+    slugs = list(ESPN_LEAGUE_SLUGS.values()) + ["fifa.world"]
+
+    def fetch(slug: str) -> List[dict]:
+        try:
+            resp = requests.get(
+                f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+                params={"dates": rng, "limit": 500}, timeout=25,
+            )
+            if resp.status_code != 200:
+                return []
+            return resp.json().get("events", [])
+        except Exception:
+            return []
+
+    finished: Dict[str, Dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        for events in pool.map(fetch, slugs):
+            for event in events:
+                comp = (event.get("competitions") or [{}])[0]
+                if comp.get("status", {}).get("type", {}).get("name") != "STATUS_FULL_TIME":
+                    continue
+                teams = comp.get("competitors", [])
+                if len(teams) < 2:
+                    continue
+                hd = next((t for t in teams if t.get("homeAway") == "home"), teams[0])
+                ad = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
+                home = hd.get("team", {}).get("displayName", "")
+                away = ad.get("team", {}).get("displayName", "")
+                try:
+                    hs, as_ = int(hd.get("score", 0)), int(ad.get("score", 0))
+                except (TypeError, ValueError):
+                    continue
+                payload = {"home": home, "away": away, "home_score": hs,
+                           "away_score": as_, "completed": True}
+                date = (event.get("date") or "")[:10]
+                finished[f"{_normalize_name(home)}|{_normalize_name(away)}|{date}"] = payload
+                finished.setdefault(f"{_normalize_name(home)}|{_normalize_name(away)}", payload)
+    return finished
+
+
 def backfill_leg_status(limit_days: int = 120) -> Dict[str, int]:
     """Fill in per-leg outcomes on chain days that were settled before we
     started recording them.
@@ -813,18 +869,16 @@ def backfill_leg_status(limit_days: int = 120) -> Dict[str, int]:
             if not todo:
                 return out
 
+            # One ranged request per league, run in parallel. The per-date
+            # collector used elsewhere would issue 91 leagues x ~30 dates with
+            # a sleep between each — thousands of calls that never finish
+            # inside a request timeout.
             dates = sorted({r.date for r, _ in todo})
-            scores = _collect_espn_scores(SCORES_SPORTS_CLUB + SCORES_SPORTS_WC, dates)
+            scores = _collect_espn_scores_ranged(dates[0], dates[-1])
 
             def _find(home: str, away: str, date: str):
                 h, a = _normalize_name(home), _normalize_name(away)
-                for cand in (f"{h}|{a}|{date}",):
-                    if cand in scores:
-                        return scores[cand]
-                for val in scores.values():
-                    if _normalize_name(val.get("home", "")) == h and _normalize_name(val.get("away", "")) == a:
-                        return val
-                return None
+                return scores.get(f"{h}|{a}|{date}") or scores.get(f"{h}|{a}")
 
             for row, picks in todo:
                 changed = False
