@@ -146,7 +146,7 @@ def get_ratings(slugs: dict[str, str] | None = None, force: bool = False) -> dic
             pass
 
     if slugs is None:
-        from leagues.club_fixtures import ESPN_CLUB_LEAGUES
+        from leagues.espn_source import ESPN_CLUB_LEAGUES
         slugs = ESPN_CLUB_LEAGUES
 
     try:

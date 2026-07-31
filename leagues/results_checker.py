@@ -51,7 +51,7 @@ _last_successful_check: Optional[str] = None
 # never be created in a league whose results we cannot then check.
 def _build_espn_slug_map():
     try:
-        from leagues.club_fixtures import ESPN_CLUB_LEAGUES
+        from leagues.espn_source import ESPN_CLUB_LEAGUES
         return {f"soccer_{slug}": slug for slug in ESPN_CLUB_LEAGUES}
     except Exception:
         return {}
