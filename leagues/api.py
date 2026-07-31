@@ -91,6 +91,109 @@ async def get_performance(days: int = 90):
         raise HTTPException(500, str(e))
 
 
+@router.get("/calibration")
+async def get_calibration(days: int = 180):
+    """Predicted confidence against measured hit rate, by confidence band.
+
+    The check that matters for a probability: when the site says 70%, does it
+    land 70% of the time? Bands with no settled legs report `actual: null`
+    rather than a fabricated zero.
+    """
+    try:
+        from leagues.picks_db import calibration
+        return {"status": "success", **calibration(limit_days=days)}
+    except Exception as e:
+        logger.error(f"Calibration fetch failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/value-bets")
+async def get_value_bets(days_ahead: int = 3, limit: int = 40):
+    """Picks ranked by how much of the price the bookmaker keeps.
+
+    This deliberately does not claim to find profitable bets, because on this
+    data none exist. Two facts make that unavoidable:
+
+    - DraftKings runs about a 9% overround on 1X2 in these leagues, well above
+      the 2-4% a sharp book charges.
+    - Our probabilities are anchored to that same book's de-vigged closing
+      prices, so by construction they land near the market's own view. A model
+      that reproduces the market cannot beat it, and expected value settles at
+      roughly minus the margin. The best pick available today sits at -2.0%.
+
+    Beating the closing line needs information the closing line lacks —
+    several books to shop between, or a market the book prices lazily. Until
+    that exists, the useful question is not "which bet wins" but "which bet
+    is least taxed", and a -2% pick over a -9% one is a real, bankable
+    improvement. `positive_ev_count` reports genuine +EV picks so the figure
+    is visible the moment it stops being zero.
+    """
+    try:
+        from leagues.engine import run_pipeline
+
+        all_picks, _ = run_pipeline(days_ahead=days_ahead)
+        rows = [
+            {
+                "match_id": p["match_id"],
+                "home_team": p["_fixture"]["home"]["name"],
+                "away_team": p["_fixture"]["away"]["name"],
+                "home_team_logo": p["_fixture"]["home"].get("logo"),
+                "away_team_logo": p["_fixture"]["away"].get("logo"),
+                "league": p["_fixture"]["league"],
+                "kickoff": p["_fixture"]["commence_time"],
+                "prediction": p["prediction"],
+                "market": p["market"],
+                "market_group": p["market_group"],
+                "confidence": p["confidence"],
+                "odds": p["odds"],
+                "odds_provider": p["odds_provider"],
+                "edge": p["edge"],
+                "expected_value": p["expected_value"],
+                # Price you would need for this to break even
+                "fair_odds": round(1.0 / p["confidence"], 2) if p["confidence"] else None,
+                # Share of stake the book keeps on this pick, as a percentage
+                "house_edge": round(-p["expected_value"] * 100, 2),
+                "positive_ev": p["expected_value"] > 0,
+            }
+            for p in all_picks
+            if p.get("odds_are_real") and p.get("expected_value") is not None
+        ]
+        rows.sort(key=lambda r: r["expected_value"], reverse=True)
+        return {
+            "status": "success",
+            "count": len(rows),
+            "positive_ev_count": sum(1 for r in rows if r["positive_ev"]),
+            "best_expected_value": rows[0]["expected_value"] if rows else None,
+            "value_bets": rows[:limit],
+        }
+    except Exception as e:
+        logger.error(f"Value bets fetch failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/fixtures")
+async def get_fixtures_list(days_ahead: int = 3):
+    """Upcoming fixtures with prices and the leagues currently in play."""
+    try:
+        from leagues.engine import run_pipeline
+
+        _, fixtures = run_pipeline(days_ahead=days_ahead)
+        leagues: dict[str, dict] = {}
+        for f in fixtures:
+            entry = leagues.setdefault(
+                f["league_slug"], {"slug": f["league_slug"], "name": f["league"], "count": 0}
+            )
+            entry["count"] += 1
+        return {
+            "status": "success",
+            "total": len(fixtures),
+            "leagues": sorted(leagues.values(), key=lambda x: -x["count"]),
+        }
+    except Exception as e:
+        logger.error(f"Fixtures fetch failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.get("/debug-rollover")
 async def debug_rollover():
     """Dump rollover DB state + scores matching debug info."""

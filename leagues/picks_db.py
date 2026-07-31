@@ -213,3 +213,72 @@ def performance_summary(limit_days: int = 90) -> dict:
         c["profit"] = round(c["returned"] - c["staked"], 2)
         c["roi"] = round((c["returned"] - c["staked"]) / c["staked"], 4) if c["staked"] else 0.0
     return by_cat
+
+
+# Confidence buckets used for calibration. Edges chosen so each band is wide
+# enough to accumulate a usable sample before the site claims anything.
+CALIBRATION_BUCKETS = [
+    (0.50, 0.60), (0.60, 0.70), (0.70, 0.80), (0.80, 0.90), (0.90, 1.01),
+]
+
+
+def calibration(limit_days: int = 180) -> dict:
+    """Predicted confidence vs measured hit rate, per confidence band.
+
+    Answers the only question that matters about a probability: when we say
+    70%, does it happen roughly 70% of the time? Draws on individual legs
+    (not whole slips) from both the category archive and the rollover chain,
+    since a leg is the thing a probability was actually attached to.
+
+    Legs still pending or voided are excluded — only settled outcomes count.
+    """
+    legs: list[tuple[float, bool]] = []
+
+    for slip in get_history(limit_days=limit_days):
+        for leg in slip.get("picks", []):
+            conf, status = leg.get("confidence"), leg.get("status")
+            if conf is None or status not in ("won", "lost"):
+                continue
+            legs.append((float(conf), status == "won"))
+
+    # Rollover legs carry the same confidences and are settled the same way
+    try:
+        from leagues.rollover_db import RolloverDay
+        db = SessionLocal()
+        try:
+            for row in db.query(RolloverDay).all():
+                for leg in json.loads(row.picks or "[]"):
+                    conf, status = leg.get("confidence"), leg.get("status")
+                    if conf is None or status not in ("won", "lost"):
+                        continue
+                    legs.append((float(conf), status == "won"))
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+    buckets = []
+    for lo, hi in CALIBRATION_BUCKETS:
+        sample = [won for conf, won in legs if lo <= conf < hi]
+        n = len(sample)
+        buckets.append({
+            "range": f"{int(lo * 100)}-{int(hi * 100 if hi <= 1 else 100)}%",
+            "low": lo,
+            "high": min(hi, 1.0),
+            "predicted": round((lo + min(hi, 1.0)) / 2, 3),
+            "actual": round(sum(sample) / n, 4) if n else None,
+            "sample": n,
+        })
+
+    total = len(legs)
+    hit = sum(1 for _, won in legs if won)
+    avg_pred = round(sum(c for c, _ in legs) / total, 4) if total else None
+
+    return {
+        "buckets": buckets,
+        "total_legs": total,
+        "hit_rate": round(hit / total, 4) if total else None,
+        "avg_predicted": avg_pred,
+        # Positive means we are over-confident: we promised more than we hit.
+        "bias": round(avg_pred - (hit / total), 4) if total else None,
+    }
