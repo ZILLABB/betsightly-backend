@@ -643,6 +643,15 @@ def check_all_pending() -> Dict[str, int]:
                     logger.info(f"Day {row.day_number}: {home} vs {away} → {match_data['home_score']}-{match_data['away_score']} → {r}")
                     pick_results.append(r)
 
+                # Record the outcome of each individual leg, not just the day.
+                # Without this the chain can say a day was lost but not which
+                # pick lost it, and every leg-level probability we published is
+                # thrown away — leaving nothing to calibrate against.
+                for pick, outcome in zip(picks, pick_results):
+                    if outcome in ("won", "lost", "void"):
+                        pick["status"] = outcome
+                row.picks = json.dumps(picks)
+
                 if any(r == "lost" for r in pick_results):
                     row.status = "lost"
                     summary["marked_lost"] += 1
@@ -769,3 +778,75 @@ def settle_published_slips() -> Dict[str, int]:
     if won or lost:
         logger.info(f"Slip settlement: {won} won, {lost} lost, {still} pending")
     return {"slips_checked": len(slips), "won": won, "lost": lost, "still_pending": still}
+
+
+def backfill_leg_status(limit_days: int = 120) -> Dict[str, int]:
+    """Fill in per-leg outcomes on chain days that were settled before we
+    started recording them.
+
+    Day-level status is left untouched — those results are already final and
+    published. This only recovers the leg detail, which is what calibration
+    and "which pick actually lost it" both need.
+    """
+    from leagues.rollover_db import RolloverDay
+    from database import SessionLocal
+
+    out = {"days_scanned": 0, "days_updated": 0, "legs_filled": 0}
+    try:
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(RolloverDay)
+                .filter(RolloverDay.status.in_(("won", "lost")))
+                .all()
+            )
+            todo = []
+            for row in rows:
+                try:
+                    picks = json.loads(row.picks or "[]")
+                except Exception:
+                    continue
+                if picks and any(p.get("status") not in ("won", "lost", "void") for p in picks):
+                    todo.append((row, picks))
+
+            out["days_scanned"] = len(todo)
+            if not todo:
+                return out
+
+            dates = sorted({r.date for r, _ in todo})
+            scores = _collect_espn_scores(SCORES_SPORTS_CLUB + SCORES_SPORTS_WC, dates)
+
+            def _find(home: str, away: str, date: str):
+                h, a = _normalize_name(home), _normalize_name(away)
+                for cand in (f"{h}|{a}|{date}",):
+                    if cand in scores:
+                        return scores[cand]
+                for val in scores.values():
+                    if _normalize_name(val.get("home", "")) == h and _normalize_name(val.get("away", "")) == a:
+                        return val
+                return None
+
+            for row, picks in todo:
+                changed = False
+                for pick in picks:
+                    if pick.get("status") in ("won", "lost", "void"):
+                        continue
+                    match = _find(pick.get("home_team", ""), pick.get("away_team", ""),
+                                  (pick.get("commence_time") or "")[:10])
+                    if not match:
+                        continue
+                    pick["status"] = _evaluate_pick(pick, match["home_score"], match["away_score"])
+                    out["legs_filled"] += 1
+                    changed = True
+                if changed:
+                    row.picks = json.dumps(picks)
+                    out["days_updated"] += 1
+
+            db.commit()
+            logger.info(f"Leg backfill: {out}")
+            return out
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Leg backfill failed: {e}")
+        return out

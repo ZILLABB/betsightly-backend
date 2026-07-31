@@ -91,6 +91,17 @@ async def get_performance(days: int = 90):
         raise HTTPException(500, str(e))
 
 
+@router.post("/backfill-legs")
+async def trigger_leg_backfill(days: int = 120):
+    """Recover per-leg outcomes on chain days settled before we recorded them."""
+    try:
+        from leagues.results_checker import backfill_leg_status
+        return {"status": "success", **backfill_leg_status(limit_days=days)}
+    except Exception as e:
+        logger.error(f"Leg backfill failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.get("/calibration")
 async def get_calibration(days: int = 180):
     """Predicted confidence against measured hit rate, by confidence band.
