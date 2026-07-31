@@ -64,6 +64,17 @@ def _to_game(p: dict, tip: dict = None) -> dict:
     league_name = (p.get("data_quality") or {}).get("league") or "Football"
     is_club = (p.get("data_quality") or {}).get("source") == "club_odds"
 
+    # Real edge only: match this pick against the value bets computed from the
+    # book's de-vigged price. Anything else reports no edge rather than the
+    # flat 0.05 placeholder that used to make every card claim "+5.0% value".
+    edge = None
+    expected_value = None
+    for vb in (p.get("value_bets") or []):
+        if vb.get("bet") == prediction:
+            edge = vb.get("edge")
+            expected_value = vb.get("expected_value")
+            break
+
     return {
         "fixture_id": hash(p.get("match_id", "")) % 1000000,
         "home_team": p.get("home_team", ""),
@@ -81,8 +92,8 @@ def _to_game(p: dict, tip: dict = None) -> dict:
         "risk_score": 1.0 - confidence,
         "risk_level": p.get("risk_level", "medium"),
         "models_agreed": 3,
-        "edge": 0.05,
-        "expected_value": 0.1,
+        "edge": edge,
+        "expected_value": expected_value,
         "model_type": "club_odds" if is_club else "elo_engine",
         "home_team_logo": p.get("home_team_logo"),
         "away_team_logo": p.get("away_team_logo"),
@@ -93,6 +104,23 @@ def _to_game(p: dict, tip: dict = None) -> dict:
         "odds_are_real": bool((p.get("data_quality") or {}).get("has_book_odds")),
         "odds_provider": (p.get("data_quality") or {}).get("odds_provider"),
     }
+
+
+def _apply_edge(game: dict, pred: dict) -> dict:
+    """Re-attach edge after a category overrides the headline prediction.
+
+    _to_game resolves edge for the match's own top pick; tiers routinely swap
+    in a different market, so without this the card would show the edge of a
+    bet it is not offering.
+    """
+    game["edge"] = None
+    game["expected_value"] = None
+    for vb in (pred.get("value_bets") or []):
+        if vb.get("bet") == game.get("prediction"):
+            game["edge"] = vb.get("edge")
+            game["expected_value"] = vb.get("expected_value")
+            break
+    return game
 
 
 def _club_match_to_prediction(m: dict) -> dict:
@@ -301,7 +329,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
             game["estimated_odds"] = pk["odds"]
             game["odds"] = pk["odds"]
             game["real_odds"] = pk["odds"]
-            games.append(game)
+            games.append(_apply_edge(game, p))
         total = 1.0
         for g in games:
             total *= g["estimated_odds"]
@@ -334,7 +362,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
             game["prediction_type"] = "over_1_5"
             game["confidence"] = o15
             game["estimated_odds"] = round(1.0 / max(o15, 0.1), 2)
-            over_picks.append(game)
+            over_picks.append(_apply_edge(game, p))
             used_o.add(p["match_id"])
         if len(over_picks) >= 5:
             break
