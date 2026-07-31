@@ -42,13 +42,52 @@ async def get_daily_accumulators():
 
 @router.post("/check-results")
 async def trigger_results_check():
-    """Manually trigger a results check (also runs every 6h automatically)."""
+    """Manually trigger a results check (also runs hourly in the background)."""
     try:
-        from leagues.results_checker import check_all_pending
+        from leagues.results_checker import check_all_pending, settle_published_slips
         summary = check_all_pending()
-        return {"status": "success", **summary}
+        slips = settle_published_slips()
+        return {"status": "success", **summary, "slips": slips}
     except Exception as e:
         logger.error(f"Results check trigger failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/results")
+async def get_results(days: int = 30, category: str | None = None):
+    """Settled history for every category, not just the rollover chain.
+
+    Returns each published slip with its legs and outcome, plus a per-category
+    performance summary (win rate, profit and ROI at level 1-unit stakes).
+    """
+    try:
+        from leagues.picks_db import get_history, performance_summary
+        history = get_history(limit_days=days, category=category)
+
+        by_date: dict[str, dict] = {}
+        for slip in history:
+            by_date.setdefault(slip["date"], {})[slip["category"]] = slip
+
+        return {
+            "status": "success",
+            "days": days,
+            "summary": performance_summary(limit_days=days),
+            "history": history,
+            "by_date": by_date,
+        }
+    except Exception as e:
+        logger.error(f"Results fetch failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/performance")
+async def get_performance(days: int = 90):
+    """Win rate, profit and ROI per category over the requested window."""
+    try:
+        from leagues.picks_db import performance_summary
+        return {"status": "success", "days": days, "summary": performance_summary(limit_days=days)}
+    except Exception as e:
+        logger.error(f"Performance fetch failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
 
 

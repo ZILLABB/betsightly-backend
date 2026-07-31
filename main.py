@@ -139,6 +139,8 @@ except ImportError as e:
 try:
     from leagues.rollover_db import ensure_table as _rollover_ensure_table
     _rollover_ensure_table()
+    from leagues.picks_db import ensure_table as _slips_ensure_table
+    _slips_ensure_table()
 except Exception as e:
     logger.warning(f"Could not ensure rollover_days table: {e}")
 

@@ -130,6 +130,69 @@ def select_accumulator(
     return chosen, round(combined, 2), round(joint, 4)
 
 
+def select_banker(picks: list[dict], max_picks: int = 2,
+                  min_confidence: float = 0.78) -> tuple[list[dict], float, float]:
+    """One or two of the day's most reliable picks.
+
+    Built for consistency rather than payout. A 2x accumulator lands around
+    half the time by construction; a single 80% pick lands four times in five.
+    This tier exists so there is something on the site whose stated confidence
+    and actual hit rate are the same number.
+
+    Two constraints keep this tier worth staking rather than merely safe:
+
+    - A price floor of 1.25. An 80% shot at 1.18 returns 0.94 per unit staked;
+      being right four times in five does not help if the price never covers
+      the fifth.
+    - A preference for real quoted prices. Estimated prices are derived as
+      fair-value plus a standard margin, so their expected value is fixed at
+      roughly 0.94 by construction — only a real quote can be genuinely
+      mispriced in our favour, and only there does "value" mean anything.
+    """
+    pool = [
+        p for p in picks
+        if p["confidence"] >= min_confidence and p["odds"] >= 1.25
+    ]
+    if not pool:
+        # Nothing clears the bar at full strength — try slightly wider rather
+        # than publishing nothing, but never below a stakeable price.
+        pool = [p for p in picks if p["confidence"] >= 0.74 and p["odds"] >= 1.25]
+    if not pool:
+        return [], 0.0, 0.0
+
+    best_per_fixture: dict[str, dict] = {}
+    for p in sorted(pool, key=lambda x: -x["confidence"]):
+        best_per_fixture.setdefault(p["match_id"], p)
+
+    # Real quoted prices first (only these can carry true value), then by
+    # expected value, then confidence.
+    ranked = sorted(
+        best_per_fixture.values(),
+        key=lambda p: (not p["odds_are_real"], -p["expected_value"], -p["confidence"]),
+    )
+
+    chosen: list[dict] = []
+    groups: dict[str, int] = {}
+    for p in ranked:
+        if len(chosen) >= max_picks:
+            break
+        g = p["market_group"]
+        if groups.get(g, 0) >= 1:  # no doubling up on one market type
+            continue
+        chosen.append(p)
+        groups[g] = groups.get(g, 0) + 1
+
+    if not chosen:
+        return [], 0.0, 0.0
+
+    combined = 1.0
+    joint = 1.0
+    for p in chosen:
+        combined *= p["odds"]
+        joint *= p["confidence"]
+    return chosen, round(combined, 2), round(joint, 4)
+
+
 def select_rollover_day(picks: list[dict], target_odds: float = 1.9,
                         max_picks: int = 3) -> tuple[list[dict], float, float]:
     """One rollover day: reach ~target_odds with the best possible hit rate.

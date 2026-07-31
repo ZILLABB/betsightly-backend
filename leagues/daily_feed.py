@@ -41,7 +41,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
         return _accum_cache["result"]
 
     from leagues.engine import run_pipeline, picks_for_date
-    from leagues.selection import select_accumulator
+    from leagues.selection import select_accumulator, select_banker
     from leagues.picks import to_game
 
     all_picks, fixtures = run_pipeline(days_ahead=4, force=force)
@@ -67,6 +67,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
     if not day_picks:
         return None
 
+    banker = select_banker(day_picks)
     two = select_accumulator(day_picks, 2.0, max_picks=4, min_confidence=0.60, min_joint=0.38)
     five = select_accumulator(day_picks, 5.0, max_picks=5, min_confidence=0.48, min_joint=0.12)
     ten = select_accumulator(day_picks, 10.0, max_picks=6, min_confidence=0.40, min_joint=0.045)
@@ -113,6 +114,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
         "source": "leagues",
         "total_fixtures": len({p["match_id"] for p in day_picks}),
         "accumulators": {
+            "banker": mk_cat(banker, "Banker", "No pick met the banker threshold today."),
             "2_odds": mk_cat(two, "Low", thin),
             "5_odds": mk_cat(five, "Medium", thin),
             "10_odds": mk_cat(ten, "High", thin),
@@ -124,8 +126,30 @@ def build_daily_accumulators(force: bool = False) -> dict:
         },
     }
 
+    _archive(target_date, result["accumulators"])
     _accum_cache.update({"result": result, "ts": now_ts})
     return result
+
+
+def _archive(date: str, accumulators: dict) -> None:
+    """Record today's slips so they can be settled and shown as history."""
+    try:
+        from leagues.picks_db import archive_slip
+    except Exception:
+        return
+    for category, cat in accumulators.items():
+        if category == "rollover" or not cat.get("selected"):
+            continue
+        try:
+            archive_slip(
+                date=date,
+                category=category,
+                games=cat.get("games", []),
+                total_odds=cat.get("total_odds", 0),
+                hit_probability=cat.get("hit_probability", 0),
+            )
+        except Exception as e:
+            logger.debug(f"archive {category} failed: {e}")
 
 
 # ── Rollover chain ─────────────────────────────────────────

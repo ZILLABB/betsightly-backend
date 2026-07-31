@@ -360,10 +360,13 @@ def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
         return "void"
 
     if market == "btts":
+        # Check the negative first: "Both Teams to Score - No" also contains
+        # "both teams to score", so testing the positive first settles every
+        # BTTS-No pick as though it were BTTS-Yes.
+        if "no" in prediction.replace("not ", "no "):
+            return "won" if (home_score == 0 or away_score == 0) else "lost"
         if "yes" in prediction or "both teams to score" in prediction:
             return "won" if (home_score >= 1 and away_score >= 1) else "lost"
-        if "no" in prediction:
-            return "won" if (home_score == 0 or away_score == 0) else "lost"
         return "void"
 
     return "void"
@@ -672,6 +675,10 @@ def run_loop():
                 logger.info(f"Results check used {result['source']} ({result['api_calls']} matches found)")
         except Exception as e:
             logger.error(f"Results check loop iteration failed: {e}")
+        try:
+            settle_published_slips()
+        except Exception as e:
+            logger.error(f"Slip settlement failed: {e}")
         time.sleep(3600)
 
         if iteration % 168 == 0:
@@ -688,3 +695,77 @@ def start_background_loop():
     t.start()
     logger.info("Results checker started (hourly poll, API-Football primary, Odds API fallback)")
     return t
+
+
+# ── Category slip settlement ─────────────────────────────────
+
+def settle_published_slips() -> Dict[str, int]:
+    """Settle archived category slips (banker / 2 odds / 5 odds / ...).
+
+    Only the rollover chain used to be settled, so the Results page had a
+    track record for one product and nothing for the rest. This walks the
+    published_slips archive, scores each leg against real results, and marks
+    the slip won or lost.
+    """
+    from leagues.picks_db import pending_slips, settle_slip
+    import json as _json
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    slips = pending_slips(today)
+    if not slips:
+        return {"slips_checked": 0, "won": 0, "lost": 0, "still_pending": 0}
+
+    # Score every league we tip, across the dates in question
+    dates = sorted({s.date for s in slips})
+    scores = _collect_espn_scores(SCORES_SPORTS_CLUB, dates)
+
+    def _lookup(home: str, away: str) -> Optional[Dict[str, Any]]:
+        h, a = _normalize_name(home), _normalize_name(away)
+        for key, val in scores.items():
+            if _normalize_name(val.get("home", "")) == h and _normalize_name(val.get("away", "")) == a:
+                return val
+        # Fall back to alias forms for teams whose feeds disagree on naming
+        h2 = TEAM_ALIASES.get(h, h)
+        a2 = TEAM_ALIASES.get(a, a)
+        for key, val in scores.items():
+            if _normalize_name(val.get("home", "")) == h2 and _normalize_name(val.get("away", "")) == a2:
+                return val
+        return None
+
+    won = lost = still = 0
+    for slip in slips:
+        picks = _json.loads(slip.picks or "[]")
+        outcomes: List[str] = []
+        for pick in picks:
+            if pick.get("status") in ("won", "lost", "void"):
+                outcomes.append(pick["status"])
+                continue
+            match = _lookup(pick.get("home_team", ""), pick.get("away_team", ""))
+            if not match:
+                outcomes.append("pending")
+                continue
+            outcomes.append(
+                _evaluate_pick(
+                    {**pick, "market": pick.get("market_group", pick.get("market", "match_result"))},
+                    match["home_score"], match["away_score"],
+                )
+            )
+
+        # A slip more than three days old that still cannot be scored is
+        # voided rather than left pending forever.
+        if "pending" in outcomes:
+            age_days = (datetime.utcnow() - datetime.strptime(slip.date, "%Y-%m-%d")).days
+            if age_days > 3:
+                outcomes = ["void" if o == "pending" else o for o in outcomes]
+
+        status = settle_slip(slip.id, outcomes)
+        if status == "won":
+            won += 1
+        elif status == "lost":
+            lost += 1
+        else:
+            still += 1
+
+    if won or lost:
+        logger.info(f"Slip settlement: {won} won, {lost} lost, {still} pending")
+    return {"slips_checked": len(slips), "won": won, "lost": lost, "still_pending": still}

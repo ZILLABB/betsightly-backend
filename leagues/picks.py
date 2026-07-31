@@ -160,6 +160,18 @@ def to_game(pick: dict) -> dict:
         "away_form": f["away"].get("form"),
         "home_record": f["home"].get("record"),
         "away_record": f["away"].get("record"),
+        # Same detail nested under the shape the prediction card already reads
+        "match_info": {
+            "kickoff_utc": f["commence_time"],
+            "venue": f.get("venue", {}).get("name"),
+            "city": f.get("venue", {}).get("city"),
+            "country": f.get("venue", {}).get("country"),
+            "broadcast": ", ".join(f.get("broadcast") or []) or None,
+            "home_form": f["home"].get("form"),
+            "away_form": f["away"].get("form"),
+            "home_record": f["home"].get("record"),
+            "away_record": f["away"].get("record"),
+        },
         "prediction": pick["prediction"],
         "prediction_type": pick["market_group"],
         "market": pick["market"],
