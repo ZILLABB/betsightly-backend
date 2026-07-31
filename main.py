@@ -139,8 +139,12 @@ except ImportError as e:
 try:
     from leagues.rollover_db import ensure_table as _rollover_ensure_table
     _rollover_ensure_table()
-    from leagues.picks_db import ensure_table as _slips_ensure_table
+    from leagues.picks_db import (
+        ensure_table as _slips_ensure_table,
+        ensure_card_table as _cards_ensure_table,
+    )
     _slips_ensure_table()
+    _cards_ensure_table()
 except Exception as e:
     logger.warning(f"Could not ensure rollover_days table: {e}")
 
@@ -285,23 +289,48 @@ def _ensure_today_generated():
 
 
 def _start_daily_generation_loop():
-    """Keep each day's artifacts present, not just at boot.
+    """Keep each day's artifacts present, and publish the card at 08:00 WAT.
 
-    The old startup-only generation left a gap: a server running past
-    midnight had no predictions for the new day until the first visitor.
-    Check every 30 minutes; the first pass after 00:00 generates the new
-    day, well before the 09:00 Telegram post.
+    The audience books in the morning in Nigeria (UTC+1), so the day's card is
+    generated right at 08:00 WAT with a full slate of fixtures still ahead of
+    the user. Waiting for the first visitor to trigger it would publish
+    whatever was left by the time someone happened to load the page.
+
+    The loop still ticks every 15 minutes so a restart or a missed window
+    recovers on its own; generation itself is idempotent and the card is
+    locked once written, so extra passes are harmless.
     """
     import time as _time
+    from datetime import timezone as _tz, timedelta as _td
+
+    PUBLISH_HOUR_UTC = 7  # 08:00 WAT
 
     def _run():
         _time.sleep(5)  # let the server finish booting first
+        last_published = None
         while True:
-            _ensure_today_generated()
-            _time.sleep(1800)
+            try:
+                now = datetime.now(_tz.utc)
+                wat = now + _td(hours=1)
+                wat_day = wat.strftime("%Y-%m-%d")
+
+                _ensure_today_generated()
+
+                # Force a fresh build the first time we pass 08:00 WAT each day
+                if wat.hour >= 8 and last_published != wat_day:
+                    try:
+                        from leagues.daily_feed import build_daily_accumulators
+                        build_daily_accumulators(force=True)
+                        last_published = wat_day
+                        logger.info(f"Published daily card for {wat_day} (08:00 WAT window)")
+                    except Exception as e:
+                        logger.error(f"Daily card publish failed: {e}")
+            except Exception as e:
+                logger.error(f"Daily generation loop iteration failed: {e}")
+            _time.sleep(900)
 
     threading.Thread(target=_run, daemon=True, name="daily-generation").start()
-    logger.info("Daily generation loop started (30 min checks)")
+    logger.info("Daily generation loop started (15 min checks, publishes 08:00 WAT)")
 
 
 _start_daily_generation_loop()

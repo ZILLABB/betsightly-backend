@@ -91,11 +91,11 @@ def archive_slip(date: str, category: str, games: list[dict],
             ])
 
             if existing:
-                if existing.status != "pending":
-                    return True  # already settled — leave history intact
-                existing.picks = payload
-                existing.total_odds = total_odds
-                existing.hit_probability = hit_probability
+                # The archive is the published record: first write wins. It
+                # previously overwrote while pending, so as early fixtures
+                # kicked off and selection re-ran, the "record" of what we had
+                # tipped quietly changed underneath us.
+                return True
             else:
                 db.add(PublishedSlip(
                     date=date, category=category, picks=payload,
@@ -282,3 +282,70 @@ def calibration(limit_days: int = 180) -> dict:
         # Positive means we are over-confident: we promised more than we hit.
         "bias": round(avg_pred - (hit / total), 4) if total else None,
     }
+
+
+# ── Locked daily card ──────────────────────────────────────
+
+class DailyCard(Base):
+    """The full published card for one publishing day, stored verbatim.
+
+    The card is generated once per day and then served from here rather than
+    re-selected on each request. Two reasons:
+
+    - Fixtures that have kicked off are filtered out of the source feed, so
+      re-selecting later in the day silently produces a *different* slip. The
+      pick a user saw at 08:00 could vanish by noon, and the archived record
+      would change with it — a track record that rewrites itself is worthless.
+    - Regenerating is also wasted work; the selection is deterministic given
+      the same fixtures.
+    """
+    __tablename__ = "daily_cards"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    publish_date = Column(String(10), nullable=False, unique=True, index=True)
+    payload = Column(Text, nullable=False)   # JSON: the accumulators block
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+def ensure_card_table() -> bool:
+    try:
+        from database import engine
+        Base.metadata.create_all(bind=engine, tables=[DailyCard.__table__])
+        return True
+    except Exception as e:
+        logger.warning(f"Could not ensure daily_cards table: {e}")
+        return False
+
+
+def save_card(publish_date: str, accumulators: dict) -> bool:
+    """Store the day's card. First write wins — the card is immutable."""
+    try:
+        db = SessionLocal()
+        try:
+            existing = db.query(DailyCard).filter(DailyCard.publish_date == publish_date).first()
+            if existing:
+                return True  # already locked for this day
+            # Rollover is persisted separately and changes as days resolve
+            body = {k: v for k, v in accumulators.items() if k != "rollover"}
+            db.add(DailyCard(publish_date=publish_date, payload=json.dumps(body)))
+            db.commit()
+            logger.info(f"Locked daily card for {publish_date}")
+            return True
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"save_card failed ({publish_date}): {e}")
+        return False
+
+
+def load_card(publish_date: str) -> Optional[dict]:
+    """The locked card for a day, or None if it has not been published yet."""
+    try:
+        db = SessionLocal()
+        try:
+            row = db.query(DailyCard).filter(DailyCard.publish_date == publish_date).first()
+            return json.loads(row.payload) if row else None
+        finally:
+            db.close()
+    except Exception:
+        return None

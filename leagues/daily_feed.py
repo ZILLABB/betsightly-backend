@@ -21,9 +21,36 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).parent / "data"
 
 _accum_cache: dict = {"result": None, "ts": 0}
-_ACCUM_CACHE_TTL = 3600  # 1 hour
+_ACCUM_CACHE_TTL = 900  # 15 min — the card itself is locked, this just trims DB reads
 
 TARGET_DAYS = 10  # rollover chain length
+
+# Nigeria is UTC+1 year-round (no daylight saving), and the audience books in
+# the morning. The card is published at 08:00 WAT so a full day of fixtures is
+# still ahead of the user rather than half-gone.
+WAT_OFFSET = timedelta(hours=1)
+PUBLISH_HOUR_WAT = 8
+
+# Fixtures kicking off sooner than this are left out at publish time — a pick
+# a user cannot realistically get on is not a pick.
+BOOKING_BUFFER = timedelta(minutes=20)
+
+
+def _wat_now() -> datetime:
+    return datetime.now(timezone.utc) + WAT_OFFSET
+
+
+def _publish_date() -> str:
+    """The WAT day whose card should currently be showing.
+
+    Before 08:00 WAT the previous day's card is still the published one, so an
+    early-morning visitor sees a settled, finished card rather than a
+    half-built one for a day that has not opened yet.
+    """
+    wat = _wat_now()
+    if wat.hour < PUBLISH_HOUR_WAT:
+        wat -= timedelta(days=1)
+    return wat.strftime("%Y-%m-%d")
 
 
 def _save(filename: str, data):
@@ -44,20 +71,48 @@ def build_daily_accumulators(force: bool = False) -> dict:
     from leagues.selection import select_accumulator, select_banker
     from leagues.picks import to_game
 
+    now = datetime.now(timezone.utc)
+    publish_date = _publish_date()
+
+    # Serve the locked card if today's has already been published. Re-selecting
+    # through the day would quietly swap picks out from under anyone who booked
+    # off the morning card.
+    if not force:
+        locked = _load_locked(publish_date)
+        if locked:
+            rollover = _build_rollover(_pipeline_for_rollover()[0], now.strftime("%Y-%m-%d"))
+            locked["rollover"] = rollover
+            result = {
+                "status": "success",
+                "date": publish_date,
+                "source": "leagues",
+                "published_at_wat": f"{PUBLISH_HOUR_WAT:02d}:00",
+                "locked": True,
+                "total_fixtures": sum(len(c.get("games", [])) for c in locked.values() if isinstance(c, dict)),
+                "accumulators": _mark_started(locked, now),
+            }
+            _accum_cache.update({"result": result, "ts": now_ts})
+            return result
+
     all_picks, fixtures = run_pipeline(days_ahead=4, force=force)
     if not all_picks:
         return None
 
-    now = datetime.now(timezone.utc)
     today = now.strftime("%Y-%m-%d")
 
-    # Fixtures that already kicked off are filtered upstream, so "today" goes
-    # thin late in the day. Roll forward to the next date that can actually
-    # support a slip rather than publishing a one-game card.
-    day_picks = picks_for_date(today, all_picks)
-    target_date = today
+    # Only fixtures a user can still get on. Anything already under way, or
+    # about to be, is excluded from a freshly published card.
+    bookable_from = (now + BOOKING_BUFFER).isoformat().replace("+00:00", "Z")
+    all_picks = [p for p in all_picks if p["_fixture"]["commence_time"] >= bookable_from]
+    if not all_picks:
+        return None
+
+    # Prefer the publishing day; fall back to the next day with enough fixtures
+    # so a late-evening rebuild does not publish a one-game card.
+    day_picks = picks_for_date(publish_date, all_picks)
+    target_date = publish_date
     if len({p["match_id"] for p in day_picks}) < 3:
-        for offset in range(1, 5):
+        for offset in range(0, 5):
             nxt = (now + timedelta(days=offset)).strftime("%Y-%m-%d")
             nxt_picks = picks_for_date(nxt, all_picks)
             if len({p["match_id"] for p in nxt_picks}) >= 3:
@@ -112,6 +167,8 @@ def build_daily_accumulators(force: bool = False) -> dict:
         "status": "success",
         "date": target_date,
         "source": "leagues",
+        "published_at_wat": f"{PUBLISH_HOUR_WAT:02d}:00",
+        "locked": False,
         "total_fixtures": len({p["match_id"] for p in day_picks}),
         "accumulators": {
             "banker": mk_cat(banker, "Banker", "No pick met the banker threshold today."),
@@ -127,8 +184,58 @@ def build_daily_accumulators(force: bool = False) -> dict:
     }
 
     _archive(target_date, result["accumulators"])
+
+    # Lock the card for the publishing day so it is served unchanged from here
+    if target_date == publish_date:
+        try:
+            from leagues.picks_db import save_card
+            save_card(publish_date, result["accumulators"])
+            result["locked"] = True
+        except Exception as e:
+            logger.debug(f"card lock skipped: {e}")
+
+    result["accumulators"] = _mark_started(result["accumulators"], now)
     _accum_cache.update({"result": result, "ts": now_ts})
     return result
+
+
+def _load_locked(publish_date: str):
+    try:
+        from leagues.picks_db import load_card
+        return load_card(publish_date)
+    except Exception:
+        return None
+
+
+def _pipeline_for_rollover():
+    """Picks needed to extend the rollover chain, independent of the locked card."""
+    from leagues.engine import run_pipeline
+    all_picks, _ = run_pipeline(days_ahead=4)
+    return (all_picks,)
+
+
+def _mark_started(accumulators: dict, now: datetime) -> dict:
+    """Flag legs whose match has kicked off.
+
+    The card stays fixed once published — that is the point — but a visitor
+    arriving at midday still needs to see which legs are no longer bookable
+    rather than being shown a slip that reads as if it were all still open.
+    """
+    cutoff = now.isoformat().replace("+00:00", "Z")
+    for cat in accumulators.values():
+        if not isinstance(cat, dict):
+            continue
+        games = cat.get("games") or []
+        started = 0
+        for g in games:
+            ko = g.get("kickoff") or g.get("date") or ""
+            g["started"] = bool(ko and ko <= cutoff)
+            if g["started"]:
+                started += 1
+        if games:
+            cat["started_count"] = started
+            cat["all_started"] = started == len(games)
+    return accumulators
 
 
 def _archive(date: str, accumulators: dict) -> None:
