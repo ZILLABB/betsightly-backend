@@ -267,6 +267,64 @@ def _collect_oddsapi_scores(sport_keys: List[str]) -> Dict[str, Dict[str, Any]]:
 
 # ── Unified scores collector ─────────────────────────────────
 
+
+def _collect_espn_scores_ranged(start_date: str, end_date: str) -> Dict[str, Dict[str, Any]]:
+    """Finished scores across every tracked league for a date range.
+
+    ESPN accepts dates=YYYYMMDD-YYYYMMDD, so each league costs one request
+    instead of one per day, and the leagues run concurrently. Keyed by
+    "home|away|date" plus a looser "home|away" so callers can match either way.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=1)
+        end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+    except Exception:
+        return {}
+    rng = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
+
+    slugs = list(ESPN_LEAGUE_SLUGS.values()) + ["fifa.world"]
+
+    def fetch(slug: str) -> List[dict]:
+        try:
+            resp = requests.get(
+                f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+                params={"dates": rng, "limit": 500}, timeout=25,
+            )
+            if resp.status_code != 200:
+                return []
+            return resp.json().get("events", [])
+        except Exception:
+            return []
+
+    finished: Dict[str, Dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        for events in pool.map(fetch, slugs):
+            for event in events:
+                comp = (event.get("competitions") or [{}])[0]
+                if comp.get("status", {}).get("type", {}).get("name") != "STATUS_FULL_TIME":
+                    continue
+                teams = comp.get("competitors", [])
+                if len(teams) < 2:
+                    continue
+                hd = next((t for t in teams if t.get("homeAway") == "home"), teams[0])
+                ad = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
+                home = hd.get("team", {}).get("displayName", "")
+                away = ad.get("team", {}).get("displayName", "")
+                try:
+                    hs, as_ = int(hd.get("score", 0)), int(ad.get("score", 0))
+                except (TypeError, ValueError):
+                    continue
+                payload = {"home": home, "away": away, "home_score": hs,
+                           "away_score": as_, "completed": True}
+                date = (event.get("date") or "")[:10]
+                finished[f"{_normalize_name(home)}|{_normalize_name(away)}|{date}"] = payload
+                finished.setdefault(f"{_normalize_name(home)}|{_normalize_name(away)}", payload)
+    return finished
+
+
+
 def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tuple[Dict[str, Dict[str, Any]], str]:
     """Collect finished scores. Returns (finished_dict, source_name).
 
@@ -295,8 +353,10 @@ def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tup
     date_from = min(dates)
     date_to = max(dates)
 
-    # 1. ESPN — free, no key, no quota
-    finished = _collect_espn_scores(sports, date_list)
+    # 1. ESPN — free, no key, no quota.
+    # Ranged + concurrent: the per-date collector issues one request per league
+    # per day, which across 91 leagues cannot finish inside a request timeout.
+    finished = _collect_espn_scores_ranged(date_from, date_to)
     if finished:
         logger.info(f"Scores from ESPN: {len(finished)} completed matches")
         return finished, "espn"
@@ -726,20 +786,17 @@ def settle_published_slips() -> Dict[str, int]:
 
     # Score every league we tip, across the dates in question
     dates = sorted({s.date for s in slips})
-    scores = _collect_espn_scores(SCORES_SPORTS_CLUB, dates)
+    scores = _collect_espn_scores_ranged(dates[0], dates[-1])
 
     def _lookup(home: str, away: str) -> Optional[Dict[str, Any]]:
         h, a = _normalize_name(home), _normalize_name(away)
-        for key, val in scores.items():
-            if _normalize_name(val.get("home", "")) == h and _normalize_name(val.get("away", "")) == a:
-                return val
+        hit = scores.get(f"{h}|{a}")
+        if hit:
+            return hit
         # Fall back to alias forms for teams whose feeds disagree on naming
         h2 = TEAM_ALIASES.get(h, h)
         a2 = TEAM_ALIASES.get(a, a)
-        for key, val in scores.items():
-            if _normalize_name(val.get("home", "")) == h2 and _normalize_name(val.get("away", "")) == a2:
-                return val
-        return None
+        return scores.get(f"{h2}|{a2}")
 
     won = lost = still = 0
     for slip in slips:
@@ -778,63 +835,6 @@ def settle_published_slips() -> Dict[str, int]:
     if won or lost:
         logger.info(f"Slip settlement: {won} won, {lost} lost, {still} pending")
     return {"slips_checked": len(slips), "won": won, "lost": lost, "still_pending": still}
-
-
-def _collect_espn_scores_ranged(start_date: str, end_date: str) -> Dict[str, Dict[str, Any]]:
-    """Finished scores across every tracked league for a date range.
-
-    ESPN accepts dates=YYYYMMDD-YYYYMMDD, so each league costs one request
-    instead of one per day, and the leagues run concurrently. Keyed by
-    "home|away|date" plus a looser "home|away" so callers can match either way.
-    """
-    from concurrent.futures import ThreadPoolExecutor
-
-    try:
-        start = datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=1)
-        end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-    except Exception:
-        return {}
-    rng = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
-
-    slugs = list(ESPN_LEAGUE_SLUGS.values()) + ["fifa.world"]
-
-    def fetch(slug: str) -> List[dict]:
-        try:
-            resp = requests.get(
-                f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
-                params={"dates": rng, "limit": 500}, timeout=25,
-            )
-            if resp.status_code != 200:
-                return []
-            return resp.json().get("events", [])
-        except Exception:
-            return []
-
-    finished: Dict[str, Dict[str, Any]] = {}
-    with ThreadPoolExecutor(max_workers=16) as pool:
-        for events in pool.map(fetch, slugs):
-            for event in events:
-                comp = (event.get("competitions") or [{}])[0]
-                if comp.get("status", {}).get("type", {}).get("name") != "STATUS_FULL_TIME":
-                    continue
-                teams = comp.get("competitors", [])
-                if len(teams) < 2:
-                    continue
-                hd = next((t for t in teams if t.get("homeAway") == "home"), teams[0])
-                ad = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
-                home = hd.get("team", {}).get("displayName", "")
-                away = ad.get("team", {}).get("displayName", "")
-                try:
-                    hs, as_ = int(hd.get("score", 0)), int(ad.get("score", 0))
-                except (TypeError, ValueError):
-                    continue
-                payload = {"home": home, "away": away, "home_score": hs,
-                           "away_score": as_, "completed": True}
-                date = (event.get("date") or "")[:10]
-                finished[f"{_normalize_name(home)}|{_normalize_name(away)}|{date}"] = payload
-                finished.setdefault(f"{_normalize_name(home)}|{_normalize_name(away)}", payload)
-    return finished
-
 
 def backfill_leg_status(limit_days: int = 120) -> Dict[str, int]:
     """Fill in per-leg outcomes on chain days that were settled before we
