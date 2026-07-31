@@ -145,19 +145,76 @@ def _fetch_league_range(slug: str, start: str, end: str) -> list[dict]:
         return []
 
 
+def _market_probs(odds_block: dict | None) -> dict | None:
+    """De-vigged 1X2 probabilities from the sportsbook's moneylines.
+
+    Raw implied probabilities sum to >1 because the book's margin is baked in;
+    normalising strips it out so the result is comparable to a model number.
+    """
+    if not odds_block:
+        return None
+    from leagues.elo_engine import _american_to_decimal
+
+    def imp(block, key="moneyLine"):
+        if not block:
+            return None
+        dec = _american_to_decimal(block.get(key))
+        return 1.0 / dec if dec and dec > 1 else None
+
+    ph = imp(odds_block.get("homeTeamOdds"))
+    pa = imp(odds_block.get("awayTeamOdds"))
+    pd = imp(odds_block.get("drawOdds"))
+    if ph is None or pa is None or pd is None:
+        return None
+    total = ph + pa + pd
+    if total <= 0:
+        return None
+    return {"home_win": ph / total, "draw": pd / total, "away_win": pa / total}
+
+
+def _market_total_probs(odds_block: dict | None) -> dict | None:
+    """De-vigged Over/Under probabilities and the line they refer to."""
+    if not odds_block:
+        return None
+    from leagues.elo_engine import _american_to_decimal
+
+    total_block = odds_block.get("total") or {}
+    line = odds_block.get("overUnder")
+
+    def side(name):
+        b = total_block.get(name) or {}
+        quote = b.get("close") or b.get("open") or {}
+        dec = _american_to_decimal(quote.get("odds"))
+        return 1.0 / dec if dec and dec > 1 else None
+
+    po, pu = side("over"), side("under")
+    if po is None or pu is None:
+        return None
+    s = po + pu
+    if s <= 0:
+        return None
+    return {"line": line, "over": po / s, "under": pu / s}
+
+
 def _build_prediction(home: str, away: str, commence: str, league_name: str,
                       home_logo: str | None, away_logo: str | None,
-                      rates: dict | None = None) -> dict | None:
-    """League base rates (measured from real results) adjusted by team ELO.
+                      rates: dict | None = None, slug: str | None = None,
+                      elo_all: dict | None = None,
+                      odds_block: dict | None = None,
+                      extra: dict | None = None) -> dict | None:
+    """Blend three independent signals into one probability per market.
 
-    Base rates are the anchor: Over 1.5 in Argentina really is ~52% and in
-    Norway ~84%, so a single global constant produces badly wrong confidence.
-    ELO then tilts the match-result split and shifts goals modestly.
-    Teams missing from the ELO registry still get a prediction — it simply
-    rests on the league rate alone.
+    1. The sportsbook's de-vigged price — the sharpest single estimate available,
+       so it carries the most weight when present.
+    2. ELO built from this league's own recent results.
+    3. The league's measured base rates.
+
+    Falling back through those in order means a fixture in a league with no
+    odds and no rated teams still gets an honest league-average number rather
+    than an invented one.
     """
     from leagues.base_rates import GLOBAL_DEFAULTS
-    from leagues.ml_overlay import elo_probabilities, get_team_rating
+    from leagues.elo_engine import rating_for
 
     rates = rates or dict(GLOBAL_DEFAULTS)
 
@@ -165,25 +222,40 @@ def _build_prediction(home: str, away: str, commence: str, league_name: str,
     lg_draw = rates.get("draw", 0.231)
     lg_away = rates.get("away_win", 0.295)
 
-    # ── Match result: blend league base with ELO when both teams are rated ──
-    probs = elo_probabilities(home, away)
-    if probs:
-        p_home = 0.60 * probs["home_win"] + 0.40 * lg_home
-        p_draw = 0.60 * probs["draw"] + 0.40 * lg_draw
-        p_away = 0.60 * probs["away_win"] + 0.40 * lg_away
-        total = p_home + p_draw + p_away
-        p_home, p_draw, p_away = p_home / total, p_draw / total, p_away / total
-        rated = True
+    # ── Team strength from ESPN-derived, league-scoped ELO ──
+    h_elo = a_elo = None
+    if slug and elo_all is not None:
+        h_elo = rating_for(slug, home, elo_all)
+        a_elo = rating_for(slug, away, elo_all)
+    rated = h_elo is not None and a_elo is not None
+
+    if rated:
+        diff = (h_elo + 60.0) - a_elo
+        expected = 1.0 / (1.0 + math.pow(10, -diff / 400.0))
+        draw_p = max(0.08, min(0.32, lg_draw))
+        e_home = max(0.03, expected - 0.5 * draw_p)
+        e_away = max(0.03, 1.0 - e_home - draw_p)
+        s = e_home + draw_p + e_away
+        elo_home, elo_draw, elo_away = e_home / s, draw_p / s, e_away / s
     else:
-        p_home, p_draw, p_away = lg_home, lg_draw, lg_away
-        rated = False
+        elo_home, elo_draw, elo_away = lg_home, lg_draw, lg_away
+
+    # ── Match result: market first, then ELO, then league base ──
+    mkt = _market_probs(odds_block)
+    if mkt:
+        w_mkt, w_elo, w_lg = (0.65, 0.25, 0.10) if rated else (0.80, 0.0, 0.20)
+        p_home = w_mkt * mkt["home_win"] + w_elo * elo_home + w_lg * lg_home
+        p_draw = w_mkt * mkt["draw"] + w_elo * elo_draw + w_lg * lg_draw
+        p_away = w_mkt * mkt["away_win"] + w_elo * elo_away + w_lg * lg_away
+    else:
+        p_home, p_draw, p_away = elo_home, elo_draw, elo_away
+    total = p_home + p_draw + p_away
+    p_home, p_draw, p_away = p_home / total, p_draw / total, p_away / total
 
     # ── Goals: anchor on the league's measured scoring, tilt by ELO gap ──
     lg_home_goals = rates.get("home_goals", 1.50)
     lg_away_goals = rates.get("away_goals", 1.20)
-    h_elo = get_team_rating(home)
-    a_elo = get_team_rating(away)
-    if h_elo is not None and a_elo is not None:
+    if rated:
         gap = max(-1.5, min(1.5, (h_elo - a_elo) / 400.0))
         exp_home = lg_home_goals * (1.0 + gap * 0.22)
         exp_away = lg_away_goals * (1.0 - gap * 0.22)
@@ -203,20 +275,43 @@ def _build_prediction(home: str, away: str, commence: str, league_name: str,
     over_1_5 = min(0.94, max(0.35, _poisson_over(1, exp_total) * o15_cal))
     over_2_5 = min(0.90, max(0.20, _poisson_over(2, exp_total) * o25_cal))
 
+    # Blend the book's Over/Under when it is quoted on the 2.5 line
+    mkt_tot = _market_total_probs(odds_block)
+    if mkt_tot and abs((mkt_tot.get("line") or 0) - 2.5) < 0.01:
+        over_2_5 = 0.65 * mkt_tot["over"] + 0.35 * over_2_5
+
     btts_raw = (1.0 - math.exp(-exp_home)) * (1.0 - math.exp(-exp_away))
     btts_at_avg = (1.0 - math.exp(-lg_home_goals)) * (1.0 - math.exp(-lg_away_goals))
     btts_cal = rates.get("btts", 0.526) / max(btts_at_avg, 1e-6)
     btts = min(0.88, max(0.20, btts_raw * btts_cal))
 
-    # Fair odds from our own probabilities. These are NOT bookmaker prices —
-    # book_odds stays absent so nothing downstream claims a verified edge.
+    # Real sportsbook prices where quoted; our own fair price elsewhere, so a
+    # slip never mixes a real payout with an imagined one silently.
+    from leagues.elo_engine import _american_to_decimal
+    ob = odds_block or {}
+    book = {}
+    if ob:
+        book["home_win"] = _american_to_decimal((ob.get("homeTeamOdds") or {}).get("moneyLine"))
+        book["away_win"] = _american_to_decimal((ob.get("awayTeamOdds") or {}).get("moneyLine"))
+        book["draw"] = _american_to_decimal((ob.get("drawOdds") or {}).get("moneyLine"))
+        tb = ob.get("total") or {}
+        for side, key in (("over", "over_2_5"), ("under", "under_2_5")):
+            q = (tb.get(side) or {}).get("close") or (tb.get(side) or {}).get("open") or {}
+            book[key] = _american_to_decimal(q.get("odds"))
+    book = {k: v for k, v in book.items() if v}
+
     margin = 1.05
+
+    def price(key, prob):
+        """Sportsbook price when available, else our fair price."""
+        return book.get(key) or round(margin / max(prob, 0.05), 2)
+
     best_odds = {
-        "home_win": round(margin / max(p_home, 0.05), 2),
-        "draw": round(margin / max(p_draw, 0.05), 2),
-        "away_win": round(margin / max(p_away, 0.05), 2),
-        "over_2_5": round(margin / max(over_2_5, 0.1), 2),
-        "under_2_5": round(margin / max(1.0 - over_2_5, 0.1), 2),
+        "home_win": price("home_win", p_home),
+        "draw": price("draw", p_draw),
+        "away_win": price("away_win", p_away),
+        "over_2_5": price("over_2_5", over_2_5),
+        "under_2_5": price("under_2_5", 1.0 - over_2_5),
     }
 
     home_or_draw = min(0.95, p_home + p_draw)
@@ -235,6 +330,44 @@ def _build_prediction(home: str, away: str, commence: str, league_name: str,
         (f"{away} or Draw", "double_chance", away_or_draw, round(margin / max(away_or_draw, 0.1), 2)),
     ]
     label, market, conf, odds = max(candidates, key=lambda c: c[2])
+
+    # Value: where our probability beats the book's own de-vigged number.
+    # Only computed against real prices — an edge over our own fair price
+    # would be meaningless.
+    value_bets = []
+    if mkt:
+        for key, our_p, lbl in (
+            ("home_win", p_home, f"{home} Win"),
+            ("away_win", p_away, f"{away} Win"),
+            ("draw", p_draw, "Draw"),
+        ):
+            dec = book.get(key)
+            if not dec:
+                continue
+            edge = our_p - mkt[key]
+            if edge > 0.04:
+                value_bets.append({
+                    "bet": lbl, "market": "match_result", "odds": dec,
+                    "our_prob": round(our_p, 3),
+                    "implied_prob": round(mkt[key], 3),
+                    "edge": round(edge, 3),
+                    "expected_value": round(our_p * dec - 1, 3),
+                })
+    if mkt_tot and abs((mkt_tot.get("line") or 0) - 2.5) < 0.01:
+        for key, our_p, lbl, mp in (
+            ("over_2_5", over_2_5, "Over 2.5 Goals", mkt_tot["over"]),
+            ("under_2_5", 1.0 - over_2_5, "Under 2.5 Goals", mkt_tot["under"]),
+        ):
+            dec = book.get(key)
+            if dec and our_p - mp > 0.04:
+                value_bets.append({
+                    "bet": lbl, "market": "goals", "odds": dec,
+                    "our_prob": round(our_p, 3),
+                    "implied_prob": round(mp, 3),
+                    "edge": round(our_p - mp, 3),
+                    "expected_value": round(our_p * dec - 1, 3),
+                })
+    value_bets.sort(key=lambda v: v["expected_value"], reverse=True)
 
     match_id = hashlib.md5(f"{home}{away}{commence}".encode()).hexdigest()
     return {
@@ -265,12 +398,30 @@ def _build_prediction(home: str, away: str, commence: str, league_name: str,
             "expected_home": round(exp_home, 2),
             "expected_away": round(exp_away, 2),
         },
-        "value_bets": [],
+        "value_bets": value_bets,
+        # Context shown on the match card: where and when it kicks off, how
+        # each side has been going, and how strong the numbers behind the
+        # pick are.
+        "match_info": {
+            "kickoff_utc": commence,
+            "venue": (extra or {}).get("venue"),
+            "city": (extra or {}).get("city"),
+            "country": (extra or {}).get("country"),
+            "broadcast": (extra or {}).get("broadcast"),
+            "home_form": (extra or {}).get("home_form"),
+            "away_form": (extra or {}).get("away_form"),
+            "home_record": (extra or {}).get("home_record"),
+            "away_record": (extra or {}).get("away_record"),
+            "home_elo": round(h_elo) if h_elo is not None else None,
+            "away_elo": round(a_elo) if a_elo is not None else None,
+        },
         "data_quality": {
             "source": "espn_elo",
             "league": league_name,
             "elo_rated": rated,
             "league_sample": rates.get("matches", 0),
+            "has_book_odds": bool(book),
+            "odds_provider": (ob.get("provider") or {}).get("displayName") if ob else None,
         },
     }
 
@@ -286,7 +437,9 @@ def get_club_predictions(days_ahead: int = 2) -> list[dict]:
         pass
 
     from leagues.base_rates import get_base_rates, rates_for
+    from leagues.elo_engine import get_ratings
     all_rates = get_base_rates(ESPN_CLUB_LEAGUES)
+    elo_all = get_ratings(ESPN_CLUB_LEAGUES)
 
     now = datetime.now(timezone.utc)
     start = now.strftime("%Y%m%d")
@@ -333,11 +486,37 @@ def get_club_predictions(days_ahead: int = 2) -> list[dict]:
             if key in seen:
                 continue
             seen.add(key)
+
+            venue = comp.get("venue") or {}
+            addr = venue.get("address") or {}
+            bc = comp.get("broadcasts") or []
+            names = (bc[0].get("names") if bc else None) or []
+
+            def _record(c):
+                recs = c.get("records") or []
+                return recs[0].get("summary") if recs else None
+
+            extra = {
+                "venue": venue.get("fullName"),
+                "city": addr.get("city"),
+                "country": addr.get("country"),
+                "broadcast": names[0] if names else None,
+                "home_form": home_c.get("form"),
+                "away_form": away_c.get("form"),
+                "home_record": _record(home_c),
+                "away_record": _record(away_c),
+            }
+            odds_list = comp.get("odds") or []
+
             pred = _build_prediction(
                 home, away, commence, league_name,
                 home_c.get("team", {}).get("logo"),
                 away_c.get("team", {}).get("logo"),
                 league_rates,
+                slug=slug,
+                elo_all=elo_all,
+                odds_block=odds_list[0] if odds_list else None,
+                extra=extra,
             )
             if pred:
                 preds.append(pred)

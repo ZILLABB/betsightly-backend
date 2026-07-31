@@ -1,51 +1,15 @@
 {
-  "par.1": {
-    "matches": 12,
-    "avg_goals": 2.5,
+  "bra.1": {
+    "matches": 28,
+    "avg_goals": 2.143,
     "over_1_5": 0.75,
-    "over_2_5": 0.4167,
-    "home_win": 0.3333,
-    "draw": 0.25,
-    "away_win": 0.4167,
-    "btts": 0.6667,
-    "home_goals": 1.25,
-    "away_goals": 1.25
-  },
-  "uru.1": {
-    "matches": 17,
-    "avg_goals": 1.824,
-    "over_1_5": 0.5882,
-    "over_2_5": 0.2941,
-    "home_win": 0.2941,
-    "draw": 0.3529,
-    "away_win": 0.3529,
-    "btts": 0.4706,
-    "home_goals": 0.941,
-    "away_goals": 0.882
-  },
-  "arg.1": {
-    "matches": 27,
-    "avg_goals": 2.074,
-    "over_1_5": 0.5185,
-    "over_2_5": 0.4074,
-    "home_win": 0.6667,
-    "draw": 0.1481,
-    "away_win": 0.1852,
-    "btts": 0.3704,
-    "home_goals": 1.296,
-    "away_goals": 0.778
-  },
-  "conmebol.sudamericana": {
-    "matches": 15,
-    "avg_goals": 2.733,
-    "over_1_5": 0.6667,
-    "over_2_5": 0.5333,
-    "home_win": 0.5333,
-    "draw": 0.1333,
-    "away_win": 0.3333,
-    "btts": 0.3333,
-    "home_goals": 1.467,
-    "away_goals": 1.267
+    "over_2_5": 0.3929,
+    "home_win": 0.2857,
+    "draw": 0.4286,
+    "away_win": 0.2857,
+    "btts": 0.5357,
+    "home_goals": 1.036,
+    "away_goals": 1.107
   },
   "bra.2": {
     "matches": 71,
@@ -59,29 +23,17 @@
     "home_goals": 1.38,
     "away_goals": 0.93
   },
-  "bra.1": {
-    "matches": 28,
-    "avg_goals": 2.143,
-    "over_1_5": 0.75,
-    "over_2_5": 0.3929,
-    "home_win": 0.2857,
-    "draw": 0.4286,
-    "away_win": 0.2857,
-    "btts": 0.5357,
-    "home_goals": 1.036,
-    "away_goals": 1.107
-  },
-  "ecu.1": {
-    "matches": 49,
-    "avg_goals": 2.204,
-    "over_1_5": 0.6122,
-    "over_2_5": 0.3878,
-    "home_win": 0.449,
-    "draw": 0.2041,
-    "away_win": 0.3469,
-    "btts": 0.4082,
-    "home_goals": 1.184,
-    "away_goals": 1.02
+  "arg.1": {
+    "matches": 27,
+    "avg_goals": 2.074,
+    "over_1_5": 0.5185,
+    "over_2_5": 0.4074,
+    "home_win": 0.6667,
+    "draw": 0.1481,
+    "away_win": 0.1852,
+    "btts": 0.3704,
+    "home_goals": 1.296,
+    "away_goals": 0.778
   },
   "col.1": {
     "matches": 10,
@@ -95,16 +47,28 @@
     "home_goals": 1.7,
     "away_goals": 1.0
   },
-  "usa.1": {
-    "matches": 36,
-    "avg_goals": 2.944,
-    "over_1_5": 0.6944,
-    "over_2_5": 0.6111,
-    "home_win": 0.6111,
-    "draw": 0.1944,
-    "away_win": 0.1944,
-    "btts": 0.5556,
-    "home_goals": 1.694,
+  "uru.1": {
+    "matches": 17,
+    "avg_goals": 1.824,
+    "over_1_5": 0.5882,
+    "over_2_5": 0.2941,
+    "home_win": 0.2941,
+    "draw": 0.3529,
+    "away_win": 0.3529,
+    "btts": 0.4706,
+    "home_goals": 0.941,
+    "away_goals": 0.882
+  },
+  "par.1": {
+    "matches": 12,
+    "avg_goals": 2.5,
+    "over_1_5": 0.75,
+    "over_2_5": 0.4167,
+    "home_win": 0.3333,
+    "draw": 0.25,
+    "away_win": 0.4167,
+    "btts": 0.6667,
+    "home_goals": 1.25,
     "away_goals": 1.25
   },
   "per.1": {
@@ -118,6 +82,42 @@
     "btts": 0.6667,
     "home_goals": 1.889,
     "away_goals": 1.0
+  },
+  "ecu.1": {
+    "matches": 49,
+    "avg_goals": 2.204,
+    "over_1_5": 0.6122,
+    "over_2_5": 0.3878,
+    "home_win": 0.449,
+    "draw": 0.2041,
+    "away_win": 0.3469,
+    "btts": 0.4082,
+    "home_goals": 1.184,
+    "away_goals": 1.02
+  },
+  "conmebol.sudamericana": {
+    "matches": 15,
+    "avg_goals": 2.733,
+    "over_1_5": 0.6667,
+    "over_2_5": 0.5333,
+    "home_win": 0.5333,
+    "draw": 0.1333,
+    "away_win": 0.3333,
+    "btts": 0.3333,
+    "home_goals": 1.467,
+    "away_goals": 1.267
+  },
+  "usa.1": {
+    "matches": 36,
+    "avg_goals": 2.944,
+    "over_1_5": 0.6944,
+    "over_2_5": 0.6111,
+    "home_win": 0.6111,
+    "draw": 0.1944,
+    "away_win": 0.1944,
+    "btts": 0.5556,
+    "home_goals": 1.694,
+    "away_goals": 1.25
   },
   "usa.nwsl": {
     "matches": 37,
@@ -143,18 +143,6 @@
     "home_goals": 1.278,
     "away_goals": 1.5
   },
-  "swe.1": {
-    "matches": 32,
-    "avg_goals": 2.875,
-    "over_1_5": 0.8125,
-    "over_2_5": 0.5625,
-    "home_win": 0.4062,
-    "draw": 0.25,
-    "away_win": 0.3438,
-    "btts": 0.5312,
-    "home_goals": 1.656,
-    "away_goals": 1.219
-  },
   "nor.1": {
     "matches": 25,
     "avg_goals": 3.12,
@@ -166,6 +154,18 @@
     "btts": 0.52,
     "home_goals": 1.68,
     "away_goals": 1.44
+  },
+  "swe.1": {
+    "matches": 32,
+    "avg_goals": 2.875,
+    "over_1_5": 0.8125,
+    "over_2_5": 0.5625,
+    "home_win": 0.4062,
+    "draw": 0.25,
+    "away_win": 0.3438,
+    "btts": 0.5312,
+    "home_goals": 1.656,
+    "away_goals": 1.219
   },
   "chn.1": {
     "matches": 36,

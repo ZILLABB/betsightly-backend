@@ -87,6 +87,11 @@ def _to_game(p: dict, tip: dict = None) -> dict:
         "home_team_logo": p.get("home_team_logo"),
         "away_team_logo": p.get("away_team_logo"),
         "league_logo": p.get("_league_logo") or "https://media.api-sports.io/football/leagues/1.png",
+        # Kickoff, venue, form and ratings for the match card
+        "match_info": p.get("match_info") or {},
+        # True when `odds` is a real sportsbook price rather than our fair price
+        "odds_are_real": bool((p.get("data_quality") or {}).get("has_book_odds")),
+        "odds_provider": (p.get("data_quality") or {}).get("odds_provider"),
     }
 
 
