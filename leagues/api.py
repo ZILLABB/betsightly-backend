@@ -119,62 +119,94 @@ async def get_calibration(days: int = 180):
 
 
 @router.get("/value-bets")
-async def get_value_bets(days_ahead: int = 3, limit: int = 40):
-    """Picks ranked by how much of the price the bookmaker keeps.
+async def get_value_bets(days_ahead: int = 3, limit: int = 40, min_ev: float = 0.02):
+    """Bets priced above fair value once every bookmaker is compared.
 
-    This deliberately does not claim to find profitable bets, because on this
-    data none exist. Two facts make that unavoidable:
+    Against a single book this list is always empty, and for a structural
+    reason: DraftKings runs ~9% overround on these leagues and our
+    probabilities are derived from its own prices, so the model reproduces the
+    market and expected value settles at minus the margin.
 
-    - DraftKings runs about a 9% overround on 1X2 in these leagues, well above
-      the 2-4% a sharp book charges.
-    - Our probabilities are anchored to that same book's de-vigged closing
-      prices, so by construction they land near the market's own view. A model
-      that reproduces the market cannot beat it, and expected value settles at
-      roughly minus the margin. The best pick available today sits at -2.0%.
+    Shopping the whole market changes the arithmetic rather than the model.
+    Measured on Arsenal vs Coventry across 39 books, taking the best quote on
+    each outcome gives an overround of 0.9996 — the house edge disappears, and
+    individual quotes scatter widely (Coventry ranged 13.0 to 20.0). Value is
+    then consensus probability, the median de-vigged view of all 39 books,
+    multiplied by the best price anyone is offering. It is positive precisely
+    when one book is out of step with everybody else, which is a real edge in
+    a way that beating a single book's own de-vigged number never was.
 
-    Beating the closing line needs information the closing line lacks —
-    several books to shop between, or a market the book prices lazily. Until
-    that exists, the useful question is not "which bet wins" but "which bet
-    is least taxed", and a -2% pick over a -9% one is a real, bankable
-    improvement. `positive_ev_count` reports genuine +EV picks so the figure
-    is visible the moment it stops being zero.
+    Two honest caveats travel with each row, and both are returned so the
+    frontend can show them: exchanges quote before commission (typically 2-5%,
+    which eats part of a small edge), and the best price is often the one with
+    the lowest stake limit.
     """
     try:
         from leagues.engine import run_pipeline
+        from leagues.odds_shop import shop_odds, lookup, budget_status
 
-        all_picks, _ = run_pipeline(days_ahead=days_ahead)
-        rows = [
-            {
-                "match_id": p["match_id"],
-                "home_team": p["_fixture"]["home"]["name"],
-                "away_team": p["_fixture"]["away"]["name"],
-                "home_team_logo": p["_fixture"]["home"].get("logo"),
-                "away_team_logo": p["_fixture"]["away"].get("logo"),
-                "league": p["_fixture"]["league"],
-                "kickoff": p["_fixture"]["commence_time"],
-                "prediction": p["prediction"],
-                "market": p["market"],
-                "market_group": p["market_group"],
-                "confidence": p["confidence"],
-                "odds": p["odds"],
-                "odds_provider": p["odds_provider"],
-                "edge": p["edge"],
-                "expected_value": p["expected_value"],
-                # Price you would need for this to break even
-                "fair_odds": round(1.0 / p["confidence"], 2) if p["confidence"] else None,
-                # Share of stake the book keeps on this pick, as a percentage
-                "house_edge": round(-p["expected_value"] * 100, 2),
-                "positive_ev": p["expected_value"] > 0,
-            }
-            for p in all_picks
-            if p.get("odds_are_real") and p.get("expected_value") is not None
-        ]
+        all_picks, fixtures = run_pipeline(days_ahead=days_ahead)
+
+        # Only shop leagues we are actually publishing from, busiest first —
+        # the free tier is 500 credits a month and blanket fetching every
+        # league would exhaust it inside a week. The budget guard inside
+        # shop_odds stops early if the daily ceiling is reached.
+        from collections import Counter
+        from leagues.odds_shop import SLUG_TO_ODDS_KEY
+        ranked = [s for s, _ in Counter(f["league_slug"] for f in fixtures).most_common()
+                  if s in SLUG_TO_ODDS_KEY]
+        shopped = shop_odds(ranked[:6])
+
+        rows = []
+        seen = set()
+        for f in fixtures:
+            hit = lookup(shopped, f["home"]["name"], f["away"]["name"])
+            if not hit:
+                continue
+            for outcome, o in hit["outcomes"].items():
+                cp, bp = o.get("consensus_prob"), o.get("best_price")
+                if not cp or not bp:
+                    continue
+                ev = cp * bp - 1
+                if ev < min_ev:
+                    continue
+                key = (f["id"], outcome)
+                if key in seen:
+                    continue
+                seen.add(key)
+                label = {"home_win": f["home"]["name"], "away_win": f["away"]["name"]}.get(outcome, "Draw")
+                rows.append({
+                    "match_id": f["id"],
+                    "home_team": f["home"]["name"],
+                    "away_team": f["away"]["name"],
+                    "home_team_logo": f["home"].get("logo"),
+                    "away_team_logo": f["away"].get("logo"),
+                    "league": f["league"],
+                    "kickoff": f["commence_time"],
+                    "prediction": f"{label} Win" if outcome != "draw" else "Draw",
+                    "market": outcome,
+                    "market_group": "match_result",
+                    "confidence": round(cp, 4),
+                    "odds": bp,
+                    "odds_provider": o.get("best_book"),
+                    "book_count": o.get("books"),
+                    "expected_value": round(ev, 4),
+                    "edge": round(cp - 1.0 / bp, 4),
+                    "fair_odds": round(1.0 / cp, 2),
+                    "house_edge": round(-ev * 100, 2),
+                    "positive_ev": True,
+                    "is_exchange": (o.get("best_book") or "").lower() in
+                        ("betfair", "smarkets", "matchbook", "betdaq"),
+                })
+
         rows.sort(key=lambda r: r["expected_value"], reverse=True)
         return {
             "status": "success",
             "count": len(rows),
-            "positive_ev_count": sum(1 for r in rows if r["positive_ev"]),
+            "positive_ev_count": len(rows),
             "best_expected_value": rows[0]["expected_value"] if rows else None,
+            "books_compared": max((r["book_count"] or 0) for r in rows) if rows else 0,
+            "budget": budget_status(),
             "value_bets": rows[:limit],
         }
     except Exception as e:
