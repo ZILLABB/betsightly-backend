@@ -125,24 +125,32 @@ setup_exception_handlers(app)
 # Include API router
 app.include_router(api_router, prefix="/api")
 
-# World Cup 2026 endpoints
+# Multi-league prediction engine endpoints
 try:
-    from worldcup.api import router as worldcup_router
-    app.include_router(worldcup_router)
-    logger.info("World Cup 2026 API endpoints registered")
+    from leagues.api import router as leagues_router
+    app.include_router(leagues_router, prefix="/api/leagues")
+    # Back-compat alias for older frontend builds that call /api/worldcup/*
+    app.include_router(leagues_router, prefix="/api/worldcup", include_in_schema=False)
+    logger.info("Leagues API endpoints registered")
 except ImportError as e:
-    logger.warning(f"World Cup module not available: {e}")
+    logger.warning(f"Leagues module not available: {e}")
 
 # Ensure rollover-chain table exists in PostgreSQL
 try:
-    from worldcup.rollover_db import ensure_table as _rollover_ensure_table
+    from leagues.rollover_db import ensure_table as _rollover_ensure_table
     _rollover_ensure_table()
+    from leagues.picks_db import (
+        ensure_table as _slips_ensure_table,
+        ensure_card_table as _cards_ensure_table,
+    )
+    _slips_ensure_table()
+    _cards_ensure_table()
 except Exception as e:
     logger.warning(f"Could not ensure rollover_days table: {e}")
 
 # Start background results checker (every 6h) — World Cup rollover chains
 try:
-    from worldcup.results_checker import start_background_loop as _start_results_loop
+    from leagues.results_checker import start_background_loop as _start_results_loop
     _start_results_loop()
 except Exception as e:
     logger.warning(f"Could not start results checker: {e}")
@@ -210,9 +218,11 @@ def _start_telegram_bot_thread():
             except Exception as e:
                 restarts += 1
                 backoff = min(30 * restarts, 300)  # 30s, 60s, ... capped at 5 min
-                logger.error(
-                    f"Telegram bot crashed ({restarts}/{MAX_RESTARTS}): {e} — "
-                    f"restarting in {backoff}s"
+                is_conflict = "Conflict" in str(e) or "409" in str(e)
+                log = logger.warning if is_conflict else logger.error
+                log(
+                    f"Telegram bot {'conflict' if is_conflict else 'crashed'} "
+                    f"({restarts}/{MAX_RESTARTS}): {e} — restarting in {backoff}s"
                 )
                 _time.sleep(backoff)
         logger.error("Telegram bot exceeded max restarts — giving up until next deploy")
@@ -272,30 +282,55 @@ def _ensure_today_generated():
     # chain only grows when a user happens to hit /accumulators/today —
     # the 09:00 Telegram post would find no picks on quiet mornings.
     try:
-        from worldcup.daily_feed import build_daily_accumulators
+        from leagues.daily_feed import build_daily_accumulators
         build_daily_accumulators()
     except Exception as e:
         logger.error(f"Daily loop: accumulator feed build failed: {e}")
 
 
 def _start_daily_generation_loop():
-    """Keep each day's artifacts present, not just at boot.
+    """Keep each day's artifacts present, and publish the card at 08:00 WAT.
 
-    The old startup-only generation left a gap: a server running past
-    midnight had no predictions for the new day until the first visitor.
-    Check every 30 minutes; the first pass after 00:00 generates the new
-    day, well before the 09:00 Telegram post.
+    The audience books in the morning in Nigeria (UTC+1), so the day's card is
+    generated right at 08:00 WAT with a full slate of fixtures still ahead of
+    the user. Waiting for the first visitor to trigger it would publish
+    whatever was left by the time someone happened to load the page.
+
+    The loop still ticks every 15 minutes so a restart or a missed window
+    recovers on its own; generation itself is idempotent and the card is
+    locked once written, so extra passes are harmless.
     """
     import time as _time
+    from datetime import timezone as _tz, timedelta as _td
+
+    PUBLISH_HOUR_UTC = 7  # 08:00 WAT
 
     def _run():
         _time.sleep(5)  # let the server finish booting first
+        last_published = None
         while True:
-            _ensure_today_generated()
-            _time.sleep(1800)
+            try:
+                now = datetime.now(_tz.utc)
+                wat = now + _td(hours=1)
+                wat_day = wat.strftime("%Y-%m-%d")
+
+                _ensure_today_generated()
+
+                # Force a fresh build the first time we pass 08:00 WAT each day
+                if wat.hour >= 8 and last_published != wat_day:
+                    try:
+                        from leagues.daily_feed import build_daily_accumulators
+                        build_daily_accumulators(force=True)
+                        last_published = wat_day
+                        logger.info(f"Published daily card for {wat_day} (08:00 WAT window)")
+                    except Exception as e:
+                        logger.error(f"Daily card publish failed: {e}")
+            except Exception as e:
+                logger.error(f"Daily generation loop iteration failed: {e}")
+            _time.sleep(900)
 
     threading.Thread(target=_run, daemon=True, name="daily-generation").start()
-    logger.info("Daily generation loop started (30 min checks)")
+    logger.info("Daily generation loop started (15 min checks, publishes 08:00 WAT)")
 
 
 _start_daily_generation_loop()

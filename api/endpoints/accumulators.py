@@ -40,7 +40,7 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
             # Fallback to World Cup predictions when no league data
             logger.info("No daily predictions — trying WC fallback...")
             try:
-                from worldcup.daily_feed import build_daily_accumulators
+                from leagues.daily_feed import build_daily_accumulators
                 wc_result = build_daily_accumulators()
                 logger.info(f"WC fallback result: {bool(wc_result)}")
                 if wc_result:
@@ -63,7 +63,7 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
         if not predictions:
             # Fallback to World Cup predictions
             try:
-                from worldcup.daily_feed import build_daily_accumulators
+                from leagues.daily_feed import build_daily_accumulators
                 wc_result = build_daily_accumulators()
                 if wc_result:
                     return wc_result
@@ -121,7 +121,7 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
         # it back in so both paths return the same shape as the WC fallback.
         if accumulators.get('rollover', {}).get('selected'):
             try:
-                from worldcup.rollover_db import load_chain
+                from leagues.rollover_db import load_chain
                 chain_days = load_chain(today.isoformat()).get("days", [])
                 cum_odds = 1.0
                 for d in chain_days:

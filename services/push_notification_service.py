@@ -213,7 +213,7 @@ def notify_predictions_ready(
         f"<b>New Predictions Ready!</b>\n\n"
         f"<b>{predictions_count}</b> picks for <b>{prediction_date}</b>\n"
         f"Categories: {cats_text}\n\n"
-        f"Check them out at betsightly-frontend.vercel.app/predictions"
+        f"Check them out at betsightly.com/predictions"
     )
     send_telegram_dm_to_all(tg_message)
 

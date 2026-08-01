@@ -321,7 +321,7 @@ async def wctips_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         import json
         from pathlib import Path
 
-        data_dir = Path(__file__).parent / "worldcup" / "data"
+        data_dir = Path(__file__).parent / "leagues" / "data"
         preds_path = data_dir / "wc_predictions.json"
 
         if not preds_path.exists():
@@ -380,7 +380,7 @@ async def wcacca_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         import json
         from pathlib import Path
 
-        data_dir = Path(__file__).parent / "worldcup" / "data"
+        data_dir = Path(__file__).parent / "leagues" / "data"
         preds_path = data_dir / "wc_predictions.json"
 
         if not preds_path.exists():
@@ -727,57 +727,73 @@ async def handle_status_reply(update: Update, text: str) -> None:
 
 async def _daily_post_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Posts today's safest accumulator pick into the group every morning.
+    Posts today's accumulator picks + rollover into the group every morning.
     Scheduled by Application.job_queue below.
     """
     chat_id = TELEGRAM_GROUP_ID
     if not chat_id:
         return
     try:
-        import json as _json
-        from pathlib import Path
+        from leagues.daily_feed import build_daily_accumulators
 
-        # Try DB rollover chain first (the new persistent store)
-        try:
-            from worldcup.rollover_db import load_chain
-            chain = load_chain(datetime.now().strftime("%Y-%m-%d"))
-            days = chain.get("days", [])
-        except Exception:
-            chain_path = Path(__file__).parent / "worldcup" / "data" / "wc_rollover_chain.json"
-            days = []
-            if chain_path.exists():
-                with open(chain_path) as f:
-                    days = _json.load(f).get("days", [])
-
-        if not days:
+        result = build_daily_accumulators()
+        if not result:
             return
 
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        today_day = next((d for d in days if d.get("date", "") >= today_str and d.get("status") == "pending"), None)
-        if not today_day:
-            return
+        accums = result.get("accumulators", {})
+        target_date = result.get("date", datetime.now().strftime("%Y-%m-%d"))
+        nice_date = datetime.strptime(target_date, "%Y-%m-%d").strftime("%A, %d %b %Y")
 
-        picks = today_day.get("picks", [])
-        if not picks:
-            return
-
-        nice_date = datetime.strptime(today_day["date"], "%Y-%m-%d").strftime("%A, %d %b %Y")
         lines = [
-            "Today's Safe Rollover Pick",
-            f"{nice_date} · Day {today_day['day_number']}",
+            f"BetSightly Daily Picks",
+            f"{nice_date}",
             "",
         ]
-        for pk in picks:
-            lines.append(f"  {pk.get('home_team', '?')} vs {pk.get('away_team', '?')}")
-            lines.append(f"     -> {pk.get('prediction', '?')} @{pk.get('odds')}")
+
+        # --- Accumulator categories ---
+        cat_labels = [
+            ("2_odds", "2 Odds"),
+            ("5_odds", "5 Odds"),
+            ("10_odds", "10 Odds"),
+            ("over_1_5", "Over 1.5"),
+        ]
+        for key, label in cat_labels:
+            cat = accums.get(key, {})
+            if not cat.get("selected"):
+                continue
+            games = cat.get("games", [])
+            if not games:
+                continue
+            lines.append(f"--- {label} ({cat.get('total_odds', 0):.2f}x) ---")
+            for g in games:
+                home = g.get("home_team", "?")
+                away = g.get("away_team", "?")
+                pred = g.get("prediction") or g.get("readable_prediction") or "?"
+                odds = g.get("odds") or g.get("estimated_odds") or 0
+                lines.append(f"  {home} vs {away}")
+                lines.append(f"     -> {pred} @{odds}")
             lines.append("")
-        lines.append(f"Combined odds: {today_day.get('combined_odds')}x")
-        lines.append(f"All {len(picks)} pick(s) must hit for the day to count.")
-        lines.append("")
-        lines.append("Full chain: https://betsightly-frontend.vercel.app/rollover")
+
+        # --- Rollover ---
+        rollover = accums.get("rollover", {})
+        chain = rollover.get("chain", [])
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_day = next((d for d in chain if d.get("date", "") >= today_str and d.get("status") == "pending"), None)
+        if today_day:
+            picks = today_day.get("picks", [])
+            if picks:
+                lines.append(f"--- Rollover · Day {today_day['day_number']} ({today_day.get('combined_odds')}x) ---")
+                for pk in picks:
+                    lines.append(f"  {pk.get('home_team', '?')} vs {pk.get('away_team', '?')}")
+                    lines.append(f"     -> {pk.get('prediction', '?')} @{pk.get('odds')}")
+                lines.append(f"  All {len(picks)} pick(s) must hit.")
+                lines.append("")
+
+        lines.append("View all picks: https://betsightly.com/predictions")
+        lines.append("Rollover chain: https://betsightly.com/rollover")
 
         await context.bot.send_message(chat_id=int(chat_id), text="\n".join(lines))
-        logger.info(f"Posted daily tip to {chat_id}")
+        logger.info(f"Posted daily picks to {chat_id}")
     except Exception as e:
         logger.error(f"Daily post failed: {e}", exc_info=True)
 
@@ -820,6 +836,7 @@ def main() -> None:
     import threading as _threading
     in_main_thread = _threading.current_thread() is _threading.main_thread()
     polling_kwargs: dict = {} if in_main_thread else {"stop_signals": None}
+    polling_kwargs["drop_pending_updates"] = True
 
     logger.info(f"BetSightly Bot starting (main_thread={in_main_thread})...")
     application.run_polling(**polling_kwargs)
