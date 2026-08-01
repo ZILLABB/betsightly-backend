@@ -170,13 +170,13 @@ async def get_value_bets(days_ahead: int = 3, limit: int = 40, min_ev: float = 0
                 ev = cp * bp - 1
                 if ev < min_ev:
                     continue
-                key = (f["id"], outcome)
+                key = (f["match_id"], outcome)
                 if key in seen:
                     continue
                 seen.add(key)
                 label = {"home_win": f["home"]["name"], "away_win": f["away"]["name"]}.get(outcome, "Draw")
                 rows.append({
-                    "match_id": f["id"],
+                    "match_id": f["match_id"],
                     "home_team": f["home"]["name"],
                     "away_team": f["away"]["name"],
                     "home_team_logo": f["home"].get("logo"),
