@@ -122,27 +122,41 @@ def build_daily_accumulators(force: bool = False) -> dict:
     if not day_picks:
         return None
 
+    # Floors are on expected value — payout times the chance it lands. They sit
+    # a little under what a normal day achieves, so the tier survives a thin
+    # fixture list but a genuinely bad slip is still refused. Longer targets get
+    # a lower floor because each extra leg multiplies in another slice of the
+    # bookmaker's margin; that cost is real and is shown rather than hidden.
     banker = select_banker(day_picks)
-    two = select_accumulator(day_picks, 2.0, max_picks=4, min_confidence=0.60, min_joint=0.38)
-    five = select_accumulator(day_picks, 5.0, max_picks=5, min_confidence=0.48, min_joint=0.12)
-    ten = select_accumulator(day_picks, 10.0, max_picks=6, min_confidence=0.40, min_joint=0.045)
+    two = select_accumulator(day_picks, 2.0, max_picks=4, min_confidence=0.60, min_ev=0.85)
+    five = select_accumulator(day_picks, 5.0, max_picks=5, min_confidence=0.55, min_ev=0.78)
+    ten = select_accumulator(day_picks, 10.0, max_picks=6, min_confidence=0.55, min_ev=0.68)
 
     # Over 1.5 — one per fixture, safest first, only where the league's own
     # measured rate supports it (this is the market the old model overclaimed).
+    #
+    # Legs are added while the slip is still worth staking rather than up to a
+    # fixed five. Five legs looked generous and was the worst product on the
+    # site: 2.40x landing 31% of the time, about -25%. Stopping on expected
+    # value gives three legs at 1.64x landing 51% — a shorter slip the user is
+    # far more likely to actually win.
+    OVER_MIN_EV = 0.82
     over_picks, seen = [], set()
+    over_total, over_joint = 1.0, 1.0
     for p in sorted(day_picks, key=lambda x: -x["confidence"]):
         if p["market"] != "over_1_5" or p["match_id"] in seen:
             continue
         if p["confidence"] < 0.70:
             continue
+        nxt_total = over_total * p["odds"]
+        nxt_joint = over_joint * p["confidence"]
+        if over_picks and nxt_total * nxt_joint < OVER_MIN_EV:
+            break
         over_picks.append(p)
         seen.add(p["match_id"])
+        over_total, over_joint = nxt_total, nxt_joint
         if len(over_picks) >= 5:
             break
-    over_total, over_joint = 1.0, 1.0
-    for p in over_picks:
-        over_total *= p["odds"]
-        over_joint *= p["confidence"]
 
     rollover = _build_rollover(all_picks, today)
 
@@ -366,6 +380,7 @@ def _build_rollover(all_picks: list, today: str) -> dict:
                     "odds": p["odds"],
                     "odds_are_real": p["odds_are_real"],
                     "confidence": p["confidence"],
+                    "raw_confidence": p.get("raw_confidence"),
                     "status": "pending",
                 }
                 for p in chosen

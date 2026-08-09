@@ -65,20 +65,35 @@ def _estimated_price(prob: float) -> float:
     return max(1.01, round(fair / ESTIMATE_MARGIN, 2))
 
 
-def build_picks(fixture: dict, model: dict, min_confidence: float = 0.55) -> list[dict]:
+def build_picks(fixture: dict, model: dict, min_confidence: float = 0.55,
+                fit: dict | None = None) -> list[dict]:
     """All viable picks for one fixture, best first.
 
     A pick must clear `min_confidence` and carry odds of at least 1.05.
     Double chance is additionally required to be genuinely strong, since it is
     a low-price market that otherwise crowds out everything else.
+
+    The model probability is passed through the empirical calibrator before
+    anything else looks at it, so the confidence threshold, the estimated
+    price, the value edge and the accumulator search all see the corrected
+    number. Calibrating only at display time would have left selection
+    choosing between the same over-stated candidates and merely relabelled
+    them on the way out.
     """
-    probs = model["probabilities"]
+    from leagues.calibrator import calibrate
+
+    if fit is None:
+        from leagues.calibrator import fit_calibration
+        fit = fit_calibration()
+
+    raw_probs = model["probabilities"]
     odds = fixture.get("odds") or {}
     home = fixture["home"]["name"]
     away = fixture["away"]["name"]
 
     picks = []
-    for market, prob in probs.items():
+    for market, raw_prob in raw_probs.items():
+        prob = calibrate(raw_prob, MARKET_GROUP[market], fit)
         if prob < min_confidence:
             continue
         # Double chance only when it is genuinely safe — otherwise it wins
@@ -122,6 +137,8 @@ def build_picks(fixture: dict, model: dict, min_confidence: float = 0.55) -> lis
             "market_group": MARKET_GROUP[market],
             "prediction": MARKET_LABELS[market].format(home=home, away=away),
             "confidence": round(prob, 4),
+            # Kept so the calibration's effect stays auditable after the fact
+            "raw_confidence": round(raw_prob, 4),
             "odds": round(price, 2),
             "odds_are_real": is_real,
             "odds_provider": odds.get("provider") if is_real else None,
@@ -178,6 +195,7 @@ def to_game(pick: dict) -> dict:
         "prediction_value": pick["prediction"],
         "readable_prediction": pick["prediction"],
         "confidence": conf,
+        "raw_confidence": pick.get("raw_confidence"),
         "odds": pick["odds"],
         "estimated_odds": pick["odds"],
         "real_odds": pick["odds"] if pick["odds_are_real"] else None,

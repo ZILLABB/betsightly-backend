@@ -47,6 +47,14 @@ async def trigger_results_check():
         from leagues.results_checker import check_all_pending, settle_published_slips
         summary = check_all_pending()
         slips = settle_published_slips()
+        # Newly settled legs are exactly what the calibration is fitted on, so
+        # refit now rather than serving a stale correction for up to six hours.
+        try:
+            from leagues.calibrator import fit_calibration
+            fit = fit_calibration(force=True)
+            summary["calibration_legs"] = fit.get("n", 0)
+        except Exception as e:
+            logger.warning(f"calibration refit after settlement failed: {e}")
         return {"status": "success", **summary, "slips": slips}
     except Exception as e:
         logger.error(f"Results check trigger failed: {e}", exc_info=True)
@@ -115,6 +123,24 @@ async def get_calibration(days: int = 180):
         return {"status": "success", **calibration(limit_days=days)}
     except Exception as e:
         logger.error(f"Calibration fetch failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/calibration-fit")
+async def get_calibration_fit():
+    """The correction currently being applied to model probabilities.
+
+    `/calibration` reports whether published confidences matched reality.
+    This reports what is being done about it: the fitted shift per market
+    group, the sample behind each one, and worked examples of what the
+    correction does to a few reference probabilities — which is much easier to
+    sanity-check than a shift in log-odds.
+    """
+    try:
+        from leagues.calibrator import status
+        return {"status": "success", **status()}
+    except Exception as e:
+        logger.error(f"Calibration fit fetch failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
 
 

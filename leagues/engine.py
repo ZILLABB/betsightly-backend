@@ -44,9 +44,13 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
     from leagues.base_rates import get_base_rates, rates_for
     from leagues.predictor import predict
     from leagues.picks import build_picks
+    from leagues.calibrator import fit_calibration
 
     fixtures = get_fixtures(days_ahead=days_ahead, force=force)
     cached_rates = get_base_rates(ESPN_CLUB_LEAGUES)
+    # Fitted once per pipeline run; every pick is corrected against the same
+    # snapshot so a mid-run refit cannot make two picks incomparable.
+    fit = fit_calibration()
 
     all_picks: list[dict] = []
     priced = unpriced = with_elo = 0
@@ -62,11 +66,12 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
         else:
             unpriced += 1
         fx["_model"] = model
-        all_picks.extend(build_picks(fx, model))
+        all_picks.extend(build_picks(fx, model, fit=fit))
 
     logger.info(
         f"Pipeline: {len(fixtures)} fixtures ({priced} priced, {unpriced} base-rate only, "
-        f"{with_elo} with ELO) -> {len(all_picks)} candidate picks"
+        f"{with_elo} with ELO) -> {len(all_picks)} candidate picks "
+        f"(calibrated on {fit.get('n', 0)} settled legs)"
     )
 
     _CACHE.update({"picks": all_picks, "fixtures": fixtures, "ts": now})

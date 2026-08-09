@@ -83,6 +83,11 @@ def archive_slip(date: str, category: str, games: list[dict],
                     "odds": g.get("odds"),
                     "odds_are_real": g.get("odds_are_real", False),
                     "confidence": g.get("confidence"),
+                    # The uncorrected model probability. The calibrator has to
+                    # refit against the number it corrects, or once calibrated
+                    # legs start settling it would fit a shift on top of a
+                    # shift and correct the same bias twice.
+                    "raw_confidence": g.get("raw_confidence"),
                     "home_team_logo": g.get("home_team_logo"),
                     "away_team_logo": g.get("away_team_logo"),
                     "status": "pending",

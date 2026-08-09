@@ -17,9 +17,18 @@ i.e. the legs that add the most multiplier for the least risk. Adding a
 fourth 75% leg to reach 2.4x is strictly worse than one 55% leg at the same
 multiplier, and this ordering sees that; confidence-sorting does not.
 
-Honesty rule: a slip is only published when its joint probability clears a
-floor tied to its payout. A 10x slip that lands 6% of the time is a losing
-product no matter how confident each individual leg looks.
+Honesty rule: a slip is only published when it clears an expected-value floor —
+payout multiplied by the chance it lands. This used to be a floor on the joint
+probability alone, which cannot tell a good slip from a bad one because it
+never looks at the price: 6% on a 20x slip is excellent and 6% on an 8x slip
+is dreadful, and a joint floor treats them identically.
+
+Expected value is also the honest number to gate on once confidences are
+calibrated. Every extra leg multiplies in another slice of the bookmaker's
+margin, so a long slip is worse than a short one at the same payout, and an EV
+floor sees that automatically where a joint floor had to be hand-tuned per
+tier — and was tuned, originally, against confidences we now know were about
+seven points hot.
 """
 
 import itertools
@@ -42,15 +51,54 @@ def _cost(pick: dict) -> float:
     return -math.log(p) / math.log(o)
 
 
+# Price bands the candidate list is drawn from, so the search always has legs
+# long enough to reach a high target. Open-ended at the top.
+_PRICE_BANDS = [(1.12, 1.30), (1.30, 1.50), (1.50, 1.80), (1.80, 2.40), (2.40, 99.0)]
+_PER_BAND = 5
+# No group may take a whole band. MARKET_CAP means at most two legs from a
+# group can be used anyway, so a third and fourth are only there as
+# alternatives if the first two collide with the one-leg-per-fixture rule.
+_PER_BAND_GROUP = 3
+
+
+def _stratify(candidates: list[dict]) -> list[dict]:
+    """Best few candidates per price band, keeping the bands market-diverse.
+
+    Cost favours short prices, so drawing a flat top-N produced a list of
+    nothing but cheap goals legs. Banding by price restores the long legs a
+    high target needs; capping each group within a band stops one market from
+    filling the list and running into MARKET_CAP.
+    """
+    out: list[dict] = []
+    for lo, hi in _PRICE_BANDS:
+        band = sorted((p for p in candidates if lo <= p["odds"] < hi), key=_cost)
+        taken: dict[str, int] = {}
+        picked = 0
+        for p in band:
+            if picked >= _PER_BAND:
+                break
+            g = p["market_group"]
+            if taken.get(g, 0) >= _PER_BAND_GROUP:
+                continue
+            taken[g] = taken.get(g, 0) + 1
+            out.append(p)
+            picked += 1
+    return sorted(out, key=_cost)
+
+
 def select_accumulator(
     picks: list[dict],
     target_odds: float,
     max_picks: int = 5,
     min_confidence: float = 0.50,
-    min_joint: float = 0.0,
+    min_ev: float = 0.0,
     prefer_real_odds: bool = True,
 ) -> tuple[list[dict], float, float]:
-    """Pick the combination most likely to reach `target_odds`.
+    """Pick the best slip that reaches `target_odds`.
+
+    "Best" is expected value — payout times the chance it lands — rather than
+    the chance alone, so a cheap long shot cannot beat a fairly priced short
+    one just by having more legs.
 
     Returns (picks, combined_odds, joint_probability). Empty when the day
     cannot support the target honestly.
@@ -62,35 +110,56 @@ def select_accumulator(
     if not pool:
         return [], 0.0, 0.0
 
-    # Keep only the best pick per fixture per market group, then the best few
-    # per fixture — one match must never contribute two correlated legs.
-    best_per_fixture: dict[str, dict] = {}
+    # Keep the best pick per fixture *per market group*. Collapsing to a single
+    # pick per fixture — which is what this used to do — silently destroyed the
+    # search: goals picks always carry the lowest cost, so every fixture
+    # contributed its Over 1.5 leg and nothing else, leaving a candidate list
+    # that was 100% goals. With MARKET_CAP allowing two legs per group that
+    # capped any slip at two legs and about 2.9x, so the 5x and 10x tiers came
+    # back empty no matter how the gates were tuned. One leg per fixture is
+    # still enforced, but during the combination search below, where it can be
+    # satisfied without throwing away the market diversity first.
+    best_by_fixture_group: dict[tuple[str, str], dict] = {}
     for p in sorted(pool, key=_cost):
-        mid = p["match_id"]
-        if mid not in best_per_fixture:
-            best_per_fixture[mid] = p
-    candidates = sorted(best_per_fixture.values(), key=_cost)
+        key = (p["match_id"], p["market_group"])
+        if key not in best_by_fixture_group:
+            best_by_fixture_group[key] = p
+    candidates = sorted(best_by_fixture_group.values(), key=_cost)
 
     # Search combinations outright rather than building greedily. Greedy adds
     # whole legs and overshoots — it would return 2.59x landing 33% of the
     # time when 1.80x landing 47% is available and is the better product at a
     # "2 odds" target. The candidate list is one pick per fixture and capped
     # below, so the search space stays small enough to enumerate exactly.
-    candidates = candidates[:18]
+    #
+    # The cap is applied within price bands rather than to one list sorted by
+    # cost. Cost favours short prices by construction, so a flat top-N was
+    # returning eighteen legs priced around 1.2 and no combination of them
+    # could reach 5x or 10x at all — those tiers came back empty however the
+    # gates were set. Banding guarantees the search can actually buy the
+    # multiplier it is being asked for.
+    candidates = _stratify(candidates)
 
     lo_band = target_odds * 0.85
     hi_band = target_odds * 1.45
 
     best: tuple[list[dict], float, float] | None = None
-    best_joint = -1.0
+    best_ev = -1.0
     fallback: tuple[list[dict], float, float] | None = None
-    fallback_joint = -1.0
+    fallback_ev = -1.0
 
     for size in range(1, min(max_picks, len(candidates)) + 1):
         for combo in itertools.combinations(candidates, size):
             groups: dict[str, int] = {}
+            fixtures_used: set[str] = set()
             ok = True
             for p in combo:
+                # Two legs off the same match are correlated, not independent —
+                # multiplying their probabilities would overstate the slip.
+                if p["match_id"] in fixtures_used:
+                    ok = False
+                    break
+                fixtures_used.add(p["match_id"])
                 g = p["market_group"]
                 groups[g] = groups.get(g, 0) + 1
                 if groups[g] > MARKET_CAP:
@@ -105,16 +174,17 @@ def select_accumulator(
                 combined *= p["odds"]
                 joint *= p["confidence"]
 
-            if joint < min_joint:
+            ev = combined * joint
+            if ev < min_ev:
                 continue
 
             if lo_band <= combined <= hi_band:
-                if joint > best_joint:
-                    best_joint = joint
+                if ev > best_ev:
+                    best_ev = ev
                     best = (list(combo), combined, joint)
-            elif combined > hi_band and joint > fallback_joint:
+            elif combined > hi_band and ev > fallback_ev:
                 # Overshoots the band but still valid — keep as a backup
-                fallback_joint = joint
+                fallback_ev = ev
                 fallback = (list(combo), combined, joint)
 
     result = best or fallback
@@ -206,5 +276,5 @@ def select_rollover_day(picks: list[dict], target_odds: float = 1.9,
         target_odds=target_odds,
         max_picks=max_picks,
         min_confidence=0.62,
-        min_joint=0.45,
+        min_ev=0.85,
     )
