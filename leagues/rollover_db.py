@@ -38,6 +38,40 @@ class RolloverDay(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+def _day_dict(r) -> Dict[str, Any]:
+    """One stored day, with its joint probability restored.
+
+    Days written before the key mismatch was fixed all hold the 0.5 default,
+    so the probability is recomputed from the legs themselves whenever they
+    carry confidences. The legs are the authoritative record — they were
+    always persisted correctly — which repairs the existing chain rather than
+    leaving it reporting a number nobody ever predicted.
+    """
+    picks = json.loads(r.picks)
+    joint = 1.0
+    have = False
+    for p in picks:
+        c = p.get("confidence")
+        if c is None:
+            have = False
+            break
+        joint *= float(c)
+        have = True
+
+    hit = round(joint, 4) if have else r.avg_confidence
+    return {
+        "day_number": r.day_number,
+        "date": r.date,
+        "picks": picks,
+        "combined_odds": r.combined_odds,
+        "hit_probability": hit,
+        # Kept under the old name too — the column and any older reader still
+        # expect it, and it is the same quantity.
+        "avg_confidence": hit,
+        "status": r.status,
+    }
+
+
 def load_chain(default_start_date: str) -> Dict[str, Any]:
     """Load the current chain from DB. Returns same shape as the old JSON."""
     try:
@@ -67,17 +101,7 @@ def load_chain(default_start_date: str) -> Dict[str, Any]:
             return {
                 "start_date": start_date,
                 "status": "active",
-                "days": [
-                    {
-                        "day_number": r.day_number,
-                        "date": r.date,
-                        "picks": json.loads(r.picks),
-                        "combined_odds": r.combined_odds,
-                        "avg_confidence": r.avg_confidence,
-                        "status": r.status,
-                    }
-                    for r in unique_days
-                ],
+                "days": [_day_dict(r) for r in unique_days],
             }
         finally:
             db.close()
@@ -103,7 +127,13 @@ def append_day(chain_start_date: str, day: Dict[str, Any]) -> bool:
                 date=day["date"],
                 picks=json.dumps(day.get("picks", [])),
                 combined_odds=float(day.get("combined_odds", 1.0)),
-                avg_confidence=float(day.get("avg_confidence", 0.5)),
+                # The builder calls this `hit_probability`; the column predates
+                # that name. Reading only `avg_confidence` meant the default
+                # fired every single time, so every stored day claimed 0.5 and
+                # the real joint probability was thrown away on save.
+                avg_confidence=float(
+                    day.get("hit_probability", day.get("avg_confidence", 0.5))
+                ),
                 status=day.get("status", "pending"),
             )
             db.add(row)
