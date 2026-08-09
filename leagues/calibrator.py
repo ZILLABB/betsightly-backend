@@ -68,9 +68,10 @@ SHRINK_K = 40
 # Likewise for the global fit against "no correction at all".
 GLOBAL_K = 60
 
-# Asymmetric on purpose — see module docstring.
+# Asymmetric on purpose — see module docstring. The upward bound is a backstop
+# only; _regularised keeps a winning streak from reaching for it.
 MAX_DOWN = -1.30
-MAX_UP = 0.35
+MAX_UP = 0.25
 
 # Below this many legs a group has nothing to say and just inherits the global.
 MIN_GROUP_N = 6
@@ -120,6 +121,25 @@ def _solve_shift(legs: list[tuple[float, bool]]) -> float:
         else:
             hi = mid
     return (lo + hi) / 2
+
+
+def _regularised(sub: list[tuple[float, bool]]) -> list[tuple[float, bool]]:
+    """Add one won and one lost pseudo-leg at the group's mean prediction.
+
+    A group that has won every leg does not identify a shift — the likelihood
+    increases without bound and the solver simply runs to the rail, leaving
+    the clamp to invent a number. Double chance did exactly this at 16 from
+    16, which asks for the largest upward correction allowed on a run that a
+    genuine 85% market produces 7% of the time anyway.
+
+    One win and one loss at the group's own mean keeps the fit finite and
+    honest: a perfect record still pulls upward, but like 17 from 18 rather
+    than like certainty.
+    """
+    if not sub:
+        return sub
+    mean_p = sum(p for p, _ in sub) / len(sub)
+    return list(sub) + [(mean_p, True), (mean_p, False)]
 
 
 def _collect_legs() -> list[tuple[float, bool, str]]:
@@ -222,7 +242,7 @@ def fit_calibration(force: bool = False) -> dict:
         n = len(sub)
         if n < MIN_GROUP_N:
             continue
-        raw = _solve_shift(sub)
+        raw = _solve_shift(_regularised(sub))
         w = n / (n + SHRINK_K)
         # Shrink the group's own effect toward the global correction.
         shift = _clamp(w * raw + (1 - w) * global_shift)
