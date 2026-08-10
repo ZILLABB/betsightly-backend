@@ -12,19 +12,20 @@ Serving both from one origin makes the cookie first-party and the problem
 disappears. It also keeps an internal tool off the public site entirely, needs
 no frontend deploy to change, and cannot leak into the public bundle.
 
-Single self-contained document — no build step, no CDN, no external requests,
-so it works under a strict CSP and cannot break because a third party did.
+The CSS and JS are separate constants served as their own same-origin routes
+rather than inlined into the document. The app already sets a strict
+`default-src 'self'` on every response, which blocks inline <style> and
+inline <script> outright — the first version of this page rendered as
+unstyled black-on-white with no working JavaScript at all, so login could not
+even be attempted. Serving them as files satisfies `'self'` without having to
+add `unsafe-inline` for scripts, which is the directive actually worth
+keeping strict.
+
+No build step, no CDN, no external requests, so it cannot break because a
+third party did.
 """
 
-ADMIN_HTML = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
-<title>Growth · BetSightly Admin</title>
-<style>
-:root{
+ADMIN_CSS = r""":root{
   --bg:#0b0f14; --panel:#11171f; --panel2:#161d27; --line:#1f2630;
   --text:#e6edf3; --dim:#8b949e; --brand:#2ea043; --warn:#d29922;
   --bad:#f85149; --info:#58a6ff;
@@ -86,117 +87,9 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--panel2);
   padding:.6rem .8rem;border-radius:6px;font-size:.8rem;color:var(--dim);margin-bottom:1rem}
 .switch{display:flex;align-items:center;justify-content:space-between;gap:1rem;
   padding:.45rem 0;border-bottom:1px solid var(--line);font-size:.85rem}
-.switch:last-child{border-bottom:0}
-</style>
-</head>
-<body>
+.switch:last-child{border-bottom:0}"""
 
-<div id="login">
-  <h1 style="margin-bottom:1rem">BetSightly Growth</h1>
-  <div class="card">
-    <p class="muted" style="margin-top:0">Admin sign-in</p>
-    <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
-    <p class="err" id="loginErr"></p>
-    <button class="primary" style="width:100%" onclick="doLogin()">Sign in</button>
-  </div>
-  <p class="muted" id="cfgNote" style="margin-top:1rem"></p>
-</div>
-
-<div id="app" class="hidden">
-<header>
-  <h1>Growth Engine <span class="muted" id="today"></span></h1>
-  <div class="row">
-    <button onclick="generate(false)">Generate</button>
-    <button onclick="generate(true)">Generate + publish</button>
-    <button onclick="retry()">Retry failed</button>
-    <button class="ghost" onclick="doLogout()">Sign out</button>
-  </div>
-</header>
-
-<main>
-  <div class="tabs">
-    <button class="active" onclick="tab('overview',this)">Overview</button>
-    <button onclick="tab('content',this)">Content</button>
-    <button onclick="tab('publications',this)">Publishing</button>
-    <button onclick="tab('settings',this)">Settings</button>
-    <button onclick="tab('referrals',this)">Referrals</button>
-  </div>
-
-  <section id="tab-overview">
-    <div class="row" style="margin-bottom:1rem">
-      <label class="muted">Window</label>
-      <select id="win" style="width:auto" onchange="loadAnalytics()">
-        <option value="1">Today</option><option value="7" selected>7 days</option>
-        <option value="30">30 days</option><option value="90">90 days</option>
-      </select>
-    </div>
-    <div class="grid cards" id="stats"></div>
-    <div class="grid two" style="margin-top:1rem">
-      <div class="card"><h2>Acquisition</h2><div id="bySource"></div></div>
-      <div class="card"><h2>Campaigns</h2><div id="byCampaign"></div></div>
-      <div class="card"><h2>Top pages</h2><div id="byPath"></div></div>
-      <div class="card"><h2>Creators</h2><div id="byRef"></div></div>
-    </div>
-  </section>
-
-  <section id="tab-content" class="hidden">
-    <div class="note">
-      Instagram, Facebook, TikTok and YouTube are generated for manual posting.
-      Automated betting posts on those platforms can get the account terminated,
-      so there is no publish button — copy the text and post it yourself.
-    </div>
-    <div class="row" style="margin-bottom:.8rem">
-      <select id="fPlatform" style="width:auto" onchange="loadContent()">
-        <option value="">All platforms</option>
-      </select>
-      <select id="fStatus" style="width:auto" onchange="loadContent()">
-        <option value="">All statuses</option>
-        <option>DRAFT</option><option>APPROVED</option>
-        <option>PUBLISHED</option><option>FAILED</option><option>CANCELLED</option>
-      </select>
-    </div>
-    <div class="card" style="padding:0;overflow:auto"><table id="contentTable"></table></div>
-    <div id="preview" class="card hidden" style="margin-top:1rem">
-      <h2>Preview</h2><pre id="previewBody"></pre>
-    </div>
-  </section>
-
-  <section id="tab-publications" class="hidden">
-    <div class="card" style="padding:0;overflow:auto"><table id="pubTable"></table></div>
-  </section>
-
-  <section id="tab-settings" class="hidden">
-    <div class="grid two">
-      <div class="card"><h2>Engine</h2><div id="engineToggle"></div></div>
-      <div class="card"><h2>Channels</h2><div id="channelToggles"></div></div>
-      <div class="card"><h2>Auto-publish</h2>
-        <p class="muted" style="margin-top:0">Off means content waits for approval.</p>
-        <div id="autoToggles"></div></div>
-      <div class="card"><h2>Schedule (UTC)</h2><div id="scheduleFields"></div></div>
-    </div>
-    <button class="primary" style="margin-top:1rem" onclick="saveSettings()">Save settings</button>
-    <span class="muted" id="settingsMsg" style="margin-left:.6rem"></span>
-  </section>
-
-  <section id="tab-referrals" class="hidden">
-    <div class="card">
-      <h2>New referral code</h2>
-      <div class="row">
-        <input id="refCode" placeholder="code (e.g. bigmike)">
-        <input id="refName" placeholder="name (optional)">
-        <button class="primary" onclick="addRef()">Create</button>
-      </div>
-      <p class="err" id="refErr"></p>
-    </div>
-    <div class="card" style="margin-top:1rem;padding:0;overflow:auto">
-      <table id="refTable"></table>
-    </div>
-  </section>
-</main>
-</div>
-
-<script>
-const API = '/api/growth';
+ADMIN_JS = r"""const API = '/api/growth';
 const $ = id => document.getElementById(id);
 let SETTINGS = {};
 
@@ -308,12 +201,12 @@ async function loadContent(){
             ${c.error ? `<div class="muted">${esc(c.error.slice(0,60))}</div>` : ''}</td>
         <td class="muted">${esc(c.publish_date)}</td>
         <td class="row">
-          <button onclick="preview(${c.id})">View</button>
-          ${c.status === 'DRAFT' ? `<button onclick="act(${c.id},'approve')">Approve</button>` : ''}
+          <button data-act="preview" data-id="${c.id}">View</button>
+          ${c.status === 'DRAFT' ? `<button data-act="approve" data-id="${c.id}">Approve</button>` : ''}
           ${(!draftOnly.includes(c.platform) && c.status !== 'PUBLISHED')
-            ? `<button class="primary" onclick="act(${c.id},'publish')">Publish</button>` : ''}
+            ? `<button class="primary" data-act="publish" data-id="${c.id}">Publish</button>` : ''}
           ${c.status !== 'PUBLISHED' && c.status !== 'CANCELLED'
-            ? `<button onclick="act(${c.id},'cancel')">Cancel</button>` : ''}
+            ? `<button data-act="cancel" data-id="${c.id}">Cancel</button>` : ''}
         </td>
       </tr>`).join('')
       : '<tr><td colspan="5" class="muted" style="padding:1rem">Nothing generated yet.</td></tr>');
@@ -417,6 +310,36 @@ async function addRef(){
   } catch(e){ $('refErr').textContent = e.message; }
 }
 
+// Delegated wiring. Inline onclick/onchange attributes are inline script and
+// are blocked by `script-src 'self'` — a hash or nonce cannot whitelist an
+// event handler attribute either, so every control is bound here instead.
+// Delegation also covers rows rendered later by innerHTML.
+const ACTIONS = {
+  login: doLogin, logout: doLogout, retry: retry,
+  generate: () => generate(false),
+  'generate-publish': () => generate(true),
+  'save-settings': saveSettings,
+  'add-ref': addRef,
+  preview: el => preview(Number(el.dataset.id)),
+  approve: el => act(Number(el.dataset.id), 'approve'),
+  publish: el => act(Number(el.dataset.id), 'publish'),
+  cancel:  el => act(Number(el.dataset.id), 'cancel'),
+};
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act],[data-tab]');
+  if (!el) return;
+  if (el.dataset.tab) { tab(el.dataset.tab, el); return; }
+  const fn = ACTIONS[el.dataset.act];
+  if (fn) { e.preventDefault(); fn(el); }
+});
+
+document.addEventListener('change', e => {
+  const what = e.target.dataset && e.target.dataset.change;
+  if (what === 'analytics') loadAnalytics();
+  if (what === 'content') loadContent();
+});
+
 $('pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 
 (async () => {
@@ -429,8 +352,124 @@ $('pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   } catch(e){}
   try { await api('/admin/me'); show('app'); boot(); }
   catch(e){ show('login'); }
-})();
-</script>
+})();"""
+
+ADMIN_HTML = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Growth · BetSightly Admin</title>
+<link rel="stylesheet" href="/admin/app.css">
+</head>
+<body>
+
+<div id="login">
+  <h1 style="margin-bottom:1rem">BetSightly Growth</h1>
+  <div class="card">
+    <p class="muted" style="margin-top:0">Admin sign-in</p>
+    <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+    <p class="err" id="loginErr"></p>
+    <button class="primary" style="width:100%" data-act="login">Sign in</button>
+  </div>
+  <p class="muted" id="cfgNote" style="margin-top:1rem"></p>
+</div>
+
+<div id="app" class="hidden">
+<header>
+  <h1>Growth Engine <span class="muted" id="today"></span></h1>
+  <div class="row">
+    <button data-act="generate">Generate</button>
+    <button data-act="generate-publish">Generate + publish</button>
+    <button data-act="retry">Retry failed</button>
+    <button class="ghost" data-act="logout">Sign out</button>
+  </div>
+</header>
+
+<main>
+  <div class="tabs">
+    <button class="active" data-tab="overview">Overview</button>
+    <button data-tab="content">Content</button>
+    <button data-tab="publications">Publishing</button>
+    <button data-tab="settings">Settings</button>
+    <button data-tab="referrals">Referrals</button>
+  </div>
+
+  <section id="tab-overview">
+    <div class="row" style="margin-bottom:1rem">
+      <label class="muted">Window</label>
+      <select id="win" style="width:auto" data-change="analytics">
+        <option value="1">Today</option><option value="7" selected>7 days</option>
+        <option value="30">30 days</option><option value="90">90 days</option>
+      </select>
+    </div>
+    <div class="grid cards" id="stats"></div>
+    <div class="grid two" style="margin-top:1rem">
+      <div class="card"><h2>Acquisition</h2><div id="bySource"></div></div>
+      <div class="card"><h2>Campaigns</h2><div id="byCampaign"></div></div>
+      <div class="card"><h2>Top pages</h2><div id="byPath"></div></div>
+      <div class="card"><h2>Creators</h2><div id="byRef"></div></div>
+    </div>
+  </section>
+
+  <section id="tab-content" class="hidden">
+    <div class="note">
+      Instagram, Facebook, TikTok and YouTube are generated for manual posting.
+      Automated betting posts on those platforms can get the account terminated,
+      so there is no publish button — copy the text and post it yourself.
+    </div>
+    <div class="row" style="margin-bottom:.8rem">
+      <select id="fPlatform" style="width:auto" data-change="content">
+        <option value="">All platforms</option>
+      </select>
+      <select id="fStatus" style="width:auto" data-change="content">
+        <option value="">All statuses</option>
+        <option>DRAFT</option><option>APPROVED</option>
+        <option>PUBLISHED</option><option>FAILED</option><option>CANCELLED</option>
+      </select>
+    </div>
+    <div class="card" style="padding:0;overflow:auto"><table id="contentTable"></table></div>
+    <div id="preview" class="card hidden" style="margin-top:1rem">
+      <h2>Preview</h2><pre id="previewBody"></pre>
+    </div>
+  </section>
+
+  <section id="tab-publications" class="hidden">
+    <div class="card" style="padding:0;overflow:auto"><table id="pubTable"></table></div>
+  </section>
+
+  <section id="tab-settings" class="hidden">
+    <div class="grid two">
+      <div class="card"><h2>Engine</h2><div id="engineToggle"></div></div>
+      <div class="card"><h2>Channels</h2><div id="channelToggles"></div></div>
+      <div class="card"><h2>Auto-publish</h2>
+        <p class="muted" style="margin-top:0">Off means content waits for approval.</p>
+        <div id="autoToggles"></div></div>
+      <div class="card"><h2>Schedule (UTC)</h2><div id="scheduleFields"></div></div>
+    </div>
+    <button class="primary" style="margin-top:1rem" data-act="save-settings">Save settings</button>
+    <span class="muted" id="settingsMsg" style="margin-left:.6rem"></span>
+  </section>
+
+  <section id="tab-referrals" class="hidden">
+    <div class="card">
+      <h2>New referral code</h2>
+      <div class="row">
+        <input id="refCode" placeholder="code (e.g. bigmike)">
+        <input id="refName" placeholder="name (optional)">
+        <button class="primary" data-act="add-ref">Create</button>
+      </div>
+      <p class="err" id="refErr"></p>
+    </div>
+    <div class="card" style="margin-top:1rem;padding:0;overflow:auto">
+      <table id="refTable"></table>
+    </div>
+  </section>
+</main>
+</div>
+
+<script src="/admin/app.js"></script>
 </body>
 </html>
 """

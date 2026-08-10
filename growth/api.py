@@ -92,17 +92,56 @@ async def match_page(slug: str, request: Request):
     return HTMLResponse(render_match_page(slug, found["leg"], found["date"]))
 
 
+# The app-wide SecurityMiddleware sets `default-src 'self'`, which blocks
+# inline <style> and <script> — that is why the first version of the dashboard
+# rendered as unstyled black-on-white with no working JavaScript. The CSS and
+# JS are served as their own routes so `'self'` is satisfied, and this policy
+# is set per-response so the middleware leaves it alone.
+#
+# `style-src` allows unsafe-inline because the markup uses style attributes for
+# one-off layout; `script-src` deliberately does not, since inline script is
+# the directive that actually stops an injected payload from executing.
+_ADMIN_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "base-uri 'none'; "
+    "form-action 'none'; "
+    "frame-ancestors 'none'"
+)
+_ADMIN_HEADERS = {
+    "X-Robots-Tag": "noindex, nofollow",
+    "Content-Security-Policy": _ADMIN_CSP,
+}
+
+
 @public_router.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard():
     """The dashboard shell.
 
     Public only in the sense that the HTML is served to anyone — it renders a
-    sign-in form and every byte of data behind it comes from routes guarded by
-    `require_admin`. Served from this origin so the session cookie is
+    sign-in form, and every byte of data behind it comes from routes guarded
+    by `require_admin`. Served from this origin so the session cookie is
     first-party; see growth/admin_ui.py.
     """
     from growth.admin_ui import ADMIN_HTML
-    return HTMLResponse(ADMIN_HTML, headers={"X-Robots-Tag": "noindex, nofollow"})
+    return HTMLResponse(ADMIN_HTML, headers=_ADMIN_HEADERS)
+
+
+@public_router.get("/admin/app.css")
+async def admin_css():
+    from growth.admin_ui import ADMIN_CSS
+    return Response(ADMIN_CSS, media_type="text/css",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@public_router.get("/admin/app.js")
+async def admin_js():
+    from growth.admin_ui import ADMIN_JS
+    return Response(ADMIN_JS, media_type="application/javascript",
+                    headers={"Cache-Control": "no-cache"})
 
 
 @public_router.get("/sitemap.xml", response_class=PlainTextResponse)
