@@ -60,6 +60,36 @@ def _save(filename: str, data):
 
 # ── Categories ─────────────────────────────────────────────
 
+def _select_tier(picks: list, target: float, max_picks: int,
+                 min_confidence: float, min_ev: float):
+    """Select a tier, and say which of the two reasons left it empty.
+
+    A blank tier has two quite different causes and they were reported with
+    the same "not enough matches" line, which is misleading when there were
+    plenty of matches and the slip was simply refused for being poor value.
+    Re-running ungated tells them apart: if a slip exists without the floor,
+    the day had the fixtures and the value was the problem.
+    """
+    from leagues.selection import select_accumulator
+
+    sel = select_accumulator(picks, target, max_picks, min_confidence, min_ev=min_ev)
+    if sel[0]:
+        return sel, None
+
+    ungated = select_accumulator(picks, target, max_picks, min_confidence, min_ev=0.0)
+    if ungated[0]:
+        _, total, joint = ungated
+        return sel, (
+            f"Today's best {target:g}x slip lands about {joint:.0%} of the time, "
+            f"which returns roughly {total * joint:.2f} for every 1 staked. "
+            f"That is too thin to put our name on, so we are sitting it out."
+        )
+    return sel, (
+        f"Not enough matches today to reach {target:g}x safely — "
+        f"check back tomorrow."
+    )
+
+
 def build_daily_accumulators(force: bool = False) -> dict:
     """Category picks + rollover chain for the next actionable match day."""
     import time as _time
@@ -122,15 +152,20 @@ def build_daily_accumulators(force: bool = False) -> dict:
     if not day_picks:
         return None
 
-    # Floors are on expected value — payout times the chance it lands. They sit
-    # a little under what a normal day achieves, so the tier survives a thin
-    # fixture list but a genuinely bad slip is still refused. Longer targets get
-    # a lower floor because each extra leg multiplies in another slice of the
-    # bookmaker's margin; that cost is real and is shown rather than hidden.
+    # Floors are on expected value — payout times the chance it lands.
+    #
+    # Each leg gives up roughly 6% to the bookmaker's margin, so a slip's value
+    # is about 0.94^legs before anything else: ~0.83 at three legs, ~0.73 at
+    # five. A floor has to sit *below* that structural cost, or it rejects the
+    # tier for being what it is. The first pass set 5 odds at 0.78, which fell
+    # between two near-identical slips — 0.796 one day, 0.766 the next — so the
+    # tier blinked out over a 3-point difference that means nothing. These sit
+    # under the normal range for each tier's leg count, so they catch a slip
+    # that is genuinely bad rather than one that is merely long.
     banker = select_banker(day_picks)
-    two = select_accumulator(day_picks, 2.0, max_picks=4, min_confidence=0.60, min_ev=0.85)
-    five = select_accumulator(day_picks, 5.0, max_picks=5, min_confidence=0.55, min_ev=0.78)
-    ten = select_accumulator(day_picks, 10.0, max_picks=6, min_confidence=0.55, min_ev=0.68)
+    two, two_why = _select_tier(day_picks, 2.0, 4, 0.60, 0.82)
+    five, five_why = _select_tier(day_picks, 5.0, 5, 0.55, 0.72)
+    ten, ten_why = _select_tier(day_picks, 10.0, 6, 0.55, 0.63)
 
     # Over 1.5 — one per fixture, safest first, only where the league's own
     # measured rate supports it (this is the market the old model overclaimed).
@@ -186,9 +221,9 @@ def build_daily_accumulators(force: bool = False) -> dict:
         "total_fixtures": len({p["match_id"] for p in day_picks}),
         "accumulators": {
             "banker": mk_cat(banker, "Banker", "No pick met the banker threshold today."),
-            "2_odds": mk_cat(two, "Low", thin),
-            "5_odds": mk_cat(five, "Medium", thin),
-            "10_odds": mk_cat(ten, "High", thin),
+            "2_odds": mk_cat(two, "Low", two_why),
+            "5_odds": mk_cat(five, "Medium", five_why),
+            "10_odds": mk_cat(ten, "High", ten_why),
             "over_1_5": mk_cat(
                 (over_picks, over_total, over_joint) if over_picks else ([], 0, 0),
                 "Very Safe", thin,

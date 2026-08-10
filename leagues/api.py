@@ -126,6 +126,45 @@ async def get_calibration(days: int = 180):
         raise HTTPException(500, str(e))
 
 
+@router.post("/repair-card")
+async def repair_card():
+    """Fill tiers today's locked card left empty, without touching the rest.
+
+    A tier can be published empty for two quite different reasons — the day
+    genuinely could not reach the target, or the value gate rejected the only
+    slip available. When a gate turns out to have been mis-set, the tier stays
+    blank until the next 08:00 WAT publish even though a perfectly good slip
+    exists for fixtures that have not kicked off.
+
+    This rebuilds the card and copies across only the tiers that are currently
+    empty. Anything already published is left untouched, so the guarantee that
+    matters — a slip you booked this morning is still the slip on the site —
+    holds exactly as before.
+    """
+    try:
+        from leagues import daily_feed
+        from leagues.picks_db import fill_empty_card_tiers
+
+        fresh = daily_feed.build_daily_accumulators(force=True)
+        if not fresh:
+            raise HTTPException(404, "Could not rebuild the card")
+
+        publish_date = daily_feed._publish_date()
+        filled = fill_empty_card_tiers(publish_date, fresh.get("accumulators", {}))
+
+        # Rebuilding with force=True leaves the *unlocked* card in the response
+        # cache, which would serve freshly-reselected picks past the lock until
+        # the TTL expired. Drop it so the next read comes off the repaired card.
+        daily_feed._accum_cache.update({"result": None, "ts": 0.0})
+
+        return {"status": "success", "publish_date": publish_date, "filled": filled}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Card repair failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.get("/calibration-fit")
 async def get_calibration_fit():
     """The correction currently being applied to model probabilities.

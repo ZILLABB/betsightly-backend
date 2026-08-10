@@ -343,6 +343,47 @@ def save_card(publish_date: str, accumulators: dict) -> bool:
         return False
 
 
+def fill_empty_card_tiers(publish_date: str, fresh: dict) -> list[str]:
+    """Fill tiers the locked card left empty. Never touches a published one.
+
+    The card is immutable because a slip someone booked at 08:00 must not
+    change under them. A tier that was published as *empty* carries no such
+    promise — nobody can have staked it — so filling one in later adds to the
+    card without rewriting any part of it.
+
+    Deliberately one-directional: a tier that is already selected is skipped
+    outright, so this cannot quietly restore the rewriting problem the lock
+    exists to prevent. Returns the tiers it filled.
+    """
+    filled: list[str] = []
+    try:
+        db = SessionLocal()
+        try:
+            row = db.query(DailyCard).filter(DailyCard.publish_date == publish_date).first()
+            if not row:
+                return []
+            stored = json.loads(row.payload)
+            for key, new_cat in fresh.items():
+                if key == "rollover" or not isinstance(new_cat, dict):
+                    continue
+                old_cat = stored.get(key)
+                if isinstance(old_cat, dict) and old_cat.get("selected"):
+                    continue  # already published — leave it exactly as it is
+                if new_cat.get("selected") and new_cat.get("games"):
+                    stored[key] = new_cat
+                    filled.append(key)
+            if filled:
+                row.payload = json.dumps(stored)
+                db.commit()
+                logger.info(f"Card {publish_date}: filled empty tiers {filled}")
+            return filled
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"fill_empty_card_tiers failed ({publish_date}): {e}")
+        return []
+
+
 def load_card(publish_date: str) -> Optional[dict]:
     """The locked card for a day, or None if it has not been published yet."""
     try:
