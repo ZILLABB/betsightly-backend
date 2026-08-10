@@ -135,6 +135,24 @@ try:
 except ImportError as e:
     logger.warning(f"Leagues module not available: {e}")
 
+# Growth Engine — marketing content generation and distribution.
+# Mounted outside api_router because its public half (the tracking beacon and
+# the crawler-facing /p/{slug} pages) must not sit behind the API key, while
+# its admin half carries its own cookie auth rather than the shared key.
+try:
+    from growth.api import router as growth_router, public_router as growth_public
+    from growth.models import ensure_tables as _growth_ensure_tables
+
+    app.include_router(growth_router, prefix="/api/growth")
+    app.include_router(growth_public, prefix="/api/growth")
+    # Share links need to be short and clean, so /p/{slug} is also served at
+    # the root — a URL posted to social is read by people, not just crawlers.
+    app.include_router(growth_public, prefix="", include_in_schema=False)
+    _growth_ensure_tables()
+    logger.info("Growth Engine endpoints registered")
+except Exception as e:
+    logger.warning(f"Growth Engine not available: {e}")
+
 # Ensure rollover-chain table exists in PostgreSQL
 try:
     from leagues.rollover_db import ensure_table as _rollover_ensure_table
@@ -286,6 +304,17 @@ def _ensure_today_generated():
         build_daily_accumulators()
     except Exception as e:
         logger.error(f"Daily loop: accumulator feed build failed: {e}")
+
+    # 3) Growth Engine. Runs last and swallows its own errors, so marketing
+    # can never be the reason predictions fail to generate. run_daily is
+    # idempotent — publication rows are claimed under a unique constraint —
+    # so calling it on every 15-minute tick posts each item exactly once.
+    try:
+        from growth.engine import retry_failed, run_daily
+        run_daily()
+        retry_failed()
+    except Exception as e:
+        logger.error(f"Daily loop: growth engine failed: {e}")
 
 
 def _start_daily_generation_loop():

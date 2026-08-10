@@ -37,6 +37,11 @@ services:
         sync: false
       - key: TELEGRAM_ADMIN_IDS
         sync: false
+      # Growth Engine admin dashboard (/admin). Store only the PBKDF2 hash —
+      # generate it with growth.admin_auth.hash_password. Unset means the
+      # admin API authenticates nobody.
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
       - key: ALLOWED_ORIGINS
         value: "https://betsightly.vercel.app,https://betsightly.com,http://localhost:3000,http://localhost:5173"
 

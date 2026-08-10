@@ -822,14 +822,16 @@ def main() -> None:
     # All text messages (codes + status replies)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Schedule daily auto-post at 09:00 UTC if job_queue is available
-    try:
-        from datetime import time as _dtime
-        if application.job_queue is not None:
-            application.job_queue.run_daily(_daily_post_job, time=_dtime(hour=9, minute=0))
-            logger.info("Scheduled daily Telegram post for 09:00 UTC")
-    except Exception as e:
-        logger.warning(f"Could not schedule daily post: {e}")
+    # The daily group post is no longer scheduled here. The Growth Engine owns
+    # scheduled distribution now: it posts the top 5, the value alert, the
+    # accumulator and the evening results at separate times, records every
+    # publication, and claims each one under a unique constraint so a restart
+    # cannot repeat it. Leaving this job armed as well would simply post the
+    # card twice every morning.
+    #
+    # _daily_post_job is kept below and still reachable through /today, so the
+    # on-demand command works whether or not the Growth Engine is enabled.
+    logger.info("Daily group post is handled by the Growth Engine scheduler")
 
     # If running in a non-main thread (e.g. as a daemon in the FastAPI process),
     # signal handlers can't be installed — disable them.
