@@ -41,7 +41,19 @@ logger = logging.getLogger(__name__)
 # reach a useful multiplier and every one is another chance to lose.
 MIN_USEFUL_ODDS = 1.12
 
-MARKET_CAP = 2  # max legs from the same market group, for diversity
+# Max legs from the same market group. Every leg is on a different fixture
+# (enforced separately), so two Over 1.5 picks in different matches are close
+# to independent — the cap is about not betting the whole slip on one market
+# being right, not about correlation between the legs themselves.
+#
+# It was 2, which turned out to be the binding constraint on ordinary days.
+# Fixtures with no bookmaker odds fall back to league base rates, and those
+# give a home win around 47%, under the confidence floor — so an unpriced slate
+# produces goals picks and almost nothing else. On 12 August, 31 of 37
+# available picks were goals, and a cap of 2 held every possible slip to 3.87x
+# against a 5x band starting at 4.25x. The tier reported "not enough matches"
+# on a day with 35 of them.
+MARKET_CAP = 3
 
 
 def _cost(pick: dict) -> float:
@@ -200,10 +212,16 @@ def select_accumulator(
     return chosen, round(combined, 2), round(joint, 4)
 
 
-def select_banker(picks: list[dict], max_picks: int = 2,
+def select_banker(picks: list[dict], max_picks: int = 1,
                   min_confidence: float = 0.72,
                   min_price: float = MIN_USEFUL_ODDS) -> tuple[list[dict], float, float]:
-    """One or two of the day's most reliable picks.
+    """The single most reliable pick of the day.
+
+    One pick, not two. Two legs multiply: on 14 August the best pair came out
+    at 79% and 80%, which is a 63% chance of the tier landing — lower than the
+    2 Odds slip that day and well under what a tier called "Most Reliable"
+    implies. Combining picks is what every other tier already does; the point
+    of this one is the number on it being the number that happens.
 
     Built for consistency rather than payout: a 2x accumulator lands about half
     the time by construction, where a single 80% pick lands four times in five.
