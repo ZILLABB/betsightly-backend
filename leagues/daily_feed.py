@@ -167,46 +167,73 @@ def build_daily_accumulators(force: bool = False) -> dict:
     five, five_why = _select_tier(day_picks, 5.0, 5, 0.55, 0.72)
     ten, ten_why = _select_tier(day_picks, 10.0, 6, 0.55, 0.63)
 
-    # Over 1.5 — one per fixture, safest first, only where the league's own
-    # measured rate supports it (this is the market the old model overclaimed).
+    # Over 1.5 — a list of singles, one per fixture, safest first.
     #
-    # Legs are added while the slip is still worth staking rather than up to a
-    # fixed five. Five legs looked generous and was the worst product on the
-    # site: 2.40x landing 31% of the time, about -25%. Stopping on expected
-    # value gives three legs at 1.64x landing 51% — a shorter slip the user is
-    # far more likely to actually win.
-    OVER_MIN_EV = 0.82
+    # This tier is not an accumulator and treating it as one was the mistake.
+    # As a slip it had to stop at about three legs to stay worth staking, so a
+    # market with ten good candidates published three of them; ten legs at 70%
+    # would land 2.8% of the time and return about -45%, which is not a product
+    # anyone should be handed.
+    #
+    # Bet individually the arithmetic is completely different: each pick stands
+    # on its own at roughly -5.7%, and adding a tenth costs the ninth nothing.
+    # So the full list is published and `presentation` marks it as singles, so
+    # no channel renders a joint probability that would not apply.
+    #
+    # The confidence floor is on the *calibrated* number. It used to be 0.70
+    # against uncalibrated confidences; once the goals correction landed
+    # (-0.41 in log-odds) that same 0.70 silently started demanding a raw 77.9%,
+    # which is why a thin day produced a single pick. 0.65 restores roughly the
+    # bar that was originally intended, measured honestly.
+    OVER_MIN_CONFIDENCE = 0.65
+    OVER_MAX_PICKS = 10
+
+    def _over_rank(p):
+        # Confidence first, then prefer fixtures a bookmaker actually priced.
+        # Unpriced matches fall back to the league's measured rate, so a whole
+        # slate of friendlies comes out on identical confidence and the order
+        # between them is arbitrary. A priced fixture is one the market took
+        # seriously and carries a real over/under line behind the number.
+        return (-p["confidence"], not (p.get("_model") or {}).get("has_market"))
+
     over_picks, seen = [], set()
-    over_total, over_joint = 1.0, 1.0
-    for p in sorted(day_picks, key=lambda x: -x["confidence"]):
+    for p in sorted(day_picks, key=_over_rank):
         if p["market"] != "over_1_5" or p["match_id"] in seen:
             continue
-        if p["confidence"] < 0.70:
+        if p["confidence"] < OVER_MIN_CONFIDENCE:
             continue
-        nxt_total = over_total * p["odds"]
-        nxt_joint = over_joint * p["confidence"]
-        if over_picks and nxt_total * nxt_joint < OVER_MIN_EV:
-            break
         over_picks.append(p)
         seen.add(p["match_id"])
-        over_total, over_joint = nxt_total, nxt_joint
-        if len(over_picks) >= 5:
+        if len(over_picks) >= OVER_MAX_PICKS:
             break
+
+    # For singles the meaningful headline is the typical chance of any one
+    # landing, not the product of all of them.
+    over_avg = (sum(p["confidence"] for p in over_picks) / len(over_picks)
+                if over_picks else 0.0)
+    over_total = 1.0
+    for p in over_picks:
+        over_total *= p["odds"]
 
     rollover = _build_rollover(all_picks, today)
 
-    def mk_cat(sel, risk, reason_if_empty):
+    def mk_cat(sel, risk, reason_if_empty, presentation="accumulator"):
         picks_, total, joint = sel
         if not picks_:
             return {"selected": False, "games": [], "total_odds": 0,
                     "risk_level": risk, "hit_probability": 0,
-                    "reason": reason_if_empty}
+                    "presentation": presentation, "reason": reason_if_empty}
         return {
             "selected": True,
             "games": [to_game(p) for p in picks_],
             "total_odds": round(total, 2),
             "risk_level": risk,
+            # For an accumulator this is the chance every leg lands. For a list
+            # of singles it is the average chance of one landing, and
+            # `presentation` is what tells a renderer which it is looking at —
+            # multiplying singles together would state a risk nobody is taking.
             "hit_probability": round(joint, 3),
+            "presentation": presentation,
             "reason": None,
         }
 
@@ -225,8 +252,10 @@ def build_daily_accumulators(force: bool = False) -> dict:
             "5_odds": mk_cat(five, "Medium", five_why),
             "10_odds": mk_cat(ten, "High", ten_why),
             "over_1_5": mk_cat(
-                (over_picks, over_total, over_joint) if over_picks else ([], 0, 0),
-                "Very Safe", thin,
+                (over_picks, over_total, over_avg) if over_picks else ([], 0, 0),
+                "Very Safe",
+                "No match cleared the Over 1.5 confidence bar today.",
+                presentation="singles",
             ),
             "rollover": rollover,
         },

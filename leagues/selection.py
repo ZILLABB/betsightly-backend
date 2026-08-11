@@ -201,32 +201,42 @@ def select_accumulator(
 
 
 def select_banker(picks: list[dict], max_picks: int = 2,
-                  min_confidence: float = 0.78) -> tuple[list[dict], float, float]:
+                  min_confidence: float = 0.72,
+                  min_price: float = MIN_USEFUL_ODDS) -> tuple[list[dict], float, float]:
     """One or two of the day's most reliable picks.
 
-    Built for consistency rather than payout. A 2x accumulator lands around
-    half the time by construction; a single 80% pick lands four times in five.
-    This tier exists so there is something on the site whose stated confidence
-    and actual hit rate are the same number.
+    Built for consistency rather than payout: a 2x accumulator lands about half
+    the time by construction, where a single 80% pick lands four times in five.
+    This tier exists so the site has something whose stated confidence and
+    actual hit rate are the same number.
 
-    Two constraints keep this tier worth staking rather than merely safe:
+    The old rule asked for confidence >= 78% *and* a price >= 1.25, and those
+    two can never both hold. An estimated price is (1/p) plus margin, so it
+    falls as confidence rises: the price drops below 1.25 once confidence
+    passes 75.8%, which is *below* the 78% the tier demanded. The conditions
+    described a number and its opposite, so the pool was empty on any day
+    without a real quote — and a real quote at 78% is priced near 1.19 too, so
+    it was empty on those days as well. The tier had simply stopped existing.
 
-    - A price floor of 1.25. An 80% shot at 1.18 returns 0.94 per unit staked;
-      being right four times in five does not help if the price never covers
-      the fifth.
-    - A preference for real quoted prices. Estimated prices are derived as
-      fair-value plus a standard margin, so their expected value is fixed at
-      roughly 0.94 by construction — only a real quote can be genuinely
-      mispriced in our favour, and only there does "value" mean anything.
+    A price floor also does nothing for value here, which was the reasoning
+    behind it. Where the price is derived from our own probability, expected
+    value is fixed at 1/margin regardless of what the probability is: an 80%
+    shot at 1.18 and a 75% shot at 1.25 both return about 0.94. The floor was
+    buying nothing and excluding exactly the safe picks the tier is for.
+
+    So confidence leads and the price floor only rules out prices too short to
+    be worth staking at all. Real quotes break ties, since only a real price
+    can be genuinely mispriced in our favour.
     """
     pool = [
         p for p in picks
-        if p["confidence"] >= min_confidence and p["odds"] >= 1.25
+        if p["confidence"] >= min_confidence and p["odds"] >= min_price
     ]
     if not pool:
-        # Nothing clears the bar at full strength — try slightly wider rather
-        # than publishing nothing, but never below a stakeable price.
-        pool = [p for p in picks if p["confidence"] >= 0.74 and p["odds"] >= 1.25]
+        # Nothing clears the bar at full strength — widen a little rather than
+        # publishing nothing, but never below a stakeable price.
+        pool = [p for p in picks
+                if p["confidence"] >= 0.68 and p["odds"] >= min_price]
     if not pool:
         return [], 0.0, 0.0
 
@@ -234,11 +244,11 @@ def select_banker(picks: list[dict], max_picks: int = 2,
     for p in sorted(pool, key=lambda x: -x["confidence"]):
         best_per_fixture.setdefault(p["match_id"], p)
 
-    # Real quoted prices first (only these can carry true value), then by
-    # expected value, then confidence.
+    # Safest first — this tier is about landing, not edge. A real quote wins a
+    # tie because it is the only kind of price that can carry true value.
     ranked = sorted(
         best_per_fixture.values(),
-        key=lambda p: (not p["odds_are_real"], -p["expected_value"], -p["confidence"]),
+        key=lambda p: (-p["confidence"], not p["odds_are_real"], -p["expected_value"]),
     )
 
     chosen: list[dict] = []
