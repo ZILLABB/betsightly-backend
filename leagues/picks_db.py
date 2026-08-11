@@ -367,8 +367,33 @@ def fill_empty_card_tiers(publish_date: str, fresh: dict) -> list[str]:
                 if key == "rollover" or not isinstance(new_cat, dict):
                     continue
                 old_cat = stored.get(key)
+
                 if isinstance(old_cat, dict) and old_cat.get("selected"):
-                    continue  # already published — leave it exactly as it is
+                    # A tier of independent singles can be *extended* without
+                    # rewriting it: the picks already published stay exactly as
+                    # they are and remain valid on their own, and a new one
+                    # neither changes nor depends on them. An accumulator is
+                    # the opposite — adding a leg changes the bet — so this
+                    # only ever applies to a singles tier, and only ever
+                    # appends.
+                    if (old_cat.get("presentation") == "singles"
+                            and new_cat.get("presentation") == "singles"):
+                        have = {g.get("match_id") for g in old_cat.get("games", [])}
+                        extra = [g for g in new_cat.get("games", [])
+                                 if g.get("match_id") not in have]
+                        if extra:
+                            old_cat["games"] = list(old_cat.get("games", [])) + extra
+                            confs = [g.get("confidence") or 0 for g in old_cat["games"]]
+                            old_cat["hit_probability"] = round(
+                                sum(confs) / len(confs), 3) if confs else 0
+                            total = 1.0
+                            for g in old_cat["games"]:
+                                total *= (g.get("odds") or 1.0)
+                            old_cat["total_odds"] = round(total, 2)
+                            stored[key] = old_cat
+                            filled.append(f"{key}(+{len(extra)})")
+                    continue  # never replace a published tier wholesale
+
                 if new_cat.get("selected") and new_cat.get("games"):
                     stored[key] = new_cat
                     filled.append(key)
