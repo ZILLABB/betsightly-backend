@@ -376,8 +376,13 @@ def fill_empty_card_tiers(publish_date: str, fresh: dict) -> list[str]:
                     # the opposite — adding a leg changes the bet — so this
                     # only ever applies to a singles tier, and only ever
                     # appends.
-                    if (old_cat.get("presentation") == "singles"
-                            and new_cat.get("presentation") == "singles"):
+                    # Keyed on how the tier is defined *now*, not on what the
+                    # stored payload happens to record. Cards written before
+                    # `presentation` existed carry no such field, and requiring
+                    # it on both sides meant the tier this was written for was
+                    # the one case it skipped.
+                    if new_cat.get("presentation") == "singles":
+                        old_cat["presentation"] = "singles"
                         have = {g.get("match_id") for g in old_cat.get("games", [])}
                         extra = [g for g in new_cat.get("games", [])
                                  if g.get("match_id") not in have]
