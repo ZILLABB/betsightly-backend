@@ -526,6 +526,11 @@ def _build_rollover(all_picks: list, today: str) -> dict:
         chosen, combined, joint = select_rollover_day(by_date[date])
         if not chosen:
             continue
+        # Earliest kick-off first, matching the category cards. The rollover
+        # builds its own pick dicts rather than going through mk_cat, so it
+        # needs the same ordering applied here or it is the one tier on the
+        # site still listed in selection order.
+        chosen = sorted(chosen, key=lambda p: p["_fixture"]["commence_time"])
 
         new_day = {
             "day_number": len(chain["days"]) + 1,
