@@ -286,6 +286,86 @@ def build_daily_accumulators(force: bool = False) -> dict:
     return result
 
 
+def build_bookable_now() -> dict | None:
+    """A slip built only from fixtures that have not kicked off yet.
+
+    Answers the problem the lock creates. The morning card must not change —
+    it is what people booked at 08:00 and it is what the track record scores —
+    but by mid-afternoon several of its legs have started and a visitor
+    arriving then cannot place it. Showing them a slip they cannot get on is
+    the same as showing them nothing.
+
+    So this is a *second*, separate thing rather than a rewrite of the first:
+    the published card stays exactly as it was, and this is generated fresh on
+    request from whatever is still ahead. It is deliberately never archived and
+    never settled, because a slip that regenerates on every request has no
+    fixed identity to score — counting it would let the record quietly reroll
+    its losers, which is the exact failure the lock exists to prevent.
+    """
+    from leagues.engine import run_pipeline
+    from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
+    from leagues.selection import select_banker
+
+    now = datetime.now(timezone.utc)
+    all_picks, _ = run_pipeline(days_ahead=2)
+    if not all_picks:
+        return None
+
+    bookable_from = (now + BOOKING_BUFFER).isoformat().replace("+00:00", "Z")
+    today = now.strftime("%Y-%m-%d")
+    live = [p for p in all_picks
+            if p["_fixture"]["commence_time"] >= bookable_from
+            and p["_fixture"]["commence_time"][:10] == today]
+    if not live:
+        return None
+
+    F = MIN_PUBLISHABLE_CONFIDENCE
+    banker = select_banker(live)
+    two, _ = _select_tier(live, 2.0, 4, F, 0.82)
+    five, _ = _select_tier(live, 5.0, 6, F, 0.72)
+    ten, _ = _select_tier(live, 10.0, 8, F, 0.63)
+
+    over, seen = [], set()
+    for p in sorted(live, key=lambda x: -x["confidence"]):
+        if p["market"] != "over_1_5" or p["match_id"] in seen or p["confidence"] < 0.65:
+            continue
+        over.append(p)
+        seen.add(p["match_id"])
+        if len(over) >= 10:
+            break
+    over_avg = sum(p["confidence"] for p in over) / len(over) if over else 0.0
+    over_total = 1.0
+    for p in over:
+        over_total *= p["odds"]
+
+    def cat(sel, risk, presentation="accumulator"):
+        picks_, total, joint = sel
+        if not picks_:
+            return {"selected": False, "games": [], "total_odds": 0,
+                    "risk_level": risk, "hit_probability": 0,
+                    "presentation": presentation,
+                    "reason": "Nothing left to build this from today."}
+        return {"selected": True, "games": [to_game(p) for p in picks_],
+                "total_odds": round(total, 2), "risk_level": risk,
+                "hit_probability": round(joint, 3),
+                "presentation": presentation, "reason": None}
+
+    return {
+        "status": "success",
+        "date": today,
+        "generated_at": now.isoformat(),
+        "kickoffs_remaining": len({p["match_id"] for p in live}),
+        "accumulators": {
+            "banker": cat(banker, "Banker"),
+            "2_odds": cat(two, "Low"),
+            "5_odds": cat(five, "Medium"),
+            "10_odds": cat(ten, "High"),
+            "over_1_5": cat((over, over_total, over_avg) if over else ([], 0, 0),
+                            "Very Safe", presentation="singles"),
+        },
+    }
+
+
 def _load_locked(publish_date: str):
     try:
         from leagues.picks_db import load_card

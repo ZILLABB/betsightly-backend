@@ -40,6 +40,31 @@ async def get_daily_accumulators():
         raise HTTPException(500, str(e))
 
 
+@router.get("/bookable-now")
+async def get_bookable_now():
+    """A slip built only from fixtures that have not kicked off yet.
+
+    The 08:00 card is deliberately frozen — it is what people booked and what
+    the record scores — so by mid-afternoon some of its legs have started and a
+    late visitor cannot place it. This is a separate, freshly built slip from
+    whatever is still ahead, so they have something they can actually get on.
+
+    Never archived and never settled: it regenerates on every request, so it
+    has no fixed identity to score, and counting it would let the track record
+    quietly reroll its losers.
+    """
+    try:
+        from leagues.daily_feed import build_bookable_now
+        result = build_bookable_now()
+        if not result:
+            return {"status": "success", "available": False,
+                    "reason": "No fixtures left to bet on today."}
+        return {"status": "success", "available": True, **result}
+    except Exception as e:
+        logger.error(f"Bookable-now build failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.post("/check-results")
 async def trigger_results_check():
     """Manually trigger a results check (also runs hourly in the background)."""
