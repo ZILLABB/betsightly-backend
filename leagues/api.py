@@ -126,6 +126,74 @@ async def get_calibration(days: int = 180):
         raise HTTPException(500, str(e))
 
 
+@router.post("/restart")
+async def restart_everything(full_rollover: bool = True, republish_card: bool = True):
+    """Clean slate: fresh rollover chain from day 1, today's card rebuilt.
+
+    What this clears:
+    - the whole rollover chain, including settled days, so it restarts at day 1
+    - today's locked card, so it republishes under the current rules
+
+    What it deliberately keeps, and why: the settled slip archive. The
+    calibration is *fitted on* those outcomes — it is the thing currently
+    holding published confidence to within a point of reality above 65%.
+    Deleting the history would not give the predictions a fresh start, it would
+    remove the correction and put the over-confidence straight back. It is also
+    the track record, and one that drops its losing days is worth nothing.
+    """
+    try:
+        from datetime import datetime, timezone
+        from database import SessionLocal
+        from leagues.rollover_db import RolloverDay
+        from leagues import daily_feed
+        from leagues.picks_db import DailyCard
+
+        out: dict = {"status": "success"}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        if full_rollover:
+            db = SessionLocal()
+            try:
+                removed = db.query(RolloverDay).delete()
+                db.commit()
+                out["rollover_days_cleared"] = removed
+            finally:
+                db.close()
+
+        if republish_card:
+            publish_date = daily_feed._publish_date()
+            db = SessionLocal()
+            try:
+                gone = (db.query(DailyCard)
+                        .filter(DailyCard.publish_date == publish_date).delete())
+                db.commit()
+                out["cards_cleared"] = gone
+                out["publish_date"] = publish_date
+            finally:
+                db.close()
+
+        daily_feed._accum_cache.update({"result": None, "ts": 0.0})
+        result = daily_feed.build_daily_accumulators(force=True)
+        if not result:
+            raise HTTPException(503, "No fixtures available to rebuild from.")
+
+        accums = result.get("accumulators", {})
+        out["card"] = {
+            k: {"picks": len(v.get("games", [])),
+                "odds": v.get("total_odds"),
+                "lands": v.get("hit_probability") or v.get("today_hit_probability")}
+            for k, v in accums.items()
+        }
+        out["kept"] = ("settled slip archive — the calibration is fitted on it, "
+                       "and it is the published track record")
+        return out
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Restart failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.post("/rebuild-rollover")
 async def rebuild_rollover():
     """Rebuild the unsettled part of the rollover chain.
