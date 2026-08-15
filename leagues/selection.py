@@ -301,47 +301,30 @@ def select_banker(picks: list[dict], max_picks: int = 1,
     return chosen, round(combined, 2), round(joint, 4)
 
 
-def select_rollover_day(picks: list[dict], target_odds: float = 1.9,
-                        max_picks: int = 1) -> tuple[list[dict], float, float]:
-    """One rollover day: the single safest pick available.
+def select_rollover_day(picks: list[dict], target_odds: float = 2.0,
+                        max_picks: int = 3) -> tuple[list[dict], float, float]:
+    """One rollover day, aiming at `target_odds` with the best hit rate.
 
-    One pick, because a chain multiplies twice over and the old rule ignored
-    that. Aiming at ~1.9x a day forced two legs around 65%, so a day landed
-    about 43% of the time — and a ten-day chain needs every day, which is
-    0.43^10, or two chances in ten thousand. The chain went 0 for 4 with 5
-    still pending and that was not bad luck, it was the design. Every losing
-    day was killed by the second leg.
+    Odds and probability are inverses, so a daily target is a choice about how
+    long the chain can be, not just about payout. With the 65% floor a leg is
+    priced at most 1.45, which means roughly:
 
-    A single pick near 80% lands about four days in five, so ten days is
-    roughly one in ten rather than one in five thousand. It pays less per day —
-    about 1.2x rather than 1.9x — but 1.2^10 is still better than 6x, and it is
-    a chain that can actually be completed.
+        1.13x/day  84% a day   10 days completes 17%    pays  3.4x
+        2.00x/day  45% a day   10 days completes 0.03%  pays 1024x
+        2.00x/day  45% a day    3 days completes 9.1%   pays  8.0x
 
-    `target_odds` is ignored for a single pick: the price is whatever the
-    safest available selection happens to pay, and reaching for a number would
-    just reintroduce the leg that keeps breaking the chain.
+    A ten-day chain at 2x is not a hard challenge, it is a rounding error — the
+    previous version aimed at 1.9x over ten days and went 0 for 4 with every
+    loss caused by the second leg. Two odds a day is a perfectly good target;
+    it just has to be paired with a chain short enough to finish, which is why
+    TARGET_DAYS came down with it.
     """
-    pool = [p for p in picks
-            if p["confidence"] >= 0.72 and p["odds"] >= MIN_USEFUL_ODDS]
-    if not pool:
-        pool = [p for p in picks
-                if p["confidence"] >= 0.68 and p["odds"] >= MIN_USEFUL_ODDS]
-    if not pool:
-        return [], 0.0, 0.0
-
-    best_per_fixture: dict[str, dict] = {}
-    for p in sorted(pool, key=lambda x: -x["confidence"]):
-        best_per_fixture.setdefault(p["match_id"], p)
-
-    ranked = sorted(
-        best_per_fixture.values(),
-        key=lambda p: (-p["confidence"], not p["odds_are_real"]),
+    return select_accumulator(
+        picks,
+        target_odds=target_odds,
+        max_picks=max_picks,
+        min_confidence=0.65,
+        # Two legs give up about 11% to the margin; below this the day is not
+        # worth staking however good the multiplier looks.
+        min_ev=0.85,
     )
-    chosen = ranked[:max(1, max_picks)]
-
-    combined = 1.0
-    joint = 1.0
-    for p in chosen:
-        combined *= p["odds"]
-        joint *= p["confidence"]
-    return chosen, round(combined, 2), round(joint, 4)

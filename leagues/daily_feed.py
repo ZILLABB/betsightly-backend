@@ -23,7 +23,12 @@ DATA_DIR = Path(__file__).parent / "data"
 _accum_cache: dict = {"result": None, "ts": 0}
 _ACCUM_CACHE_TTL = 900  # 15 min — the card itself is locked, this just trims DB reads
 
-TARGET_DAYS = 10  # rollover chain length
+# Rollover chain length. Cut from 10 because the daily target went up to 2x,
+# and the two numbers are not independent: a day at 2x lands about 45% of the
+# time, and every day has to land. Ten days of that is 0.03% — a chain nobody
+# completes. Three days of it is 9.1% and pays about 8x, which is a challenge
+# somebody actually wins now and then.
+TARGET_DAYS = 3
 
 # Nigeria is UTC+1 year-round (no daylight saving), and the audience books in
 # the morning. The card is published at 08:00 WAT so a full day of fixtures is
@@ -234,7 +239,11 @@ def build_daily_accumulators(force: bool = False) -> dict:
                     "presentation": presentation, "reason": reason_if_empty}
         return {
             "selected": True,
-            "games": [to_game(p) for p in picks_],
+            # Ordered by kick-off so the card reads as the day runs: what is
+            # about to start is at the top, and a leg that has already gone is
+            # never buried under one that kicks off tonight. Selection is
+            # unaffected — this is purely how the chosen picks are presented.
+            "games": _by_kickoff([to_game(p) for p in picks_]),
             "total_odds": round(total, 2),
             "risk_level": risk,
             # For an accumulator this is the chance every leg lands. For a list
@@ -284,6 +293,11 @@ def build_daily_accumulators(force: bool = False) -> dict:
     result["accumulators"] = _mark_started(result["accumulators"], now)
     _accum_cache.update({"result": result, "ts": now_ts})
     return result
+
+
+def _by_kickoff(games: list[dict]) -> list[dict]:
+    """Order games by kick-off, earliest first."""
+    return sorted(games, key=lambda g: (g.get("kickoff") or g.get("date") or "9999"))
 
 
 def build_bookable_now() -> dict | None:
@@ -345,7 +359,8 @@ def build_bookable_now() -> dict | None:
                     "risk_level": risk, "hit_probability": 0,
                     "presentation": presentation,
                     "reason": "Nothing left to build this from today."}
-        return {"selected": True, "games": [to_game(p) for p in picks_],
+        return {"selected": True,
+                "games": _by_kickoff([to_game(p) for p in picks_]),
                 "total_odds": round(total, 2), "risk_level": risk,
                 "hit_probability": round(joint, 3),
                 "presentation": presentation, "reason": None}

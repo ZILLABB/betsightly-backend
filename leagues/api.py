@@ -40,6 +40,23 @@ async def get_daily_accumulators():
         raise HTTPException(500, str(e))
 
 
+@router.get("/live-scores")
+async def get_live_scores():
+    """Scores for the fixtures on today's card, keyed by match_id.
+
+    Served apart from the card on purpose: the card is locked at 08:00 and must
+    not change, while a score changes every few minutes. Merging them would
+    force a choice between a stale score and a card that rewrites itself.
+    """
+    try:
+        from leagues.live_scores import scores_for_card
+        result = scores_for_card()
+        return {"status": "success", "count": len(result.get("scores", {})), **result}
+    except Exception as e:
+        logger.error(f"Live scores failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.get("/bookable-now")
 async def get_bookable_now():
     """A slip built only from fixtures that have not kicked off yet.
