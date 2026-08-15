@@ -126,6 +126,44 @@ async def get_calibration(days: int = 180):
         raise HTTPException(500, str(e))
 
 
+@router.post("/rebuild-rollover")
+async def rebuild_rollover():
+    """Rebuild the unsettled part of the rollover chain.
+
+    The chain used to aim at ~1.9x a day, which forced two legs around 65% and
+    left each day landing about 43% of the time. A ten-day chain needs every
+    day, so that design completed 0.43^10 — two chances in ten thousand — and
+    it duly went 0 for 4 with every loss caused by the second leg. Days are now
+    a single pick near 80%.
+
+    Days already published for future dates still carry the old two-leg build,
+    so they are dropped and regenerated. Settled days are never touched: the
+    losses stay on the record, because a track record that deletes its losing
+    days is worth nothing.
+    """
+    try:
+        from datetime import datetime, timezone
+        from leagues.rollover_db import drop_pending_days
+        from leagues import daily_feed
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        dropped = drop_pending_days(today)
+
+        daily_feed._accum_cache.update({"result": None, "ts": 0.0})
+        result = daily_feed.build_daily_accumulators(force=True)
+        rollover = (result or {}).get("accumulators", {}).get("rollover", {})
+
+        return {
+            "status": "success",
+            "dropped_pending_days": dropped,
+            "chain_length": rollover.get("chain_length"),
+            "today_hit_probability": rollover.get("today_hit_probability"),
+        }
+    except Exception as e:
+        logger.error(f"Rollover rebuild failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.post("/repair-card")
 async def repair_card():
     """Fill tiers today's locked card left empty, without touching the rest.

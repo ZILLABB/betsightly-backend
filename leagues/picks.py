@@ -65,7 +65,21 @@ def _estimated_price(prob: float) -> float:
     return max(1.01, round(fair / ESTIMATE_MARGIN, 2))
 
 
-def build_picks(fixture: dict, model: dict, min_confidence: float = 0.55,
+# Nothing below this is publishable, in any tier.
+#
+# Measured over 148 settled legs: picks at or above 65% land 75.5% of the time
+# against 76.2% promised — accurate to within a point. Picks below 65% land
+# 48.1% against 58.8% promised. The model is not broken; it is fine wherever it
+# is confident, and the losses came from the legs added underneath that line to
+# stretch a slip up to 5x and 10x. Those legs were 44% and 56% respectively.
+#
+# Raising the floor costs reach on the long tiers and buys back the thing the
+# whole site is judged on: whether a published prediction actually happens.
+MIN_PUBLISHABLE_CONFIDENCE = 0.65
+
+
+def build_picks(fixture: dict, model: dict,
+                min_confidence: float = MIN_PUBLISHABLE_CONFIDENCE,
                 fit: dict | None = None) -> list[dict]:
     """All viable picks for one fixture, best first.
 

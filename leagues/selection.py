@@ -66,11 +66,15 @@ def _cost(pick: dict) -> float:
 # Price bands the candidate list is drawn from, so the search always has legs
 # long enough to reach a high target. Open-ended at the top.
 _PRICE_BANDS = [(1.12, 1.30), (1.30, 1.50), (1.50, 1.80), (1.80, 2.40), (2.40, 99.0)]
-_PER_BAND = 5
-# No group may take a whole band. MARKET_CAP means at most two legs from a
-# group can be used anyway, so a third and fourth are only there as
-# alternatives if the first two collide with the one-leg-per-fixture rule.
-_PER_BAND_GROUP = 3
+# Raised from 5. A 65% confidence floor caps every estimated price at 1.45
+# (the price is 1/confidence plus margin), so the bands above 1.50 are empty
+# and a long slip has to be built from many short legs rather than a few long
+# ones. Taking only five per band left the search ten candidates to reach 10x
+# from, topping out at 8.25x, while 69 usable picks sat unexamined in the
+# 1.30-1.50 band.
+_PER_BAND = 9
+# No group may take a whole band, so a slip is never one market end to end.
+_PER_BAND_GROUP = 4
 
 
 def _stratify(candidates: list[dict]) -> list[dict]:
@@ -152,7 +156,13 @@ def select_accumulator(
     # multiplier it is being asked for.
     candidates = _stratify(candidates)
 
-    lo_band = target_odds * 0.85
+    # Widened from 0.85. With every leg capped at 1.45, the multiplier a slip
+    # can reach moves in coarse steps — seven legs reached 8.25x against a
+    # lower bound of 8.5x, so a perfectly good slip was discarded for landing
+    # 3% short of a round number. Undershooting the target slightly is a far
+    # better outcome than publishing nothing, and the expected-value floor
+    # still decides whether the slip is worth staking at all.
+    lo_band = target_odds * 0.80
     hi_band = target_odds * 1.45
 
     best: tuple[list[dict], float, float] | None = None
@@ -292,17 +302,46 @@ def select_banker(picks: list[dict], max_picks: int = 1,
 
 
 def select_rollover_day(picks: list[dict], target_odds: float = 1.9,
-                        max_picks: int = 3) -> tuple[list[dict], float, float]:
-    """One rollover day: reach ~target_odds with the best possible hit rate.
+                        max_picks: int = 1) -> tuple[list[dict], float, float]:
+    """One rollover day: the single safest pick available.
 
-    Deliberately fewer legs than a category slip. Compounding is unforgiving —
-    four legs at 75% land 32% of the time, two at 85% land 72% — and a
-    rollover chain only survives if individual days actually win.
+    One pick, because a chain multiplies twice over and the old rule ignored
+    that. Aiming at ~1.9x a day forced two legs around 65%, so a day landed
+    about 43% of the time — and a ten-day chain needs every day, which is
+    0.43^10, or two chances in ten thousand. The chain went 0 for 4 with 5
+    still pending and that was not bad luck, it was the design. Every losing
+    day was killed by the second leg.
+
+    A single pick near 80% lands about four days in five, so ten days is
+    roughly one in ten rather than one in five thousand. It pays less per day —
+    about 1.2x rather than 1.9x — but 1.2^10 is still better than 6x, and it is
+    a chain that can actually be completed.
+
+    `target_odds` is ignored for a single pick: the price is whatever the
+    safest available selection happens to pay, and reaching for a number would
+    just reintroduce the leg that keeps breaking the chain.
     """
-    return select_accumulator(
-        picks,
-        target_odds=target_odds,
-        max_picks=max_picks,
-        min_confidence=0.62,
-        min_ev=0.85,
+    pool = [p for p in picks
+            if p["confidence"] >= 0.72 and p["odds"] >= MIN_USEFUL_ODDS]
+    if not pool:
+        pool = [p for p in picks
+                if p["confidence"] >= 0.68 and p["odds"] >= MIN_USEFUL_ODDS]
+    if not pool:
+        return [], 0.0, 0.0
+
+    best_per_fixture: dict[str, dict] = {}
+    for p in sorted(pool, key=lambda x: -x["confidence"]):
+        best_per_fixture.setdefault(p["match_id"], p)
+
+    ranked = sorted(
+        best_per_fixture.values(),
+        key=lambda p: (-p["confidence"], not p["odds_are_real"]),
     )
+    chosen = ranked[:max(1, max_picks)]
+
+    combined = 1.0
+    joint = 1.0
+    for p in chosen:
+        combined *= p["odds"]
+        joint *= p["confidence"]
+    return chosen, round(combined, 2), round(joint, 4)

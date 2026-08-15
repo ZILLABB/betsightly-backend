@@ -99,7 +99,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
 
     from leagues.engine import run_pipeline, picks_for_date
     from leagues.selection import select_accumulator, select_banker
-    from leagues.picks import to_game
+    from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
 
     now = datetime.now(timezone.utc)
     publish_date = _publish_date()
@@ -162,10 +162,19 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # tier blinked out over a 3-point difference that means nothing. These sit
     # under the normal range for each tier's leg count, so they catch a slip
     # that is genuinely bad rather than one that is merely long.
+    # Every tier now draws from the same 65% floor. The long tiers used to
+    # reach down to 0.55 to buy the multiplier, and that is precisely where the
+    # losses were: sub-65% legs landed 48% of the time against 59% promised,
+    # while everything at or above 65% landed 75.5% against 76.2% promised.
+    # A long tier now needs more legs to reach its target instead of worse
+    # ones, which costs hit rate honestly rather than by overstating each leg.
+    FLOOR = MIN_PUBLISHABLE_CONFIDENCE
     banker = select_banker(day_picks)
-    two, two_why = _select_tier(day_picks, 2.0, 4, 0.60, 0.82)
-    five, five_why = _select_tier(day_picks, 5.0, 5, 0.55, 0.72)
-    ten, ten_why = _select_tier(day_picks, 10.0, 6, 0.55, 0.63)
+    two, two_why = _select_tier(day_picks, 2.0, 4, FLOOR, 0.82)
+    five, five_why = _select_tier(day_picks, 5.0, 6, FLOOR, 0.72)
+    # Reaching 10x from legs that are never priced above ~1.45 takes seven of
+    # them; capping at six made the tier unbuildable rather than merely long.
+    ten, ten_why = _select_tier(day_picks, 10.0, 8, FLOOR, 0.63)
 
     # Over 1.5 — a list of singles, one per fixture, safest first.
     #

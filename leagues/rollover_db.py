@@ -181,6 +181,41 @@ def reset_chain(chain_start_date: str) -> bool:
         return False
 
 
+def drop_pending_days(from_date: str) -> int:
+    """Delete unsettled chain days on or after `from_date`. Returns the count.
+
+    Used when the rule that built those days is found to be wrong — the days
+    are regenerated on the next build under the current rule.
+
+    Deliberately not `reset_chain`, which deletes the whole chain including
+    settled days. The settled record contains the losses, and a track record
+    that quietly drops its losing days is worthless. Only days that have not
+    resolved, and have not started, are removed; day numbering continues from
+    whatever settled history remains.
+    """
+    try:
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(RolloverDay)
+                .filter(RolloverDay.status == "pending",
+                        RolloverDay.date >= from_date)
+                .all()
+            )
+            count = len(rows)
+            for r in rows:
+                db.delete(r)
+            db.commit()
+            if count:
+                logger.info(f"Dropped {count} pending rollover day(s) from {from_date}")
+            return count
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"drop_pending_days failed: {e}")
+        return 0
+
+
 def ensure_table():
     """Create the table if it doesn't exist yet. Safe to call multiple times."""
     try:
