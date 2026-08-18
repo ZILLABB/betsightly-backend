@@ -70,13 +70,16 @@ async def ml_shadow(days: int = 60):
                               leg.get("market")))
 
         if not pairs:
+            # Same key as the populated response below. Reporting the model
+            # under "ml" here and "model" there meant a caller had to know
+            # which branch it hit to find the same field.
             return {
                 "status": "success",
                 "compared_legs": 0,
                 "verdict": "No settled legs carry an ensemble opinion yet. "
                            "Shadow mode records one on every new pick from a "
                            "priced fixture; come back once those settle.",
-                "ml": ml_status(),
+                "model": ml_status(),
             }
 
         n = len(pairs)
