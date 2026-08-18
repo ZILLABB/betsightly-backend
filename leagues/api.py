@@ -40,6 +40,93 @@ async def get_daily_accumulators():
         raise HTTPException(500, str(e))
 
 
+@router.get("/ml-shadow")
+async def ml_shadow(days: int = 60):
+    """How the trained ensemble is doing against the model actually in use.
+
+    Both are scored on the same settled legs, so this is the evidence that
+    decides whether the ensemble gets to move a published number. Brier score
+    is the measure — mean squared error of the probability — because accuracy
+    alone rewards a model that is confidently right and confidently wrong in
+    equal measure, which is exactly what we are trying to avoid.
+
+    Only legs where the ensemble had an opinion are compared; it declines on
+    unpriced fixtures by design.
+    """
+    try:
+        from leagues.ml_models import status as ml_status
+        from leagues.picks_db import get_history
+
+        pairs = []
+        for slip in get_history(limit_days=days):
+            for leg in slip.get("picks", []):
+                if leg.get("status") not in ("won", "lost"):
+                    continue
+                ml = leg.get("ml_confidence")
+                pub = leg.get("confidence")
+                if ml is None or pub is None:
+                    continue
+                pairs.append((float(pub), float(ml), leg["status"] == "won",
+                              leg.get("market")))
+
+        if not pairs:
+            return {
+                "status": "success",
+                "compared_legs": 0,
+                "verdict": "No settled legs carry an ensemble opinion yet. "
+                           "Shadow mode records one on every new pick from a "
+                           "priced fixture; come back once those settle.",
+                "ml": ml_status(),
+            }
+
+        n = len(pairs)
+        won = sum(1 for _, _, w, _ in pairs if w)
+        brier_pub = sum((p - w) ** 2 for p, _, w, _ in pairs) / n
+        brier_ml = sum((m - w) ** 2 for _, m, w, _ in pairs) / n
+        mean_pub = sum(p for p, _, _, _ in pairs) / n
+        mean_ml = sum(m for _, m, _, _ in pairs) / n
+        actual = won / n
+
+        by_market: dict[str, dict] = {}
+        for pub, ml, w, market in pairs:
+            b = by_market.setdefault(market or "?", {"n": 0, "pub": 0.0,
+                                                     "ml": 0.0, "won": 0})
+            b["n"] += 1
+            b["pub"] += (pub - w) ** 2
+            b["ml"] += (ml - w) ** 2
+            b["won"] += int(w)
+        for b in by_market.values():
+            b["brier_published"] = round(b.pop("pub") / b["n"], 4)
+            b["brier_ml"] = round(b.pop("ml") / b["n"], 4)
+            b["hit_rate"] = round(b.pop("won") / b["n"], 4)
+
+        better = brier_ml < brier_pub
+        margin = abs(brier_pub - brier_ml)
+        # 30 legs is not a verdict. Saying so is the whole point of shadowing.
+        confident = n >= 100 and margin > 0.01
+
+        return {
+            "status": "success",
+            "compared_legs": n,
+            "actual_hit_rate": round(actual, 4),
+            "published": {"mean_confidence": round(mean_pub, 4),
+                          "brier": round(brier_pub, 4)},
+            "ml": {"mean_confidence": round(mean_ml, 4),
+                   "brier": round(brier_ml, 4)},
+            "by_market": by_market,
+            "verdict": (
+                f"Ensemble is {'ahead' if better else 'behind'} by "
+                f"{margin:.4f} Brier over {n} legs. "
+                + ("Enough evidence to act on." if confident else
+                   "Not enough to act on yet — needs 100+ legs and a clear margin.")
+            ),
+            "model": ml_status(),
+        }
+    except Exception as e:
+        logger.error(f"ML shadow evaluation failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.get("/live-scores")
 async def get_live_scores():
     """Scores for the fixtures on today's card, keyed by match_id.

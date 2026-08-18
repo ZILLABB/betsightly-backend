@@ -45,12 +45,23 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
     from leagues.predictor import predict
     from leagues.picks import build_picks
     from leagues.calibrator import fit_calibration
+    from leagues import ml_models
+    from leagues.team_history import HistoryIndex
 
     fixtures = get_fixtures(days_ahead=days_ahead, force=force)
     cached_rates = get_base_rates(ESPN_CLUB_LEAGUES)
     # Fitted once per pipeline run; every pick is corrected against the same
     # snapshot so a mid-run refit cannot make two picks incomparable.
     fit = fit_calibration()
+
+    # Second opinion from the trained ensemble, in shadow only: it is recorded
+    # on each pick and evaluated against results, and does not move a published
+    # number. Built once per run because the history index is a 15s fetch.
+    try:
+        history = HistoryIndex()
+    except Exception as e:
+        logger.warning(f"team history unavailable, ML second opinion off: {e}")
+        history = None
 
     all_picks: list[dict] = []
     priced = unpriced = with_elo = 0
@@ -61,6 +72,11 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
         if elo:
             with_elo += 1
         model = predict(fx, base, elo)
+        if history is not None:
+            try:
+                model["ml"] = ml_models.predict_fixture(fx, history)
+            except Exception:
+                model["ml"] = None
         if model["has_market"]:
             priced += 1
         else:
@@ -70,7 +86,9 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
 
     logger.info(
         f"Pipeline: {len(fixtures)} fixtures ({priced} priced, {unpriced} base-rate only, "
-        f"{with_elo} with ELO) -> {len(all_picks)} candidate picks "
+        f"{with_elo} with ELO, "
+        f"{sum(1 for f in fixtures if (f.get('_model') or {}).get('ml'))} with ML) "
+        f"-> {len(all_picks)} candidate picks "
         f"(calibrated on {fit.get('n', 0)} settled legs)"
     )
 

@@ -88,6 +88,9 @@ def archive_slip(date: str, category: str, games: list[dict],
                     # legs start settling it would fit a shift on top of a
                     # shift and correct the same bias twice.
                     "raw_confidence": g.get("raw_confidence"),
+                    # The trained ensemble's shadow opinion, stored so it can
+                    # be scored against the same outcome as the published pick.
+                    "ml_confidence": g.get("ml_confidence"),
                     "home_team_logo": g.get("home_team_logo"),
                     "away_team_logo": g.get("away_team_logo"),
                     "status": "pending",

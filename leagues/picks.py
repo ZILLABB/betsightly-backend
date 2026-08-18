@@ -83,6 +83,16 @@ REAL_ODDS_KEY = {
 }
 
 
+def _ml_for(model: dict, market: str) -> float | None:
+    """The trained ensemble's probability for this market, if it has one."""
+    try:
+        from leagues.ml_models import market_probability
+        p = market_probability(model.get("ml"), market)
+        return round(float(p), 4) if p is not None else None
+    except Exception:
+        return None
+
+
 def _estimated_price(prob: float) -> float:
     """Fair price plus a typical book margin, floored at a sane minimum."""
     if prob <= 0:
@@ -186,6 +196,10 @@ def build_picks(fixture: dict, model: dict,
             "confidence": round(prob, 4),
             # Kept so the calibration's effect stays auditable after the fact
             "raw_confidence": round(raw_prob, 4),
+            # The trained ensemble's view of this same market, recorded but not
+            # acted on. Null where it has no opinion — an unpriced fixture, or
+            # a market it was never trained for.
+            "ml_confidence": _ml_for(model, market),
             "odds": round(price, 2),
             "odds_are_real": is_real,
             "odds_provider": odds.get("provider") if is_real else None,
@@ -243,6 +257,7 @@ def to_game(pick: dict) -> dict:
         "readable_prediction": pick["prediction"],
         "confidence": conf,
         "raw_confidence": pick.get("raw_confidence"),
+        "ml_confidence": pick.get("ml_confidence"),
         "odds": pick["odds"],
         "estimated_odds": pick["odds"],
         "real_odds": pick["odds"] if pick["odds_are_real"] else None,
