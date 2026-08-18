@@ -153,8 +153,7 @@ def _collect_legs() -> list[tuple[float, bool, str]]:
                 conf, status = _raw_conf(leg), leg.get("status")
                 if conf is None or status not in ("won", "lost"):
                     continue
-                group = leg.get("market_group") or _group_of(leg.get("market"))
-                legs.append((conf, status == "won", group))
+                legs.append((conf, status == "won", _calibration_group(leg)))
     except Exception as e:
         logger.debug(f"calibration: archive unavailable ({e})")
 
@@ -170,8 +169,7 @@ def _collect_legs() -> list[tuple[float, bool, str]]:
                     conf, status = _raw_conf(leg), leg.get("status")
                     if conf is None or status not in ("won", "lost"):
                         continue
-                    legs.append((conf, status == "won",
-                                 leg.get("market") or "unknown"))
+                    legs.append((conf, status == "won", _calibration_group(leg)))
         finally:
             db.close()
     except Exception as e:
@@ -193,12 +191,31 @@ def _raw_conf(leg: dict) -> float | None:
     return float(v) if v is not None else None
 
 
+def _calibration_group(leg: dict) -> str:
+    """Which calibration cell a settled leg belongs to.
+
+    Derived from the leg's own market rather than the stored `market_group`,
+    because that field records the *diversity* grouping, which deliberately
+    lumps overs and unders together. Calibration needs them apart — see
+    CALIBRATION_GROUP in picks.py.
+    """
+    market = leg.get("market")
+    if market:
+        try:
+            from leagues.picks import CALIBRATION_GROUP
+            if market in CALIBRATION_GROUP:
+                return CALIBRATION_GROUP[market]
+        except Exception:
+            pass
+    return leg.get("market_group") or _group_of(market)
+
+
 def _group_of(market: str | None) -> str:
     if not market:
         return "unknown"
     try:
-        from leagues.picks import MARKET_GROUP
-        return MARKET_GROUP.get(market, market)
+        from leagues.picks import CALIBRATION_GROUP
+        return CALIBRATION_GROUP.get(market, market)
     except Exception:
         return market
 

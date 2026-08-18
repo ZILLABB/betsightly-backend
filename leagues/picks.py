@@ -41,6 +41,9 @@ MARKET_LABELS = {
     "btts_no": "Both Teams to Score - No",
 }
 
+# Used for slip diversity: no slip should rest on one kind of market being
+# right. Overs and unders belong together here — they are the same opinion
+# about goals, so a slip holding both is not diversified.
 MARKET_GROUP = {
     "home_win": "match_result", "away_win": "match_result", "draw": "match_result",
     "home_or_draw": "double_chance", "away_or_draw": "double_chance",
@@ -48,6 +51,29 @@ MARKET_GROUP = {
     "over_1_5": "goals", "over_2_5": "goals", "over_3_5": "goals",
     "under_2_5": "goals", "under_3_5": "goals",
     "btts_yes": "btts", "btts_no": "btts",
+}
+
+# Used for calibration, and deliberately *not* the same split.
+#
+# A calibration group must contain markets whose error points the same way. If
+# the goals model runs hot, every "over" is over-stated and every "under" is
+# under-stated by the same amount — opposite directions. Grouping them
+# together fits one shift to the average and then applies it to both, which
+# corrects the overs and pushes the unders further from the truth. Measured:
+#
+#     over_1_5   n=85   promised 73.9%   actual 67.1%   (+6.8, too high)
+#     over_2_5   n= 4   promised 57.7%   actual 50.0%   (+7.7, too high)
+#     under_2_5  n= 7   promised 57.0%   actual 71.4%  (-14.5, too low)
+#
+# The unders were being dragged down by a correction fitted on the overs.
+# Same argument for both-teams-to-score, which is also a yes/no pair.
+CALIBRATION_GROUP = {
+    "home_win": "match_result", "away_win": "match_result", "draw": "match_result",
+    "home_or_draw": "double_chance", "away_or_draw": "double_chance",
+    "home_or_away": "double_chance",
+    "over_1_5": "goals_over", "over_2_5": "goals_over", "over_3_5": "goals_over",
+    "under_2_5": "goals_under", "under_3_5": "goals_under",
+    "btts_yes": "btts_yes", "btts_no": "btts_no",
 }
 
 # Markets DraftKings gives us a real price for, mapped to the odds key
@@ -107,15 +133,22 @@ def build_picks(fixture: dict, model: dict,
 
     picks = []
     for market, raw_prob in raw_probs.items():
-        prob = calibrate(raw_prob, MARKET_GROUP[market], fit)
+        prob = calibrate(raw_prob, CALIBRATION_GROUP[market], fit)
         if prob < min_confidence:
             continue
         # Double chance only when it is genuinely safe — otherwise it wins
         # every selection on price alone and adds no information.
         if MARKET_GROUP[market] == "double_chance" and prob < 0.78:
             continue
-        # Rarely useful and usually mispriced against us
-        if market in ("home_or_away", "over_3_5", "under_3_5"):
+        # home_or_away is "no draw" — real, but almost never offered, and the
+        # label reads as a double chance it is not. over_3_5 sits well below
+        # the confidence floor on any normal fixture.
+        #
+        # under_3_5 is back: it is a common, well-priced market that clears the
+        # floor on roughly 40% of fixtures, and it was the only thing on the
+        # board pulling in the opposite direction to Over 1.5. Excluding it left
+        # the card betting one way on goals and nothing else.
+        if market in ("home_or_away", "over_3_5"):
             continue
 
         real_key = REAL_ODDS_KEY.get(market)
