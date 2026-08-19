@@ -272,7 +272,13 @@ def performance_summary(limit_days: int = 90) -> dict:
             continue
         c = by_cat.setdefault(slip["category"], {"won": 0, "lost": 0, "staked": 0.0, "returned": 0.0})
 
+        c["unit"] = "slip"
+
         if slip.get("presentation") == "singles":
+            # Counted in picks, not slips — the caller has to be able to tell,
+            # or a page adding these to the accumulator counts reports ten
+            # separate bets as ten slips.
+            c["unit"] = "pick"
             # One unit per pick, not one unit on the set. Charging a singles
             # tier a single stake and paying it the product of ten prices would
             # be scoring a bet nobody placed.
@@ -296,6 +302,7 @@ def performance_summary(limit_days: int = 90) -> dict:
     for c in by_cat.values():
         settled = c["won"] + c["lost"]
         c["settled"] = settled
+        c.setdefault("unit", "slip")
         c["win_rate"] = round(c["won"] / settled, 4) if settled else 0.0
         c["profit"] = round(c["returned"] - c["staked"], 2)
         c["roi"] = round((c["returned"] - c["staked"]) / c["staked"], 4) if c["staked"] else 0.0

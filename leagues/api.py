@@ -208,10 +208,36 @@ async def get_results(days: int = 30, category: str | None = None):
         for slip in history:
             by_date.setdefault(slip["date"], {})[slip["category"]] = slip
 
+        summary = performance_summary(limit_days=days)
+
+        # Totals split by unit. Over 1.5 is a list of singles and is counted in
+        # individual picks; every other tier is one slip. Adding them into a
+        # single "settled slips" figure — which the results page was doing —
+        # reports ten separate bets as ten slips and overstates the count.
+        totals = {
+            "slips": {"won": 0, "lost": 0, "settled": 0,
+                      "staked": 0.0, "returned": 0.0},
+            "picks": {"won": 0, "lost": 0, "settled": 0,
+                      "staked": 0.0, "returned": 0.0},
+        }
+        for cat in summary.values():
+            bucket = totals["picks"] if cat.get("unit") == "pick" else totals["slips"]
+            for key in ("won", "lost", "settled", "staked", "returned"):
+                bucket[key] += cat.get(key, 0)
+        for bucket in totals.values():
+            n = bucket["settled"]
+            bucket["win_rate"] = round(bucket["won"] / n, 4) if n else None
+            bucket["profit"] = round(bucket["returned"] - bucket["staked"], 2)
+            bucket["roi"] = (round(bucket["profit"] / bucket["staked"], 4)
+                             if bucket["staked"] else None)
+        totals["combined_profit"] = round(
+            totals["slips"]["profit"] + totals["picks"]["profit"], 2)
+
         return {
             "status": "success",
             "days": days,
-            "summary": performance_summary(limit_days=days),
+            "summary": summary,
+            "totals": totals,
             "history": history,
             "by_date": by_date,
         }
