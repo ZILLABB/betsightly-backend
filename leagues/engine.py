@@ -43,7 +43,7 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
     from leagues.espn_source import get_fixtures, ESPN_CLUB_LEAGUES
     from leagues.base_rates import get_base_rates, rates_for
     from leagues.predictor import predict
-    from leagues.picks import build_picks
+    from leagues.picks import MIN_CANDIDATE_CONFIDENCE, build_picks
     from leagues.calibrator import fit_calibration
     from leagues import ml_models
     from leagues.team_history import HistoryIndex
@@ -82,7 +82,8 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
         else:
             unpriced += 1
         fx["_model"] = model
-        all_picks.extend(build_picks(fx, model, fit=fit))
+        all_picks.extend(build_picks(
+            fx, model, min_confidence=MIN_CANDIDATE_CONFIDENCE, fit=fit))
 
     logger.info(
         f"Pipeline: {len(fixtures)} fixtures ({priced} priced, {unpriced} base-rate only, "

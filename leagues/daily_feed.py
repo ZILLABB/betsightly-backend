@@ -104,7 +104,8 @@ def build_daily_accumulators(force: bool = False) -> dict:
 
     from leagues.engine import run_pipeline, picks_for_date
     from leagues.selection import select_accumulator, select_banker
-    from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
+    from leagues.picks import (
+        MIN_CANDIDATE_CONFIDENCE, MIN_PUBLISHABLE_CONFIDENCE, to_game)
 
     now = datetime.now(timezone.utc)
     publish_date = _publish_date()
@@ -176,10 +177,14 @@ def build_daily_accumulators(force: bool = False) -> dict:
     FLOOR = MIN_PUBLISHABLE_CONFIDENCE
     banker = select_banker(day_picks)
     two, two_why = _select_tier(day_picks, 2.0, 4, FLOOR, 0.82)
-    five, five_why = _select_tier(day_picks, 5.0, 6, FLOOR, 0.72)
+    # The long tiers reach down to the per-market floors, which lets them use
+    # a 1.60-1.80 leg from a market that has earned it instead of stacking six
+    # short ones. Fewer legs is worth a lot here: 5x from 3 legs at 1.80
+    # returns 0.84 and lands 14.4%, against 0.75 and 11.7% from 5 at 1.45.
+    five, five_why = _select_tier(day_picks, 5.0, 6, MIN_CANDIDATE_CONFIDENCE, 0.72)
     # Reaching 10x from legs that are never priced above ~1.45 takes seven of
     # them; capping at six made the tier unbuildable rather than merely long.
-    ten, ten_why = _select_tier(day_picks, 10.0, 8, FLOOR, 0.63)
+    ten, ten_why = _select_tier(day_picks, 10.0, 8, MIN_CANDIDATE_CONFIDENCE, 0.63)
 
     # Over 1.5 — a list of singles, one per fixture, safest first.
     #
@@ -317,7 +322,8 @@ def build_bookable_now() -> dict | None:
     its losers, which is the exact failure the lock exists to prevent.
     """
     from leagues.engine import run_pipeline
-    from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
+    from leagues.picks import (
+        MIN_CANDIDATE_CONFIDENCE, MIN_PUBLISHABLE_CONFIDENCE, to_game)
     from leagues.selection import select_banker
 
     now = datetime.now(timezone.utc)

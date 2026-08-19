@@ -113,6 +113,45 @@ def _estimated_price(prob: float) -> float:
 # whole site is judged on: whether a published prediction actually happens.
 MIN_PUBLISHABLE_CONFIDENCE = 0.65
 
+# ...but one floor for every market was too blunt, and it was costing the long
+# tiers badly. Splitting the sub-65% band by market shows it was never the
+# confidence level that was wrong — it was two specific markets:
+#
+#     sub-65%, excluding BTTS   n=46  promised 59.4%  actual 60.9%   (-1.4)
+#     sub-65% BTTS only         n=16  promised 57.3%  actual 37.5%  (+19.8)
+#     sub-65% Over 1.5          n=16  promised 60.6%  actual 37.5%  (+23.1)
+#     sub-65% home_win          n=14  promised 59.8%  actual 71.4%  (-11.6)
+#     sub-65% under_2_5         n= 7  promised 57.0%  actual 71.4%  (-14.5)
+#
+# Match result and unders at 55-65% land *better* than promised. Blocking them
+# forced 5x and 10x to be built from many short legs, and that is the worst
+# possible shape: every leg multiplies in another 6% of margin, so a 5x slip
+# from 5 legs at 1.45 returns 0.75 and lands 11.7%, while the same 5x from 3
+# legs at 1.80 returns 0.84 and lands 14.4%. Fewer, longer legs wins on both.
+#
+# Over 1.5 below 65% means the model is calling a low-scoring game, which is
+# exactly where it extrapolates worst, so it keeps the high floor. BTTS keeps a
+# higher one still until it earns its way back.
+MIN_CONFIDENCE_BY_GROUP = {
+    "match_result": 0.55,
+    "double_chance": 0.65,
+    "goals_under": 0.58,
+    "goals_over": 0.65,
+    "btts_yes": 0.70,
+    "btts_no": 0.70,
+}
+
+
+# The lowest per-market floor. The pipeline builds candidates down to this so
+# each tier can choose how far to reach; the blanket minimum must not sit above
+# it or the per-market floors never apply.
+MIN_CANDIDATE_CONFIDENCE = min(MIN_CONFIDENCE_BY_GROUP.values())
+
+
+def min_confidence_for(market: str, default: float = MIN_PUBLISHABLE_CONFIDENCE) -> float:
+    """The floor this market has to clear, on its own measured record."""
+    return MIN_CONFIDENCE_BY_GROUP.get(CALIBRATION_GROUP.get(market, ""), default)
+
 
 def build_picks(fixture: dict, model: dict,
                 min_confidence: float = MIN_PUBLISHABLE_CONFIDENCE,
@@ -144,7 +183,11 @@ def build_picks(fixture: dict, model: dict,
     picks = []
     for market, raw_prob in raw_probs.items():
         prob = calibrate(raw_prob, CALIBRATION_GROUP[market], fit)
-        if prob < min_confidence:
+        # Per-market floor, never below whatever the caller asked for as a
+        # blanket minimum. A tier wanting only safe picks still gets them; a
+        # tier reaching for a multiplier can use a longer leg from a market
+        # that has earned it.
+        if prob < max(min_confidence_for(market), min_confidence):
             continue
         # Double chance only when it is genuinely safe — otherwise it wins
         # every selection on price alone and adds no information.
