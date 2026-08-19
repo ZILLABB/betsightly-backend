@@ -141,6 +141,21 @@ MIN_CONFIDENCE_BY_GROUP = {
     "btts_no": 0.70,
 }
 
+# A market only gets a floor below the standard one once its own record can
+# support it. Settled legs, in its own calibration group.
+#
+# This exists because the first version did not have it and the result was
+# exactly the failure it prevents: unders were relaxed to 58% on the strength
+# of seven settled Under 2.5 legs, and Under 3.5 — which had never been
+# published at all, zero settled legs — inherited that floor and immediately
+# became 38% of the candidate pool. A market with no track record was handed
+# the largest share of the board on evidence borrowed from a different market.
+#
+# Below the threshold a market is still publishable, just at the standard
+# floor, so it accumulates a record at high confidence before being trusted
+# lower down. The relaxation then applies on its own.
+MIN_EVIDENCE_LEGS = 25
+
 
 # The lowest per-market floor. The pipeline builds candidates down to this so
 # each tier can choose how far to reach; the blanket minimum must not sit above
@@ -148,9 +163,30 @@ MIN_CONFIDENCE_BY_GROUP = {
 MIN_CANDIDATE_CONFIDENCE = min(MIN_CONFIDENCE_BY_GROUP.values())
 
 
-def min_confidence_for(market: str, default: float = MIN_PUBLISHABLE_CONFIDENCE) -> float:
-    """The floor this market has to clear, on its own measured record."""
-    return MIN_CONFIDENCE_BY_GROUP.get(CALIBRATION_GROUP.get(market, ""), default)
+def min_confidence_for(market: str, default: float = MIN_PUBLISHABLE_CONFIDENCE,
+                       fit: dict | None = None) -> float:
+    """The floor this market has to clear, on its own measured record.
+
+    A floor *below* the standard one has to be earned: the market's
+    calibration group needs MIN_EVIDENCE_LEGS settled legs before its own
+    number is used. Without that check a market with no history inherits a
+    relaxation measured on a different one. A floor *above* the standard
+    always applies — restricting a market that is behaving badly needs no
+    sample-size argument.
+    """
+    group = CALIBRATION_GROUP.get(market, "")
+    floor = MIN_CONFIDENCE_BY_GROUP.get(group, default)
+    if floor >= default:
+        return floor
+
+    if fit is None:
+        try:
+            from leagues.calibrator import fit_calibration
+            fit = fit_calibration()
+        except Exception:
+            return default
+    n = ((fit.get("groups") or {}).get(group) or {}).get("n", 0)
+    return floor if n >= MIN_EVIDENCE_LEGS else default
 
 
 def build_picks(fixture: dict, model: dict,
@@ -187,7 +223,7 @@ def build_picks(fixture: dict, model: dict,
         # blanket minimum. A tier wanting only safe picks still gets them; a
         # tier reaching for a multiplier can use a longer leg from a market
         # that has earned it.
-        if prob < max(min_confidence_for(market), min_confidence):
+        if prob < max(min_confidence_for(market, fit=fit), min_confidence):
             continue
         # Double chance only when it is genuinely safe — otherwise it wins
         # every selection on price alone and adds no information.
