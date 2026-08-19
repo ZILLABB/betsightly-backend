@@ -492,6 +492,72 @@ async def get_calibration_fit():
         raise HTTPException(500, str(e))
 
 
+@router.get("/odds-shop-status")
+async def odds_shop_status():
+    """Whether multi-book price shopping is actually working.
+
+    It fails silently by design — a missing key returns {} and a non-200
+    returns [] — so a broken shop looks exactly like a quiet day: value-bets
+    just reports zero. That is the worst possible failure mode for the one
+    component that can make a pick genuinely +EV, so this reports the real
+    HTTP status instead of swallowing it.
+    """
+    try:
+        import os
+        import requests as _rq
+        from leagues.odds_shop import (
+            CACHE_PATH, SLUG_TO_ODDS_KEY, budget_status,
+        )
+
+        key = os.getenv("ODDS_API_KEY", "").strip()
+        out = {
+            "key_configured": bool(key),
+            "budget": budget_status(),
+            "mapped_leagues": len(SLUG_TO_ODDS_KEY),
+            "cache_exists": CACHE_PATH.exists(),
+        }
+        if CACHE_PATH.exists():
+            import json as _json
+            import time as _time
+            try:
+                blob = _json.loads(CACHE_PATH.read_text())
+                out["cache_age_hours"] = round(
+                    (_time.time() - blob.get("ts", 0)) / 3600, 1)
+                out["cache_fixtures"] = len(blob.get("data", {}))
+            except Exception:
+                out["cache_age_hours"] = None
+
+        if not key:
+            out["verdict"] = "ODDS_API_KEY is not set — no shopping happens at all."
+            return {"status": "success", **out}
+
+        # One real probe so the actual failure surfaces.
+        resp = _rq.get(
+            "https://api.the-odds-api.com/v4/sports/soccer_epl/odds",
+            params={"apiKey": key, "regions": "eu,uk",
+                    "markets": "h2h", "oddsFormat": "decimal"},
+            timeout=25,
+        )
+        out["probe_http_status"] = resp.status_code
+        out["quota_remaining"] = resp.headers.get("x-requests-remaining")
+        out["quota_used"] = resp.headers.get("x-requests-used")
+        if resp.status_code == 200:
+            events = resp.json() or []
+            out["probe_events"] = len(events)
+            out["verdict"] = (
+                f"Working. {len(events)} EPL fixtures priced, "
+                f"{out['quota_remaining']} credits left."
+            )
+        else:
+            body = resp.text[:300]
+            out["probe_error"] = body
+            out["verdict"] = f"The Odds API rejected the request: HTTP {resp.status_code}."
+        return {"status": "success", **out}
+    except Exception as e:
+        logger.error(f"odds shop status failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.get("/value-bets")
 async def get_value_bets(days_ahead: int = 3, limit: int = 40, min_ev: float = 0.02):
     """Bets priced above fair value once every bookmaker is compared.
