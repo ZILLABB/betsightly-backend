@@ -74,3 +74,4 @@ cache/
 leagues/data/team_history.json
 leagues/data/calibration_fit.json
 leagues/data/shopped_odds.json
+leagues/data/odds_budget.json

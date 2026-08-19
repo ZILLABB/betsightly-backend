@@ -111,11 +111,53 @@ def _norm(name: str) -> str:
 
 # ── Credit budget ──────────────────────────────────────────
 
-def _budget() -> dict:
+def _db_get(key: str):
+    """Read a persisted value. The disk is not durable on Render."""
     try:
-        b = json.loads(BUDGET_PATH.read_text())
+        from sqlalchemy import text
+        from database import engine
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS odds_usage ("
+                "k VARCHAR(32) PRIMARY KEY, v TEXT)"))
+            row = conn.execute(text("SELECT v FROM odds_usage WHERE k = :k"),
+                               {"k": key}).fetchone()
+        return json.loads(row[0]) if row and row[0] else None
     except Exception:
-        b = {}
+        return None
+
+
+def _db_set(key: str, value) -> None:
+    try:
+        from sqlalchemy import text
+        from database import engine
+        payload = json.dumps(value)
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS odds_usage ("
+                "k VARCHAR(32) PRIMARY KEY, v TEXT)"))
+            updated = conn.execute(
+                text("UPDATE odds_usage SET v = :v WHERE k = :k"),
+                {"k": key, "v": payload}).rowcount
+            if not updated:
+                conn.execute(text("INSERT INTO odds_usage (k, v) VALUES (:k, :v)"),
+                             {"k": key, "v": payload})
+    except Exception as e:
+        logger.debug(f"odds usage persist failed: {e}")
+
+
+def _budget() -> dict:
+    # The database, not the disk. This file used to live on the filesystem and
+    # was also committed to the repo, so every deploy restored a snapshot
+    # reading 10 credits used while the real total climbed past 499 — the guard
+    # reset itself every time it shipped, and the month's quota was gone
+    # without anything reporting it.
+    b = _db_get("budget")
+    if b is None:
+        try:
+            b = json.loads(BUDGET_PATH.read_text())
+        except Exception:
+            b = {}
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     month = today[:7]
     if b.get("day") != today:
@@ -125,18 +167,45 @@ def _budget() -> dict:
     return b
 
 
-def _spend(credits: int) -> None:
-    b = _budget()
-    b["day_used"] = b.get("day_used", 0) + credits
-    b["month_used"] = b.get("month_used", 0) + credits
+def _remaining_from_api() -> int | None:
+    """Credits the provider itself says are left, if we have seen a response.
+
+    Authoritative over our own counter: it survives deploys, counts calls we
+    made before the counter existed, and cannot drift.
+    """
+    v = _db_get("remaining")
+    return int(v) if isinstance(v, (int, float)) else None
+
+
+def record_quota(headers) -> None:
+    """Store the quota the provider reports on every response."""
     try:
-        BUDGET_PATH.parent.mkdir(parents=True, exist_ok=True)
-        BUDGET_PATH.write_text(json.dumps(b))
+        remaining = headers.get("x-requests-remaining")
+        if remaining is not None:
+            _db_set("remaining", int(float(remaining)))
+        used = headers.get("x-requests-used")
+        if used is not None:
+            _db_set("used", int(float(used)))
     except Exception:
         pass
 
 
+def _spend(credits: int) -> None:
+    b = _budget()
+    b["day_used"] = b.get("day_used", 0) + credits
+    b["month_used"] = b.get("month_used", 0) + credits
+    _db_set("budget", b)
+
+
+# Leave a little headroom so the provider's own limit is never the thing that
+# stops us — running to zero is how this went unnoticed.
+RESERVE_CREDITS = 20
+
+
 def _can_spend(credits: int) -> bool:
+    remaining = _remaining_from_api()
+    if remaining is not None and remaining - credits < RESERVE_CREDITS:
+        return False
     b = _budget()
     return (b.get("day_used", 0) + credits <= DAILY_CREDIT_CEILING
             and b.get("month_used", 0) + credits <= MONTHLY_CREDIT_CEILING)
@@ -144,7 +213,10 @@ def _can_spend(credits: int) -> bool:
 
 def budget_status() -> dict:
     b = _budget()
+    remaining = _remaining_from_api()
     return {
+        "provider_remaining": remaining,
+        "provider_used": _db_get("used"),
         "day": b.get("day"), "day_used": b.get("day_used", 0),
         "day_ceiling": DAILY_CREDIT_CEILING,
         "month": b.get("month"), "month_used": b.get("month_used", 0),
@@ -173,8 +245,16 @@ def _fetch_league(sport_key: str, api_key: str) -> list[dict]:
             timeout=30,
         )
         if resp.status_code != 200:
-            logger.warning(f"odds shop {sport_key}: HTTP {resp.status_code}")
+            # Record the quota even on a rejection — a 401 for exhausted
+            # credits still carries the headers, and that is exactly the
+            # moment we most need the real number.
+            record_quota(resp.headers)
+            logger.warning(
+                f"odds shop {sport_key}: HTTP {resp.status_code} "
+                f"{resp.text[:160]}"
+            )
             return []
+        record_quota(resp.headers)
         used = int(resp.headers.get("x-requests-last", 2) or 2)
         _spend(used)
         return resp.json() or []
