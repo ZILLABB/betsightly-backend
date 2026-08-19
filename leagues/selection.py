@@ -109,12 +109,22 @@ def select_accumulator(
     min_confidence: float = 0.50,
     min_ev: float = 0.0,
     prefer_real_odds: bool = True,
+    prefer: str = "ev",
 ) -> tuple[list[dict], float, float]:
     """Pick the best slip that reaches `target_odds`.
 
-    "Best" is expected value — payout times the chance it lands — rather than
-    the chance alone, so a cheap long shot cannot beat a fairly priced short
-    one just by having more legs.
+    `prefer` chooses what "best" means.
+
+    "ev" — payout times the chance it lands. Right for a standalone slip: a
+    cheap long shot cannot beat a fairly priced short one just by having more
+    legs.
+
+    "joint" — the chance it lands, ignoring payout beyond the target band.
+    Right for a link in a chain, where every day has to come in and a day that
+    misses ends the run. Maximising value there quietly prefers the riskier
+    day: inside a 2x band a slip paying 2.33x and landing 44% scores a higher
+    EV than one paying 1.30x and landing 69%, so the chain kept being built
+    from the least likely days available.
 
     Returns (picks, combined_odds, joint_probability). Empty when the day
     cannot support the target honestly.
@@ -199,14 +209,15 @@ def select_accumulator(
             ev = combined * joint
             if ev < min_ev:
                 continue
+            score = joint if prefer == "joint" else ev
 
             if lo_band <= combined <= hi_band:
-                if ev > best_ev:
-                    best_ev = ev
+                if score > best_ev:
+                    best_ev = score
                     best = (list(combo), combined, joint)
-            elif combined > hi_band and ev > fallback_ev:
+            elif combined > hi_band and score > fallback_ev:
                 # Overshoots the band but still valid — keep as a backup
-                fallback_ev = ev
+                fallback_ev = score
                 fallback = (list(combo), combined, joint)
 
     result = best or fallback
@@ -327,4 +338,9 @@ def select_rollover_day(picks: list[dict], target_odds: float = 2.0,
         # Two legs give up about 11% to the margin; below this the day is not
         # worth staking however good the multiplier looks.
         min_ev=0.85,
+        # The chain needs every day to land, so the safest day that reaches the
+        # target wins — not the most valuable one. Optimising value here was
+        # picking a 44% day over a 69% day because it paid more, which is how
+        # you build a chain out of its least likely links.
+        prefer="joint",
     )
