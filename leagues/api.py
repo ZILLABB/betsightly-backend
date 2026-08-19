@@ -326,6 +326,51 @@ async def restart_everything(full_rollover: bool = True, republish_card: bool = 
         raise HTTPException(500, str(e))
 
 
+@router.post("/repair-singles")
+async def repair_singles():
+    """Re-score singles tiers that were settled under the accumulator rule.
+
+    Over 1.5 publishes ten independent bets, but every slip was settled by
+    "any leg lost, so the slip lost". A tier hitting nine from ten was being
+    recorded as a loss. This tags those slips as singles and re-derives their
+    status from the legs, which are stored correctly and untouched.
+    """
+    try:
+        import json as _json
+        from database import SessionLocal
+        from leagues.picks_db import PublishedSlip, ensure_table
+
+        ensure_table()
+        fixed = []
+        db = SessionLocal()
+        try:
+            rows = db.query(PublishedSlip).filter(
+                PublishedSlip.category == "over_1_5").all()
+            for r in rows:
+                legs = _json.loads(r.picks or "[]")
+                r.presentation = "singles"
+                results = [l.get("status") or "pending" for l in legs]
+                if not results or any(o == "pending" for o in results):
+                    new_status = "pending"
+                else:
+                    staked = sum(1 for o in results if o in ("won", "lost"))
+                    returned = sum(float(l.get("odds") or 0)
+                                   for l, o in zip(legs, results) if o == "won")
+                    new_status = "won" if returned > staked else "lost"
+                if new_status != r.status:
+                    fixed.append({"date": r.date, "was": r.status, "now": new_status,
+                                  "legs": f"{sum(1 for o in results if o=='won')}W"
+                                          f"/{sum(1 for o in results if o=='lost')}L"})
+                    r.status = new_status
+            db.commit()
+        finally:
+            db.close()
+        return {"status": "success", "slips_retagged": len(rows), "restated": fixed}
+    except Exception as e:
+        logger.error(f"repair-singles failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.post("/rebuild-rollover")
 async def rebuild_rollover():
     """Rebuild the unsettled part of the rollover chain.

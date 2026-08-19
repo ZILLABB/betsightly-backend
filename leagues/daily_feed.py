@@ -436,6 +436,7 @@ def _archive(date: str, accumulators: dict) -> None:
                 games=cat.get("games", []),
                 total_odds=cat.get("total_odds", 0),
                 hit_probability=cat.get("hit_probability", 0),
+                presentation=cat.get("presentation", "accumulator"),
             )
         except Exception as e:
             logger.debug(f"archive {category} failed: {e}")

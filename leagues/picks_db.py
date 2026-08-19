@@ -36,6 +36,10 @@ class PublishedSlip(Base):
     picks = Column(Text, nullable=False)                       # JSON list
     total_odds = Column(Float, nullable=False)
     hit_probability = Column(Float, default=0.0)
+    # "accumulator" (every leg must land) or "singles" (each leg is its own
+    # bet). They settle and score by completely different rules, so the slip
+    # has to remember which it was published as.
+    presentation = Column(String(16), default="accumulator")
     status = Column(String(20), default="pending")             # pending|won|lost|void
     settled_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -46,14 +50,53 @@ def ensure_table() -> bool:
     try:
         from database import engine
         Base.metadata.create_all(bind=engine, tables=[PublishedSlip.__table__])
+        _add_missing_columns(engine)
         return True
     except Exception as e:
         logger.warning(f"Could not ensure published_slips table: {e}")
         return False
 
 
+def _add_missing_columns(engine) -> None:
+    """Add columns introduced after the table was first created.
+
+    create_all() only creates tables that do not exist — it will not alter one
+    that does. On a database where published_slips already exists, a new column
+    is simply absent and every read of it fails at runtime rather than at
+    deploy. The project has no migration discipline (one Alembic revision,
+    everything else via create_all), so additive columns are applied here.
+
+    The existing columns are inspected rather than relying on
+    "ADD COLUMN IF NOT EXISTS": Postgres supports that, SQLite does not, and
+    production is Postgres while local dev is SQLite. Checking first works on
+    both and keeps this safe to run on every boot.
+    """
+    import sqlalchemy as sa
+
+    wanted = {
+        "presentation": "VARCHAR(16) DEFAULT 'accumulator'",
+    }
+    try:
+        existing = {c["name"] for c in sa.inspect(engine).get_columns("published_slips")}
+    except Exception as e:
+        logger.warning(f"could not inspect published_slips: {e}")
+        return
+
+    for name, ddl in wanted.items():
+        if name in existing:
+            continue
+        try:
+            with engine.begin() as conn:
+                conn.execute(sa.text(
+                    f"ALTER TABLE published_slips ADD COLUMN {name} {ddl}"))
+            logger.info(f"published_slips: added column {name}")
+        except Exception as e:
+            logger.warning(f"could not add column {name}: {e}")
+
+
 def archive_slip(date: str, category: str, games: list[dict],
-                 total_odds: float, hit_probability: float) -> bool:
+                 total_odds: float, hit_probability: float,
+                 presentation: str = "accumulator") -> bool:
     """Record a published slip. Idempotent per (date, category).
 
     Re-published slips overwrite only while still pending — once a slip is
@@ -108,7 +151,7 @@ def archive_slip(date: str, category: str, games: list[dict],
                 db.add(PublishedSlip(
                     date=date, category=category, picks=payload,
                     total_odds=total_odds, hit_probability=hit_probability,
-                    status="pending",
+                    presentation=presentation, status="pending",
                 ))
             db.commit()
             return True
@@ -133,6 +176,7 @@ def get_history(limit_days: int = 30, category: Optional[str] = None) -> list[di
                     "date": r.date,
                     "category": r.category,
                     "status": r.status,
+                    "presentation": r.presentation or "accumulator",
                     "total_odds": r.total_odds,
                     "hit_probability": r.hit_probability,
                     "picks": json.loads(r.picks or "[]"),
@@ -166,8 +210,18 @@ def pending_slips(before_date: str) -> list[Any]:
 def settle_slip(slip_id: int, pick_results: list[str]) -> Optional[str]:
     """Apply per-leg outcomes and set the slip status.
 
-    A slip wins only when every leg wins. It is lost as soon as any leg loses,
-    even while other legs are unresolved — a lost leg cannot be recovered.
+    An accumulator wins only when every leg wins, and is lost the moment any
+    leg loses — a lost leg cannot be recovered, so there is no point waiting.
+
+    A singles tier is scored completely differently and applying the
+    accumulator rule to it was badly wrong. Over 1.5 publishes ten independent
+    bets; on 19 August one lost while nine were still unplayed and the whole
+    tier was recorded LOST. Over time that makes a tier hitting eight from ten
+    read as though it loses almost every day.
+
+    Singles stay pending until every leg has resolved, and are then judged on
+    whether the set of bets made money at one unit each — which is the only
+    question that means anything when nobody staked them as one slip.
     """
     try:
         db = SessionLocal()
@@ -179,7 +233,17 @@ def settle_slip(slip_id: int, pick_results: list[str]) -> Optional[str]:
             for pick, outcome in zip(picks, pick_results):
                 pick["status"] = outcome
 
-            if any(o == "lost" for o in pick_results):
+            if (slip.presentation or "accumulator") == "singles":
+                if not pick_results or any(o == "pending" for o in pick_results):
+                    status = "pending"
+                else:
+                    staked = sum(1 for o in pick_results if o in ("won", "lost"))
+                    returned = sum(
+                        float(pk.get("odds") or 0)
+                        for pk, o in zip(picks, pick_results) if o == "won"
+                    )
+                    status = "won" if returned > staked else "lost"
+            elif any(o == "lost" for o in pick_results):
                 status = "lost"
             elif all(o in ("won", "void") for o in pick_results) and pick_results:
                 status = "won"
@@ -207,6 +271,21 @@ def performance_summary(limit_days: int = 90) -> dict:
         if slip["status"] not in ("won", "lost"):
             continue
         c = by_cat.setdefault(slip["category"], {"won": 0, "lost": 0, "staked": 0.0, "returned": 0.0})
+
+        if slip.get("presentation") == "singles":
+            # One unit per pick, not one unit on the set. Charging a singles
+            # tier a single stake and paying it the product of ten prices would
+            # be scoring a bet nobody placed.
+            for leg in slip.get("picks", []):
+                if leg.get("status") == "won":
+                    c["won"] += 1
+                    c["staked"] += 1.0
+                    c["returned"] += float(leg.get("odds") or 0)
+                elif leg.get("status") == "lost":
+                    c["lost"] += 1
+                    c["staked"] += 1.0
+            continue
+
         if slip["status"] == "won":
             c["won"] += 1
             c["returned"] += slip["total_odds"]
