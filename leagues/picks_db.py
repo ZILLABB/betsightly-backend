@@ -192,15 +192,40 @@ def get_history(limit_days: int = 30, category: Optional[str] = None) -> list[di
 
 
 def pending_slips(before_date: str) -> list[Any]:
-    """Unsettled slips whose date is on or before `before_date`."""
+    """Slips with any leg still to resolve, on or before `before_date`.
+
+    Deliberately not "slips whose status is pending". An accumulator dies on
+    its first losing leg and was then dropped from this query, so every leg
+    kicking off *later* stayed pending forever — 73 of 343 legs in decided
+    slips, every one of them inside a slip that had already lost.
+
+    Those legs never reached the calibrator, which fits only on settled
+    outcomes, so the sample kept the leg that killed each slip and silently
+    discarded the ones beside it. The slip's own outcome is still decided once
+    and never revised; this only finishes recording what actually happened.
+    """
     try:
         db = SessionLocal()
         try:
-            return (
+            rows = (
                 db.query(PublishedSlip)
-                .filter(PublishedSlip.status == "pending", PublishedSlip.date <= before_date)
+                .filter(PublishedSlip.date <= before_date)
+                .order_by(PublishedSlip.date.desc())
+                .limit(600)
                 .all()
             )
+            out = []
+            for r in rows:
+                if r.status == "pending":
+                    out.append(r)
+                    continue
+                try:
+                    if any(p.get("status") in (None, "pending")
+                           for p in json.loads(r.picks or "[]")):
+                        out.append(r)
+                except Exception:
+                    continue
+            return out
         finally:
             db.close()
     except Exception:
@@ -233,6 +258,8 @@ def settle_slip(slip_id: int, pick_results: list[str]) -> Optional[str]:
             for pick, outcome in zip(picks, pick_results):
                 pick["status"] = outcome
 
+            already_decided = slip.status in ("won", "lost", "void")
+
             if (slip.presentation or "accumulator") == "singles":
                 if not pick_results or any(o == "pending" for o in pick_results):
                     status = "pending"
@@ -245,17 +272,24 @@ def settle_slip(slip_id: int, pick_results: list[str]) -> Optional[str]:
                     status = "won" if returned > staked else "lost"
             elif any(o == "lost" for o in pick_results):
                 status = "lost"
+            elif pick_results and all(o == "void" for o in pick_results):
+                # Every leg voided: the stake comes back. Counting that as a
+                # win inflated the banker record by two slips that never
+                # actually won anything.
+                status = "void"
             elif all(o in ("won", "void") for o in pick_results) and pick_results:
                 status = "won"
             else:
                 status = "pending"
 
             slip.picks = json.dumps(picks)
-            if status != "pending":
+            # A decided slip keeps its verdict — a leg finishing afterwards
+            # completes the record, it does not reopen the result.
+            if status != "pending" and not already_decided:
                 slip.status = status
                 slip.settled_at = datetime.utcnow()
             db.commit()
-            return status
+            return slip.status if already_decided else status
         finally:
             db.close()
     except Exception as e:
