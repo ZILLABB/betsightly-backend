@@ -352,6 +352,42 @@ async def restart_everything(full_rollover: bool = True, republish_card: bool = 
         raise HTTPException(500, str(e))
 
 
+@router.post("/repair-void-slips")
+async def repair_void_slips():
+    """Restate slips recorded as won whose every leg actually voided.
+
+    The old rule was "all legs won or void", so a slip where every leg voided
+    counted as a win. A void returns the stake — it wins nothing. The rule is
+    fixed going forward; this corrects the records already written.
+    """
+    try:
+        import json as _json
+        from database import SessionLocal
+        from leagues.picks_db import PublishedSlip, ensure_table
+
+        ensure_table()
+        fixed = []
+        db = SessionLocal()
+        try:
+            for r in db.query(PublishedSlip).filter(
+                    PublishedSlip.status == "won").all():
+                legs = _json.loads(r.picks or "[]")
+                if not legs:
+                    continue
+                states = [l.get("status") for l in legs]
+                if all(st == "void" for st in states):
+                    fixed.append({"date": r.date, "category": r.category,
+                                  "legs": len(legs)})
+                    r.status = "void"
+            db.commit()
+        finally:
+            db.close()
+        return {"status": "success", "restated": fixed, "count": len(fixed)}
+    except Exception as e:
+        logger.error(f"repair-void-slips failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.post("/repair-singles")
 async def repair_singles():
     """Re-score singles tiers that were settled under the accumulator rule.
