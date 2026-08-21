@@ -175,16 +175,46 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # A long tier now needs more legs to reach its target instead of worse
     # ones, which costs hit rate honestly rather than by overstating each leg.
     FLOOR = MIN_PUBLISHABLE_CONFIDENCE
+
+    # Tiers are built one after another, each excluding the fixtures already
+    # used, so they are genuinely different bets.
+    #
+    # They were not. On 19 August Shanghai Port Win sat in 2 odds, 5 odds and
+    # 10 odds at once; it lost and killed all three. The next day Vancouver
+    # Whitecaps did exactly the same. Two days running, "almost every tier
+    # failed" was one bad pick counted three times — somebody staking the whole
+    # card was not making five bets, they were making one at triple stake, and
+    # nothing on the site said so.
+    #
+    # Safest tier first, so banker and 2 odds get first refusal on the best
+    # picks; the long tiers are built from longer prices anyway and lose least
+    # by being excluded. If a tier cannot be built from what is left it falls
+    # back to the full pool rather than going empty — on a thin day a shared
+    # leg beats no slip at all.
+    used_fixtures: set = set()
+
+    def _tier(target, max_picks, floor, min_ev):
+        pool = [p for p in day_picks if p["match_id"] not in used_fixtures]
+        sel, why = _select_tier(pool, target, max_picks, floor, min_ev)
+        if not sel[0]:
+            sel, why = _select_tier(day_picks, target, max_picks, floor, min_ev)
+        for pick in sel[0]:
+            used_fixtures.add(pick["match_id"])
+        return sel, why
+
     banker = select_banker(day_picks)
-    two, two_why = _select_tier(day_picks, 2.0, 4, FLOOR, 0.82)
+    for _p in banker[0]:
+        used_fixtures.add(_p["match_id"])
+
+    two, two_why = _tier(2.0, 4, FLOOR, 0.82)
     # The long tiers reach down to the per-market floors, which lets them use
     # a 1.60-1.80 leg from a market that has earned it instead of stacking six
     # short ones. Fewer legs is worth a lot here: 5x from 3 legs at 1.80
     # returns 0.84 and lands 14.4%, against 0.75 and 11.7% from 5 at 1.45.
-    five, five_why = _select_tier(day_picks, 5.0, 6, MIN_CANDIDATE_CONFIDENCE, 0.72)
+    five, five_why = _tier(5.0, 6, MIN_CANDIDATE_CONFIDENCE, 0.72)
     # Reaching 10x from legs that are never priced above ~1.45 takes seven of
     # them; capping at six made the tier unbuildable rather than merely long.
-    ten, ten_why = _select_tier(day_picks, 10.0, 8, MIN_CANDIDATE_CONFIDENCE, 0.63)
+    ten, ten_why = _tier(10.0, 8, MIN_CANDIDATE_CONFIDENCE, 0.63)
 
     # Over 1.5 — a list of singles, one per fixture, safest first.
     #
