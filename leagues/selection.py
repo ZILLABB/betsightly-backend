@@ -110,6 +110,7 @@ def select_accumulator(
     min_ev: float = 0.0,
     prefer_real_odds: bool = True,
     prefer: str = "ev",
+    band_low: float = 0.80,
 ) -> tuple[list[dict], float, float]:
     """Pick the best slip that reaches `target_odds`.
 
@@ -172,7 +173,7 @@ def select_accumulator(
     # 3% short of a round number. Undershooting the target slightly is a far
     # better outcome than publishing nothing, and the expected-value floor
     # still decides whether the slip is worth staking at all.
-    lo_band = target_odds * 0.80
+    lo_band = target_odds * band_low
     hi_band = target_odds * 1.45
 
     best: tuple[list[dict], float, float] | None = None

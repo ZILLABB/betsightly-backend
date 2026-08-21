@@ -66,7 +66,8 @@ def _save(filename: str, data):
 # ── Categories ─────────────────────────────────────────────
 
 def _select_tier(picks: list, target: float, max_picks: int,
-                 min_confidence: float, min_ev: float):
+                 min_confidence: float, min_ev: float,
+                 prefer: str = "joint", band_low: float = 0.80):
     """Select a tier, and say which of the two reasons left it empty.
 
     A blank tier has two quite different causes and they were reported with
@@ -77,11 +78,13 @@ def _select_tier(picks: list, target: float, max_picks: int,
     """
     from leagues.selection import select_accumulator
 
-    sel = select_accumulator(picks, target, max_picks, min_confidence, min_ev=min_ev)
+    sel = select_accumulator(picks, target, max_picks, min_confidence,
+                             min_ev=min_ev, prefer=prefer, band_low=band_low)
     if sel[0]:
         return sel, None
 
-    ungated = select_accumulator(picks, target, max_picks, min_confidence, min_ev=0.0)
+    ungated = select_accumulator(picks, target, max_picks, min_confidence,
+                                 min_ev=0.0, prefer=prefer, band_low=band_low)
     if ungated[0]:
         _, total, joint = ungated
         return sel, (
@@ -199,13 +202,14 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # and stops at the first level that can actually build the tier.
     fixture_uses: dict = {}
 
-    def _tier(target, max_picks, floor, min_ev):
+    def _tier(target, max_picks, floor, min_ev, band_low=0.80):
         sel, why = ([], 0.0, 0.0), None
         for limit in (1, 2, None):
             pool = ([p for p in day_picks
                      if fixture_uses.get(p["match_id"], 0) < limit]
                     if limit is not None else day_picks)
-            sel, why = _select_tier(pool, target, max_picks, floor, min_ev)
+            sel, why = _select_tier(pool, target, max_picks, floor, min_ev,
+                                    band_low=band_low)
             if sel[0]:
                 break
         for pick in sel[0]:
@@ -216,7 +220,11 @@ def build_daily_accumulators(force: bool = False) -> dict:
     for _p in banker[0]:
         fixture_uses[_p["match_id"]] = fixture_uses.get(_p["match_id"], 0) + 1
 
-    two, two_why = _tier(2.0, 4, FLOOR, 0.82)
+    # Chance-to-land, not expected value: these are bought to come in. On
+    # 22 August that is 2 odds landing 57.5% instead of 49.2%, and 5 odds
+    # 24.1% instead of 17.4%. The band floor keeps 2 Odds honest to its name —
+    # maximising landing alone drifts it down to 1.63x, which is not 2 odds.
+    two, two_why = _tier(2.0, 4, FLOOR, 0.82, band_low=0.92)
     # The long tiers reach down to the per-market floors, which lets them use
     # a 1.60-1.80 leg from a market that has earned it instead of stacking six
     # short ones. Fewer legs is worth a lot here: 5x from 3 legs at 1.80
