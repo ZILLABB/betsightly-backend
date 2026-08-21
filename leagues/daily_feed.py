@@ -191,20 +191,30 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # by being excluded. If a tier cannot be built from what is left it falls
     # back to the full pool rather than going empty — on a thin day a shared
     # leg beats no slip at all.
-    used_fixtures: set = set()
+    # Counted, not a flat set: on a thin day full independence is impossible —
+    # banker, 2 odds, 5 odds and 10 odds want thirteen legs and there may only
+    # be nine fixtures left after the booking buffer. Falling straight back to
+    # the whole pool put every tier back on the same picks, which is the exact
+    # failure this exists to stop, so the limit is relaxed one step at a time
+    # and stops at the first level that can actually build the tier.
+    fixture_uses: dict = {}
 
     def _tier(target, max_picks, floor, min_ev):
-        pool = [p for p in day_picks if p["match_id"] not in used_fixtures]
-        sel, why = _select_tier(pool, target, max_picks, floor, min_ev)
-        if not sel[0]:
-            sel, why = _select_tier(day_picks, target, max_picks, floor, min_ev)
+        sel, why = ([], 0.0, 0.0), None
+        for limit in (1, 2, None):
+            pool = ([p for p in day_picks
+                     if fixture_uses.get(p["match_id"], 0) < limit]
+                    if limit is not None else day_picks)
+            sel, why = _select_tier(pool, target, max_picks, floor, min_ev)
+            if sel[0]:
+                break
         for pick in sel[0]:
-            used_fixtures.add(pick["match_id"])
+            fixture_uses[pick["match_id"]] = fixture_uses.get(pick["match_id"], 0) + 1
         return sel, why
 
     banker = select_banker(day_picks)
     for _p in banker[0]:
-        used_fixtures.add(_p["match_id"])
+        fixture_uses[_p["match_id"]] = fixture_uses.get(_p["match_id"], 0) + 1
 
     two, two_why = _tier(2.0, 4, FLOOR, 0.82)
     # The long tiers reach down to the per-market floors, which lets them use
