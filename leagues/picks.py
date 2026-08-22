@@ -19,6 +19,7 @@ estimate reflects what is actually obtainable.
 """
 
 import logging
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -334,6 +335,11 @@ def to_game(pick: dict) -> dict:
         "market": pick["market"],
         "prediction_value": pick["prediction"],
         "readable_prediction": pick["prediction"],
+        # When this pick entered the card. Stamped at build time and preserved
+        # whenever a tier is extended, so a reader can tell the picks that were
+        # there this morning from ones that appeared later. Without it a tier
+        # that changed looked identical to one that never had.
+        "added_at": datetime.now(timezone.utc).isoformat(),
         "confidence": conf,
         "raw_confidence": pick.get("raw_confidence"),
         "ml_confidence": pick.get("ml_confidence"),

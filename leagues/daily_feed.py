@@ -121,12 +121,18 @@ def build_daily_accumulators(force: bool = False) -> dict:
         if locked:
             rollover = _build_rollover(_pipeline_for_rollover()[0], now.strftime("%Y-%m-%d"))
             locked["rollover"] = rollover
+            # Revision metadata travels with the stored card, so a reader gets
+            # the same answer whether the card is served fresh or from the lock.
+            _rev = locked.pop("_card_revision", 1)
+            _updated = locked.pop("_last_updated_at", None)
             result = {
                 "status": "success",
                 "date": publish_date,
                 "source": "leagues",
                 "published_at_wat": f"{PUBLISH_HOUR_WAT:02d}:00",
                 "locked": True,
+                "revision": _rev,
+                "last_updated_at": _updated,
                 "total_fixtures": sum(len(c.get("games", [])) for c in locked.values() if isinstance(c, dict)),
                 "accumulators": _mark_started(locked, now),
             }
@@ -310,9 +316,16 @@ def build_daily_accumulators(force: bool = False) -> dict:
 
     thin = "Not enough matches today to build this safely — check back tomorrow."
 
+    _built_at = now.isoformat()
     result = {
         "status": "success",
         "date": target_date,
+        # When this card was first put together, and how many times it has been
+        # rebuilt. A rebuild used to replace the day's card leaving no trace, so
+        # a reader refreshing a tier had no way to tell what had changed.
+        "first_published_at": _built_at,
+        "last_built_at": _built_at,
+        "revision": 1,
         "source": "leagues",
         "published_at_wat": f"{PUBLISH_HOUR_WAT:02d}:00",
         "locked": False,

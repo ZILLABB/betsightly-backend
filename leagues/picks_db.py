@@ -510,7 +510,18 @@ def fill_empty_card_tiers(publish_date: str, fresh: dict) -> list[str]:
                         extra = [g for g in new_cat.get("games", [])
                                  if g.get("match_id") not in have]
                         if extra:
+                            # The picks already on the card keep the stamp they
+                            # were published with; only the new ones carry the
+                            # later time. That difference is the whole point —
+                            # it is what lets a reader tell this morning's picks
+                            # from ones that appeared during the day.
+                            _now = datetime.utcnow().isoformat()
+                            for g in extra:
+                                g["added_at"] = _now
+                                g["added_later"] = True
                             old_cat["games"] = list(old_cat.get("games", [])) + extra
+                            old_cat["revision"] = int(old_cat.get("revision", 1)) + 1
+                            old_cat["last_updated_at"] = _now
                             confs = [g.get("confidence") or 0 for g in old_cat["games"]]
                             old_cat["hit_probability"] = round(
                                 sum(confs) / len(confs), 3) if confs else 0
@@ -526,6 +537,8 @@ def fill_empty_card_tiers(publish_date: str, fresh: dict) -> list[str]:
                     stored[key] = new_cat
                     filled.append(key)
             if filled:
+                stored["_card_revision"] = int(stored.get("_card_revision", 1)) + 1
+                stored["_last_updated_at"] = datetime.utcnow().isoformat()
                 row.payload = json.dumps(stored)
                 db.commit()
                 logger.info(f"Card {publish_date}: filled empty tiers {filled}")
