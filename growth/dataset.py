@@ -239,11 +239,22 @@ def _recent_results(days: int = 7) -> dict:
         for slip in history:
             if slip.get("date") != yesterday or slip.get("status") not in ("won", "lost"):
                 continue
+            legs = slip.get("picks", [])
+            singles = slip.get("presentation") == "singles"
+            leg_won = sum(1 for p in legs if p.get("status") == "won")
+            leg_lost = sum(1 for p in legs if p.get("status") == "lost")
             settled_yesterday.append({
                 "category": slip.get("category"),
                 "label": TIER_LABELS.get(slip.get("category"), slip.get("category")),
                 "status": slip.get("status"),
-                "total_odds": round(float(slip.get("total_odds") or 0.0), 2),
+                # A singles tier is not one bet. Reporting "Over 1.5 lost" with
+                # a 7.04x combined price, on a day it went 7 from 10, describes
+                # a slip nobody placed.
+                "presentation": "singles" if singles else "accumulator",
+                "leg_won": leg_won,
+                "leg_lost": leg_lost,
+                "total_odds": (0.0 if singles
+                               else round(float(slip.get("total_odds") or 0.0), 2)),
                 "legs": [
                     {
                         "home_team": p.get("home_team"),
@@ -256,17 +267,34 @@ def _recent_results(days: int = 7) -> dict:
             })
 
         summary = performance_summary(limit_days=days)
-        won = sum(c.get("won", 0) for c in summary.values())
-        lost = sum(c.get("lost", 0) for c in summary.values())
-        settled = won + lost
+
+        # Slips and singles are counted in different units and must not be
+        # added together. Doing so is why Telegram announced 70 wins while the
+        # site showed a different figure for the same window — the same
+        # conflation that made the results page report 94 individual Over 1.5
+        # picks as 94 slips.
+        def _tally(unit: str) -> dict:
+            rows = [c for c in summary.values()
+                    if (c.get("unit") or "slip") == unit]
+            w = sum(c.get("won", 0) for c in rows)
+            l = sum(c.get("lost", 0) for c in rows)
+            n = w + l
+            return {"won": w, "lost": l, "settled": n,
+                    "win_rate": round(w / n, 4) if n else None}
+
+        slips = _tally("slip")
+        picks = _tally("pick")
 
         return {
             "date": yesterday,
-            "slips": settled_yesterday,
-            "won": won,
-            "lost": lost,
-            "settled": settled,
-            "win_rate": round(won / settled, 4) if settled else None,
+            "slips_settled": settled_yesterday,
+            # Headline figures are the slips — one bet, one outcome. Singles
+            # are reported alongside rather than folded in.
+            "won": slips["won"],
+            "lost": slips["lost"],
+            "settled": slips["settled"],
+            "win_rate": slips["win_rate"],
+            "singles": picks,
             "window_days": days,
             "by_category": summary,
         }

@@ -467,9 +467,24 @@ def results(data: dict, platform: str, ref: str | None = None) -> dict | None:
                  f"_Last {res['window_days']} days_", "",
                  f"✅ Won: *{won}*", f"❌ Lost: *{lost}*",
                  f"\U0001f4c8 Strike rate: *{rate_s}*", ""]
-        for slip in res.get("slips", [])[:5]:
-            mark = "✅" if slip["status"] == "won" else "❌"
-            lines.append(f"{mark} {slip['label']} ({slip['total_odds']:.2f}x)")
+        for slip in res.get("slips_settled", [])[:5]:
+            if slip.get("presentation") == "singles":
+                # Report what actually happened: a count, not a verdict.
+                lines.append(
+                    f"📍 {slip['label']}: "
+                    f"{slip.get('leg_won', 0)} from "
+                    f"{slip.get('leg_won', 0) + slip.get('leg_lost', 0)}"
+                )
+            else:
+                mark = "✅" if slip["status"] == "won" else "❌"
+                lines.append(f"{mark} {slip['label']} ({slip['total_odds']:.2f}x)")
+        singles = res.get("singles") or {}
+        if singles.get("settled"):
+            lines.append("")
+            lines.append(
+                f"Individual picks: {singles['won']} from {singles['settled']}"
+                + (f" ({singles['win_rate']:.0%})" if singles.get("win_rate") else "")
+            )
         lines += ["", "_We publish losses as well as wins — a strike rate "
                       "you cannot check is not a strike rate._", "",
                   f"[Full results]({url})"]

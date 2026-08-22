@@ -76,7 +76,19 @@ def run_daily(force: bool = False, publish: bool = True,
         if not data:
             report["notes"].append("no published card yet today")
             return report
-        report["date"] = data["date"]
+
+        # Publication is keyed on the *publishing day*, not the card's fixture
+        # date. Those differ: when the current day is too thin the card falls
+        # forward to the next day with enough fixtures, and on 19 August that
+        # shift mid-afternoon changed the key from 08-19 to 08-20, so every
+        # template re-published — two results posts sixteen minutes apart with
+        # different numbers, then a fresh "Thursday, 20 August" card that
+        # evening. One post per template per calendar day, whichever fixtures
+        # the card happens to be pointing at.
+        from leagues.daily_feed import _publish_date
+        publish_key = _publish_date()
+        report["date"] = publish_key
+        report["card_date"] = data["date"]
 
         # 2) Render everything.
         items = gc.generate(data)
@@ -84,6 +96,11 @@ def run_daily(force: bool = False, publish: bool = True,
         if not items:
             report["notes"].append("nothing to say from today's card")
             return report
+
+        # Content is stored under the publishing day so the duplicate guard
+        # and the archive agree on what "today" means.
+        for item in items:
+            item["date"] = publish_key
 
         # 3) Store. Hash-keyed, so a second run stores nothing new.
         stored = store.store_items(items)
@@ -102,7 +119,7 @@ def run_daily(force: bool = False, publish: bool = True,
         if force and only_templates:
             due = set(only_templates)
 
-        for row in store.list_content(publish_date=data["date"]):
+        for row in store.list_content(publish_date=publish_key):
             channel, template = row["platform"], row["template"]
 
             if template not in due:

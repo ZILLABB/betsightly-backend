@@ -200,12 +200,24 @@ def notify_predictions_ready(
     predictions_count: int,
     categories: Dict[str, bool],
 ):
-    """Fire notifications to all channels when new predictions are ready."""
+    """Fire notifications to all channels when new predictions are ready.
+
+    Refuses to announce an empty card. The count used to come from the retired
+    pipeline, which has produced nothing for weeks, so every alert read
+    "0 picks for today" while the real card was full. A notification that
+    cannot state a real number is worse than no notification, so it is simply
+    not sent.
+    """
+    if not predictions_count or predictions_count <= 0:
+        logger.info("Skipping prediction alert: nothing published to announce")
+        return
+
     available = [k.replace("_", " ").title() for k, v in categories.items() if v]
     cats_text = ", ".join(available) if available else "Predictions"
 
     title = "New Predictions Ready!"
-    body = f"{predictions_count} picks for {prediction_date}. Categories: {cats_text}"
+    plural = "pick" if predictions_count == 1 else "picks"
+    body = f"{predictions_count} {plural} for {prediction_date}. Categories: {cats_text}"
 
     send_push_to_all(title=title, body=body, url="/predictions")
 

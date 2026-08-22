@@ -246,22 +246,16 @@ class DailyPredictionsService:
 
             logger.info(f"✅ Generated {predictions_count} predictions for {target_date}")
 
-            # Notify subscribers
-            try:
-                from services.push_notification_service import notify_predictions_ready
-                notify_predictions_ready(
-                    prediction_date=target_date,
-                    predictions_count=predictions_count,
-                    categories={
-                        "2_odds": category_counts["2_odds"] > 0,
-                        "5_odds": category_counts["5_odds"] > 0,
-                        "10_odds": category_counts["10_odds"] > 0,
-                        "over_1.5": category_counts["over_1_5"] > 0,
-                        "rollover": category_counts["rollover"] > 0,
-                    },
-                )
-            except Exception as e:
-                logger.warning(f"Failed to send notifications: {e}")
+            # Notifications are NOT sent from here any more.
+            #
+            # This pipeline is retired — it has generated 0 predictions every
+            # day for weeks — and it was still the thing firing the push alert
+            # and the Telegram DM. Subscribers were being told "0 picks for
+            # today" while the leagues engine had a full card, which is the
+            # same wiring gap that left the Predictions page blank.
+            #
+            # The alert now goes out from the daily loop in main.py, counted
+            # off the card that is actually published.
 
             # Build response before closing session (object is still bound)
             result = {

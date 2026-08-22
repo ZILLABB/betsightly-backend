@@ -259,6 +259,12 @@ try:
 except Exception as e:
     logger.warning(f"Could not start Telegram bot: {e}")
 
+# Which publishing day has already had its "new predictions" alert. The loop
+# ticks every 15 minutes; without this it would announce the card four times an
+# hour.
+_ALERTED: dict = {"date": None}
+
+
 def _ensure_today_generated():
     """Generate today's predictions + accumulator feed if missing.
 
@@ -305,7 +311,38 @@ def _ensure_today_generated():
     except Exception as e:
         logger.error(f"Daily loop: accumulator feed build failed: {e}")
 
-    # 3) Growth Engine. Runs last and swallows its own errors, so marketing
+    # 3) Tell subscribers, counted off the card that is actually published.
+    #
+    # This used to fire from the retired daily-predictions pipeline, which has
+    # generated nothing for weeks, so the Chrome alert and the Telegram DM both
+    # announced "0 picks for today" while the real card was full. Sent once per
+    # publishing day, and never when the count is zero.
+    try:
+        from leagues.daily_feed import _publish_date, build_daily_accumulators
+        from services.push_notification_service import notify_predictions_ready
+
+        _pub_date = _publish_date()
+        if _ALERTED.get("date") != _pub_date:
+            _card = build_daily_accumulators()
+            _accums = (_card or {}).get("accumulators") or {}
+            _cats = {
+                key: bool((cat or {}).get("games"))
+                for key, cat in _accums.items() if key != "rollover"
+            }
+            _count = sum(len((cat or {}).get("games") or [])
+                         for key, cat in _accums.items() if key != "rollover")
+            if _count:
+                notify_predictions_ready(
+                    prediction_date=_pub_date,
+                    predictions_count=_count,
+                    categories=_cats,
+                )
+                _ALERTED["date"] = _pub_date
+                logger.info(f"Prediction alert sent for {_pub_date} ({_count} picks)")
+    except Exception as e:
+        logger.warning(f"Daily loop: prediction alert failed: {e}")
+
+    # 4) Growth Engine. Runs last and swallows its own errors, so marketing
     # can never be the reason predictions fail to generate. run_daily is
     # idempotent — publication rows are claimed under a unique constraint —
     # so calling it on every 15-minute tick posts each item exactly once.
