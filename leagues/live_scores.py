@@ -19,7 +19,7 @@ are fetched apart and joined in the client.
 import hashlib
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -122,20 +122,28 @@ def scores_for(slugs: list[str], date_str: str | None = None) -> dict:
 
 
 def scores_for_card() -> dict:
-    """Scores for every fixture on today's published card.
+    """Scores for every fixture on today's card.
 
-    Only the leagues actually on the card are fetched, so this stays a handful
-    of requests rather than a sweep of all 91.
+    Dates come from the card's own fixtures, not from the clock. Fetching
+    "today and tomorrow" looked right and was wrong: at 02:13 UTC the card
+    still carries the previous evening's late kick-offs, that date was never
+    requested, and every one of those matches reported no score — which the
+    frontend renders as a permanent "in play". Asking for the dates the
+    fixtures actually fall on is correct at any hour.
+
+    Only the leagues on the card are fetched, so this stays a handful of
+    requests rather than a sweep of all 91.
     """
     try:
         from leagues.daily_feed import build_daily_accumulators
 
         card = build_daily_accumulators()
         if not card:
-            return {"scores": {}, "leagues": []}
+            return {"scores": {}, "leagues": [], "dates": []}
 
         slugs: set[str] = set()
         ids: set[str] = set()
+        dates: set[str] = set()
         for cat in (card.get("accumulators") or {}).values():
             if not isinstance(cat, dict):
                 continue
@@ -147,23 +155,31 @@ def scores_for_card() -> dict:
                     slugs.add(g["league_slug"])
                 if g.get("match_id"):
                     ids.add(g["match_id"])
+                kickoff = g.get("kickoff") or g.get("commence_time") or ""
+                if len(kickoff) >= 10:
+                    dates.add(kickoff[:10])
 
-        # ESPN buckets by local date, so a late kick-off can land on the next
-        # calendar day. Both are fetched and merged.
-        today = datetime.now(timezone.utc)
-        found = scores_for(sorted(slugs), today.strftime("%Y%m%d"))
-        tomorrow = today.replace(hour=0, minute=0)
-        found.update(scores_for(
-            sorted(slugs),
-            (today.timestamp() and datetime.fromtimestamp(
-                today.timestamp() + 86400, tz=timezone.utc)).strftime("%Y%m%d"),
-        ))
+        # A late kick-off can land in ESPN's next local day, so each fixture
+        # date is asked for alongside the day after it.
+        wanted: set[str] = set()
+        for d in dates:
+            try:
+                day = datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            wanted.add(day.strftime("%Y%m%d"))
+            wanted.add((day + timedelta(days=1)).strftime("%Y%m%d"))
+
+        found: dict[str, dict] = {}
+        for date_str in sorted(wanted):
+            found.update(scores_for(sorted(slugs), date_str))
 
         return {
             "scores": {k: v for k, v in found.items() if k in ids},
             "leagues": sorted(slugs),
+            "dates": sorted(dates),
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
         logger.warning(f"live scores unavailable: {e}")
-        return {"scores": {}, "leagues": [], "error": str(e)}
+        return {"scores": {}, "leagues": [], "dates": [], "error": str(e)}

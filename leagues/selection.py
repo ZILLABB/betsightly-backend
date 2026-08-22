@@ -314,7 +314,7 @@ def select_banker(picks: list[dict], max_picks: int = 1,
 
 
 def select_rollover_day(picks: list[dict], target_odds: float = 2.0,
-                        max_picks: int = 3) -> tuple[list[dict], float, float]:
+                        max_picks: int = 4) -> tuple[list[dict], float, float]:
     """One rollover day, aiming at `target_odds` with the best hit rate.
 
     Odds and probability are inverses, so a daily target is a choice about how
@@ -344,4 +344,10 @@ def select_rollover_day(picks: list[dict], target_odds: float = 2.0,
         # picking a 44% day over a 69% day because it paid more, which is how
         # you build a chain out of its least likely links.
         prefer="joint",
+        # The band used to open at 0.80 of target, so a chain advertised as
+        # "2 odds a day" published days at 1.60x and never looked like what it
+        # claimed. Held at 0.95, a day has to actually reach ~1.9x, and with a
+        # fourth leg available it can get there on safe picks rather than by
+        # reaching for a long one.
+        band_low=0.95,
     )
