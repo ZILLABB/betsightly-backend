@@ -125,6 +125,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
             # the same answer whether the card is served fresh or from the lock.
             _rev = locked.pop("_card_revision", 1)
             _updated = locked.pop("_last_updated_at", None)
+            _first = locked.pop("_first_published_at", None)
             result = {
                 "status": "success",
                 "date": publish_date,
@@ -132,6 +133,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
                 "published_at_wat": f"{PUBLISH_HOUR_WAT:02d}:00",
                 "locked": True,
                 "revision": _rev,
+                "first_published_at": _first,
                 "last_updated_at": _updated,
                 "total_fixtures": sum(len(c.get("games", [])) for c in locked.values() if isinstance(c, dict)),
                 "accumulators": _mark_started(locked, now),

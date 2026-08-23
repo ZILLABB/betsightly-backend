@@ -453,8 +453,16 @@ def save_card(publish_date: str, accumulators: dict) -> bool:
             existing = db.query(DailyCard).filter(DailyCard.publish_date == publish_date).first()
             if existing:
                 return True  # already locked for this day
-            # Rollover is persisted separately and changes as days resolve
+            # Rollover is persisted separately and changes as days resolve.
+            #
+            # Card-level metadata is stored alongside the tiers under
+            # underscore keys. Only the accumulators used to be saved, so
+            # `first_published_at` — set when the card is built — vanished the
+            # moment it locked, and the locked path served None. The whole
+            # point of the field is to survive exactly that.
             body = {k: v for k, v in accumulators.items() if k != "rollover"}
+            body["_first_published_at"] = datetime.utcnow().isoformat()
+            body["_card_revision"] = 1
             db.add(DailyCard(publish_date=publish_date, payload=json.dumps(body)))
             db.commit()
             logger.info(f"Locked daily card for {publish_date}")
