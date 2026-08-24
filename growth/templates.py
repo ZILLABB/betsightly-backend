@@ -61,6 +61,23 @@ def _odds_str(leg: dict) -> str:
 
 # ── Template A — Best Pick ─────────────────────────────────
 
+def _booking_lines(tier: dict) -> list[str]:
+    """The SportyBet code for a tier, with the caveat it needs.
+
+    The prices in a code are the prices at the moment it was made, and a card
+    locked at 08:00 will not quote the same numbers by evening. Saying when it
+    was priced is the difference between a convenience and a claim.
+    """
+    booking = tier.get("booking") or {}
+    code = booking.get("share_code")
+    if not code:
+        return []
+    priced = (booking.get("priced_at") or "")[11:16]
+    note = f"_Priced {priced} UTC — check the slip before you stake._" if priced \
+        else "_Check the slip before you stake._"
+    return ["", f"\U0001f3ab SportyBet code: `{code}`", note]
+
+
 def best_pick(data: dict, platform: str, ref: str | None = None) -> dict | None:
     leg = data.get("best_pick")
     if not leg:
@@ -337,7 +354,9 @@ def accumulator(data: dict, platform: str, tier_key: str = "two_odds",
                 f"({safe_confidence(leg['confidence'])})",
             ]
         lines += ["", f"\U0001f4b5 Total odds: *{tier['total_odds']:.2f}x*",
-                  f"\U0001f4ca {honesty}", "", f"[Open the full card]({url})"]
+                  f"\U0001f4ca {honesty}"]
+        lines += _booking_lines(tier)
+        lines += ["", f"[Open the full card]({url})"]
         return {"text": "\n".join(lines), "parse_mode": "Markdown", "url": url}
 
     if platform == "x":

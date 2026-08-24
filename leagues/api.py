@@ -220,6 +220,44 @@ async def get_daily_runs(limit: int = 14):
     return {"status": "success", "count": len(runs), "runs": runs}
 
 
+@router.post("/book-tiers", dependencies=[Depends(require_api_key)])
+async def trigger_tier_booking(force: bool = False):
+    """Generate SportyBet booking codes for today's published tiers.
+
+    Runs as part of the daily job; exposed separately so a tier that failed to
+    book — a fixture missing from the board, a market suspended — can be
+    retried without republishing the card. Idempotent: a tier already holding
+    a valid code is left alone unless `force` is set.
+    """
+    try:
+        from leagues.booking import book_card
+        from leagues.daily_feed import build_daily_accumulators, _publish_date
+        card = build_daily_accumulators()
+        if not card:
+            raise HTTPException(404, "no card to book")
+        return {"status": "success",
+                **book_card(_publish_date(),
+                            card.get("accumulators") or {}, force=force)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Tier booking failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/bookings")
+async def get_bookings(date: str | None = None):
+    """Booking codes for a publishing day, and why any tier has none."""
+    from leagues.booking import bookings_for
+    from leagues.daily_feed import _publish_date
+    day = date or _publish_date()
+    stored = bookings_for(day)
+    return {"status": "success", "date": day,
+            "count": sum(1 for v in stored.values()
+                         if v.get("status") == "active"),
+            "bookings": stored}
+
+
 @router.get("/bookmaker-status")
 async def bookmaker_status():
     """The price feed behind the card: coverage and the margins it is seeing."""

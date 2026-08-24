@@ -178,7 +178,18 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
 
     _step(report, "card", _publish_card)
 
-    # 3. Distribution. Its own duplicate guard sits on
+    # 3. Book the tiers. After the lock, so a code always describes the card
+    #    that was actually published, and before distribution, so the Telegram
+    #    post can carry the codes rather than a list to retype.
+    def _book():
+        from leagues.booking import book_card
+        from leagues.daily_feed import build_daily_accumulators
+        card = build_daily_accumulators()
+        return book_card(run_date, (card or {}).get("accumulators") or {})
+
+    _step(report, "book", _book)
+
+    # 4. Distribution. Its own duplicate guard sits on
     #    (publish_date, channel, template), so this is safe on a retry too.
     if publish:
         def _distribute():

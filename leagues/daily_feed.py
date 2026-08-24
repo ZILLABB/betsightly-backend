@@ -143,7 +143,8 @@ def build_daily_accumulators(force: bool = False) -> dict:
                 "first_published_at": _first,
                 "last_updated_at": _updated,
                 "total_fixtures": sum(len(c.get("games", [])) for c in locked.values() if isinstance(c, dict)),
-                "accumulators": _mark_started(locked, now),
+                "accumulators": _attach_bookings(
+                    publish_date, _mark_started(locked, now)),
             }
             _accum_cache.update({"result": result, "ts": now_ts})
             return result
@@ -384,6 +385,11 @@ def build_daily_accumulators(force: bool = False) -> dict:
             logger.debug(f"card lock skipped: {e}")
 
     result["accumulators"] = _mark_started(result["accumulators"], now)
+    if target_date == publish_date:
+        # Only the publishing day's card has bookings. A card that has fallen
+        # forward to tomorrow's fixtures must not wear today's codes.
+        result["accumulators"] = _attach_bookings(
+            publish_date, result["accumulators"])
     _accum_cache.update({"result": result, "ts": now_ts})
     return result
 
@@ -473,6 +479,20 @@ def build_bookable_now() -> dict | None:
                             "Very Safe", presentation="singles"),
         },
     }
+
+
+def _attach_bookings(publish_date: str, accumulators: dict) -> dict:
+    """Hang stored booking codes on the card, never failing the card for it.
+
+    A bookmaker being unreachable must not take the predictions down with it —
+    the picks are the product, the code is a convenience on top.
+    """
+    try:
+        from leagues.booking import attach_bookings
+        return attach_bookings(publish_date, accumulators)
+    except Exception as e:
+        logger.debug(f"booking attach skipped: {e}")
+        return accumulators
 
 
 def _load_locked(publish_date: str):
@@ -645,6 +665,14 @@ def _build_rollover(all_picks: list, today: str) -> dict:
                     "commence_time": p["_fixture"]["commence_time"],
                     "prediction": p["prediction"],
                     "market": p["market_group"],
+                    # The specific market, not just its group. `market` above
+                    # holds the group and is left alone because settlement and
+                    # the frontend already read it, but a group cannot be
+                    # booked: "match_result" does not say which side won the
+                    # pick, so "FC Cologne Win" was unrecoverable from stored
+                    # data and rollover was the one tier that could never
+                    # carry a booking code.
+                    "market_key": p["market"],
                     "odds": p["odds"],
                     "odds_are_real": p["odds_are_real"],
                     "confidence": p["confidence"],
@@ -687,6 +715,11 @@ def _build_rollover(all_picks: list, today: str) -> dict:
                 "kickoff": pk.get("commence_time", ""),
                 "prediction": pk.get("prediction", ""),
                 "prediction_type": pk.get("market", "match_result"),
+                # Every other tier publishes the specific market under this
+                # key; rollover omitted it entirely. Absent on chains stored
+                # before `market_key` existed, which simply means those legs
+                # cannot be booked rather than being booked wrongly.
+                "market": pk.get("market_key"),
                 "confidence": pk.get("confidence", 0.5),
                 "estimated_odds": pk.get("odds"),
                 "odds": pk.get("odds"),

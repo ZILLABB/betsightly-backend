@@ -110,6 +110,13 @@ def _tier_block(key: str, cat: dict) -> dict:
         "legs": [_leg(g, key) for g in games],
         "leg_count": len(games),
         "all_started": bool(cat.get("all_started")),
+        # The SportyBet code for this exact slip, when one exists. Carried
+        # through so a post can offer six characters instead of asking a
+        # reader to retype five fixtures into another app. Only ever an
+        # `active` record: a tier that failed to book advertises nothing.
+        "booking": ((cat.get("booking") or {})
+                    if (cat.get("booking") or {}).get("status") == "active"
+                    else None),
     }
 
 
