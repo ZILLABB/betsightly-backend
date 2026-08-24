@@ -30,6 +30,12 @@ _ACCUM_CACHE_TTL = 900  # 15 min — the card itself is locked, this just trims 
 # somebody actually wins now and then.
 TARGET_DAYS = 3
 
+# How close two confidences have to be before the bookmaker's margin is
+# allowed to decide between them. Two points: wide enough that near-identical
+# picks are actually compared on price, narrow enough that a cheap market can
+# never buy its way past a genuinely stronger pick.
+_MARGIN_TIE_BAND = 0.02
+
 # Nigeria is UTC+1 year-round (no daylight saving), and the audience books in
 # the morning. The card is published at 08:00 WAT so a full day of fixtures is
 # still ahead of the user rather than half-gone.
@@ -108,7 +114,8 @@ def build_daily_accumulators(force: bool = False) -> dict:
     from leagues.engine import run_pipeline, picks_for_date
     from leagues.selection import select_accumulator, select_banker
     from leagues.picks import (
-        MIN_CANDIDATE_CONFIDENCE, MIN_PUBLISHABLE_CONFIDENCE, to_game)
+        ESTIMATE_MARGIN, MIN_CANDIDATE_CONFIDENCE, MIN_PUBLISHABLE_CONFIDENCE,
+        to_game)
 
     now = datetime.now(timezone.utc)
     publish_date = _publish_date()
@@ -264,12 +271,30 @@ def build_daily_accumulators(force: bool = False) -> dict:
     OVER_MAX_PICKS = 10
 
     def _over_rank(p):
-        # Confidence first, then prefer fixtures a bookmaker actually priced.
-        # Unpriced matches fall back to the league's measured rate, so a whole
-        # slate of friendlies comes out on identical confidence and the order
-        # between them is arbitrary. A priced fixture is one the market took
-        # seriously and carries a real over/under line behind the number.
-        return (-p["confidence"], not (p.get("_model") or {}).get("has_market"))
+        # Confidence first, then the cheaper price, then whether a bookmaker
+        # priced the fixture at all.
+        #
+        # Confidence is banded rather than compared outright so the margin can
+        # actually decide something. Raw confidences are continuous, so exact
+        # ties never happen and a strict confidence sort would leave margin
+        # dead code — but 82.4% and 81.9% are the same pick for staking
+        # purposes, and between two picks that good the one the book prices
+        # tightest is worth more.
+        #
+        # This tier is where that matters most. These are ten singles, and a
+        # single pays the margin once where an accumulator pays it per leg, so
+        # a point off the margin is a point of return rather than a point
+        # divided among fourteen legs. Measured across 296 Over 1.5 markets on
+        # one board: 5.95% median against 4.03% in the tightest decile.
+        #
+        # An estimated price carries ESTIMATE_MARGIN flat, so it sorts exactly
+        # where its real equivalent would rather than being pushed to the back.
+        margin = p.get("market_margin")
+        if margin is None:
+            margin = ESTIMATE_MARGIN - 1.0
+        return (-round(p["confidence"] / _MARGIN_TIE_BAND),
+                margin,
+                not (p.get("_model") or {}).get("has_market"))
 
     over_picks, seen = [], set()
     for p in sorted(day_picks, key=_over_rank):

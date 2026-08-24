@@ -17,7 +17,9 @@ Provides:
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from utils.security import require_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +193,38 @@ async def trigger_results_check():
     except Exception as e:
         logger.error(f"Results check trigger failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
+
+
+@router.post("/run-daily", dependencies=[Depends(require_api_key)])
+async def trigger_daily_run(force: bool = False, publish: bool = True):
+    """Settle, publish today's card, then distribute. Safe to call twice.
+
+    The scheduled entry point. Guarded by X-API-Key because it is expensive
+    and side-effectful — it posts to Telegram — not because the data is
+    secret. Idempotent regardless: a second call on the same publishing day
+    returns `skipped` rather than repeating the work.
+    """
+    try:
+        from leagues.scheduler import run_daily_job
+        return run_daily_job(force=force, publish=publish)
+    except Exception as e:
+        logger.error(f"Daily run failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/daily-runs")
+async def get_daily_runs(limit: int = 14):
+    """Whether the daily job actually ran, and what it did."""
+    from leagues.scheduler import last_runs
+    runs = last_runs(limit=limit)
+    return {"status": "success", "count": len(runs), "runs": runs}
+
+
+@router.get("/bookmaker-status")
+async def bookmaker_status():
+    """The price feed behind the card: coverage and the margins it is seeing."""
+    from leagues import sportybet
+    return {"status": "success", "sportybet": sportybet.board_status()}
 
 
 @router.get("/results")

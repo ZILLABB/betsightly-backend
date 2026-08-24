@@ -1,0 +1,90 @@
+# Publishes the day's card, then distributes it.
+#
+# GitHub Actions rather than an in-process scheduler: the API runs on Render,
+# which restarts the process on every deploy, so a scheduler living inside it
+# would silently miss any morning that followed a deploy and would never retry.
+# A workflow is also free, where a Render cron job is a separate paid service.
+#
+# 07:00 UTC is 08:00 WAT. Nigeria does not observe daylight saving, so this one
+# expression holds all year.
+#
+# The job is idempotent at the server: a second call on the same publishing day
+# returns "skipped". That matters because GitHub's scheduler is best-effort and
+# can fire late or twice under load — the retry below leans on the same
+# property.
+
+name: Daily run
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Re-run even if today already completed"
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger the daily run
+        env:
+          API_BASE: ${{ secrets.API_BASE_URL }}
+          API_KEY: ${{ secrets.BETSIGHTLY_API_KEY }}
+          FORCE: ${{ inputs.force || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_BASE:-}" ] || [ -z "${API_KEY:-}" ]; then
+            echo "::error::API_BASE_URL and BETSIGHTLY_API_KEY must be set as repository secrets"
+            exit 1
+          fi
+
+          # Render sleeps idle instances, and a cold start can outlast a normal
+          # timeout. Wake it first and do not fail the run if the ping is slow.
+          curl -sS -m 120 -o /dev/null "${API_BASE}/api/health/" || true
+
+          code=0
+          for attempt in 1 2 3; do
+            echo "attempt ${attempt}"
+            if curl -sS -m 600 --fail-with-body \
+                 -X POST "${API_BASE}/api/leagues/run-daily?force=${FORCE}" \
+                 -H "X-API-Key: ${API_KEY}" \
+                 -o response.json; then
+              code=0
+              break
+            fi
+            code=$?
+            echo "attempt ${attempt} failed (exit ${code})"
+            [ "${attempt}" -lt 3 ] && sleep 60
+          done
+
+          echo "--- response ---"
+          cat response.json || true
+          echo
+
+          if [ "${code}" -ne 0 ]; then
+            echo "::error::daily run did not complete after 3 attempts"
+            exit 1
+          fi
+
+          # A run that publishes nothing is a failure even when HTTP says 200.
+          python3 - <<'PY'
+          import json, sys
+          with open("response.json") as fh:
+              r = json.load(fh)
+          status = r.get("status")
+          failed = r.get("failed") or []
+          print(f"status={status} failed={failed}")
+          if status == "skipped":
+              print("::notice::already ran today — nothing to do")
+              sys.exit(0)
+          tiers = ((r.get("steps") or {}).get("card") or {}).get("detail") or {}
+          print(f"tiers={tiers.get('tiers')}")
+          if failed:
+              print(f"::warning::steps failed: {', '.join(failed)}")
+          if not (r.get("steps", {}).get("card", {}).get("ok")):
+              print("::error::the card did not publish")
+              sys.exit(1)
+          PY

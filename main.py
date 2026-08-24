@@ -382,15 +382,29 @@ def _start_daily_generation_loop():
 
                 _ensure_today_generated()
 
-                # Force a fresh build the first time we pass 08:00 WAT each day
+                # Past 08:00 WAT, run the full day: settle, refit, publish,
+                # distribute. This used to build the card and nothing else, so
+                # results were settled and Telegram posted only when something
+                # else happened to trigger them.
+                #
+                # The scheduled GitHub Action runs the same job, and the job
+                # claims the day in the database before doing any work — so
+                # whichever fires first does it and the other returns
+                # "skipped". That makes this loop a fallback rather than a
+                # duplicate, and it keeps publishing if the Action is ever
+                # unavailable. `last_published` stays as an in-process short
+                # circuit only; the database is what actually decides.
                 if wat.hour >= 8 and last_published != wat_day:
                     try:
-                        from leagues.daily_feed import build_daily_accumulators
-                        build_daily_accumulators(force=True)
+                        from leagues.scheduler import run_daily_job
+                        report = run_daily_job()
+                        if report.get("status") != "skipped":
+                            logger.info(
+                                f"Daily run for {wat_day}: {report.get('status')} "
+                                f"(failed: {report.get('failed') or 'none'})")
                         last_published = wat_day
-                        logger.info(f"Published daily card for {wat_day} (08:00 WAT window)")
                     except Exception as e:
-                        logger.error(f"Daily card publish failed: {e}")
+                        logger.error(f"Daily run failed: {e}")
             except Exception as e:
                 logger.error(f"Daily generation loop iteration failed: {e}")
             _time.sleep(900)

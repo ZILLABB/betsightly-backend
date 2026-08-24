@@ -55,6 +55,26 @@ MIN_USEFUL_ODDS = 1.12
 # on a day with 35 of them.
 MARKET_CAP = 3
 
+# How close two slips have to score before the bookmaker's margin decides
+# between them. Expected value already moves with price — a tighter market
+# quotes a longer price for the same probability, so it scores higher without
+# any help. What it cannot do is separate slips whose prices are *estimated*,
+# because an estimated price is our own probability plus a flat margin and
+# every such slip returns exactly 1/ESTIMATE_MARGIN. On a board that mixes
+# real and estimated quotes the EV ranking is therefore partly blind, and this
+# band lets the observed margin break the ties it cannot see.
+_SCORE_TIE_BAND = 0.01
+
+
+def _mean_margin(combo) -> float:
+    """Average book cut across a slip's legs. Lower is better."""
+    from leagues.picks import ESTIMATE_MARGIN
+    total = 0.0
+    for p in combo:
+        m = p.get("market_margin")
+        total += (ESTIMATE_MARGIN - 1.0) if m is None else m
+    return total / len(combo) if combo else 0.0
+
 
 def _cost(pick: dict) -> float:
     """Risk paid per unit of multiplier gained. Lower is better."""
@@ -177,9 +197,9 @@ def select_accumulator(
     hi_band = target_odds * 1.45
 
     best: tuple[list[dict], float, float] | None = None
-    best_ev = -1.0
+    best_key: tuple[int, float] | None = None
     fallback: tuple[list[dict], float, float] | None = None
-    fallback_ev = -1.0
+    fallback_key: tuple[int, float] | None = None
 
     for size in range(1, min(max_picks, len(candidates)) + 1):
         for combo in itertools.combinations(candidates, size):
@@ -211,15 +231,21 @@ def select_accumulator(
             if ev < min_ev:
                 continue
             score = joint if prefer == "joint" else ev
+            # Score first, banded; the cheaper slip wins ties. Comparing the
+            # raw score alone would leave margin unused, because two slips
+            # never score identically to full float precision even when they
+            # are the same product for staking purposes.
+            key = (round(score / _SCORE_TIE_BAND), -_mean_margin(combo))
 
             if lo_band <= combined <= hi_band:
-                if score > best_ev:
-                    best_ev = score
+                if best_key is None or key > best_key:
+                    best_key = key
                     best = (list(combo), combined, joint)
-            elif combined > hi_band and score > fallback_ev:
+            elif combined > hi_band:
                 # Overshoots the band but still valid — keep as a backup
-                fallback_ev = score
-                fallback = (list(combo), combined, joint)
+                if fallback_key is None or key > fallback_key:
+                    fallback_key = key
+                    fallback = (list(combo), combined, joint)
 
     result = best or fallback
     if not result:
@@ -288,7 +314,14 @@ def select_banker(picks: list[dict], max_picks: int = 1,
     # tie because it is the only kind of price that can carry true value.
     ranked = sorted(
         best_per_fixture.values(),
-        key=lambda p: (-p["confidence"], not p["odds_are_real"], -p["expected_value"]),
+        # Confidence banded, then the cheaper market, then a real quote, then
+        # value. Banding matters here for the same reason it does on Over 1.5:
+        # this tier stakes a single pick, so it pays the margin exactly once
+        # and a point saved is a point kept.
+        key=lambda p: (-round(p["confidence"] / _SCORE_TIE_BAND / 2),
+                       _mean_margin([p]),
+                       not p["odds_are_real"],
+                       -p["expected_value"]),
     )
 
     chosen: list[dict] = []

@@ -49,6 +49,17 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
     from leagues.team_history import HistoryIndex
 
     fixtures = get_fixtures(days_ahead=days_ahead, force=force)
+
+    # Real, bookable prices and the margin behind each one. Never fatal: a
+    # book that is unreachable leaves the fixtures exactly as ESPN supplied
+    # them, and the card falls back to estimated prices as it always has.
+    sb_matched = 0
+    try:
+        from leagues import sportybet
+        sb_matched = sportybet.apply_to_fixtures(fixtures)
+    except Exception as e:
+        logger.warning(f"SportyBet pricing unavailable: {e}")
+
     cached_rates = get_base_rates(ESPN_CLUB_LEAGUES)
     # Fitted once per pipeline run; every pick is corrected against the same
     # snapshot so a mid-run refit cannot make two picks incomparable.
@@ -87,7 +98,7 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
 
     logger.info(
         f"Pipeline: {len(fixtures)} fixtures ({priced} priced, {unpriced} base-rate only, "
-        f"{with_elo} with ELO, "
+        f"{sb_matched} with SportyBet prices, {with_elo} with ELO, "
         f"{sum(1 for f in fixtures if (f.get('_model') or {}).get('ml'))} with ML) "
         f"-> {len(all_picks)} candidate picks "
         f"(calibrated on {fit.get('n', 0)} settled legs)"

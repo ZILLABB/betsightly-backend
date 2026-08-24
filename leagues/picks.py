@@ -77,10 +77,24 @@ CALIBRATION_GROUP = {
     "btts_yes": "btts_yes", "btts_no": "btts_no",
 }
 
-# Markets DraftKings gives us a real price for, mapped to the odds key
+# Markets a book gives us a real price for, mapped to the odds key.
+#
+# This was five markets, because ESPN's feed carries a 1X2 moneyline and a
+# single over/under line and nothing else. Everything outside that list fell
+# back to an estimated price — which is our own probability with a flat 6%
+# added, so it can never be mispriced in our favour and can never disagree
+# with us. Sixteen of twenty-nine published legs were priced that way.
+#
+# SportyBet quotes all thirteen, so they can all carry a real price now. The
+# ones that changed — over_1_5, both BTTS sides and all three double chance
+# selections — are exactly the markets the card leans on most.
 REAL_ODDS_KEY = {
     "home_win": "home_win", "away_win": "away_win", "draw": "draw",
-    "over_2_5": "over_2_5", "under_2_5": "under_2_5",
+    "home_or_draw": "home_or_draw", "away_or_draw": "away_or_draw",
+    "home_or_away": "home_or_away",
+    "over_1_5": "over_1_5", "over_2_5": "over_2_5", "over_3_5": "over_3_5",
+    "under_2_5": "under_2_5", "under_3_5": "under_3_5",
+    "btts_yes": "btts_yes", "btts_no": "btts_no",
 }
 
 
@@ -283,6 +297,13 @@ def build_picks(fixture: dict, model: dict,
             "odds": round(price, 2),
             "odds_are_real": is_real,
             "odds_provider": odds.get("provider") if is_real else None,
+            # The book's cut on the market this price came from. Null where
+            # the price is our own estimate, because an estimated price has a
+            # flat margin by construction and ranking on it would be ranking
+            # on nothing. Selection uses it to break ties: the same pick is
+            # worth more from a market the book prices tightly, and that
+            # difference is free — it needs no second feed and cannot decay.
+            "market_margin": (odds.get("margins") or {}).get(real_key) if is_real else None,
             "edge": edge,
             "expected_value": round(prob * price - 1.0, 4),
             "_fixture": fixture,
