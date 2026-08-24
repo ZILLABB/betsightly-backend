@@ -338,8 +338,17 @@ class AdvancedPredictionService:
                         }
                         logger.info(f"✅ SHAP explainer ready for {model_name}")
                 else:
-                    # Fallback to direct SHAP setup
+                    # Fallback to direct SHAP setup.
+                    #
+                    # Imported here rather than at module scope: shap is not in
+                    # requirements.txt, so this path has never had the library
+                    # available. It was referencing a bare `shap` that was
+                    # never imported at all, which raised NameError and was
+                    # logged below as a SHAP setup failure — indistinguishable
+                    # from a model that genuinely could not be explained. An
+                    # ImportError says what is actually missing.
                     try:
+                        import shap
                         explainer = shap.TreeExplainer(model_info["model"])
                         self.explainers[model_name] = {
                             "type": "shap",

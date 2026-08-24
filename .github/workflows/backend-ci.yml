@@ -1,22 +1,32 @@
+# Backend CI.
+#
+# This was passing vacuously for a long time. Three things were wrong at once:
+# it ran `pytest tests/unit/ml/ ...` against directories that do not exist, it
+# pinned Python 3.9 while the code uses PEP-604 unions (`dict | None`) that
+# need 3.10+ and the Dockerfile ships 3.12, and it only triggered on `main` and
+# `dev` while the work happens on `devil`.
+
 name: Backend CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, devil]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, devil]
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          # Matches runtime.txt (3.11.7). The Dockerfile runs 3.12; anything
+          # from 3.11 up parses the union syntax the codebase relies on.
+          python-version: "3.11"
           cache: "pip"
 
       - name: Install dependencies
@@ -24,8 +34,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Check every module imports
+        # The failure 3.9 would have caught if it had got this far, and the
+        # one a syntax-only lint misses: a module that parses but explodes on
+        # import. Cheap, and it covers far more than the test suite reaches.
+        run: |
+          python -c "
+          import importlib, pathlib, sys
+          roots = ['leagues', 'growth']
+          failed = []
+          for root in roots:
+              for path in sorted(pathlib.Path(root).glob('*.py')):
+                  if path.stem == '__init__':
+                      continue
+                  name = f'{root}.{path.stem}'
+                  try:
+                      importlib.import_module(name)
+                  except Exception as exc:
+                      failed.append(f'{name}: {type(exc).__name__}: {exc}')
+          for line in failed:
+              print('FAIL', line)
+          print(f'checked {sum(1 for r in roots for _ in pathlib.Path(r).glob(\"*.py\"))} modules')
+          sys.exit(1 if failed else 0)
+          "
+
       - name: Run tests
-        run: pytest tests/unit/ml/ tests/unit/services/test_api_client.py tests/unit/utils/test_config.py -v
+        run: pytest tests/ -v
 
       - name: Check code style
         run: |

@@ -523,7 +523,8 @@ def _all_games_finished(rows) -> bool:
 
 def _already_checked_today(rows) -> bool:
     """Skip if we already did a successful check after these rows' last game."""
-    global _last_successful_check
+    # No `global` needed: this only reads the module-level value. Declaring it
+    # suggested an assignment that never happens.
     if not _last_successful_check:
         return False
     latest = None

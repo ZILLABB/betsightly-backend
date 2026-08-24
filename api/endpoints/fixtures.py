@@ -22,28 +22,23 @@ def get_fixtures(
     league_id: Optional[int] = None
 ):
     """Get fixtures."""
-    fixture_service = FixtureService(db)
+    # Queried directly, as the prediction endpoint below already does. This
+    # used to call a db-backed FixtureService that no longer exists anywhere
+    # in the project — the name resolved to nothing, so every request here
+    # raised NameError and returned a 500. The only FixtureService that does
+    # exist takes an api_key and fetches remotely; it is imported above as
+    # OddsFixtureService and used by the odds endpoints further down.
+    query = db.query(Fixture)
 
-    if date and league_id:
-        # Get fixtures by date and league
-        fixtures = fixture_service.get_fixtures_by_league(
-            league_id=league_id,
-            date=datetime.combine(date, datetime.min.time())
-        )
-    elif date:
-        # Get fixtures by date
-        fixtures = fixture_service.get_fixtures_by_date(
-            date=datetime.combine(date, datetime.min.time())
-        )
-    elif league_id:
-        # Get fixtures by league
-        fixtures = fixture_service.get_fixtures_by_league(league_id=league_id)
-    else:
-        # Get today's fixtures
-        fixtures = fixture_service.get_fixtures_by_date(
-            date=datetime.now()
-        )
+    if league_id:
+        query = query.filter(Fixture.league_id == league_id)
 
+    day = date or datetime.now().date()
+    start = datetime.combine(day, datetime.min.time())
+    end = datetime.combine(day, datetime.max.time())
+    query = query.filter(Fixture.date >= start, Fixture.date <= end)
+
+    fixtures = query.order_by(Fixture.date).all()
     return [fixture.to_dict() for fixture in fixtures]
 
 @router.get("/{fixture_id}")
@@ -52,8 +47,7 @@ def get_fixture(
     db: Session = Depends(get_db)
 ):
     """Get fixture by ID."""
-    fixture_service = FixtureService(db)
-    fixture = fixture_service.get_fixture_by_id(fixture_id)
+    fixture = db.query(Fixture).filter(Fixture.id == fixture_id).first()
 
     if not fixture:
         raise HTTPException(status_code=404, detail="Fixture not found")
@@ -127,20 +121,24 @@ def sync_fixtures_from_apifootball(
     date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format (defaults to today)"),
     db: Session = Depends(get_db)
 ):
-    """Sync fixtures from APIFootball.com to database."""
-    try:
-        fixture_service = FixtureService(db)
-        fixtures = fixture_service.sync_fixtures_from_apifootball(date)
+    """Sync fixtures from APIFootball.com to database.
 
-        return {
-            "status": "success",
-            "message": f"Synced fixtures from APIFootball.com for {date or 'today'}",
-            "count": len(fixtures),
-            "fixtures": [fixture.to_dict() for fixture in fixtures],
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to sync fixtures"
-        )
+    Not implemented. This called `sync_fixtures_from_apifootball` on a
+    db-backed FixtureService that does not exist in the project, so the call
+    raised NameError, was swallowed by the except below, and returned a 500
+    reading "Failed to sync fixtures" — which described a transient failure
+    rather than a method that was never written.
+
+    `APIFootballService.get_daily_fixtures` can fetch the data, but nothing
+    maps it onto the Fixture table, and guessing that mapping would risk
+    writing wrong rows into the fixture history. Saying so plainly is better
+    than a 500 that implies the feature works on a good day.
+
+    The live pipeline does not depend on this: `leagues/` takes its fixtures
+    from ESPN and prices them through the bookmaker adapter.
+    """
+    raise HTTPException(
+        status_code=501,
+        detail=("Fixture sync is not implemented. Fixtures are ingested by the "
+                "leagues pipeline (ESPN), not through this endpoint."),
+    )
