@@ -489,9 +489,16 @@ def _attach_bookings(publish_date: str, accumulators: dict) -> dict:
     """
     try:
         from leagues.booking import attach_bookings
-        return attach_bookings(publish_date, accumulators)
+        out = attach_bookings(publish_date, accumulators)
+        attached = sum(1 for v in out.values()
+                       if isinstance(v, dict) and v.get("booking"))
+        logger.info(f"booking attach {publish_date}: {attached} tier(s) carry a code")
+        return out
     except Exception as e:
-        logger.debug(f"booking attach skipped: {e}")
+        # Logged loudly, not at debug. A booking that silently fails to attach
+        # looks identical to a day nothing was booked, and the card gives no
+        # hint which it is.
+        logger.warning(f"booking attach failed: {e}", exc_info=True)
         return accumulators
 
 
