@@ -52,8 +52,25 @@ MARKET_TO_SPORTYBET = {
     "under_2_5":    ("18", "total=2.5", "13"),
     "over_3_5":     ("18", "total=3.5", "12"),
     "under_3_5":    ("18", "total=3.5", "13"),
+    "over_4_5":     ("18", "total=4.5", "12"),
+    "under_4_5":    ("18", "total=4.5", "13"),
     "btts_yes":     ("29", "", "74"),
     "btts_no":      ("29", "", "76"),
+    "dnb_home":     ("11", "", "4"),
+    "dnb_away":     ("11", "", "5"),
+    # Per-team goal lines. Markets 19 and 20 mirror 18's structure, so the
+    # outcome ids are identical and only the market id says whose goals are
+    # being counted — getting these two the wrong way round would book the
+    # opposite team, which no amount of validation downstream would catch
+    # because the slip would be internally consistent.
+    "home_over_0_5": ("19", "total=0.5", "12"),
+    "home_under_0_5": ("19", "total=0.5", "13"),
+    "home_over_1_5": ("19", "total=1.5", "12"),
+    "home_under_1_5": ("19", "total=1.5", "13"),
+    "away_over_0_5": ("20", "total=0.5", "12"),
+    "away_under_0_5": ("20", "total=0.5", "13"),
+    "away_over_1_5": ("20", "total=1.5", "12"),
+    "away_under_1_5": ("20", "total=1.5", "13"),
 }
 
 

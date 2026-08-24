@@ -77,8 +77,8 @@ def test_confidence_still_outranks_margin():
 
 
 def test_accumulator_prefers_the_cheaper_of_two_equal_slips():
-    cheap = [_pick(f"c{i}", 0.80, 1.40, 0.030, market="over_1_5") for i in range(2)]
-    dear = [_pick(f"d{i}", 0.80, 1.40, 0.075, market="over_2_5",
+    cheap = [_pick(f"c{i}", 0.72, 1.40, 0.030, market="over_1_5") for i in range(2)]
+    dear = [_pick(f"d{i}", 0.72, 1.40, 0.075, market="over_2_5",
                   group="goals_over") for i in range(2)]
     chosen, combined, _ = select_accumulator(
         cheap + dear, target_odds=1.96, max_picks=2, min_confidence=0.70,
@@ -91,7 +91,7 @@ def test_accumulator_prefers_the_cheaper_of_two_equal_slips():
 
 def test_selection_works_when_no_pick_carries_a_margin():
     """A board with no bookmaker coverage must still produce a card."""
-    picks = [_pick(f"p{i}", 0.80, 1.40, None) for i in range(4)]
+    picks = [_pick(f"p{i}", 0.72, 1.40, None) for i in range(4)]
     chosen, combined, joint = select_accumulator(
         picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
         band_low=0.90)
@@ -100,11 +100,42 @@ def test_selection_works_when_no_pick_carries_a_margin():
 
 def test_mixed_real_and_estimated_prices_do_not_crash_the_search():
     picks = [
-        _pick("a", 0.80, 1.40, 0.04),
-        _pick("b", 0.80, 1.40, None),
-        _pick("c", 0.78, 1.45, 0.06),
+        _pick("a", 0.72, 1.40, 0.04),
+        _pick("b", 0.72, 1.40, None),
+        _pick("c", 0.70, 1.45, 0.06),
     ]
     chosen, combined, _ = select_accumulator(
         picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
         band_low=0.90)
     assert chosen and combined > 1.0
+
+
+# ── Expected-value ceiling ─────────────────────────────────
+
+def test_a_slip_claiming_an_incredible_edge_is_refused():
+    """The search maximises expected value, so it reaches for the tail.
+
+    Capping each leg is not enough — legs that individually pass compound.
+    Four at 1.05 apiece make 1.22, and every one of them looked fine alone.
+    """
+    picks = [_pick(f"p{i}", 0.90, 1.40, 0.04) for i in range(4)]  # EV 1.26/leg
+    chosen, _, _ = select_accumulator(
+        picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
+        band_low=0.90, max_ev=1.10)
+    assert not chosen, "a slip claiming a 26% edge should not be published"
+
+
+def test_the_ceiling_leaves_ordinary_slips_alone():
+    picks = [_pick(f"p{i}", 0.72, 1.40, 0.04) for i in range(4)]  # EV 1.008/leg
+    chosen, combined, _ = select_accumulator(
+        picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
+        band_low=0.90, max_ev=1.10)
+    assert chosen and combined > 1.0
+
+
+def test_floor_and_ceiling_can_both_bind():
+    picks = [_pick(f"p{i}", 0.75, 1.40, 0.04) for i in range(4)]
+    none, _, _ = select_accumulator(
+        picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
+        band_low=0.90, min_ev=1.20, max_ev=1.10)
+    assert not none, "an impossible window should return nothing, not crash"

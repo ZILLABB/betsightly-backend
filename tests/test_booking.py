@@ -104,7 +104,43 @@ def test_every_bookable_market_has_a_distinct_selection():
     for market, triple in B.MARKET_TO_SPORTYBET.items():
         assert triple not in seen, f"{market} duplicates another market"
         seen.add(triple)
-    assert len(B.MARKET_TO_SPORTYBET) == 14
+
+
+def test_team_totals_are_not_crossed():
+    """Markets 19 and 20 mirror each other, so the ids alone say whose goals.
+
+    Getting these the wrong way round books the opposite team, and nothing
+    downstream would catch it — the slip would be internally consistent and
+    validate cleanly against exactly the wrong selection.
+    """
+    team_totals = {m: t for m, t in B.MARKET_TO_SPORTYBET.items()
+                   if "_over_" in m or "_under_" in m}
+    assert team_totals, "expected per-team goal lines in the table"
+    for market, (mid, _, _) in team_totals.items():
+        if market.startswith("home_"):
+            assert mid == "19", f"{market} must use the home market"
+        elif market.startswith("away_"):
+            assert mid == "20", f"{market} must use the away market"
+
+
+def test_over_and_under_take_opposite_outcomes():
+    for market, (mid, spec, outcome) in B.MARKET_TO_SPORTYBET.items():
+        if "_over_" in market or market.startswith("over_"):
+            assert outcome == "12", market
+        elif "_under_" in market or market.startswith("under_"):
+            assert outcome == "13", market
+
+
+def test_every_published_market_can_be_booked():
+    """A pick we publish but cannot book costs its whole tier a code.
+
+    Partial slips are refused, so one unbookable market in a tier means no
+    code at all — which makes this table's completeness a publishing concern,
+    not just a booking one.
+    """
+    from leagues.picks import MARKET_LABELS
+    missing = sorted(set(MARKET_LABELS) - set(B.MARKET_TO_SPORTYBET))
+    assert not missing, f"published but not bookable: {missing}"
 
 
 # ── Refusals ───────────────────────────────────────────────

@@ -26,6 +26,27 @@ logger = logging.getLogger(__name__)
 # Typical bookmaker margin on markets DraftKings does not price for us
 ESTIMATE_MARGIN = 1.06
 
+# The most expected value a pick may claim against a real price before we
+# treat it as a broken probability rather than a find.
+#
+# Set from the measured distribution rather than picked: across 585
+# real-priced candidates the median lands at 0.970 — near the 0.95 a fair
+# market with a 5% margin implies — and the ninetieth percentile at 1.034.
+# So the body of the board agrees with the bookmaker, and only a thin tail
+# claims to beat it.
+#
+# The tail is the danger, because selection ranks on expected value and
+# therefore reaches for it deliberately: the twenty highest-EV picks on one
+# board had a median EV of 1.115 and were 15/20 the same market. Those are
+# the picks the model is most wrong about, promoted precisely because it is
+# wrong about them. It is the optimizer's curse the calibration already fixed
+# once, reappearing against real prices instead of raw confidences.
+#
+# 1.10 cuts the least credible 1.9% and leaves the agreeing body untouched.
+# A model measured at roughly 5% skill on match_result and none on goals does
+# not find ten-percent edges at volume.
+MAX_CREDIBLE_EV = 1.10
+
 MARKET_LABELS = {
     "home_win": "{home} Win",
     "away_win": "{away} Win",
@@ -36,8 +57,16 @@ MARKET_LABELS = {
     "over_1_5": "Over 1.5 Goals",
     "over_2_5": "Over 2.5 Goals",
     "over_3_5": "Over 3.5 Goals",
+    "under_1_5": "Under 1.5 Goals",
     "under_2_5": "Under 2.5 Goals",
     "under_3_5": "Under 3.5 Goals",
+    "under_4_5": "Under 4.5 Goals",
+    "dnb_home": "{home} (Draw No Bet)",
+    "dnb_away": "{away} (Draw No Bet)",
+    "home_over_0_5": "{home} to Score",
+    "home_over_1_5": "{home} Over 1.5 Goals",
+    "away_over_0_5": "{away} to Score",
+    "away_over_1_5": "{away} Over 1.5 Goals",
     "btts_yes": "Both Teams to Score",
     "btts_no": "Both Teams to Score - No",
 }
@@ -50,8 +79,17 @@ MARKET_GROUP = {
     "home_or_draw": "double_chance", "away_or_draw": "double_chance",
     "home_or_away": "double_chance",
     "over_1_5": "goals", "over_2_5": "goals", "over_3_5": "goals",
-    "under_2_5": "goals", "under_3_5": "goals",
+    "under_1_5": "goals", "under_2_5": "goals",
+    "under_3_5": "goals", "under_4_5": "goals",
     "btts_yes": "btts", "btts_no": "btts",
+    # Separate groups for MARKET_CAP, which exists to stop a slip riding on
+    # one market being right. Team totals are the diversity the board was
+    # missing: on a full Saturday only nine match_result picks cleared their
+    # floor against 170 goals picks, so every slip was capped at three legs
+    # of anything useful and could not pass ~41x.
+    "home_over_0_5": "team_goals_home", "home_over_1_5": "team_goals_home",
+    "away_over_0_5": "team_goals_away", "away_over_1_5": "team_goals_away",
+    "dnb_home": "dnb", "dnb_away": "dnb",
 }
 
 # Used for calibration, and deliberately *not* the same split.
@@ -73,8 +111,20 @@ CALIBRATION_GROUP = {
     "home_or_draw": "double_chance", "away_or_draw": "double_chance",
     "home_or_away": "double_chance",
     "over_1_5": "goals_over", "over_2_5": "goals_over", "over_3_5": "goals_over",
-    "under_2_5": "goals_under", "under_3_5": "goals_under",
+    "under_1_5": "goals_under", "under_2_5": "goals_under",
+    "under_3_5": "goals_under", "under_4_5": "goals_under",
     "btts_yes": "btts_yes", "btts_no": "btts_no",
+    # Tracked apart from the totals they are derived from. A team-total pick
+    # is a different claim from a match-total one — "the home side scores"
+    # can be right on a match that finishes 1-0 under every goals line — so
+    # folding them into goals_over would average two different accuracies
+    # into one correction and misprice both.
+    "home_over_0_5": "team_goals_home", "home_over_1_5": "team_goals_home",
+    "away_over_0_5": "team_goals_away", "away_over_1_5": "team_goals_away",
+    # Draw no bet is the 1X2 opinion with the draw removed, and it is right
+    # or wrong on different matches from a straight win pick, so it earns its
+    # own record rather than inheriting match_result's.
+    "dnb_home": "dnb", "dnb_away": "dnb",
 }
 
 # Markets a book gives us a real price for, mapped to the odds key.
@@ -93,7 +143,11 @@ REAL_ODDS_KEY = {
     "home_or_draw": "home_or_draw", "away_or_draw": "away_or_draw",
     "home_or_away": "home_or_away",
     "over_1_5": "over_1_5", "over_2_5": "over_2_5", "over_3_5": "over_3_5",
-    "under_2_5": "under_2_5", "under_3_5": "under_3_5",
+    "under_1_5": "under_1_5", "under_2_5": "under_2_5",
+    "under_3_5": "under_3_5", "under_4_5": "under_4_5",
+    "dnb_home": "dnb_home", "dnb_away": "dnb_away",
+    "home_over_0_5": "home_over_0_5", "home_over_1_5": "home_over_1_5",
+    "away_over_0_5": "away_over_0_5", "away_over_1_5": "away_over_1_5",
     "btts_yes": "btts_yes", "btts_no": "btts_no",
 }
 
@@ -154,6 +208,19 @@ MIN_CONFIDENCE_BY_GROUP = {
     "goals_over": 0.65,
     "btts_yes": 0.70,
     "btts_no": 0.70,
+    # New groups, deliberately at or above the blanket floor rather than
+    # below it. Every other entry here was set from a measured record; these
+    # have none yet, so they start no looser than the default and
+    # MIN_EVIDENCE_LEGS keeps them there until 25 settled legs say otherwise.
+    #
+    # Team totals sit at the default. Draw no bet sits above it: removing the
+    # draw inflates the probability without adding any information, so the
+    # same opinion that reads 0.55 as a win reads about 0.70 here, and the
+    # floor has to rise with it or the tier fills with picks that only look
+    # safer than the match_result pick they came from.
+    "team_goals_home": 0.65,
+    "team_goals_away": 0.65,
+    "dnb": 0.72,
 }
 
 # A market only gets a floor below the standard one once its own record can
@@ -266,6 +333,28 @@ def build_picks(fixture: dict, model: dict,
             is_real = False
 
         if price < 1.05:
+            continue
+
+        # A real price we disagree with violently is evidence against us, not
+        # a bet. Where a bookmaker quotes 2.60 on Over 2.5 — about 38% — and
+        # the model says 67.5%, one of the two is badly wrong, and it is not
+        # the party with money at stake on thousands of matches.
+        #
+        # This only became visible once real prices reached the markets ESPN
+        # never quoted. An estimated price is our own probability plus a flat
+        # margin, so it agrees with us by construction and can never expose
+        # the error; the picks below were always mispriced, they just could
+        # not be seen. Selection makes it worse than invisible: it ranks on
+        # expected value, so the picks the model is most wrong about score
+        # highest and get published first.
+        #
+        # The threshold is loose on purpose. Real edge from a mispriced line
+        # runs a few percent; anything past a quarter is a broken number.
+        if is_real and prob * price > MAX_CREDIBLE_EV:
+            logger.debug(
+                f"dropped {market} on {fixture['match_id']}: "
+                f"conf {prob:.3f} vs price {price:.2f} implies "
+                f"{prob * price - 1:.0%} edge")
             continue
 
         # Value only means something against a real, de-vigged market price

@@ -41,7 +41,7 @@ OPER_ID = os.getenv("SPORTYBET_OPER_ID", "2")  # Nigeria
 
 # Markets worth pulling. Each costs nothing extra — they arrive on the same
 # response — but every one widens how many picks can carry a real price.
-_MARKET_IDS = "1,18,10,29"
+_MARKET_IDS = "1,18,10,29,11,19,20"
 
 _PAGE_SIZE = 100
 _MAX_PAGES = 12
@@ -57,12 +57,26 @@ _FIXED = {
     "1": {"1": "home_win", "2": "draw", "3": "away_win"},
     "10": {"9": "home_or_draw", "10": "home_or_away", "11": "away_or_draw"},
     "29": {"74": "btts_yes", "76": "btts_no"},
+    "11": {"4": "dnb_home", "5": "dnb_away"},
 }
 
+# Market 18 is the match total; 19 and 20 are the same structure per team, so
+# outcome ids repeat across all three and only the market id separates them.
 _OVER_UNDER = {
-    "total=1.5": ("over_1_5", "under_1_5"),
-    "total=2.5": ("over_2_5", "under_2_5"),
-    "total=3.5": ("over_3_5", "under_3_5"),
+    "18": {
+        "total=1.5": ("over_1_5", "under_1_5"),
+        "total=2.5": ("over_2_5", "under_2_5"),
+        "total=3.5": ("over_3_5", "under_3_5"),
+        "total=4.5": ("over_4_5", "under_4_5"),
+    },
+    "19": {
+        "total=0.5": ("home_over_0_5", "home_under_0_5"),
+        "total=1.5": ("home_over_1_5", "home_under_1_5"),
+    },
+    "20": {
+        "total=0.5": ("away_over_0_5", "away_under_0_5"),
+        "total=1.5": ("away_over_1_5", "away_under_1_5"),
+    },
 }
 
 # Double chance quotes three outcomes that each cover two of three results, so
@@ -293,8 +307,8 @@ def _parse_event(ev: dict) -> dict | None:
 
         if mid in _FIXED:
             mapping = _FIXED[mid]
-        elif mid == "18" and spec in _OVER_UNDER:
-            over_key, under_key = _OVER_UNDER[spec]
+        elif mid in _OVER_UNDER and spec in _OVER_UNDER[mid]:
+            over_key, under_key = _OVER_UNDER[mid][spec]
             mapping = {}
             for o in outcomes:
                 desc = (o.get("desc") or "").lower()

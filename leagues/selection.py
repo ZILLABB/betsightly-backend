@@ -128,6 +128,7 @@ def select_accumulator(
     max_picks: int = 5,
     min_confidence: float = 0.50,
     min_ev: float = 0.0,
+    max_ev: float = 1.10,
     prefer_real_odds: bool = True,
     prefer: str = "ev",
     band_low: float = 0.80,
@@ -229,6 +230,17 @@ def select_accumulator(
 
             ev = combined * joint
             if ev < min_ev:
+                continue
+            # A ceiling as well as a floor, because this search maximises
+            # expected value and will therefore stack whichever legs the model
+            # most disagrees with the bookmaker about. Capping each leg is not
+            # enough: four legs at 1.05 apiece compound to 1.22, and every one
+            # of them passed on its own.
+            #
+            # A slip claiming to beat the market by a quarter is not a find,
+            # it is four correlated mistakes multiplied together — and the
+            # search reaches for exactly that combination by construction.
+            if ev > max_ev:
                 continue
             score = joint if prefer == "joint" else ev
             # Score first, banded; the cheaper slip wins ties. Comparing the
