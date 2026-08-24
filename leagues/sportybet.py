@@ -93,6 +93,40 @@ _NOISE = {
 _RE_PAREN = None
 _RE_YEAR = None
 
+# Clubs the two feeds call different things. Not spelling variants — different
+# names for the same team, which no amount of normalisation resolves, because
+# there is no shared substring to work from. Athletico Paranaense is
+# "Athletico-PR" to ESPN and "Paranaense" to SportyBet; Wolverhampton
+# Wanderers is "Wolves". Both sides are normalised before lookup, so keys here
+# are in normalised form.
+#
+# Kept deliberately short. Every entry is a hand-verified pair, because a
+# wrong alias silently prices a slip off the wrong match — the failure this
+# whole module is arranged to avoid.
+_ALIASES = {
+    "wolverhampton wanderers": "wolves",
+    "athletico pr": "paranaense",
+    "atletico pr": "paranaense",
+    "crb": "cr brasil",
+    "america mineiro": "america mg",
+    "atletico mineiro": "atletico mg",
+    "gremio": "gremio rs",
+    "internacional": "internacional rs",
+    "vasco da gama": "vasco",
+    "brighton hove albion": "brighton",
+    "tottenham hotspur": "tottenham",
+    "manchester united": "man utd",
+    "manchester city": "man city",
+    "newcastle united": "newcastle",
+    "west ham united": "west ham",
+    "nottingham forest": "nottm forest",
+    "borussia monchengladbach": "monchengladbach",
+    "bayer leverkusen": "leverkusen",
+    "paris saint germain": "psg",
+    "inter milan": "inter",
+    "sporting cp": "sporting",
+}
+
 
 def _norm(name: str) -> str:
     """Comparable form of a club name, tolerant of how feeds spell things.
@@ -126,7 +160,10 @@ def _norm(name: str) -> str:
     # Never reduce a name to nothing: a club genuinely called "CD" keeps it.
     if not tokens:
         tokens = n.split()
-    return " ".join(tokens)
+    out = " ".join(tokens)
+    # Applied last, so an alias is written in the same normalised form both
+    # feeds arrive in and one entry covers every spelling of either side.
+    return _ALIASES.get(out, out)
 
 
 def _tokens(norm_name: str) -> set:

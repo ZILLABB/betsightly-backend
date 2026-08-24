@@ -28,7 +28,7 @@ from leagues import sportybet as sb
     # Founding years appear on one side only.
     ("SC Verl 1924", "verl"),
     # Brazilian and Argentine state codes are hyphenated or absent.
-    ("Athletico-PR", "athletico pr"),
+    ("Coritiba-PR", "coritiba pr"),
     # Club-words carry no identity.
     ("FC Cologne", "cologne"),
     ("Kocaelispor", "kocaelispor"),
@@ -265,3 +265,30 @@ def test_apply_to_fixtures_without_a_board_is_a_no_op():
     fx = [{"home": {"name": "Arsenal"}, "away": {"name": "Chelsea"}, "odds": {}}]
     assert sb.apply_to_fixtures(fx, {}) == 0
     assert fx[0]["odds"] == {}
+
+
+# ── Aliases ────────────────────────────────────────────────
+
+def test_aliases_resolve_clubs_the_feeds_name_differently():
+    """No shared substring, so normalisation alone cannot join these."""
+    assert sb._norm("Athletico-PR") == sb._norm("Paranaense")
+    assert sb._norm("Wolverhampton Wanderers") == sb._norm("Wolves")
+    assert sb._norm("CRB") == sb._norm("CR Brasil")
+
+
+def test_aliases_do_not_collapse_distinct_clubs():
+    """The risk an alias table carries: joining two teams that differ."""
+    assert sb._norm("Atletico Mineiro") != sb._norm("America Mineiro")
+    assert sb._norm("Manchester United") != sb._norm("Manchester City")
+    assert sb._norm("Internacional") != sb._norm("Inter Milan")
+
+
+def test_alias_keys_are_stored_normalised():
+    """An alias written in raw form would never be looked up.
+
+    Keys are consulted after normalisation, so any key that is not already in
+    normalised form is dead weight that silently does nothing.
+    """
+    for key in sb._ALIASES:
+        assert key == " ".join(key.split()), key
+        assert key == key.lower(), key
