@@ -198,9 +198,9 @@ def select_accumulator(
     hi_band = target_odds * 1.45
 
     best: tuple[list[dict], float, float] | None = None
-    best_key: tuple[int, float] | None = None
+    best_key: tuple | None = None
     fallback: tuple[list[dict], float, float] | None = None
-    fallback_key: tuple[int, float] | None = None
+    fallback_key: tuple | None = None
 
     for size in range(1, min(max_picks, len(candidates)) + 1):
         for combo in itertools.combinations(candidates, size):
@@ -247,7 +247,16 @@ def select_accumulator(
             # raw score alone would leave margin unused, because two slips
             # never score identically to full float precision even when they
             # are the same product for staking purposes.
-            key = (round(score / _SCORE_TIE_BAND), -_mean_margin(combo))
+            # Score first, banded; then how much of the slip can actually be
+            # booked; then the cheaper price. Bookability sits above margin
+            # because a tier where one leg has no SportyBet counterpart gets
+            # no code at all — partial slips are refused — so an unbookable
+            # leg costs far more than a point of margin ever saves.
+            bookable = sum(1 for p in combo if p.get("bookable"))
+            key = (round(score / _SCORE_TIE_BAND),
+                   bookable == len(combo),
+                   bookable,
+                   -_mean_margin(combo))
 
             if lo_band <= combined <= hi_band:
                 if best_key is None or key > best_key:

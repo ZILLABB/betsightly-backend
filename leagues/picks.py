@@ -393,6 +393,21 @@ def build_picks(fixture: dict, model: dict,
             # worth more from a market the book prices tightly, and that
             # difference is free — it needs no second feed and cannot decay.
             "market_margin": (odds.get("margins") or {}).get(real_key) if is_real else None,
+            # Whether this pick could become part of a booking code, known
+            # before selection rather than discovered after it.
+            #
+            # Fixtures come from ESPN and codes come from SportyBet, and the
+            # two feeds do not name every club alike — so roughly a fifth of
+            # published legs turn out to have no bookable counterpart. Finding
+            # that out at booking time is too late: a tier is refused a code
+            # when any one leg is unmatched, so a single unmatched pick has
+            # been costing an entire tier its code after the card was locked.
+            #
+            # Carried as a preference, never a filter. A pick that cannot be
+            # booked is still a good pick, and dropping good picks to please
+            # the bookmaker would be letting the tail wag the dog.
+            "bookable": bool(odds.get("sportybet_event_id")),
+            "sportybet_event_id": odds.get("sportybet_event_id"),
             "edge": edge,
             "expected_value": round(prob * price - 1.0, 4),
             "_fixture": fixture,
@@ -458,6 +473,7 @@ def to_game(pick: dict) -> dict:
         "real_odds": pick["odds"] if pick["odds_are_real"] else None,
         "odds_are_real": pick["odds_are_real"],
         "odds_provider": pick["odds_provider"],
+        "bookable": pick.get("bookable", False),
         "edge": pick["edge"],
         "expected_value": pick["expected_value"],
         "expected_goals": eg["total"],

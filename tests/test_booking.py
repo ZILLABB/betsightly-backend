@@ -442,3 +442,60 @@ def test_booking_drops_the_served_card_cache(monkeypatch):
 
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM daily_runs WHERE run_date = '1999-04-04'"))
+
+
+# ── Partial booking for singles ────────────────────────────
+
+def test_a_singles_tier_books_whatever_is_available(monkeypatch):
+    """Ten Over 1.5 picks are ten bets, so seven of them is seven bets.
+
+    Refusing the lot because three fixtures could not be matched is what left
+    that tier with no code at all — the seven bookable picks were fine.
+    """
+    sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",
+             "specifier": "total=1.5"}]
+    monkeypatch.setattr(B, "_post_share", lambda s: _share_response(sels))
+    monkeypatch.setattr(B, "_read_share", lambda c: _share_response(sels))
+    games = [_game("Fulham", "Chelsea", "over_1_5"),
+             _game("Someone", "Nobody", "over_1_5")]
+    record = B.create_booking(games, _board(), allow_partial=True)
+    assert record["status"] == "active"
+    assert record["partial"] is True
+    assert record["unbooked"] == ["Someone v Nobody"]
+
+
+def test_an_accumulator_still_refuses_a_partial_slip(monkeypatch):
+    """A missing leg changes the bet, and the reader cannot see that it did."""
+    monkeypatch.setattr(B, "_post_share",
+                        lambda s: pytest.fail("must not book a partial acca"))
+    games = [_game("Fulham", "Chelsea", "over_1_5"),
+             _game("Someone", "Nobody", "over_1_5")]
+    record = B.create_booking(games, _board(), allow_partial=False)
+    assert record["status"] == "unavailable"
+
+
+def test_a_complete_singles_tier_is_not_flagged_partial(monkeypatch):
+    sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",
+             "specifier": "total=1.5"}]
+    monkeypatch.setattr(B, "_post_share", lambda s: _share_response(sels))
+    monkeypatch.setattr(B, "_read_share", lambda c: _share_response(sels))
+    record = B.create_booking([_game("Fulham", "Chelsea", "over_1_5")],
+                              _board(), allow_partial=True)
+    assert record["status"] == "active" and record["partial"] is False
+
+
+def test_book_card_allows_partial_only_for_singles(monkeypatch):
+    """The presentation field decides, not the tier name."""
+    sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",
+             "specifier": "total=1.5"}]
+    monkeypatch.setattr(B, "_post_share", lambda s: _share_response(sels))
+    monkeypatch.setattr(B, "_read_share", lambda c: _share_response(sels))
+    monkeypatch.setattr("leagues.sportybet.fetch_board", lambda: _board())
+    games = [_game("Fulham", "Chelsea", "over_1_5"),
+             _game("Someone", "Nobody", "over_1_5")]
+    report = B.book_card(DAY, {
+        "over_1_5": {"games": games, "presentation": "singles"},
+        "5_odds": {"games": games, "presentation": "accumulator"},
+    })
+    assert any(r.startswith("over_1_5") for r in report["booked"])
+    assert any(r.startswith("5_odds") for r in report["failed"])

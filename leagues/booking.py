@@ -265,7 +265,7 @@ def validate_code(code: str, expected: list) -> tuple[bool, str]:
     return True, "ok"
 
 
-def create_booking(games: list, board: dict) -> dict:
+def create_booking(games: list, board: dict, allow_partial: bool = False) -> dict:
     """Book one tier. Returns a record describing what happened, always.
 
     Failure is a first-class outcome here rather than an exception: a tier
@@ -280,10 +280,17 @@ def create_booking(games: list, board: dict) -> dict:
                 "unmapped": unmapped, "priced_at": now,
                 "reason": "no leg could be matched to a SportyBet selection"}
 
-    # Partial slips are refused. A four-leg code under a five-leg tier is a
-    # different bet from the one on the card, and the reader has no way to see
-    # the difference once the code is loaded.
-    if unmapped:
+    # Partial slips are refused for accumulators. A four-leg code under a
+    # five-leg tier is a different bet from the one on the card, and the reader
+    # has no way to see the difference once the code is loaded.
+    #
+    # Singles are the exception, and the distinction is real rather than a
+    # convenience. Ten Over 1.5 picks are ten separate bets that happen to be
+    # listed together, so a code carrying seven of them is seven of those bets
+    # — not a different bet. Refusing the lot because three fixtures could not
+    # be matched left that tier with no code at all on 25 August, which helped
+    # nobody: the seven bookable picks were perfectly good.
+    if unmapped and not allow_partial:
         return {"status": "unavailable", "share_code": None,
                 "legs": len(selections), "unmapped": unmapped, "priced_at": now,
                 "reason": (f"{len(unmapped)} of {len(games)} legs could not be "
@@ -336,6 +343,11 @@ def create_booking(games: list, board: dict) -> dict:
         # being shown a figure presented as current.
         "priced_at": now,
         "expires_at": expires,
+        # Stated plainly when a singles tier booked only part of itself, so
+        # the card can say "7 of 10 picks" rather than implying the code holds
+        # everything on screen.
+        "partial": bool(unmapped),
+        "unbooked": [u["match"] for u in unmapped],
     }
 
 
@@ -373,7 +385,10 @@ def book_card(publish_date: str, accumulators: dict,
             report["skipped"].append(f"{tier}: {prior.get('share_code')}")
             continue
 
-        record = create_booking(games, board)
+        # A singles tier may book whatever part of itself is available; an
+        # accumulator may not, because a missing leg changes the bet.
+        singles = data.get("presentation") == "singles"
+        record = create_booking(games, board, allow_partial=singles)
         _store(publish_date, tier, record)
         if record["status"] == "active":
             report["booked"].append(f"{tier}: {record['share_code']}")

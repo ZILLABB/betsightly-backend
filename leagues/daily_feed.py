@@ -290,10 +290,16 @@ def build_daily_accumulators(force: bool = False) -> dict:
         #
         # An estimated price carries ESTIMATE_MARGIN flat, so it sorts exactly
         # where its real equivalent would rather than being pushed to the back.
+        # Bookability sits between confidence and margin. This tier lost its
+        # code entirely on 25 August because three of its ten legs had no
+        # SportyBet counterpart, and ten legs means ten chances to miss — so
+        # among equally confident picks, one that can be booked is worth more
+        # than one that is a fraction cheaper.
         margin = p.get("market_margin")
         if margin is None:
             margin = ESTIMATE_MARGIN - 1.0
         return (-round(p["confidence"] / _MARGIN_TIE_BAND),
+                not p.get("bookable"),
                 margin,
                 not (p.get("_model") or {}).get("has_market"))
 
@@ -680,6 +686,10 @@ def _build_rollover(all_picks: list, today: str) -> dict:
                     # data and rollover was the one tier that could never
                     # carry a booking code.
                     "market_key": p["market"],
+                    # Carried for the same reason as market_key: a rollover
+                    # leg with no SportyBet counterpart cannot be booked, and
+                    # the chain should prefer legs that can be.
+                    "bookable": p.get("bookable", False),
                     "odds": p["odds"],
                     "odds_are_real": p["odds_are_real"],
                     "confidence": p["confidence"],
@@ -727,6 +737,7 @@ def _build_rollover(all_picks: list, today: str) -> dict:
                 # before `market_key` existed, which simply means those legs
                 # cannot be booked rather than being booked wrongly.
                 "market": pk.get("market_key"),
+                "bookable": pk.get("bookable", False),
                 "confidence": pk.get("confidence", 0.5),
                 "estimated_odds": pk.get("odds"),
                 "odds": pk.get("odds"),
