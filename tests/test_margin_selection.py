@@ -112,30 +112,48 @@ def test_mixed_real_and_estimated_prices_do_not_crash_the_search():
 
 # ── Expected-value ceiling ─────────────────────────────────
 
-def test_a_slip_claiming_an_incredible_edge_is_refused():
-    """The search maximises expected value, so it reaches for the tail.
-
-    Capping each leg is not enough — legs that individually pass compound.
-    Four at 1.05 apiece make 1.22, and every one of them looked fine alone.
-    """
-    picks = [_pick(f"p{i}", 0.90, 1.40, 0.04) for i in range(4)]  # EV 1.26/leg
+def test_a_slip_whose_typical_leg_beats_the_market_too_far_is_refused():
+    """The search maximises expected value, so it reaches for the tail."""
+    picks = [_pick(f"p{i}", 0.90, 1.40, 0.04) for i in range(4)]  # 1.26 per leg
     chosen, _, _ = select_accumulator(
         picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
-        band_low=0.90, max_ev=1.10)
-    assert not chosen, "a slip claiming a 26% edge should not be published"
+        band_low=0.90, max_leg_ev=1.04)
+    assert not chosen, "a leg claiming a 26% edge should not be published"
 
 
 def test_the_ceiling_leaves_ordinary_slips_alone():
-    picks = [_pick(f"p{i}", 0.72, 1.40, 0.04) for i in range(4)]  # EV 1.008/leg
+    picks = [_pick(f"p{i}", 0.72, 1.40, 0.04) for i in range(4)]  # 1.008 per leg
     chosen, combined, _ = select_accumulator(
         picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
-        band_low=0.90, max_ev=1.10)
+        band_low=0.90, max_leg_ev=1.04)
     assert chosen and combined > 1.0
+
+
+def test_the_ceiling_is_per_leg_so_long_slips_are_not_punished():
+    """The bug this replaced: a flat slip-level cap emptied the 10 odds tier.
+
+    Expected value compounds, so eight legs each a credible 3% above the
+    market make 1.27 together. A flat cap at 1.10 refused every one of them
+    on the richest day of the week, while waving through a two-leg slip at
+    exactly the same per-leg optimism.
+    """
+    # Spread across market groups, or _PER_BAND_GROUP trims the candidate
+    # list to four and the target becomes unreachable for reasons that have
+    # nothing to do with the ceiling under test.
+    groups = ["goals_over", "goals_under", "match_result",
+              "team_goals_home", "team_goals_away", "dnb"]
+    legs = [_pick(f"p{i}", 0.74, 1.40, 0.04, group=groups[i % len(groups)])
+            for i in range(8)]  # 1.036 per leg
+    chosen, combined, joint = select_accumulator(
+        legs, target_odds=7.5, max_picks=8, min_confidence=0.70,
+        band_low=0.80, max_leg_ev=1.04)
+    assert chosen, "a long slip of individually credible legs must survive"
+    assert (combined * joint) > 1.10,         "and its compounded value legitimately exceeds the old flat cap"
 
 
 def test_floor_and_ceiling_can_both_bind():
     picks = [_pick(f"p{i}", 0.75, 1.40, 0.04) for i in range(4)]
     none, _, _ = select_accumulator(
         picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
-        band_low=0.90, min_ev=1.20, max_ev=1.10)
+        band_low=0.90, min_ev=1.20, max_leg_ev=1.04)
     assert not none, "an impossible window should return nothing, not crash"

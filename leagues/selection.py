@@ -128,7 +128,7 @@ def select_accumulator(
     max_picks: int = 5,
     min_confidence: float = 0.50,
     min_ev: float = 0.0,
-    max_ev: float = 1.10,
+    max_leg_ev: float = 1.04,
     prefer_real_odds: bool = True,
     prefer: str = "ev",
     band_low: float = 0.80,
@@ -233,14 +233,24 @@ def select_accumulator(
                 continue
             # A ceiling as well as a floor, because this search maximises
             # expected value and will therefore stack whichever legs the model
-            # most disagrees with the bookmaker about. Capping each leg is not
-            # enough: four legs at 1.05 apiece compound to 1.22, and every one
-            # of them passed on its own.
+            # most disagrees with the bookmaker about. A slip claiming to beat
+            # the market by a quarter is not a find, it is several correlated
+            # mistakes multiplied together, and the search reaches for exactly
+            # that combination by construction.
             #
-            # A slip claiming to beat the market by a quarter is not a find,
-            # it is four correlated mistakes multiplied together — and the
-            # search reaches for exactly that combination by construction.
-            if ev > max_ev:
+            # Applied per leg rather than to the slip, because expected value
+            # compounds: eight legs each a credible 3% above the market make
+            # 1.27 together, and a flat slip-level cap refused every one of
+            # them. That emptied the 10 odds tier on the richest day of the
+            # week — 794 qualifying picks and no slip published — while
+            # letting a two-leg slip through at the same per-leg optimism.
+            #
+            # The geometric mean asks the question that actually matters: how
+            # far above the market is the *typical* leg? Three percent is
+            # generous for a model measured at roughly five percent skill on
+            # one market and none on goals; seven, which is what the
+            # unconstrained search reached for, is not.
+            if ev ** (1.0 / size) > max_leg_ev:
                 continue
             score = joint if prefer == "joint" else ev
             # Score first, banded; the cheaper slip wins ties. Comparing the
