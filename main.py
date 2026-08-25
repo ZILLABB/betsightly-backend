@@ -262,7 +262,10 @@ except Exception as e:
 # Which publishing day has already had its "new predictions" alert. The loop
 # ticks every 15 minutes; without this it would announce the card four times an
 # hour.
-_ALERTED: dict = {"date": None}
+# The in-memory alert guard that used to live here is gone. It reset on every
+# process start, which is precisely why deploying sent a notification. The
+# replacement is a claimed row in notification_deliveries, keyed on the
+# publishing day and the channel — see services/push_notification_service.py.
 
 
 def _ensure_today_generated():
@@ -311,38 +314,17 @@ def _ensure_today_generated():
     except Exception as e:
         logger.error(f"Daily loop: accumulator feed build failed: {e}")
 
-    # 3) Tell subscribers, counted off the card that is actually published.
+    # Subscriber alerts used to fire from here, guarded by a dict held in
+    # process memory. That dict is empty in a new process, so every deploy and
+    # every restart announced the day again — one notification per push, and
+    # two to four whenever a deploy cycled more than once. Sitting on the boot
+    # path also meant an afternoon restart re-announced the morning's card.
     #
-    # This used to fire from the retired daily-predictions pipeline, which has
-    # generated nothing for weeks, so the Chrome alert and the Telegram DM both
-    # announced "0 picks for today" while the real card was full. Sent once per
-    # publishing day, and never when the count is zero.
-    try:
-        from leagues.daily_feed import _publish_date, build_daily_accumulators
-        from services.push_notification_service import notify_predictions_ready
+    # The alert is now a step of the daily job in leagues/scheduler.py, inside
+    # the run claim and behind a delivery row of its own, so it goes out once
+    # per publishing day however often this process starts.
 
-        _pub_date = _publish_date()
-        if _ALERTED.get("date") != _pub_date:
-            _card = build_daily_accumulators()
-            _accums = (_card or {}).get("accumulators") or {}
-            _cats = {
-                key: bool((cat or {}).get("games"))
-                for key, cat in _accums.items() if key != "rollover"
-            }
-            _count = sum(len((cat or {}).get("games") or [])
-                         for key, cat in _accums.items() if key != "rollover")
-            if _count:
-                notify_predictions_ready(
-                    prediction_date=_pub_date,
-                    predictions_count=_count,
-                    categories=_cats,
-                )
-                _ALERTED["date"] = _pub_date
-                logger.info(f"Prediction alert sent for {_pub_date} ({_count} picks)")
-    except Exception as e:
-        logger.warning(f"Daily loop: prediction alert failed: {e}")
-
-    # 4) Growth Engine. Runs last and swallows its own errors, so marketing
+    # 3) Growth Engine. Runs last and swallows its own errors, so marketing
     # can never be the reason predictions fail to generate. run_daily is
     # idempotent — publication rows are claimed under a unique constraint —
     # so calling it on every 15-minute tick posts each item exactly once.

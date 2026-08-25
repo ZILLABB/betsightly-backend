@@ -189,7 +189,32 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
 
     _step(report, "book", _book)
 
-    # 4. Distribution. Its own duplicate guard sits on
+    # 4. Tell subscribers, counted off the card that was actually published.
+    #
+    # This used to run from application startup, which is why deploying sent
+    # a notification: the guard was a dict in process memory, so every new
+    # process announced the day again. Here it sits inside the claimed daily
+    # run and behind a delivery row of its own, so it fires once per
+    # publishing day whatever restarts happen — and it can no longer fire at
+    # three in the afternoon announcing the morning's card.
+    def _alert():
+        from leagues.daily_feed import build_daily_accumulators
+        from services.push_notification_service import notify_predictions_ready
+        card = build_daily_accumulators()
+        accs = (card or {}).get("accumulators") or {}
+        cats = {k: bool((c or {}).get("games"))
+                for k, c in accs.items() if k != "rollover"}
+        count = sum(len((c or {}).get("games") or [])
+                    for k, c in accs.items() if k != "rollover")
+        if not count:
+            return {"sent": False, "reason": "nothing published to announce"}
+        notify_predictions_ready(prediction_date=run_date,
+                                 predictions_count=count, categories=cats)
+        return {"sent": True, "picks": count}
+
+    _step(report, "alert", _alert)
+
+    # 5. Distribution. Its own duplicate guard sits on
     #    (publish_date, channel, template), so this is safe on a retry too.
     if publish:
         def _distribute():

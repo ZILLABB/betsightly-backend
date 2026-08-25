@@ -258,6 +258,19 @@ async def get_bookings(date: str | None = None):
             "bookings": stored}
 
 
+@router.get("/notification-log")
+async def get_notification_log(limit: int = 40):
+    """Which alerts were sent, when, and on which channel.
+
+    There was no record at all before: duplicates were neither preventable nor
+    visible after the fact, so "did this go out twice?" could only be answered
+    by whoever received it.
+    """
+    from services.push_notification_service import delivery_log
+    rows = delivery_log(limit=limit)
+    return {"status": "success", "count": len(rows), "deliveries": rows}
+
+
 @router.get("/bookmaker-status")
 async def bookmaker_status():
     """The price feed behind the card: coverage and the margins it is seeing."""
