@@ -406,3 +406,39 @@ def test_a_changed_tier_is_rebooked_not_skipped(monkeypatch):
     # Same tier, different legs — the held code no longer applies.
     B.book_card(DAY, {"banker": {"games": [_game("Arsenal", "Spurs", "home_win")]}})
     assert len(posts) == 2
+
+
+def test_booking_drops_the_served_card_cache(monkeypatch):
+    """Codes must appear on the card now, not whenever the cache lapses.
+
+    The daily job builds and caches the card, then books against it. Without
+    invalidation the site serves that cached, code-free card for up to fifteen
+    minutes while the codes sit in the database — which is exactly what the
+    site showed the morning after booking went live.
+
+    Runs the real job so the assertion guards the shipped step, not a copy of
+    it; every outward call is stubbed.
+    """
+    from leagues import daily_feed, scheduler
+
+    monkeypatch.setattr(daily_feed, "_publish_date", lambda: "1999-04-04")
+    monkeypatch.setattr(daily_feed, "build_daily_accumulators",
+                        lambda *a, **k: {"date": "1999-04-04",
+                                         "accumulators": {}, "revision": 1})
+    monkeypatch.setattr("leagues.booking.book_card",
+                        lambda *a, **k: {"booked": ["banker: X"], "skipped": [],
+                                         "failed": []})
+    monkeypatch.setattr("leagues.results_checker.check_all_pending", lambda: {})
+    monkeypatch.setattr("leagues.results_checker.settle_published_slips", lambda: {})
+    monkeypatch.setattr("leagues.calibrator.fit_calibration", lambda **k: {"n": 0})
+    monkeypatch.setattr("services.push_notification_service.notify_predictions_ready",
+                        lambda **k: None)
+
+    daily_feed._accum_cache.update({"result": {"stale": True}, "ts": 9e9})
+    report = scheduler.run_daily_job(force=True, publish=False)
+
+    assert report["steps"]["book"]["ok"], report["steps"]["book"]
+    assert daily_feed._accum_cache["result"] is None,         "the cached card must be dropped so codes are served immediately"
+
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM daily_runs WHERE run_date = '1999-04-04'"))

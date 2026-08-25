@@ -182,10 +182,17 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
     #    that was actually published, and before distribution, so the Telegram
     #    post can carry the codes rather than a list to retype.
     def _book():
+        from leagues import daily_feed
         from leagues.booking import book_card
-        from leagues.daily_feed import build_daily_accumulators
-        card = build_daily_accumulators()
-        return book_card(run_date, (card or {}).get("accumulators") or {})
+        card = daily_feed.build_daily_accumulators()
+        report = book_card(run_date, (card or {}).get("accumulators") or {})
+        # Drop the served card so the codes appear now rather than whenever
+        # the cache next lapses. The card is cached for fifteen minutes and
+        # was built by the step above — before any of these codes existed —
+        # so without this the site shows a card with no codes on it while the
+        # codes sit in the database, and self-heals only on expiry.
+        daily_feed._accum_cache.update({"result": None, "ts": 0})
+        return report
 
     _step(report, "book", _book)
 
