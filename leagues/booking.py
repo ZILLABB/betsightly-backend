@@ -140,7 +140,12 @@ def bookings_for(publish_date: str) -> dict:
                 "SELECT tier, detail FROM tier_bookings WHERE publish_date = :d"),
                 {"d": publish_date}).fetchall()
     except Exception as e:
-        logger.debug(f"booking lookup failed: {e}")
+        # Loud, not debug. A lookup that fails here returns an empty dict, and
+        # an empty dict is indistinguishable from a day nothing was booked —
+        # so a broken query looks exactly like a quiet morning and the card
+        # simply carries no codes with nothing to say why.
+        logger.warning(f"booking lookup failed for {publish_date}: "
+                       f"{type(e).__name__}: {e}", exc_info=True)
         return {}
     for tier, detail in rows:
         try:

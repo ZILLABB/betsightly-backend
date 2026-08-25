@@ -248,14 +248,42 @@ async def trigger_tier_booking(force: bool = False):
 @router.get("/bookings")
 async def get_bookings(date: str | None = None):
     """Booking codes for a publishing day, and why any tier has none."""
-    from leagues.booking import bookings_for
-    from leagues.daily_feed import _publish_date
+    from leagues.booking import bookings_for, leg_fingerprint
+    from leagues.daily_feed import _publish_date, build_daily_accumulators
     day = date or _publish_date()
     stored = bookings_for(day)
+
+    # Why a tier on the card has no code, answered from the same place the
+    # codes are read. Stored bookings and the served card agreeing on every
+    # input while the card still carries nothing is a gap that cannot be seen
+    # from either endpoint alone.
+    attach: dict = {}
+    try:
+        card = build_daily_accumulators() or {}
+        accs = card.get("accumulators") or {}
+        attach = {
+            "card_date": card.get("date"),
+            "dates_match": card.get("date") == day,
+            "tiers_on_card": sorted(accs.keys()),
+            "tiers_stored": sorted(stored.keys()),
+            "carrying_a_booking": sorted(
+                k for k, v in accs.items()
+                if isinstance(v, dict) and v.get("booking")),
+            "fingerprints": {
+                k: {"stored": (stored.get(k) or {}).get("leg_fingerprint"),
+                    "live": leg_fingerprint((v or {}).get("games") or [])}
+                for k, v in accs.items()
+                if isinstance(v, dict) and (stored.get(k) or {}).get("leg_fingerprint")
+            },
+        }
+    except Exception as e:
+        attach = {"error": f"{type(e).__name__}: {e}"}
+
     return {"status": "success", "date": day,
             "count": sum(1 for v in stored.values()
                          if v.get("status") == "active"),
-            "bookings": stored}
+            "bookings": stored,
+            "attach": attach}
 
 
 @router.get("/notification-log")
