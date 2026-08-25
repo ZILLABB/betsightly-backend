@@ -110,9 +110,31 @@ CALIBRATION_GROUP = {
     "home_win": "match_result", "away_win": "match_result", "draw": "match_result",
     "home_or_draw": "double_chance", "away_or_draw": "double_chance",
     "home_or_away": "double_chance",
-    "over_1_5": "goals_over", "over_2_5": "goals_over", "over_3_5": "goals_over",
-    "under_1_5": "goals_under", "under_2_5": "goals_under",
-    "under_3_5": "goals_under", "under_4_5": "goals_under",
+    # One cell per goal line, not one per direction.
+    #
+    # These were lumped as goals_over and goals_under, which was fine while
+    # over_1_5 was the only line published in any volume — 228 of the 241
+    # settled goals legs are over_1_5, so the group's correction was really
+    # that market's correction wearing a wider name.
+    #
+    # It stopped being fine the moment under_3_5 and under_4_5 started
+    # publishing. The whole under record is 13 settled legs, every one of them
+    # under_2_5, sitting around 55% — and that shift was being applied to
+    # under_4_5 picks sitting around 85%. A logit correction fitted on one end
+    # of the range has no business steering the other, and the two are not
+    # even the same bet: under 4.5 comes in four times in five, under 2.5
+    # rather more like a coin.
+    #
+    # Split, each line earns its own record. Anything under MIN_EVIDENCE_LEGS
+    # falls back to the blanket floor and the global shift, which is the right
+    # answer for a market that has never settled a leg.
+    "over_1_5": "goals_over_1_5",
+    "over_2_5": "goals_over_2_5",
+    "over_3_5": "goals_over_3_5",
+    "under_1_5": "goals_under_1_5",
+    "under_2_5": "goals_under_2_5",
+    "under_3_5": "goals_under_3_5",
+    "under_4_5": "goals_under_4_5",
     "btts_yes": "btts_yes", "btts_no": "btts_no",
     # Tracked apart from the totals they are derived from. A team-total pick
     # is a different claim from a match-total one — "the home side scores"
@@ -204,8 +226,12 @@ MIN_PUBLISHABLE_CONFIDENCE = 0.65
 MIN_CONFIDENCE_BY_GROUP = {
     "match_result": 0.55,
     "double_chance": 0.65,
-    "goals_under": 0.58,
-    "goals_over": 0.65,
+    # Only the two lines with a settled record carry their own floor. Every
+    # other goal line inherits the blanket default until MIN_EVIDENCE_LEGS is
+    # satisfied, which is the honest treatment of a market that has never
+    # settled a leg — and under_3_5 and under_4_5 have settled none at all.
+    "goals_under_2_5": 0.58,
+    "goals_over_1_5": 0.65,
     "btts_yes": 0.70,
     "btts_no": 0.70,
     # New groups, deliberately at or above the blanket floor rather than

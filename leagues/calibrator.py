@@ -199,7 +199,11 @@ def _calibration_group(leg: dict) -> str:
     lumps overs and unders together. Calibration needs them apart — see
     CALIBRATION_GROUP in picks.py.
     """
-    market = leg.get("market")
+    # Rollover stores the market *group* under "market" and the specific
+    # market under "market_key", so prefer the latter where it exists. Without
+    # it a rollover goals leg lands in a cell named "goals", which matches no
+    # calibration group at all and quietly drops out of every fit.
+    market = leg.get("market_key") or leg.get("market")
     if market:
         try:
             from leagues.picks import CALIBRATION_GROUP

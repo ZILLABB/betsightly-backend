@@ -27,20 +27,50 @@ def test_every_market_has_a_label_group_and_calibration_group():
         assert market in CALIBRATION_GROUP, f"{market} has no calibration group"
 
 
-def test_every_calibration_group_has_a_floor():
-    groups = set(CALIBRATION_GROUP.values())
-    missing = groups - set(MIN_CONFIDENCE_BY_GROUP)
-    assert not missing, f"groups with no floor: {sorted(missing)}"
+def test_a_group_without_a_floor_falls_back_to_the_blanket_default():
+    """A missing floor is the correct state for a market with no record.
+
+    Only groups with settled evidence carry a tailored floor; everything else
+    inherits MIN_PUBLISHABLE_CONFIDENCE until MIN_EVIDENCE_LEGS is satisfied.
+    Requiring an entry for every group would mean inventing a number for
+    markets that have never settled a leg.
+    """
+    from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, min_confidence_for
+    for market, group in CALIBRATION_GROUP.items():
+        if group in MIN_CONFIDENCE_BY_GROUP:
+            continue
+        assert min_confidence_for(market, fit={"n": 0, "groups": {}}) ==             MIN_PUBLISHABLE_CONFIDENCE, market
+
+
+def test_no_floor_is_looser_than_the_default_without_evidence():
+    """A tailored floor below the default must be earned, never assumed."""
+    from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, min_confidence_for
+    thin = {"n": 0, "groups": {}}
+    for market in CALIBRATION_GROUP:
+        assert min_confidence_for(market, fit=thin) >= MIN_PUBLISHABLE_CONFIDENCE, market
 
 
 def test_team_totals_are_tracked_apart_from_match_totals():
     """Folding them together would average two accuracies into one correction."""
     assert CALIBRATION_GROUP["home_over_0_5"] == "team_goals_home"
     assert CALIBRATION_GROUP["away_over_0_5"] == "team_goals_away"
-    assert CALIBRATION_GROUP["over_1_5"] == "goals_over"
+    assert CALIBRATION_GROUP["over_1_5"] == "goals_over_1_5"
     assert len({CALIBRATION_GROUP["home_over_0_5"],
                 CALIBRATION_GROUP["away_over_0_5"],
                 CALIBRATION_GROUP["over_1_5"]}) == 3
+
+
+def test_each_goal_line_is_calibrated_on_its_own_record():
+    """A shift fitted on under 2.5 has no business steering under 4.5.
+
+    The whole under record is 13 legs, all under_2_5, sitting near 55%. Under
+    4.5 sits near 85%. Sharing one logit correction between them corrects
+    neither.
+    """
+    lines = ["over_1_5", "over_2_5", "over_3_5",
+             "under_1_5", "under_2_5", "under_3_5", "under_4_5"]
+    cells = {CALIBRATION_GROUP[m] for m in lines}
+    assert len(cells) == len(lines), f"goal lines sharing a cell: {cells}"
 
 
 def test_new_groups_start_no_looser_than_the_blanket_floor():
