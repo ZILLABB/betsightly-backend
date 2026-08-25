@@ -24,8 +24,6 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          # Matches runtime.txt (3.11.7). The Dockerfile runs 3.12; anything
-          # from 3.11 up parses the union syntax the codebase relies on.
           python-version: "3.12"
           cache: "pip"
 
