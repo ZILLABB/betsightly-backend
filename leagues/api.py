@@ -17,7 +17,9 @@ Provides:
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from utils.security import require_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,138 @@ async def get_daily_accumulators():
         raise HTTPException(500, str(e))
 
 
+@router.get("/ml-shadow")
+async def ml_shadow(days: int = 60):
+    """How the trained ensemble is doing against the model actually in use.
+
+    Both are scored on the same settled legs, so this is the evidence that
+    decides whether the ensemble gets to move a published number. Brier score
+    is the measure — mean squared error of the probability — because accuracy
+    alone rewards a model that is confidently right and confidently wrong in
+    equal measure, which is exactly what we are trying to avoid.
+
+    Only legs where the ensemble had an opinion are compared; it declines on
+    unpriced fixtures by design.
+    """
+    try:
+        from leagues.ml_models import status as ml_status
+        from leagues.picks_db import get_history
+
+        pairs = []
+        for slip in get_history(limit_days=days):
+            for leg in slip.get("picks", []):
+                if leg.get("status") not in ("won", "lost"):
+                    continue
+                ml = leg.get("ml_confidence")
+                pub = leg.get("confidence")
+                if ml is None or pub is None:
+                    continue
+                pairs.append((float(pub), float(ml), leg["status"] == "won",
+                              leg.get("market")))
+
+        if not pairs:
+            # Same key as the populated response below. Reporting the model
+            # under "ml" here and "model" there meant a caller had to know
+            # which branch it hit to find the same field.
+            return {
+                "status": "success",
+                "compared_legs": 0,
+                "verdict": "No settled legs carry an ensemble opinion yet. "
+                           "Shadow mode records one on every new pick from a "
+                           "priced fixture; come back once those settle.",
+                "model": ml_status(),
+            }
+
+        n = len(pairs)
+        won = sum(1 for _, _, w, _ in pairs if w)
+        brier_pub = sum((p - w) ** 2 for p, _, w, _ in pairs) / n
+        brier_ml = sum((m - w) ** 2 for _, m, w, _ in pairs) / n
+        mean_pub = sum(p for p, _, _, _ in pairs) / n
+        mean_ml = sum(m for _, m, _, _ in pairs) / n
+        actual = won / n
+
+        by_market: dict[str, dict] = {}
+        for pub, ml, w, market in pairs:
+            b = by_market.setdefault(market or "?", {"n": 0, "pub": 0.0,
+                                                     "ml": 0.0, "won": 0})
+            b["n"] += 1
+            b["pub"] += (pub - w) ** 2
+            b["ml"] += (ml - w) ** 2
+            b["won"] += int(w)
+        for b in by_market.values():
+            b["brier_published"] = round(b.pop("pub") / b["n"], 4)
+            b["brier_ml"] = round(b.pop("ml") / b["n"], 4)
+            b["hit_rate"] = round(b.pop("won") / b["n"], 4)
+
+        better = brier_ml < brier_pub
+        margin = abs(brier_pub - brier_ml)
+        # 30 legs is not a verdict. Saying so is the whole point of shadowing.
+        confident = n >= 100 and margin > 0.01
+
+        return {
+            "status": "success",
+            "compared_legs": n,
+            "actual_hit_rate": round(actual, 4),
+            "published": {"mean_confidence": round(mean_pub, 4),
+                          "brier": round(brier_pub, 4)},
+            "ml": {"mean_confidence": round(mean_ml, 4),
+                   "brier": round(brier_ml, 4)},
+            "by_market": by_market,
+            "verdict": (
+                f"Ensemble is {'ahead' if better else 'behind'} by "
+                f"{margin:.4f} Brier over {n} legs. "
+                + ("Enough evidence to act on." if confident else
+                   "Not enough to act on yet — needs 100+ legs and a clear margin.")
+            ),
+            "model": ml_status(),
+        }
+    except Exception as e:
+        logger.error(f"ML shadow evaluation failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/live-scores")
+async def get_live_scores():
+    """Scores for the fixtures on today's card, keyed by match_id.
+
+    Served apart from the card on purpose: the card is locked at 08:00 and must
+    not change, while a score changes every few minutes. Merging them would
+    force a choice between a stale score and a card that rewrites itself.
+    """
+    try:
+        from leagues.live_scores import scores_for_card
+        result = scores_for_card()
+        return {"status": "success", "count": len(result.get("scores", {})), **result}
+    except Exception as e:
+        logger.error(f"Live scores failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/bookable-now")
+async def get_bookable_now():
+    """A slip built only from fixtures that have not kicked off yet.
+
+    The 08:00 card is deliberately frozen — it is what people booked and what
+    the record scores — so by mid-afternoon some of its legs have started and a
+    late visitor cannot place it. This is a separate, freshly built slip from
+    whatever is still ahead, so they have something they can actually get on.
+
+    Never archived and never settled: it regenerates on every request, so it
+    has no fixed identity to score, and counting it would let the track record
+    quietly reroll its losers.
+    """
+    try:
+        from leagues.daily_feed import build_bookable_now
+        result = build_bookable_now()
+        if not result:
+            return {"status": "success", "available": False,
+                    "reason": "No fixtures left to bet on today."}
+        return {"status": "success", "available": True, **result}
+    except Exception as e:
+        logger.error(f"Bookable-now build failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.post("/check-results")
 async def trigger_results_check():
     """Manually trigger a results check (also runs hourly in the background)."""
@@ -47,10 +181,88 @@ async def trigger_results_check():
         from leagues.results_checker import check_all_pending, settle_published_slips
         summary = check_all_pending()
         slips = settle_published_slips()
+        # Newly settled legs are exactly what the calibration is fitted on, so
+        # refit now rather than serving a stale correction for up to six hours.
+        try:
+            from leagues.calibrator import fit_calibration
+            fit = fit_calibration(force=True)
+            summary["calibration_legs"] = fit.get("n", 0)
+        except Exception as e:
+            logger.warning(f"calibration refit after settlement failed: {e}")
         return {"status": "success", **summary, "slips": slips}
     except Exception as e:
         logger.error(f"Results check trigger failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
+
+
+@router.post("/run-daily", dependencies=[Depends(require_api_key)])
+async def trigger_daily_run(force: bool = False, publish: bool = True):
+    """Settle, publish today's card, then distribute. Safe to call twice.
+
+    The scheduled entry point. Guarded by X-API-Key because it is expensive
+    and side-effectful — it posts to Telegram — not because the data is
+    secret. Idempotent regardless: a second call on the same publishing day
+    returns `skipped` rather than repeating the work.
+    """
+    try:
+        from leagues.scheduler import run_daily_job
+        return run_daily_job(force=force, publish=publish)
+    except Exception as e:
+        logger.error(f"Daily run failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/daily-runs")
+async def get_daily_runs(limit: int = 14):
+    """Whether the daily job actually ran, and what it did."""
+    from leagues.scheduler import last_runs
+    runs = last_runs(limit=limit)
+    return {"status": "success", "count": len(runs), "runs": runs}
+
+
+@router.post("/book-tiers", dependencies=[Depends(require_api_key)])
+async def trigger_tier_booking(force: bool = False):
+    """Generate SportyBet booking codes for today's published tiers.
+
+    Runs as part of the daily job; exposed separately so a tier that failed to
+    book — a fixture missing from the board, a market suspended — can be
+    retried without republishing the card. Idempotent: a tier already holding
+    a valid code is left alone unless `force` is set.
+    """
+    try:
+        from leagues.booking import book_card
+        from leagues.daily_feed import build_daily_accumulators, _publish_date
+        card = build_daily_accumulators()
+        if not card:
+            raise HTTPException(404, "no card to book")
+        return {"status": "success",
+                **book_card(_publish_date(),
+                            card.get("accumulators") or {}, force=force)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Tier booking failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/bookings")
+async def get_bookings(date: str | None = None):
+    """Booking codes for a publishing day, and why any tier has none."""
+    from leagues.booking import bookings_for
+    from leagues.daily_feed import _publish_date
+    day = date or _publish_date()
+    stored = bookings_for(day)
+    return {"status": "success", "date": day,
+            "count": sum(1 for v in stored.values()
+                         if v.get("status") == "active"),
+            "bookings": stored}
+
+
+@router.get("/bookmaker-status")
+async def bookmaker_status():
+    """The price feed behind the card: coverage and the margins it is seeing."""
+    from leagues import sportybet
+    return {"status": "success", "sportybet": sportybet.board_status()}
 
 
 @router.get("/results")
@@ -68,10 +280,36 @@ async def get_results(days: int = 30, category: str | None = None):
         for slip in history:
             by_date.setdefault(slip["date"], {})[slip["category"]] = slip
 
+        summary = performance_summary(limit_days=days)
+
+        # Totals split by unit. Over 1.5 is a list of singles and is counted in
+        # individual picks; every other tier is one slip. Adding them into a
+        # single "settled slips" figure — which the results page was doing —
+        # reports ten separate bets as ten slips and overstates the count.
+        totals = {
+            "slips": {"won": 0, "lost": 0, "settled": 0,
+                      "staked": 0.0, "returned": 0.0},
+            "picks": {"won": 0, "lost": 0, "settled": 0,
+                      "staked": 0.0, "returned": 0.0},
+        }
+        for cat in summary.values():
+            bucket = totals["picks"] if cat.get("unit") == "pick" else totals["slips"]
+            for key in ("won", "lost", "settled", "staked", "returned"):
+                bucket[key] += cat.get(key, 0)
+        for bucket in totals.values():
+            n = bucket["settled"]
+            bucket["win_rate"] = round(bucket["won"] / n, 4) if n else None
+            bucket["profit"] = round(bucket["returned"] - bucket["staked"], 2)
+            bucket["roi"] = (round(bucket["profit"] / bucket["staked"], 4)
+                             if bucket["staked"] else None)
+        totals["combined_profit"] = round(
+            totals["slips"]["profit"] + totals["picks"]["profit"], 2)
+
         return {
             "status": "success",
             "days": days,
-            "summary": performance_summary(limit_days=days),
+            "summary": summary,
+            "totals": totals,
             "history": history,
             "by_date": by_date,
         }
@@ -115,6 +353,316 @@ async def get_calibration(days: int = 180):
         return {"status": "success", **calibration(limit_days=days)}
     except Exception as e:
         logger.error(f"Calibration fetch failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.post("/restart")
+async def restart_everything(full_rollover: bool = True, republish_card: bool = True):
+    """Clean slate: fresh rollover chain from day 1, today's card rebuilt.
+
+    What this clears:
+    - the whole rollover chain, including settled days, so it restarts at day 1
+    - today's locked card, so it republishes under the current rules
+
+    What it deliberately keeps, and why: the settled slip archive. The
+    calibration is *fitted on* those outcomes — it is the thing currently
+    holding published confidence to within a point of reality above 65%.
+    Deleting the history would not give the predictions a fresh start, it would
+    remove the correction and put the over-confidence straight back. It is also
+    the track record, and one that drops its losing days is worth nothing.
+    """
+    try:
+        from datetime import datetime, timezone
+        from database import SessionLocal
+        from leagues.rollover_db import RolloverDay
+        from leagues import daily_feed
+        from leagues.picks_db import DailyCard
+
+        out: dict = {"status": "success"}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        if full_rollover:
+            db = SessionLocal()
+            try:
+                removed = db.query(RolloverDay).delete()
+                db.commit()
+                out["rollover_days_cleared"] = removed
+            finally:
+                db.close()
+
+        if republish_card:
+            publish_date = daily_feed._publish_date()
+            db = SessionLocal()
+            try:
+                gone = (db.query(DailyCard)
+                        .filter(DailyCard.publish_date == publish_date).delete())
+                db.commit()
+                out["cards_cleared"] = gone
+                out["publish_date"] = publish_date
+            finally:
+                db.close()
+
+        daily_feed._accum_cache.update({"result": None, "ts": 0.0})
+        result = daily_feed.build_daily_accumulators(force=True)
+        if not result:
+            raise HTTPException(503, "No fixtures available to rebuild from.")
+
+        accums = result.get("accumulators", {})
+        out["card"] = {
+            k: {"picks": len(v.get("games", [])),
+                "odds": v.get("total_odds"),
+                "lands": v.get("hit_probability") or v.get("today_hit_probability")}
+            for k, v in accums.items()
+        }
+        out["kept"] = ("settled slip archive — the calibration is fitted on it, "
+                       "and it is the published track record")
+        return out
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Restart failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.post("/repair-void-slips")
+async def repair_void_slips():
+    """Restate slips recorded as won whose every leg actually voided.
+
+    The old rule was "all legs won or void", so a slip where every leg voided
+    counted as a win. A void returns the stake — it wins nothing. The rule is
+    fixed going forward; this corrects the records already written.
+    """
+    try:
+        import json as _json
+        from database import SessionLocal
+        from leagues.picks_db import PublishedSlip, ensure_table
+
+        ensure_table()
+        fixed = []
+        db = SessionLocal()
+        try:
+            for r in db.query(PublishedSlip).filter(
+                    PublishedSlip.status == "won").all():
+                legs = _json.loads(r.picks or "[]")
+                if not legs:
+                    continue
+                states = [l.get("status") for l in legs]
+                if all(st == "void" for st in states):
+                    fixed.append({"date": r.date, "category": r.category,
+                                  "legs": len(legs)})
+                    r.status = "void"
+            db.commit()
+        finally:
+            db.close()
+        return {"status": "success", "restated": fixed, "count": len(fixed)}
+    except Exception as e:
+        logger.error(f"repair-void-slips failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.post("/repair-singles")
+async def repair_singles():
+    """Re-score singles tiers that were settled under the accumulator rule.
+
+    Over 1.5 publishes ten independent bets, but every slip was settled by
+    "any leg lost, so the slip lost". A tier hitting nine from ten was being
+    recorded as a loss. This tags those slips as singles and re-derives their
+    status from the legs, which are stored correctly and untouched.
+    """
+    try:
+        import json as _json
+        from database import SessionLocal
+        from leagues.picks_db import PublishedSlip, ensure_table
+
+        ensure_table()
+        fixed = []
+        db = SessionLocal()
+        try:
+            rows = db.query(PublishedSlip).filter(
+                PublishedSlip.category == "over_1_5").all()
+            for r in rows:
+                legs = _json.loads(r.picks or "[]")
+                r.presentation = "singles"
+                results = [l.get("status") or "pending" for l in legs]
+                if not results or any(o == "pending" for o in results):
+                    new_status = "pending"
+                else:
+                    staked = sum(1 for o in results if o in ("won", "lost"))
+                    returned = sum(float(l.get("odds") or 0)
+                                   for l, o in zip(legs, results) if o == "won")
+                    new_status = "won" if returned > staked else "lost"
+                if new_status != r.status:
+                    fixed.append({"date": r.date, "was": r.status, "now": new_status,
+                                  "legs": f"{sum(1 for o in results if o=='won')}W"
+                                          f"/{sum(1 for o in results if o=='lost')}L"})
+                    r.status = new_status
+            db.commit()
+        finally:
+            db.close()
+        return {"status": "success", "slips_retagged": len(rows), "restated": fixed}
+    except Exception as e:
+        logger.error(f"repair-singles failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.post("/rebuild-rollover")
+async def rebuild_rollover():
+    """Rebuild the unsettled part of the rollover chain.
+
+    The chain used to aim at ~1.9x a day, which forced two legs around 65% and
+    left each day landing about 43% of the time. A ten-day chain needs every
+    day, so that design completed 0.43^10 — two chances in ten thousand — and
+    it duly went 0 for 4 with every loss caused by the second leg. Days are now
+    a single pick near 80%.
+
+    Days already published for future dates still carry the old two-leg build,
+    so they are dropped and regenerated. Settled days are never touched: the
+    losses stay on the record, because a track record that deletes its losing
+    days is worth nothing.
+    """
+    try:
+        from datetime import datetime, timezone
+        from leagues.rollover_db import drop_pending_days
+        from leagues import daily_feed
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        dropped = drop_pending_days(today)
+
+        daily_feed._accum_cache.update({"result": None, "ts": 0.0})
+        result = daily_feed.build_daily_accumulators(force=True)
+        rollover = (result or {}).get("accumulators", {}).get("rollover", {})
+
+        return {
+            "status": "success",
+            "dropped_pending_days": dropped,
+            "chain_length": rollover.get("chain_length"),
+            "today_hit_probability": rollover.get("today_hit_probability"),
+        }
+    except Exception as e:
+        logger.error(f"Rollover rebuild failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.post("/repair-card")
+async def repair_card():
+    """Fill tiers today's locked card left empty, without touching the rest.
+
+    A tier can be published empty for two quite different reasons — the day
+    genuinely could not reach the target, or the value gate rejected the only
+    slip available. When a gate turns out to have been mis-set, the tier stays
+    blank until the next 08:00 WAT publish even though a perfectly good slip
+    exists for fixtures that have not kicked off.
+
+    This rebuilds the card and copies across only the tiers that are currently
+    empty. Anything already published is left untouched, so the guarantee that
+    matters — a slip you booked this morning is still the slip on the site —
+    holds exactly as before.
+    """
+    try:
+        from leagues import daily_feed
+        from leagues.picks_db import fill_empty_card_tiers
+
+        fresh = daily_feed.build_daily_accumulators(force=True)
+        if not fresh:
+            raise HTTPException(404, "Could not rebuild the card")
+
+        publish_date = daily_feed._publish_date()
+        filled = fill_empty_card_tiers(publish_date, fresh.get("accumulators", {}))
+
+        # Rebuilding with force=True leaves the *unlocked* card in the response
+        # cache, which would serve freshly-reselected picks past the lock until
+        # the TTL expired. Drop it so the next read comes off the repaired card.
+        daily_feed._accum_cache.update({"result": None, "ts": 0.0})
+
+        return {"status": "success", "publish_date": publish_date, "filled": filled}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Card repair failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/calibration-fit")
+async def get_calibration_fit():
+    """The correction currently being applied to model probabilities.
+
+    `/calibration` reports whether published confidences matched reality.
+    This reports what is being done about it: the fitted shift per market
+    group, the sample behind each one, and worked examples of what the
+    correction does to a few reference probabilities — which is much easier to
+    sanity-check than a shift in log-odds.
+    """
+    try:
+        from leagues.calibrator import status
+        return {"status": "success", **status()}
+    except Exception as e:
+        logger.error(f"Calibration fit fetch failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/odds-shop-status")
+async def odds_shop_status():
+    """Whether multi-book price shopping is actually working.
+
+    It fails silently by design — a missing key returns {} and a non-200
+    returns [] — so a broken shop looks exactly like a quiet day: value-bets
+    just reports zero. That is the worst possible failure mode for the one
+    component that can make a pick genuinely +EV, so this reports the real
+    HTTP status instead of swallowing it.
+    """
+    try:
+        import os
+        import requests as _rq
+        from leagues.odds_shop import (
+            CACHE_PATH, SLUG_TO_ODDS_KEY, budget_status,
+        )
+
+        key = os.getenv("ODDS_API_KEY", "").strip()
+        out = {
+            "key_configured": bool(key),
+            "budget": budget_status(),
+            "mapped_leagues": len(SLUG_TO_ODDS_KEY),
+            "cache_exists": CACHE_PATH.exists(),
+        }
+        if CACHE_PATH.exists():
+            import json as _json
+            import time as _time
+            try:
+                blob = _json.loads(CACHE_PATH.read_text())
+                out["cache_age_hours"] = round(
+                    (_time.time() - blob.get("ts", 0)) / 3600, 1)
+                out["cache_fixtures"] = len(blob.get("data", {}))
+            except Exception:
+                out["cache_age_hours"] = None
+
+        if not key:
+            out["verdict"] = "ODDS_API_KEY is not set — no shopping happens at all."
+            return {"status": "success", **out}
+
+        # One real probe so the actual failure surfaces.
+        resp = _rq.get(
+            "https://api.the-odds-api.com/v4/sports/soccer_epl/odds",
+            params={"apiKey": key, "regions": "eu,uk",
+                    "markets": "h2h", "oddsFormat": "decimal"},
+            timeout=25,
+        )
+        out["probe_http_status"] = resp.status_code
+        out["quota_remaining"] = resp.headers.get("x-requests-remaining")
+        out["quota_used"] = resp.headers.get("x-requests-used")
+        if resp.status_code == 200:
+            events = resp.json() or []
+            out["probe_events"] = len(events)
+            out["verdict"] = (
+                f"Working. {len(events)} EPL fixtures priced, "
+                f"{out['quota_remaining']} credits left."
+            )
+        else:
+            body = resp.text[:300]
+            out["probe_error"] = body
+            out["verdict"] = f"The Odds API rejected the request: HTTP {resp.status_code}."
+        return {"status": "success", **out}
+    except Exception as e:
+        logger.error(f"odds shop status failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
 
 

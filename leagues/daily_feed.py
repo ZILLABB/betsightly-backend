@@ -23,7 +23,18 @@ DATA_DIR = Path(__file__).parent / "data"
 _accum_cache: dict = {"result": None, "ts": 0}
 _ACCUM_CACHE_TTL = 900  # 15 min — the card itself is locked, this just trims DB reads
 
-TARGET_DAYS = 10  # rollover chain length
+# Rollover chain length. Cut from 10 because the daily target went up to 2x,
+# and the two numbers are not independent: a day at 2x lands about 45% of the
+# time, and every day has to land. Ten days of that is 0.03% — a chain nobody
+# completes. Three days of it is 9.1% and pays about 8x, which is a challenge
+# somebody actually wins now and then.
+TARGET_DAYS = 3
+
+# How close two confidences have to be before the bookmaker's margin is
+# allowed to decide between them. Two points: wide enough that near-identical
+# picks are actually compared on price, narrow enough that a cheap market can
+# never buy its way past a genuinely stronger pick.
+_MARGIN_TIE_BAND = 0.02
 
 # Nigeria is UTC+1 year-round (no daylight saving), and the audience books in
 # the morning. The card is published at 08:00 WAT so a full day of fixtures is
@@ -60,6 +71,39 @@ def _save(filename: str, data):
 
 # ── Categories ─────────────────────────────────────────────
 
+def _select_tier(picks: list, target: float, max_picks: int,
+                 min_confidence: float, min_ev: float,
+                 prefer: str = "joint", band_low: float = 0.80):
+    """Select a tier, and say which of the two reasons left it empty.
+
+    A blank tier has two quite different causes and they were reported with
+    the same "not enough matches" line, which is misleading when there were
+    plenty of matches and the slip was simply refused for being poor value.
+    Re-running ungated tells them apart: if a slip exists without the floor,
+    the day had the fixtures and the value was the problem.
+    """
+    from leagues.selection import select_accumulator
+
+    sel = select_accumulator(picks, target, max_picks, min_confidence,
+                             min_ev=min_ev, prefer=prefer, band_low=band_low)
+    if sel[0]:
+        return sel, None
+
+    ungated = select_accumulator(picks, target, max_picks, min_confidence,
+                                 min_ev=0.0, prefer=prefer, band_low=band_low)
+    if ungated[0]:
+        _, total, joint = ungated
+        return sel, (
+            f"Today's best {target:g}x slip lands about {joint:.0%} of the time, "
+            f"which returns roughly {total * joint:.2f} for every 1 staked. "
+            f"That is too thin to put our name on, so we are sitting it out."
+        )
+    return sel, (
+        f"Not enough matches today to reach {target:g}x safely — "
+        f"check back tomorrow."
+    )
+
+
 def build_daily_accumulators(force: bool = False) -> dict:
     """Category picks + rollover chain for the next actionable match day."""
     import time as _time
@@ -69,7 +113,9 @@ def build_daily_accumulators(force: bool = False) -> dict:
 
     from leagues.engine import run_pipeline, picks_for_date
     from leagues.selection import select_accumulator, select_banker
-    from leagues.picks import to_game
+    from leagues.picks import (
+        ESTIMATE_MARGIN, MIN_CANDIDATE_CONFIDENCE, MIN_PUBLISHABLE_CONFIDENCE,
+        to_game)
 
     now = datetime.now(timezone.utc)
     publish_date = _publish_date()
@@ -82,14 +128,23 @@ def build_daily_accumulators(force: bool = False) -> dict:
         if locked:
             rollover = _build_rollover(_pipeline_for_rollover()[0], now.strftime("%Y-%m-%d"))
             locked["rollover"] = rollover
+            # Revision metadata travels with the stored card, so a reader gets
+            # the same answer whether the card is served fresh or from the lock.
+            _rev = locked.pop("_card_revision", 1)
+            _updated = locked.pop("_last_updated_at", None)
+            _first = locked.pop("_first_published_at", None)
             result = {
                 "status": "success",
                 "date": publish_date,
                 "source": "leagues",
                 "published_at_wat": f"{PUBLISH_HOUR_WAT:02d}:00",
                 "locked": True,
+                "revision": _rev,
+                "first_published_at": _first,
+                "last_updated_at": _updated,
                 "total_fixtures": sum(len(c.get("games", [])) for c in locked.values() if isinstance(c, dict)),
-                "accumulators": _mark_started(locked, now),
+                "accumulators": _attach_bookings(
+                    publish_date, _mark_started(locked, now)),
             }
             _accum_cache.update({"result": result, "ts": now_ts})
             return result
@@ -122,62 +177,197 @@ def build_daily_accumulators(force: bool = False) -> dict:
     if not day_picks:
         return None
 
-    banker = select_banker(day_picks)
-    two = select_accumulator(day_picks, 2.0, max_picks=4, min_confidence=0.60, min_joint=0.38)
-    five = select_accumulator(day_picks, 5.0, max_picks=5, min_confidence=0.48, min_joint=0.12)
-    ten = select_accumulator(day_picks, 10.0, max_picks=6, min_confidence=0.40, min_joint=0.045)
+    # Floors are on expected value — payout times the chance it lands.
+    #
+    # Each leg gives up roughly 6% to the bookmaker's margin, so a slip's value
+    # is about 0.94^legs before anything else: ~0.83 at three legs, ~0.73 at
+    # five. A floor has to sit *below* that structural cost, or it rejects the
+    # tier for being what it is. The first pass set 5 odds at 0.78, which fell
+    # between two near-identical slips — 0.796 one day, 0.766 the next — so the
+    # tier blinked out over a 3-point difference that means nothing. These sit
+    # under the normal range for each tier's leg count, so they catch a slip
+    # that is genuinely bad rather than one that is merely long.
+    # Every tier now draws from the same 65% floor. The long tiers used to
+    # reach down to 0.55 to buy the multiplier, and that is precisely where the
+    # losses were: sub-65% legs landed 48% of the time against 59% promised,
+    # while everything at or above 65% landed 75.5% against 76.2% promised.
+    # A long tier now needs more legs to reach its target instead of worse
+    # ones, which costs hit rate honestly rather than by overstating each leg.
+    FLOOR = MIN_PUBLISHABLE_CONFIDENCE
 
-    # Over 1.5 — one per fixture, safest first, only where the league's own
-    # measured rate supports it (this is the market the old model overclaimed).
+    # Tiers are built one after another, each excluding the fixtures already
+    # used, so they are genuinely different bets.
+    #
+    # They were not. On 19 August Shanghai Port Win sat in 2 odds, 5 odds and
+    # 10 odds at once; it lost and killed all three. The next day Vancouver
+    # Whitecaps did exactly the same. Two days running, "almost every tier
+    # failed" was one bad pick counted three times — somebody staking the whole
+    # card was not making five bets, they were making one at triple stake, and
+    # nothing on the site said so.
+    #
+    # Safest tier first, so banker and 2 odds get first refusal on the best
+    # picks; the long tiers are built from longer prices anyway and lose least
+    # by being excluded. If a tier cannot be built from what is left it falls
+    # back to the full pool rather than going empty — on a thin day a shared
+    # leg beats no slip at all.
+    # Counted, not a flat set: on a thin day full independence is impossible —
+    # banker, 2 odds, 5 odds and 10 odds want thirteen legs and there may only
+    # be nine fixtures left after the booking buffer. Falling straight back to
+    # the whole pool put every tier back on the same picks, which is the exact
+    # failure this exists to stop, so the limit is relaxed one step at a time
+    # and stops at the first level that can actually build the tier.
+    fixture_uses: dict = {}
+
+    def _tier(target, max_picks, floor, min_ev, band_low=0.80):
+        sel, why = ([], 0.0, 0.0), None
+        for limit in (1, 2, None):
+            pool = ([p for p in day_picks
+                     if fixture_uses.get(p["match_id"], 0) < limit]
+                    if limit is not None else day_picks)
+            sel, why = _select_tier(pool, target, max_picks, floor, min_ev,
+                                    band_low=band_low)
+            if sel[0]:
+                break
+        for pick in sel[0]:
+            fixture_uses[pick["match_id"]] = fixture_uses.get(pick["match_id"], 0) + 1
+        return sel, why
+
+    banker = select_banker(day_picks)
+    for _p in banker[0]:
+        fixture_uses[_p["match_id"]] = fixture_uses.get(_p["match_id"], 0) + 1
+
+    # Chance-to-land, not expected value: these are bought to come in. On
+    # 22 August that is 2 odds landing 57.5% instead of 49.2%, and 5 odds
+    # 24.1% instead of 17.4%. The band floor keeps 2 Odds honest to its name —
+    # maximising landing alone drifts it down to 1.63x, which is not 2 odds.
+    two, two_why = _tier(2.0, 4, FLOOR, 0.82, band_low=0.92)
+    # The long tiers reach down to the per-market floors, which lets them use
+    # a 1.60-1.80 leg from a market that has earned it instead of stacking six
+    # short ones. Fewer legs is worth a lot here: 5x from 3 legs at 1.80
+    # returns 0.84 and lands 14.4%, against 0.75 and 11.7% from 5 at 1.45.
+    five, five_why = _tier(5.0, 6, MIN_CANDIDATE_CONFIDENCE, 0.72)
+    # Reaching 10x from legs that are never priced above ~1.45 takes seven of
+    # them; capping at six made the tier unbuildable rather than merely long.
+    ten, ten_why = _tier(10.0, 8, MIN_CANDIDATE_CONFIDENCE, 0.63)
+
+    # Over 1.5 — a list of singles, one per fixture, safest first.
+    #
+    # This tier is not an accumulator and treating it as one was the mistake.
+    # As a slip it had to stop at about three legs to stay worth staking, so a
+    # market with ten good candidates published three of them; ten legs at 70%
+    # would land 2.8% of the time and return about -45%, which is not a product
+    # anyone should be handed.
+    #
+    # Bet individually the arithmetic is completely different: each pick stands
+    # on its own at roughly -5.7%, and adding a tenth costs the ninth nothing.
+    # So the full list is published and `presentation` marks it as singles, so
+    # no channel renders a joint probability that would not apply.
+    #
+    # The confidence floor is on the *calibrated* number. It used to be 0.70
+    # against uncalibrated confidences; once the goals correction landed
+    # (-0.41 in log-odds) that same 0.70 silently started demanding a raw 77.9%,
+    # which is why a thin day produced a single pick. 0.65 restores roughly the
+    # bar that was originally intended, measured honestly.
+    OVER_MIN_CONFIDENCE = 0.65
+    OVER_MAX_PICKS = 10
+
+    def _over_rank(p):
+        # Confidence first, then the cheaper price, then whether a bookmaker
+        # priced the fixture at all.
+        #
+        # Confidence is banded rather than compared outright so the margin can
+        # actually decide something. Raw confidences are continuous, so exact
+        # ties never happen and a strict confidence sort would leave margin
+        # dead code — but 82.4% and 81.9% are the same pick for staking
+        # purposes, and between two picks that good the one the book prices
+        # tightest is worth more.
+        #
+        # This tier is where that matters most. These are ten singles, and a
+        # single pays the margin once where an accumulator pays it per leg, so
+        # a point off the margin is a point of return rather than a point
+        # divided among fourteen legs. Measured across 296 Over 1.5 markets on
+        # one board: 5.95% median against 4.03% in the tightest decile.
+        #
+        # An estimated price carries ESTIMATE_MARGIN flat, so it sorts exactly
+        # where its real equivalent would rather than being pushed to the back.
+        margin = p.get("market_margin")
+        if margin is None:
+            margin = ESTIMATE_MARGIN - 1.0
+        return (-round(p["confidence"] / _MARGIN_TIE_BAND),
+                margin,
+                not (p.get("_model") or {}).get("has_market"))
+
     over_picks, seen = [], set()
-    for p in sorted(day_picks, key=lambda x: -x["confidence"]):
+    for p in sorted(day_picks, key=_over_rank):
         if p["market"] != "over_1_5" or p["match_id"] in seen:
             continue
-        if p["confidence"] < 0.70:
+        if p["confidence"] < OVER_MIN_CONFIDENCE:
             continue
         over_picks.append(p)
         seen.add(p["match_id"])
-        if len(over_picks) >= 5:
+        if len(over_picks) >= OVER_MAX_PICKS:
             break
-    over_total, over_joint = 1.0, 1.0
+
+    # For singles the meaningful headline is the typical chance of any one
+    # landing, not the product of all of them.
+    over_avg = (sum(p["confidence"] for p in over_picks) / len(over_picks)
+                if over_picks else 0.0)
+    over_total = 1.0
     for p in over_picks:
         over_total *= p["odds"]
-        over_joint *= p["confidence"]
 
     rollover = _build_rollover(all_picks, today)
 
-    def mk_cat(sel, risk, reason_if_empty):
+    def mk_cat(sel, risk, reason_if_empty, presentation="accumulator"):
         picks_, total, joint = sel
         if not picks_:
             return {"selected": False, "games": [], "total_odds": 0,
                     "risk_level": risk, "hit_probability": 0,
-                    "reason": reason_if_empty}
+                    "presentation": presentation, "reason": reason_if_empty}
         return {
             "selected": True,
-            "games": [to_game(p) for p in picks_],
+            # Ordered by kick-off so the card reads as the day runs: what is
+            # about to start is at the top, and a leg that has already gone is
+            # never buried under one that kicks off tonight. Selection is
+            # unaffected — this is purely how the chosen picks are presented.
+            "games": _by_kickoff([to_game(p) for p in picks_]),
             "total_odds": round(total, 2),
             "risk_level": risk,
+            # For an accumulator this is the chance every leg lands. For a list
+            # of singles it is the average chance of one landing, and
+            # `presentation` is what tells a renderer which it is looking at —
+            # multiplying singles together would state a risk nobody is taking.
             "hit_probability": round(joint, 3),
+            "presentation": presentation,
             "reason": None,
         }
 
     thin = "Not enough matches today to build this safely — check back tomorrow."
 
+    _built_at = now.isoformat()
     result = {
         "status": "success",
         "date": target_date,
+        # When this card was first put together, and how many times it has been
+        # rebuilt. A rebuild used to replace the day's card leaving no trace, so
+        # a reader refreshing a tier had no way to tell what had changed.
+        "first_published_at": _built_at,
+        "last_built_at": _built_at,
+        "revision": 1,
         "source": "leagues",
         "published_at_wat": f"{PUBLISH_HOUR_WAT:02d}:00",
         "locked": False,
         "total_fixtures": len({p["match_id"] for p in day_picks}),
         "accumulators": {
             "banker": mk_cat(banker, "Banker", "No pick met the banker threshold today."),
-            "2_odds": mk_cat(two, "Low", thin),
-            "5_odds": mk_cat(five, "Medium", thin),
-            "10_odds": mk_cat(ten, "High", thin),
+            "2_odds": mk_cat(two, "Low", two_why),
+            "5_odds": mk_cat(five, "Medium", five_why),
+            "10_odds": mk_cat(ten, "High", ten_why),
             "over_1_5": mk_cat(
-                (over_picks, over_total, over_joint) if over_picks else ([], 0, 0),
-                "Very Safe", thin,
+                (over_picks, over_total, over_avg) if over_picks else ([], 0, 0),
+                "Very Safe",
+                "No match cleared the Over 1.5 confidence bar today.",
+                presentation="singles",
             ),
             "rollover": rollover,
         },
@@ -195,8 +385,121 @@ def build_daily_accumulators(force: bool = False) -> dict:
             logger.debug(f"card lock skipped: {e}")
 
     result["accumulators"] = _mark_started(result["accumulators"], now)
+    if target_date == publish_date:
+        # Only the publishing day's card has bookings. A card that has fallen
+        # forward to tomorrow's fixtures must not wear today's codes.
+        result["accumulators"] = _attach_bookings(
+            publish_date, result["accumulators"])
     _accum_cache.update({"result": result, "ts": now_ts})
     return result
+
+
+def _by_kickoff(games: list[dict]) -> list[dict]:
+    """Order games by kick-off, earliest first."""
+    return sorted(games, key=lambda g: (g.get("kickoff") or g.get("date") or "9999"))
+
+
+def build_bookable_now() -> dict | None:
+    """A slip built only from fixtures that have not kicked off yet.
+
+    Answers the problem the lock creates. The morning card must not change —
+    it is what people booked at 08:00 and it is what the track record scores —
+    but by mid-afternoon several of its legs have started and a visitor
+    arriving then cannot place it. Showing them a slip they cannot get on is
+    the same as showing them nothing.
+
+    So this is a *second*, separate thing rather than a rewrite of the first:
+    the published card stays exactly as it was, and this is generated fresh on
+    request from whatever is still ahead. It is deliberately never archived and
+    never settled, because a slip that regenerates on every request has no
+    fixed identity to score — counting it would let the record quietly reroll
+    its losers, which is the exact failure the lock exists to prevent.
+    """
+    from leagues.engine import run_pipeline
+    from leagues.picks import (
+        MIN_CANDIDATE_CONFIDENCE, MIN_PUBLISHABLE_CONFIDENCE, to_game)
+    from leagues.selection import select_banker
+
+    now = datetime.now(timezone.utc)
+    all_picks, _ = run_pipeline(days_ahead=2)
+    if not all_picks:
+        return None
+
+    bookable_from = (now + BOOKING_BUFFER).isoformat().replace("+00:00", "Z")
+    today = now.strftime("%Y-%m-%d")
+    live = [p for p in all_picks
+            if p["_fixture"]["commence_time"] >= bookable_from
+            and p["_fixture"]["commence_time"][:10] == today]
+    if not live:
+        return None
+
+    F = MIN_PUBLISHABLE_CONFIDENCE
+    banker = select_banker(live)
+    two, _ = _select_tier(live, 2.0, 4, F, 0.82)
+    five, _ = _select_tier(live, 5.0, 6, F, 0.72)
+    ten, _ = _select_tier(live, 10.0, 8, F, 0.63)
+
+    over, seen = [], set()
+    for p in sorted(live, key=lambda x: -x["confidence"]):
+        if p["market"] != "over_1_5" or p["match_id"] in seen or p["confidence"] < 0.65:
+            continue
+        over.append(p)
+        seen.add(p["match_id"])
+        if len(over) >= 10:
+            break
+    over_avg = sum(p["confidence"] for p in over) / len(over) if over else 0.0
+    over_total = 1.0
+    for p in over:
+        over_total *= p["odds"]
+
+    def cat(sel, risk, presentation="accumulator"):
+        picks_, total, joint = sel
+        if not picks_:
+            return {"selected": False, "games": [], "total_odds": 0,
+                    "risk_level": risk, "hit_probability": 0,
+                    "presentation": presentation,
+                    "reason": "Nothing left to build this from today."}
+        return {"selected": True,
+                "games": _by_kickoff([to_game(p) for p in picks_]),
+                "total_odds": round(total, 2), "risk_level": risk,
+                "hit_probability": round(joint, 3),
+                "presentation": presentation, "reason": None}
+
+    return {
+        "status": "success",
+        "date": today,
+        "generated_at": now.isoformat(),
+        "kickoffs_remaining": len({p["match_id"] for p in live}),
+        "accumulators": {
+            "banker": cat(banker, "Banker"),
+            "2_odds": cat(two, "Low"),
+            "5_odds": cat(five, "Medium"),
+            "10_odds": cat(ten, "High"),
+            "over_1_5": cat((over, over_total, over_avg) if over else ([], 0, 0),
+                            "Very Safe", presentation="singles"),
+        },
+    }
+
+
+def _attach_bookings(publish_date: str, accumulators: dict) -> dict:
+    """Hang stored booking codes on the card, never failing the card for it.
+
+    A bookmaker being unreachable must not take the predictions down with it —
+    the picks are the product, the code is a convenience on top.
+    """
+    try:
+        from leagues.booking import attach_bookings
+        out = attach_bookings(publish_date, accumulators)
+        attached = sum(1 for v in out.values()
+                       if isinstance(v, dict) and v.get("booking"))
+        logger.info(f"booking attach {publish_date}: {attached} tier(s) carry a code")
+        return out
+    except Exception as e:
+        # Logged loudly, not at debug. A booking that silently fails to attach
+        # looks identical to a day nothing was booked, and the card gives no
+        # hint which it is.
+        logger.warning(f"booking attach failed: {e}", exc_info=True)
+        return accumulators
 
 
 def _load_locked(publish_date: str):
@@ -254,6 +557,7 @@ def _archive(date: str, accumulators: dict) -> None:
                 games=cat.get("games", []),
                 total_odds=cat.get("total_odds", 0),
                 hit_probability=cat.get("hit_probability", 0),
+                presentation=cat.get("presentation", "accumulator"),
             )
         except Exception as e:
             logger.debug(f"archive {category} failed: {e}")
@@ -344,6 +648,11 @@ def _build_rollover(all_picks: list, today: str) -> dict:
         chosen, combined, joint = select_rollover_day(by_date[date])
         if not chosen:
             continue
+        # Earliest kick-off first, matching the category cards. The rollover
+        # builds its own pick dicts rather than going through mk_cat, so it
+        # needs the same ordering applied here or it is the one tier on the
+        # site still listed in selection order.
+        chosen = sorted(chosen, key=lambda p: p["_fixture"]["commence_time"])
 
         new_day = {
             "day_number": len(chain["days"]) + 1,
@@ -363,9 +672,18 @@ def _build_rollover(all_picks: list, today: str) -> dict:
                     "commence_time": p["_fixture"]["commence_time"],
                     "prediction": p["prediction"],
                     "market": p["market_group"],
+                    # The specific market, not just its group. `market` above
+                    # holds the group and is left alone because settlement and
+                    # the frontend already read it, but a group cannot be
+                    # booked: "match_result" does not say which side won the
+                    # pick, so "FC Cologne Win" was unrecoverable from stored
+                    # data and rollover was the one tier that could never
+                    # carry a booking code.
+                    "market_key": p["market"],
                     "odds": p["odds"],
                     "odds_are_real": p["odds_are_real"],
                     "confidence": p["confidence"],
+                    "raw_confidence": p.get("raw_confidence"),
                     "status": "pending",
                 }
                 for p in chosen
@@ -404,6 +722,11 @@ def _build_rollover(all_picks: list, today: str) -> dict:
                 "kickoff": pk.get("commence_time", ""),
                 "prediction": pk.get("prediction", ""),
                 "prediction_type": pk.get("market", "match_result"),
+                # Every other tier publishes the specific market under this
+                # key; rollover omitted it entirely. Absent on chains stored
+                # before `market_key` existed, which simply means those legs
+                # cannot be booked rather than being booked wrongly.
+                "market": pk.get("market_key"),
                 "confidence": pk.get("confidence", 0.5),
                 "estimated_odds": pk.get("odds"),
                 "odds": pk.get("odds"),

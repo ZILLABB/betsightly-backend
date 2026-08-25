@@ -43,10 +43,36 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
     from leagues.espn_source import get_fixtures, ESPN_CLUB_LEAGUES
     from leagues.base_rates import get_base_rates, rates_for
     from leagues.predictor import predict
-    from leagues.picks import build_picks
+    from leagues.picks import MIN_CANDIDATE_CONFIDENCE, build_picks
+    from leagues.calibrator import fit_calibration
+    from leagues import ml_models
+    from leagues.team_history import HistoryIndex
 
     fixtures = get_fixtures(days_ahead=days_ahead, force=force)
+
+    # Real, bookable prices and the margin behind each one. Never fatal: a
+    # book that is unreachable leaves the fixtures exactly as ESPN supplied
+    # them, and the card falls back to estimated prices as it always has.
+    sb_matched = 0
+    try:
+        from leagues import sportybet
+        sb_matched = sportybet.apply_to_fixtures(fixtures)
+    except Exception as e:
+        logger.warning(f"SportyBet pricing unavailable: {e}")
+
     cached_rates = get_base_rates(ESPN_CLUB_LEAGUES)
+    # Fitted once per pipeline run; every pick is corrected against the same
+    # snapshot so a mid-run refit cannot make two picks incomparable.
+    fit = fit_calibration()
+
+    # Second opinion from the trained ensemble, in shadow only: it is recorded
+    # on each pick and evaluated against results, and does not move a published
+    # number. Built once per run because the history index is a 15s fetch.
+    try:
+        history = HistoryIndex()
+    except Exception as e:
+        logger.warning(f"team history unavailable, ML second opinion off: {e}")
+        history = None
 
     all_picks: list[dict] = []
     priced = unpriced = with_elo = 0
@@ -57,16 +83,25 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
         if elo:
             with_elo += 1
         model = predict(fx, base, elo)
+        if history is not None:
+            try:
+                model["ml"] = ml_models.predict_fixture(fx, history)
+            except Exception:
+                model["ml"] = None
         if model["has_market"]:
             priced += 1
         else:
             unpriced += 1
         fx["_model"] = model
-        all_picks.extend(build_picks(fx, model))
+        all_picks.extend(build_picks(
+            fx, model, min_confidence=MIN_CANDIDATE_CONFIDENCE, fit=fit))
 
     logger.info(
         f"Pipeline: {len(fixtures)} fixtures ({priced} priced, {unpriced} base-rate only, "
-        f"{with_elo} with ELO) -> {len(all_picks)} candidate picks"
+        f"{sb_matched} with SportyBet prices, {with_elo} with ELO, "
+        f"{sum(1 for f in fixtures if (f.get('_model') or {}).get('ml'))} with ML) "
+        f"-> {len(all_picks)} candidate picks "
+        f"(calibrated on {fit.get('n', 0)} settled legs)"
     )
 
     _CACHE.update({"picks": all_picks, "fixtures": fixtures, "ts": now})

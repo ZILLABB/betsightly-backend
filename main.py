@@ -135,6 +135,24 @@ try:
 except ImportError as e:
     logger.warning(f"Leagues module not available: {e}")
 
+# Growth Engine — marketing content generation and distribution.
+# Mounted outside api_router because its public half (the tracking beacon and
+# the crawler-facing /p/{slug} pages) must not sit behind the API key, while
+# its admin half carries its own cookie auth rather than the shared key.
+try:
+    from growth.api import router as growth_router, public_router as growth_public
+    from growth.models import ensure_tables as _growth_ensure_tables
+
+    app.include_router(growth_router, prefix="/api/growth")
+    app.include_router(growth_public, prefix="/api/growth")
+    # Share links need to be short and clean, so /p/{slug} is also served at
+    # the root — a URL posted to social is read by people, not just crawlers.
+    app.include_router(growth_public, prefix="", include_in_schema=False)
+    _growth_ensure_tables()
+    logger.info("Growth Engine endpoints registered")
+except Exception as e:
+    logger.warning(f"Growth Engine not available: {e}")
+
 # Ensure rollover-chain table exists in PostgreSQL
 try:
     from leagues.rollover_db import ensure_table as _rollover_ensure_table
@@ -241,6 +259,12 @@ try:
 except Exception as e:
     logger.warning(f"Could not start Telegram bot: {e}")
 
+# Which publishing day has already had its "new predictions" alert. The loop
+# ticks every 15 minutes; without this it would announce the card four times an
+# hour.
+_ALERTED: dict = {"date": None}
+
+
 def _ensure_today_generated():
     """Generate today's predictions + accumulator feed if missing.
 
@@ -287,6 +311,48 @@ def _ensure_today_generated():
     except Exception as e:
         logger.error(f"Daily loop: accumulator feed build failed: {e}")
 
+    # 3) Tell subscribers, counted off the card that is actually published.
+    #
+    # This used to fire from the retired daily-predictions pipeline, which has
+    # generated nothing for weeks, so the Chrome alert and the Telegram DM both
+    # announced "0 picks for today" while the real card was full. Sent once per
+    # publishing day, and never when the count is zero.
+    try:
+        from leagues.daily_feed import _publish_date, build_daily_accumulators
+        from services.push_notification_service import notify_predictions_ready
+
+        _pub_date = _publish_date()
+        if _ALERTED.get("date") != _pub_date:
+            _card = build_daily_accumulators()
+            _accums = (_card or {}).get("accumulators") or {}
+            _cats = {
+                key: bool((cat or {}).get("games"))
+                for key, cat in _accums.items() if key != "rollover"
+            }
+            _count = sum(len((cat or {}).get("games") or [])
+                         for key, cat in _accums.items() if key != "rollover")
+            if _count:
+                notify_predictions_ready(
+                    prediction_date=_pub_date,
+                    predictions_count=_count,
+                    categories=_cats,
+                )
+                _ALERTED["date"] = _pub_date
+                logger.info(f"Prediction alert sent for {_pub_date} ({_count} picks)")
+    except Exception as e:
+        logger.warning(f"Daily loop: prediction alert failed: {e}")
+
+    # 4) Growth Engine. Runs last and swallows its own errors, so marketing
+    # can never be the reason predictions fail to generate. run_daily is
+    # idempotent — publication rows are claimed under a unique constraint —
+    # so calling it on every 15-minute tick posts each item exactly once.
+    try:
+        from growth.engine import retry_failed, run_daily
+        run_daily()
+        retry_failed()
+    except Exception as e:
+        logger.error(f"Daily loop: growth engine failed: {e}")
+
 
 def _start_daily_generation_loop():
     """Keep each day's artifacts present, and publish the card at 08:00 WAT.
@@ -316,15 +382,29 @@ def _start_daily_generation_loop():
 
                 _ensure_today_generated()
 
-                # Force a fresh build the first time we pass 08:00 WAT each day
+                # Past 08:00 WAT, run the full day: settle, refit, publish,
+                # distribute. This used to build the card and nothing else, so
+                # results were settled and Telegram posted only when something
+                # else happened to trigger them.
+                #
+                # The scheduled GitHub Action runs the same job, and the job
+                # claims the day in the database before doing any work — so
+                # whichever fires first does it and the other returns
+                # "skipped". That makes this loop a fallback rather than a
+                # duplicate, and it keeps publishing if the Action is ever
+                # unavailable. `last_published` stays as an in-process short
+                # circuit only; the database is what actually decides.
                 if wat.hour >= 8 and last_published != wat_day:
                     try:
-                        from leagues.daily_feed import build_daily_accumulators
-                        build_daily_accumulators(force=True)
+                        from leagues.scheduler import run_daily_job
+                        report = run_daily_job()
+                        if report.get("status") != "skipped":
+                            logger.info(
+                                f"Daily run for {wat_day}: {report.get('status')} "
+                                f"(failed: {report.get('failed') or 'none'})")
                         last_published = wat_day
-                        logger.info(f"Published daily card for {wat_day} (08:00 WAT window)")
                     except Exception as e:
-                        logger.error(f"Daily card publish failed: {e}")
+                        logger.error(f"Daily run failed: {e}")
             except Exception as e:
                 logger.error(f"Daily generation loop iteration failed: {e}")
             _time.sleep(900)

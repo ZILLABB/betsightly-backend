@@ -67,3 +67,11 @@ cache/
 *.db-shm
 *.db-wal
 *.corrupt-backup
+
+# Rebuildable runtime caches under leagues/data — regenerated from ESPN and
+# from the settled record on first use. Committing them means a deploy ships a
+# stale snapshot of match history and calibration.
+leagues/data/team_history.json
+leagues/data/calibration_fit.json
+leagues/data/shopped_odds.json
+leagues/data/odds_budget.json

@@ -149,7 +149,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none'"
+
+        # Only set the default policy when the route has not set its own.
+        # Assigning unconditionally silently overwrote the stricter, more
+        # specific policy the admin dashboard sends, and the blanket
+        # `default-src 'self'` then blocked that page's own stylesheet and
+        # script — it rendered unstyled with no working JavaScript at all.
+        if "content-security-policy" not in {k.lower() for k in response.headers}:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; frame-ancestors 'none'"
+            )
 
         try:
             del response.headers["Server"]

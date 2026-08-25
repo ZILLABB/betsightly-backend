@@ -193,6 +193,29 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
     # Confidence ceiling when nothing is priced — we are extrapolating
     cap = 0.97 if has_market else 0.80
 
+    # Per-team goal lines. The Poisson already carries each side's expected
+    # goals separately — these were always computable and simply never
+    # published, which is why the qualifying pool ran 96% goals markets and no
+    # slip could reach past about 41x however many fixtures were modelled.
+    #
+    # Independent of the total-goals lines in the sense that matters here: one
+    # leg per fixture is enforced elsewhere, so "home to score" and "over 1.5"
+    # never appear together off the same match.
+    p_h05 = _p_over(0.5, home_lam)
+    p_a05 = _p_over(0.5, away_lam)
+    p_h15 = _p_over(1.5, home_lam)
+    p_a15 = _p_over(1.5, away_lam)
+    p_o45 = _p_over(4.5, total_lam)
+
+    # Draw no bet. The same opinion as the 1X2 with the draw removed and the
+    # stake returned, so the probability is the win share of a decisive
+    # result. Worth having because match_result clears its floor on very few
+    # fixtures — nine of 177 on a full Saturday — while the same view
+    # expressed without the draw clears far more often.
+    decisive = p_home + p_away
+    p_dnb_h = (p_home / decisive) if decisive > 0.01 else 0.5
+    p_dnb_a = (p_away / decisive) if decisive > 0.01 else 0.5
+
     markets = {
         "home_win":   min(cap, p_home),
         "draw":       min(cap, p_draw),
@@ -200,11 +223,19 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
         "home_or_draw": min(cap, p_hd),
         "away_or_draw": min(cap, p_ad),
         "home_or_away": min(cap, p_ha),
+        "dnb_home":   min(cap, p_dnb_h),
+        "dnb_away":   min(cap, p_dnb_a),
         "over_1_5":   min(cap, p_o15),
         "over_2_5":   min(cap, p_o25),
         "over_3_5":   min(cap, p_o35),
+        "under_1_5":  min(cap, 1.0 - p_o15),
         "under_2_5":  min(cap, 1.0 - p_o25),
         "under_3_5":  min(cap, 1.0 - p_o35),
+        "under_4_5":  min(cap, 1.0 - p_o45),
+        "home_over_0_5": min(cap, p_h05),
+        "home_over_1_5": min(cap, p_h15),
+        "away_over_0_5": min(cap, p_a05),
+        "away_over_1_5": min(cap, p_a15),
         "btts_yes":   min(cap, p_btts),
         "btts_no":    min(cap, 1.0 - p_btts),
     }
