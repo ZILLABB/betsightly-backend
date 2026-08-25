@@ -286,6 +286,57 @@ async def get_bookings(date: str | None = None):
             "attach": attach}
 
 
+# Built slips, keyed on (target, horizon, day). Generating one runs the
+# optimizer and posts a booking, so an uncached public endpoint would let a
+# refresh loop mint codes at a bookmaker indefinitely. Two readers asking for
+# the same thing on the same day get the same slip, which is also the honest
+# answer — there is one best combination, not one per visitor.
+_SLIP_CACHE: dict = {}
+_SLIP_TTL = 1800
+
+
+@router.get("/slip-builder/targets")
+async def slip_builder_targets():
+    """The targets offered, and what each is actually worth."""
+    from leagues.slip_builder import (HORIZONS, MAX_LEGS, MAX_TARGET,
+                                      MIN_TARGET, TARGETS)
+    return {
+        "status": "success",
+        "targets": TARGETS,
+        "min": MIN_TARGET,
+        "max": MAX_TARGET,
+        "max_legs": MAX_LEGS,
+        "horizons": sorted(HORIZONS),
+        "note": ("Longer slips give up more of the stake to the bookmaker's "
+                 "margin — every added leg costs about 5%. The expected "
+                 "return shown with each slip is what it is worth on average."),
+    }
+
+
+@router.post("/slip-builder/generate")
+async def slip_builder_generate(target: float, horizon: str = "week",
+                                refresh: bool = False):
+    """Build a slip to a requested multiplier and book it."""
+    import time as _t
+    from leagues.daily_feed import _publish_date
+    from leagues.slip_builder import generate
+
+    key = (round(float(target), 2), horizon, _publish_date())
+    hit = _SLIP_CACHE.get(key)
+    if hit and not refresh and (_t.time() - hit["ts"]) < _SLIP_TTL:
+        return {**hit["result"], "cached": True}
+
+    try:
+        result = generate(target, horizon=horizon)
+    except Exception as e:
+        logger.error(f"Slip build failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+    if result.get("status") == "success":
+        _SLIP_CACHE[key] = {"result": result, "ts": _t.time()}
+    return {**result, "cached": False}
+
+
 @router.get("/notification-log")
 async def get_notification_log(limit: int = 40):
     """Which alerts were sent, when, and on which channel.
