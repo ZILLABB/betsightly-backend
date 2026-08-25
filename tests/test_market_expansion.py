@@ -150,3 +150,32 @@ def test_the_guard_only_applies_to_real_prices():
 def test_guard_threshold_is_above_any_real_edge():
     """Line shopping is worth a few percent, never a quarter."""
     assert 1.05 <= MAX_CREDIBLE_EV < 1.50
+
+
+# ── Team totals inherit BTTS's caution ─────────────────────
+
+def test_team_totals_are_not_published_more_freely_than_btts():
+    """They are BTTS taken apart, so they cannot have an easier bar.
+
+    The model's btts_yes is (1 - e^-λh)(1 - e^-λa) — precisely
+    home_over_0_5 multiplied by away_over_0_5. Publishing each half at 0.65
+    while holding the product at 0.70 would let the same error back in
+    through a door already shut, and BTTS is the worst-calibrated market
+    there is: 28 legs promising 58% and delivering 50%.
+    """
+    btts = MIN_CONFIDENCE_BY_GROUP["btts_yes"]
+    assert MIN_CONFIDENCE_BY_GROUP["team_goals_home"] >= btts
+    assert MIN_CONFIDENCE_BY_GROUP["team_goals_away"] >= btts
+
+
+def test_btts_really_is_the_product_of_the_two_team_totals():
+    """If this stops holding, the floor above is guarding the wrong thing."""
+    import math
+    probs = predict(_fixture(), _base(), None)["probabilities"]
+    eg = predict(_fixture(), _base(), None)["expected_goals"]
+    raw_product = (1 - math.exp(-eg["home"])) * (1 - math.exp(-eg["away"]))
+    # btts is blended toward the league base rate, so this is a family
+    # resemblance rather than an identity — but a distant one would mean the
+    # two are no longer the same claim.
+    assert abs(probs["btts_yes"] - raw_product) < 0.15
+    assert abs(probs["home_over_0_5"] - (1 - math.exp(-eg["home"]))) < 0.01

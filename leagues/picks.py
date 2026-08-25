@@ -218,8 +218,22 @@ MIN_CONFIDENCE_BY_GROUP = {
     # same opinion that reads 0.55 as a win reads about 0.70 here, and the
     # floor has to rise with it or the tier fills with picks that only look
     # safer than the match_result pick they came from.
-    "team_goals_home": 0.65,
-    "team_goals_away": 0.65,
+    # Raised to match BTTS rather than starting at the blanket default,
+    # because these are not a new idea — they are BTTS taken apart.
+    #
+    # The model's btts_yes is (1 - e^-λh)(1 - e^-λa), which is exactly
+    # home_over_0_5 multiplied by away_over_0_5. Same Poisson, same two
+    # numbers. And BTTS is the worst-calibrated market we have: 28 settled
+    # legs promising 58% and delivering 50%. If the product runs eight points
+    # hot then each factor runs roughly five points hot, so publishing the
+    # halves at 0.65 while the whole is held at 0.70 would let the same error
+    # back in through a door we had already shut.
+    #
+    # This is inference from 28 legs, not a measurement of these markets, so
+    # it is set conservatively and MIN_EVIDENCE_LEGS lets them earn their way
+    # down once 25 of their own legs have settled.
+    "team_goals_home": 0.70,
+    "team_goals_away": 0.70,
     "dnb": 0.72,
 }
 
