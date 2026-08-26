@@ -383,7 +383,12 @@ def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tup
 
 def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
     """Compare a single pick against the actual score. Returns 'won' | 'lost' | 'void'."""
-    market = pick.get("market", "match_result")
+    # Persisted rollover legs store the diversity group in ``market`` and the
+    # actual selection in ``market_key``.  Always prefer the precise key: a
+    # group such as ``goals`` is not enough to distinguish Under 4.5 from
+    # Over 1.5, and historically those newer lines were silently voided.
+    market = pick.get("market_key") or pick.get("market", "match_result")
+    market_group = pick.get("market_group") or market
     prediction = (pick.get("prediction") or "").lower()
     total = home_score + away_score
     diff = home_score - away_score
@@ -391,7 +396,14 @@ def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
     home = (pick.get("home_team") or "").lower()
     away = (pick.get("away_team") or "").lower()
 
-    if market == "match_result":
+    if market in ("home_win", "away_win", "draw"):
+        if market == "home_win":
+            return "won" if diff > 0 else "lost"
+        if market == "away_win":
+            return "won" if diff < 0 else "lost"
+        return "won" if diff == 0 else "lost"
+
+    if market_group == "match_result":
         if "draw" in prediction and "or" not in prediction:
             return "won" if diff == 0 else "lost"
         if home and home in prediction:
@@ -400,7 +412,14 @@ def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
             return "won" if diff < 0 else "lost"
         return "void"
 
-    if market == "double_chance":
+    if market in ("home_or_draw", "away_or_draw", "home_or_away"):
+        if market == "home_or_draw":
+            return "won" if diff >= 0 else "lost"
+        if market == "away_or_draw":
+            return "won" if diff <= 0 else "lost"
+        return "won" if diff != 0 else "lost"
+
+    if market_group == "double_chance":
         if "or draw" in prediction:
             if home and home in prediction:
                 return "won" if diff >= 0 else "lost"
@@ -408,18 +427,49 @@ def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
                 return "won" if diff <= 0 else "lost"
         return "void"
 
-    if market == "goals":
-        if "over 1.5" in prediction:
-            return "won" if total > 1 else "lost"
-        if "over 2.5" in prediction:
-            return "won" if total > 2 else "lost"
-        if "under 2.5" in prediction:
-            return "won" if total <= 2 else "lost"
-        if "over 0.5" in prediction:
-            return "won" if total >= 1 else "lost"
-        return "void"
+    if market in ("dnb_home", "dnb_away"):
+        if diff == 0:
+            return "void"
+        won = diff > 0 if market == "dnb_home" else diff < 0
+        return "won" if won else "lost"
 
-    if market == "btts":
+    # Match totals. Half-goal lines cannot push, so integer comparison is
+    # exact and covers every line the predictor can publish.
+    if market.startswith(("over_", "under_")):
+        try:
+            line = float(market.rsplit("_", 2)[-2] + "." + market.rsplit("_", 1)[-1])
+        except (ValueError, IndexError):
+            return "void"
+        won = total > line if market.startswith("over_") else total < line
+        return "won" if won else "lost"
+
+    # Per-team totals use the same key suffix, but settle against the named
+    # team's score rather than the match total.
+    if market.startswith(("home_over_", "away_over_")):
+        parts = market.split("_")
+        try:
+            line = float(parts[-2] + "." + parts[-1])
+        except (ValueError, IndexError):
+            return "void"
+        scored = home_score if market.startswith("home_") else away_score
+        return "won" if scored > line else "lost"
+
+    # Backwards-compatible text grading for old rows that only stored a group.
+    if market_group == "goals":
+        import re
+        hit = re.search(r"\b(over|under)\s+(\d+(?:\.\d+)?)", prediction)
+        if not hit:
+            return "void"
+        direction, line_text = hit.groups()
+        line = float(line_text)
+        won = total > line if direction == "over" else total < line
+        return "won" if won else "lost"
+
+    if market in ("btts_yes", "btts_no"):
+        yes = home_score > 0 and away_score > 0
+        return "won" if yes == (market == "btts_yes") else "lost"
+
+    if market_group == "btts":
         # Check the negative first: "Both Teams to Score - No" also contains
         # "both teams to score", so testing the positive first settles every
         # BTTS-No pick as though it were BTTS-Yes.
@@ -813,7 +863,7 @@ def settle_published_slips() -> Dict[str, int]:
                 continue
             outcomes.append(
                 _evaluate_pick(
-                    {**pick, "market": pick.get("market_group", pick.get("market", "match_result"))},
+                    pick,
                     match["home_score"], match["away_score"],
                 )
             )

@@ -182,6 +182,43 @@ def test_guard_threshold_is_above_any_real_edge():
     assert 1.05 <= MAX_CREDIBLE_EV < 1.50
 
 
+def test_unseen_market_gets_no_global_calibration_boost():
+    """A correction earned by other markets cannot lift a new goal line."""
+    from leagues.calibrator import calibrate
+    fit = {"n": 100, "global": 0.4, "groups": {}}
+    assert calibrate(0.755, "goals_under_4_5", fit) == pytest.approx(0.755)
+
+
+def test_pick_reports_its_own_evidence_and_real_model_count():
+    from leagues.picks import build_picks, to_game
+    fx = _fixture()
+    fx["odds"] = {"provider": "SportyBet", "under_4_5": 1.30,
+                  "margins": {"under_4_5": 0.05}}
+    model = predict(fx, _base(), None)
+    model["probabilities"] = {"under_4_5": 0.75}
+    model["ml"] = None
+    fit = {"n": 100, "global": 0.2, "groups": {}}
+    picks = build_picks(fx, model, min_confidence=0.50, fit=fit)
+    pick = picks[0]
+    game = to_game(pick)
+    assert pick["calibration_sample"] == 0
+    assert not pick["safe_tier_eligible"]
+    assert game["models_agreed"] == 1
+    assert game["model_sources"] == ["league base + Poisson"]
+
+
+def test_ml_can_veto_a_severe_disagreement(monkeypatch):
+    from leagues.picks import build_picks
+    fx = _fixture()
+    fx["odds"] = {"provider": "SportyBet", "over_1_5": 1.35,
+                  "margins": {"over_1_5": 0.04}}
+    model = predict(fx, _base(), None)
+    model["probabilities"] = {"over_1_5": 0.75}
+    model["ml"] = {"over_1_5": 0.50}
+    monkeypatch.setattr("leagues.picks._ml_for", lambda *_: 0.50)
+    assert not build_picks(fx, model, min_confidence=0.50, fit=NEUTRAL_FIT)
+
+
 # ── Team totals inherit BTTS's caution ─────────────────────
 
 def test_team_totals_are_not_published_more_freely_than_btts():

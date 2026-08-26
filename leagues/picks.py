@@ -340,7 +340,10 @@ def build_picks(fixture: dict, model: dict,
 
     picks = []
     for market, raw_prob in raw_probs.items():
-        prob = calibrate(raw_prob, CALIBRATION_GROUP[market], fit)
+        calibration_group = CALIBRATION_GROUP[market]
+        calibration_cell = (fit.get("groups") or {}).get(calibration_group) or {}
+        calibration_sample = int(calibration_cell.get("n", 0))
+        prob = calibrate(raw_prob, calibration_group, fit)
         # Per-market floor, never below whatever the caller asked for as a
         # blanket minimum. A tier wanting only safe picks still gets them; a
         # tier reaching for a multiplier can use a longer leg from a market
@@ -397,6 +400,18 @@ def build_picks(fixture: dict, model: dict,
                 f"{prob * price - 1:.0%} edge")
             continue
 
+        ml_prob = _ml_for(model, market)
+        # The trained ensemble is deliberately a veto, not a confidence
+        # booster. Its held-out skill is positive but small, so agreement is
+        # useful corroboration while disagreement is a reason to sit out.
+        # Markets it was never trained for remain null instead of receiving a
+        # fabricated vote.
+        if ml_prob is not None and abs(prob - ml_prob) > 0.15:
+            logger.debug(
+                f"dropped {market} on {fixture['match_id']}: "
+                f"league/market model {prob:.3f} vs ML {ml_prob:.3f}")
+            continue
+
         # Value only means something against a real, de-vigged market price
         edge = None
         if is_real:
@@ -419,10 +434,17 @@ def build_picks(fixture: dict, model: dict,
             "confidence": round(prob, 4),
             # Kept so the calibration's effect stays auditable after the fact
             "raw_confidence": round(raw_prob, 4),
-            # The trained ensemble's view of this same market, recorded but not
-            # acted on. Null where it has no opinion — an unpriced fixture, or
-            # a market it was never trained for.
-            "ml_confidence": _ml_for(model, market),
+            # The trained ensemble's view of this same market. It may veto a
+            # severe disagreement above, but never boosts the published
+            # confidence. Null means it had no compatible opinion.
+            "ml_confidence": ml_prob,
+            "market_implied_probability": round(1.0 / price, 4) if is_real else None,
+            "calibration_group": calibration_group,
+            "calibration_sample": calibration_sample,
+            # Banker and 2 Odds only admit markets with enough *published,
+            # settled* evidence of their own. Longer tiers may still collect
+            # that evidence, clearly labelled as developing markets.
+            "safe_tier_eligible": calibration_sample >= MIN_EVIDENCE_LEGS,
             "odds": round(price, 2),
             "odds_are_real": is_real,
             "odds_provider": odds.get("provider") if is_real else None,
@@ -464,6 +486,12 @@ def to_game(pick: dict) -> dict:
     m = pick["_model"]
     eg = m["expected_goals"]
     conf = pick["confidence"]
+
+    sources = ["market + Poisson" if m.get("has_market") else "league base + Poisson"]
+    if pick.get("ml_confidence") is not None:
+        sources.append("trained ML ensemble")
+    if pick["market"] in ("home_win", "away_win", "draw", "home_or_draw", "away_or_draw", "dnb_home", "dnb_away") and m.get("elo_agreement"):
+        sources.append("Elo")
 
     return {
         "fixture_id": abs(hash(pick["match_id"])) % 1_000_000,
@@ -508,6 +536,12 @@ def to_game(pick: dict) -> dict:
         "confidence": conf,
         "raw_confidence": pick.get("raw_confidence"),
         "ml_confidence": pick.get("ml_confidence"),
+        "market_implied_probability": pick.get("market_implied_probability"),
+        "calibration_group": pick.get("calibration_group"),
+        "calibration_sample": pick.get("calibration_sample", 0),
+        "safe_tier_eligible": pick.get("safe_tier_eligible", False),
+        "model_sources": sources,
+        "models_used": len(sources),
         "odds": pick["odds"],
         "estimated_odds": pick["odds"],
         "real_odds": pick["odds"] if pick["odds_are_real"] else None,
@@ -523,5 +557,12 @@ def to_game(pick: dict) -> dict:
         "risk_level": "low" if conf >= 0.75 else ("medium" if conf >= 0.62 else "high"),
         "model_type": "market_poisson" if m["has_market"] else "league_base",
         "elo_agreement": m.get("elo_agreement"),
-        "models_agreed": 3 if m.get("elo_agreement") == "agree" else 2,
+        # Count only compatible models that actually produced an opinion.
+        # This replaces the former hard-coded 2/3 claim on picks for which ML
+        # was null and Elo had never evaluated that market.
+        "models_agreed": (
+            1
+            + int(pick.get("ml_confidence") is not None)
+            + int(m.get("elo_agreement") == "agree")
+        ),
     }

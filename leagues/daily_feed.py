@@ -223,12 +223,15 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # and stops at the first level that can actually build the tier.
     fixture_uses: dict = {}
 
-    def _tier(target, max_picks, floor, min_ev, band_low=0.80):
+    def _tier(target, max_picks, floor, min_ev, band_low=0.80,
+              safe_only=False):
         sel, why = ([], 0.0, 0.0), None
+        tier_picks = ([p for p in day_picks if p.get("safe_tier_eligible")]
+                      if safe_only else day_picks)
         for limit in (1, 2, None):
-            pool = ([p for p in day_picks
+            pool = ([p for p in tier_picks
                      if fixture_uses.get(p["match_id"], 0) < limit]
-                    if limit is not None else day_picks)
+                    if limit is not None else tier_picks)
             sel, why = _select_tier(pool, target, max_picks, floor, min_ev,
                                     band_low=band_low)
             if sel[0]:
@@ -237,7 +240,8 @@ def build_daily_accumulators(force: bool = False) -> dict:
             fixture_uses[pick["match_id"]] = fixture_uses.get(pick["match_id"], 0) + 1
         return sel, why
 
-    banker = select_banker(day_picks)
+    safe_picks = [p for p in day_picks if p.get("safe_tier_eligible")]
+    banker = select_banker(safe_picks)
     for _p in banker[0]:
         fixture_uses[_p["match_id"]] = fixture_uses.get(_p["match_id"], 0) + 1
 
@@ -245,7 +249,8 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # 22 August that is 2 odds landing 57.5% instead of 49.2%, and 5 odds
     # 24.1% instead of 17.4%. The band floor keeps 2 Odds honest to its name —
     # maximising landing alone drifts it down to 1.63x, which is not 2 odds.
-    two, two_why = _tier(2.0, 4, FLOOR, 0.82, band_low=0.92)
+    two, two_why = _tier(2.0, 4, FLOOR, 0.82, band_low=0.92,
+                         safe_only=True)
     # The long tiers reach down to the per-market floors, which lets them use
     # a 1.60-1.80 leg from a market that has earned it instead of stacking six
     # short ones. Fewer legs is worth a lot here: 5x from 3 legs at 1.80

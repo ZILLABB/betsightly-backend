@@ -306,13 +306,35 @@ def _clamp(shift: float) -> float:
 
 
 def calibrate(prob: float, market_group: str, fit: dict | None = None) -> float:
-    """Published probability for a raw model probability."""
+    """Published probability for a raw model probability.
+
+    A group with no settled legs is corrected by nothing at all.
+
+    It used to inherit the global shift, which sounds cautious and is not. The
+    global figure is an average over the markets that *do* have records, and
+    those records currently say over_1_5 and match_result have been
+    under-promising — so the global shift is a positive boost. Handing it to a
+    market that has never settled a leg asserts, on no evidence, that it is
+    under-promising too.
+
+    That is not hypothetical. Under 4.5 on Real Madrid v Real Sociedad came out
+    of the Poisson at 0.7553, was lifted to 0.7754 by a +0.1122 global shift
+    earned entirely by other markets, and went onto the card at 78% — against
+    a bookmaker quoting 1.37, which implies about 69%. We had no record for
+    that line at all and were publishing a number above the market's on the
+    strength of corrections fitted elsewhere.
+
+    Zero is the honest default. It can under-state a new market that really is
+    under-promising, which costs picks; the alternative over-states one, which
+    costs money. MIN_EVIDENCE_LEGS then lets each group earn its own
+    correction from its own results.
+    """
     if prob <= 0 or prob >= 1:
         return prob
     if fit is None:
         fit = fit_calibration()
     grp = (fit.get("groups") or {}).get(market_group)
-    shift = grp["shift"] if grp else fit.get("global", 0.0)
+    shift = grp["shift"] if grp else 0.0
     if not shift:
         return prob
     return _sigmoid(_logit(prob) + shift)
