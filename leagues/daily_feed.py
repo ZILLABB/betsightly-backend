@@ -126,8 +126,13 @@ def build_daily_accumulators(force: bool = False) -> dict:
     if not force:
         locked = _load_locked(publish_date)
         if locked:
-            rollover = _build_rollover(_pipeline_for_rollover()[0], now.strftime("%Y-%m-%d"))
-            locked["rollover"] = rollover
+            # Refresh statuses from the persisted chain without rerunning the
+            # entire fixture/ML pipeline on a read. Extending the chain is a
+            # scheduled publishing responsibility; a page view must stay a
+            # cheap, predictable database read.
+            rollover = _build_rollover([], now.strftime("%Y-%m-%d"))
+            if rollover.get("chain_length") or not locked.get("rollover"):
+                locked["rollover"] = rollover
             # Revision metadata travels with the stored card, so a reader gets
             # the same answer whether the card is served fresh or from the lock.
             _rev = locked.pop("_card_revision", 1)
@@ -514,13 +519,6 @@ def _load_locked(publish_date: str):
         return load_card(publish_date)
     except Exception:
         return None
-
-
-def _pipeline_for_rollover():
-    """Picks needed to extend the rollover chain, independent of the locked card."""
-    from leagues.engine import run_pipeline
-    all_picks, _ = run_pipeline(days_ahead=4)
-    return (all_picks,)
 
 
 def _mark_started(accumulators: dict, now: datetime) -> dict:

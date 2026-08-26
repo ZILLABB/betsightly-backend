@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from services.daily_predictions_service import DailyPredictionsService, DailyPrediction, DailyPredictionSummary
+from utils.security import require_api_key
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ def get_betting_categories_from_db(db: Session = Depends(get_db)):
         logger.error(f"Error getting betting categories: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve betting categories")
 
-@router.post("/generate")
+@router.post("/generate", dependencies=[Depends(require_api_key)])
 def generate_daily_predictions(
     background_tasks: BackgroundTasks,
     target_date: str = Query(None, description="Date in YYYY-MM-DD format (default: today)"),
@@ -315,7 +316,7 @@ def get_prediction_history(
         logger.error(f"Error getting prediction history: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve prediction history")
 
-@router.delete("/clear")
+@router.delete("/clear", dependencies=[Depends(require_api_key)])
 def clear_predictions(
     target_date: str = Query(None, description="Date in YYYY-MM-DD format (default: today)"),
     db: Session = Depends(get_db)

@@ -69,10 +69,14 @@ class RateLimiter:
         if now - self._last_global_cleanup > 300 or len(self.requests) >= self.MAX_CLIENTS:
             self._global_cleanup(window_start)
 
-        # If still at cap after cleanup, fail open for unseen clients rather
-        # than letting the dict grow without bound. (Known clients still limited.)
+        # Keep memory bounded without disabling protection. If every tracked
+        # client is still active, evict the least recently seen client.
         if client_id not in self.requests and len(self.requests) >= self.MAX_CLIENTS:
-            return True
+            oldest = min(
+                self.requests,
+                key=lambda cid: self.requests[cid][-1][0] if self.requests[cid] else 0,
+            )
+            self.requests.pop(oldest, None)
 
         # Clean old entries for this client
         if client_id in self.requests:
@@ -248,14 +252,20 @@ def require_api_key(request: Request) -> None:
     """
     Dependency that enforces API key auth when API_KEY env var is set.
 
-    Pass the key via the X-API-Key header. In development (API_KEY unset),
-    all requests are allowed through so local iteration stays frictionless.
+    Pass the key via the X-API-Key header. Missing production configuration
+    fails closed; development and tests remain convenient when no key is set.
     """
     import os
     expected_key = os.getenv("API_KEY", "")
     if not expected_key:
-        # Dev / unprotected mode — skip auth
-        return
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        if environment in {"development", "dev", "local", "test"}:
+            return
+        logger.critical("API_KEY is not configured; refusing protected request")
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "API security is not configured"},
+        )
 
     provided_key = request.headers.get("X-API-Key", "")
     if not provided_key:
@@ -284,15 +294,10 @@ def get_client_id(request: Request) -> str:
     Returns:
         Unique client identifier
     """
-    # Use IP address as client ID (in production, consider using API keys)
+    # Use the normalized client IP only. Including User-Agent made the limit
+    # trivial to bypass by rotating one header value.
     client_ip = request.client.host if request.client else "unknown"
-    
-    # Include user agent for better uniqueness
-    user_agent = request.headers.get("user-agent", "")
-    
-    # Create hash of IP + User Agent
-    client_data = f"{client_ip}:{user_agent}"
-    return hashlib.sha256(client_data.encode()).hexdigest()[:16]
+    return hashlib.sha256(client_ip.encode()).hexdigest()[:16]
 
 
 def check_rate_limit(request: Request) -> None:

@@ -174,7 +174,7 @@ async def get_bookable_now():
         raise HTTPException(500, str(e))
 
 
-@router.post("/check-results")
+@router.post("/check-results", dependencies=[Depends(require_api_key)])
 async def trigger_results_check():
     """Manually trigger a results check (also runs hourly in the background)."""
     try:
@@ -421,7 +421,7 @@ async def get_performance(days: int = 90):
         raise HTTPException(500, str(e))
 
 
-@router.post("/backfill-legs")
+@router.post("/backfill-legs", dependencies=[Depends(require_api_key)])
 async def trigger_leg_backfill(days: int = 120):
     """Recover per-leg outcomes on chain days settled before we recorded them."""
     try:
@@ -448,7 +448,7 @@ async def get_calibration(days: int = 180):
         raise HTTPException(500, str(e))
 
 
-@router.post("/restart")
+@router.post("/restart", dependencies=[Depends(require_api_key)])
 async def restart_everything(full_rollover: bool = True, republish_card: bool = True):
     """Clean slate: fresh rollover chain from day 1, today's card rebuilt.
 
@@ -516,7 +516,7 @@ async def restart_everything(full_rollover: bool = True, republish_card: bool = 
         raise HTTPException(500, str(e))
 
 
-@router.post("/repair-void-slips")
+@router.post("/repair-void-slips", dependencies=[Depends(require_api_key)])
 async def repair_void_slips():
     """Restate slips recorded as won whose every leg actually voided.
 
@@ -552,7 +552,7 @@ async def repair_void_slips():
         raise HTTPException(500, str(e))
 
 
-@router.post("/repair-singles")
+@router.post("/repair-singles", dependencies=[Depends(require_api_key)])
 async def repair_singles():
     """Re-score singles tiers that were settled under the accumulator rule.
 
@@ -597,7 +597,7 @@ async def repair_singles():
         raise HTTPException(500, str(e))
 
 
-@router.post("/rebuild-rollover")
+@router.post("/rebuild-rollover", dependencies=[Depends(require_api_key)])
 async def rebuild_rollover():
     """Rebuild the unsettled part of the rollover chain.
 
@@ -635,7 +635,7 @@ async def rebuild_rollover():
         raise HTTPException(500, str(e))
 
 
-@router.post("/repair-card")
+@router.post("/repair-card", dependencies=[Depends(require_api_key)])
 async def repair_card():
     """Fill tiers today's locked card left empty, without touching the rest.
 

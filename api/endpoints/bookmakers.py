@@ -13,6 +13,7 @@ from database import get_db
 from bookmaker import Bookmaker
 from schemas.bookmaker import BookmakerCreate, BookmakerUpdate, BookmakerResponse, BookmakerListResponse
 from utils.common import setup_logging
+from utils.security import require_api_key
 
 # Set up logging
 logger = setup_logging(__name__)
@@ -23,8 +24,8 @@ router = APIRouter()
 @router.get("/", response_model=BookmakerListResponse)
 def get_bookmakers(
     db: Session = Depends(get_db),
-    skip: int = Query(0, description="Number of bookmakers to skip"),
-    limit: int = Query(100, description="Maximum number of bookmakers to return")
+    skip: int = Query(0, ge=0, description="Number of bookmakers to skip"),
+    limit: int = Query(100, ge=1, le=200, description="Maximum number of bookmakers to return")
 ):
     """
     Get all bookmakers.
@@ -88,7 +89,7 @@ def get_bookmaker(
         logger.error(f"Error getting bookmaker {bookmaker_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve bookmaker")
 
-@router.post("/", response_model=BookmakerResponse)
+@router.post("/", response_model=BookmakerResponse, dependencies=[Depends(require_api_key)])
 def create_bookmaker(
     bookmaker: BookmakerCreate,
     db: Session = Depends(get_db)
@@ -131,7 +132,7 @@ def create_bookmaker(
         logger.error(f"Error creating bookmaker: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to create bookmaker")
 
-@router.put("/{bookmaker_id}", response_model=BookmakerResponse)
+@router.put("/{bookmaker_id}", response_model=BookmakerResponse, dependencies=[Depends(require_api_key)])
 def update_bookmaker(
     bookmaker_id: int,
     bookmaker: BookmakerUpdate,
@@ -175,7 +176,7 @@ def update_bookmaker(
         logger.error(f"Error updating bookmaker {bookmaker_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to update bookmaker")
 
-@router.delete("/{bookmaker_id}")
+@router.delete("/{bookmaker_id}", dependencies=[Depends(require_api_key)])
 def delete_bookmaker(
     bookmaker_id: int,
     db: Session = Depends(get_db)

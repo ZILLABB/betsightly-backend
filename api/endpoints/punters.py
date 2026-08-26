@@ -18,6 +18,7 @@ from punter_prediction import PunterPrediction
 from schemas.punter import PunterCreate, PunterUpdate, PunterResponse, PunterListResponse
 from schemas.prediction import PunterPredictionResponse, PunterPredictionListResponse
 from utils.common import setup_logging
+from utils.security import require_api_key
 
 # Set up logging
 logger = setup_logging(__name__)
@@ -28,8 +29,8 @@ router = APIRouter()
 @router.get("/", response_model=PunterListResponse)
 def get_punters(
     db: Session = Depends(get_db),
-    skip: int = Query(0, description="Number of punters to skip"),
-    limit: int = Query(100, description="Maximum number of punters to return")
+    skip: int = Query(0, ge=0, description="Number of punters to skip"),
+    limit: int = Query(100, ge=1, le=200, description="Maximum number of punters to return")
 ):
     """
     Get all punters.
@@ -104,7 +105,7 @@ def get_punter(
         logger.error(f"Error getting punter {punter_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve punter")
 
-@router.post("/", response_model=PunterResponse)
+@router.post("/", response_model=PunterResponse, dependencies=[Depends(require_api_key)])
 def create_punter(
     punter: PunterCreate,
     db: Session = Depends(get_db)
@@ -129,7 +130,7 @@ def create_punter(
         logger.error(f"Error creating punter: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to create punter")
 
-@router.put("/{punter_id}", response_model=PunterResponse)
+@router.put("/{punter_id}", response_model=PunterResponse, dependencies=[Depends(require_api_key)])
 def update_punter(
     punter_id: str,
     punter: PunterUpdate,
@@ -158,7 +159,7 @@ def update_punter(
         logger.error(f"Error updating punter {punter_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to update punter")
 
-@router.delete("/{punter_id}")
+@router.delete("/{punter_id}", dependencies=[Depends(require_api_key)])
 def delete_punter(
     punter_id: str,
     db: Session = Depends(get_db)
@@ -253,7 +254,7 @@ def get_punter_performance(
 
 
 
-@router.post("/{punter_id}/predictions/{prediction_id}/status")
+@router.post("/{punter_id}/predictions/{prediction_id}/status", dependencies=[Depends(require_api_key)])
 def update_prediction_status(
     punter_id: str,
     prediction_id: str,

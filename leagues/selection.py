@@ -96,6 +96,14 @@ _PER_BAND = 9
 # No group may take a whole band, so a slip is never one market end to end.
 _PER_BAND_GROUP = 4
 
+# Exact enumeration grows combinatorially (45 choose 8 is 215 million). A
+# live SportyBet board can fill every price band, so leaving all stratified
+# candidates in the search pinned a worker for minutes and pushed the process
+# close to a 2 GB container limit. Eighteen candidates still cover every band
+# and allow an eight-leg slip, while bounding the full search below 107k
+# combinations. Small pools remain completely exact.
+_MAX_SEARCH_CANDIDATES = 18
+
 
 def _stratify(candidates: list[dict]) -> list[dict]:
     """Best few candidates per price band, keeping the bands market-diverse.
@@ -120,6 +128,39 @@ def _stratify(candidates: list[dict]) -> list[dict]:
             out.append(p)
             picked += 1
     return sorted(out, key=_cost)
+
+
+def _bound_search_space(candidates: list[dict]) -> list[dict]:
+    """Keep a diverse, bounded candidate set for exact combination search.
+
+    Round-robin selection across price bands avoids recreating the old bug
+    where a flat top-N list contained only short-priced goals markets and
+    could not reach the requested multiplier.
+    """
+    if len(candidates) <= _MAX_SEARCH_CANDIDATES:
+        return candidates
+
+    buckets = [
+        sorted(
+            (p for p in candidates if lo <= p["odds"] < hi),
+            key=_cost,
+        )
+        for lo, hi in _PRICE_BANDS
+    ]
+    bounded: list[dict] = []
+    index = 0
+    while len(bounded) < _MAX_SEARCH_CANDIDATES:
+        progressed = False
+        for bucket in buckets:
+            if index < len(bucket):
+                bounded.append(bucket[index])
+                progressed = True
+                if len(bounded) >= _MAX_SEARCH_CANDIDATES:
+                    break
+        if not progressed:
+            break
+        index += 1
+    return sorted(bounded, key=_cost)
 
 
 def select_accumulator(
@@ -186,7 +227,7 @@ def select_accumulator(
     # could reach 5x or 10x at all — those tiers came back empty however the
     # gates were set. Banding guarantees the search can actually buy the
     # multiplier it is being asked for.
-    candidates = _stratify(candidates)
+    candidates = _bound_search_space(_stratify(candidates))
 
     # Widened from 0.85. With every leg capped at 1.45, the multiplier a slip
     # can reach moves in coarse steps — seven legs reached 8.25x against a

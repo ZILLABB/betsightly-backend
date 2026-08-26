@@ -35,6 +35,7 @@ import os
 import secrets
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import Cookie, HTTPException, Request, Response
 
@@ -175,7 +176,7 @@ def login(request: Request, response: Response, password: str) -> dict:
         max_age=TOKEN_TTL,
         httponly=True,      # unreadable from page JS
         secure=True,        # HTTPS only
-        samesite="none",    # dashboard and API are on different domains
+        samesite="strict",  # dashboard and API are deliberately same-origin
         path="/",
     )
     logger.info(f"admin: login from {ip}")
@@ -183,11 +184,12 @@ def login(request: Request, response: Response, password: str) -> dict:
 
 
 def logout(response: Response) -> dict:
-    response.delete_cookie(COOKIE_NAME, path="/", samesite="none", secure=True)
+    response.delete_cookie(COOKIE_NAME, path="/", samesite="strict", secure=True)
     return {"ok": True}
 
 
-def require_admin(bs_admin: Optional[str] = Cookie(default=None)) -> str:
+def require_admin(request: Request,
+                  bs_admin: Optional[str] = Cookie(default=None)) -> str:
     """FastAPI dependency guarding every admin route."""
     if not is_configured():
         raise HTTPException(503, "Admin access is not configured.")
@@ -196,4 +198,14 @@ def require_admin(bs_admin: Optional[str] = Cookie(default=None)) -> str:
     subject = validate_token(bs_admin)
     if not subject:
         raise HTTPException(401, "Session expired. Sign in again.")
+
+    # SameSite=Strict is the primary CSRF boundary. This origin check is a
+    # second layer for browsers on every state-changing request.
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin = request.headers.get("origin")
+        if origin:
+            origin_host = urlparse(origin).netloc.lower()
+            request_host = request.headers.get("host", "").lower()
+            if not origin_host or origin_host != request_host:
+                raise HTTPException(403, "Cross-origin admin request refused.")
     return subject

@@ -17,12 +17,13 @@ from collections import Counter
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 from services.fixture_service import FixtureService
+from utils.security import require_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -925,7 +926,7 @@ def get_prediction_accuracy(days: int = Query(30, ge=1, le=365)):
         raise HTTPException(status_code=500, detail="Failed to compute accuracy")
 
 
-@router.post("/results/settle")
+@router.post("/results/settle", dependencies=[Depends(require_api_key)])
 def settle_results(date: Optional[str] = Query(None, description="YYYY-MM-DD, default yesterday")):
     """Manually trigger results settlement for a date (admin/debug)."""
     try:

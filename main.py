@@ -49,6 +49,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Background publishers and settlement loops must never start merely because
+# a test imports the ASGI app. Production keeps the current behavior; local
+# runs can opt in with ENABLE_BACKGROUND_JOBS=true.
+_environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+_background_default = "true" if _environment == "production" else "false"
+BACKGROUND_JOBS_ENABLED = os.getenv(
+    "ENABLE_BACKGROUND_JOBS", _background_default
+).strip().lower() in {"1", "true", "yes", "on"}
+
 # httpx logs full request URLs at INFO — the Telegram bot token is part of the
 # URL, so it would leak into production logs. Keep these loggers at WARNING.
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -103,6 +112,8 @@ _defaults = [
     "http://localhost:3777",
     "http://localhost:5173",
     "http://localhost:5180",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5180",
 ]
 _allowed_origins = list(set(_explicit_origins + _defaults))
 
@@ -167,11 +178,12 @@ except Exception as e:
     logger.warning(f"Could not ensure rollover_days table: {e}")
 
 # Start background results checker (every 6h) — World Cup rollover chains
-try:
-    from leagues.results_checker import start_background_loop as _start_results_loop
-    _start_results_loop()
-except Exception as e:
-    logger.warning(f"Could not start results checker: {e}")
+if BACKGROUND_JOBS_ENABLED:
+    try:
+        from leagues.results_checker import start_background_loop as _start_results_loop
+        _start_results_loop()
+    except Exception as e:
+        logger.warning(f"Could not start results checker: {e}")
 
 
 def _start_prediction_settlement_loop():
@@ -202,10 +214,11 @@ def _start_prediction_settlement_loop():
     logger.info("Prediction settlement loop started (12h interval)")
 
 
-try:
-    _start_prediction_settlement_loop()
-except Exception as e:
-    logger.warning(f"Could not start prediction settlement loop: {e}")
+if BACKGROUND_JOBS_ENABLED:
+    try:
+        _start_prediction_settlement_loop()
+    except Exception as e:
+        logger.warning(f"Could not start prediction settlement loop: {e}")
 
 
 def _start_telegram_bot_thread():
@@ -254,10 +267,11 @@ def _start_telegram_bot_thread():
     logger.info("Telegram bot started in supervised background thread")
 
 
-try:
-    _start_telegram_bot_thread()
-except Exception as e:
-    logger.warning(f"Could not start Telegram bot: {e}")
+if BACKGROUND_JOBS_ENABLED:
+    try:
+        _start_telegram_bot_thread()
+    except Exception as e:
+        logger.warning(f"Could not start Telegram bot: {e}")
 
 # Which publishing day has already had its "new predictions" alert. The loop
 # ticks every 15 minutes; without this it would announce the card four times an
@@ -395,7 +409,10 @@ def _start_daily_generation_loop():
     logger.info("Daily generation loop started (15 min checks, publishes 08:00 WAT)")
 
 
-_start_daily_generation_loop()
+if BACKGROUND_JOBS_ENABLED:
+    _start_daily_generation_loop()
+else:
+    logger.info("Background jobs disabled for this process")
 
 
 @app.get("/")
