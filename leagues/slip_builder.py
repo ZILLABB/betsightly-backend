@@ -155,7 +155,8 @@ def _best_per_fixture_group(pool: list) -> list:
 
 def build_slip(target: float, pool: list | None = None,
                max_legs: int = MAX_LEGS, market_cap: int | None = None,
-               horizon: str = DEFAULT_HORIZON) -> dict:
+               horizon: str = DEFAULT_HORIZON,
+               require_bookable: bool = True) -> dict:
     """The slip most likely to land at `target`, or an honest refusal."""
     from leagues.selection import MARKET_CAP
     cap = MARKET_CAP if market_cap is None else market_cap
@@ -164,6 +165,12 @@ def build_slip(target: float, pool: list | None = None,
         pool = _pool(horizon)
     if not pool:
         return {"ok": False, "reason": "No qualifying picks are available right now."}
+
+    if require_bookable:
+        pool = [pick for pick in pool if pick.get("bookable")]
+        if not pool:
+            return {"ok": False,
+                    "reason": "No exact SportyBet-bookable selections are available right now."}
 
     candidates = _best_per_fixture_group(pool)
 
@@ -241,8 +248,31 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
         return {"status": "error",
                 "reason": f"Horizon must be one of {sorted(HORIZONS)}."}
 
-    built = build_slip(target, pool=_pool(horizon, force=force),
-                       horizon=horizon)
+    qualified_pool = _pool(horizon, force=force)
+    try:
+        from leagues import sportybet
+        board = sportybet.fetch_board(force=True)
+        bookable_pool = []
+        for pick in qualified_pool:
+            fixture = pick["_fixture"]
+            availability = sportybet.availability_for(
+                board, fixture["home"]["name"], fixture["away"]["name"],
+                fixture.get("commence_time", ""), fixture.get("league", ""),
+                pick["market"])
+            if not availability.get("sportybet_available"):
+                continue
+            candidate = dict(pick)
+            candidate["bookable"] = True
+            candidate["sportybet_availability"] = availability
+            candidate["odds"] = availability["sportybet_odds"]
+            candidate["odds_are_real"] = True
+            bookable_pool.append(candidate)
+    except Exception as exc:
+        logger.warning(f"SportyBet pool revalidation failed: {exc}")
+        board, bookable_pool = {}, []
+
+    built = build_slip(target, pool=bookable_pool,
+                       horizon=horizon, require_bookable=True)
     if not built.get("ok"):
         return {"status": "unavailable", "horizon": horizon, **built}
 
@@ -268,9 +298,9 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
     # Book it. A slip nobody can place is only half the feature — but a failed
     # booking must not lose the slip, so this reports rather than raises.
     try:
-        from leagues import sportybet
         from leagues.booking import create_booking
-        out["booking"] = create_booking(games, sportybet.fetch_board())
+        out["booking"] = create_booking(
+            games, board, booking_status="FULL", predicted_odds=built["odds"])
     except Exception as e:
         logger.warning(f"slip booking failed: {e}")
         out["booking"] = {"status": "failed", "share_code": None,

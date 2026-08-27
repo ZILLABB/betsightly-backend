@@ -106,15 +106,15 @@ def test_kickoff_guard_separates_identically_named_clubs():
     """
     entry = {"kickoff_ms": 1787598000000}  # 2026-08-24T19:00:00Z
     assert sb._kickoff_ok(entry, "2026-08-24T19:00:00Z")
-    assert sb._kickoff_ok(entry, "2026-08-24T22:00:00Z")     # same match, feeds disagree
+    assert not sb._kickoff_ok(entry, "2026-08-24T22:00:00Z") # outside strict tolerance
     assert not sb._kickoff_ok(entry, "2026-08-27T15:00:00Z")  # different match
 
 
-def test_kickoff_guard_abstains_without_data():
-    """Missing timestamps cost coverage, never correctness."""
-    assert sb._kickoff_ok({"kickoff_ms": None}, "2026-08-24T19:00:00Z")
-    assert sb._kickoff_ok({"kickoff_ms": 1787598000000}, "")
-    assert sb._kickoff_ok({"kickoff_ms": 1787598000000}, "not-a-date")
+def test_kickoff_guard_rejects_missing_or_bad_data():
+    """Missing timestamps cannot silently bypass fixture identity."""
+    assert not sb._kickoff_ok({"kickoff_ms": None}, "2026-08-24T19:00:00Z")
+    assert not sb._kickoff_ok({"kickoff_ms": 1787598000000}, "")
+    assert not sb._kickoff_ok({"kickoff_ms": 1787598000000}, "not-a-date")
 
 
 # ── Margin arithmetic ──────────────────────────────────────
@@ -165,8 +165,8 @@ def test_partial_market_yields_price_but_no_margin():
     assert "home_win" not in parsed["margins"]
 
 
-def test_event_without_usable_prices_is_dropped():
-    assert sb._parse_event(_event([])) is None
+def test_event_without_prices_is_retained_for_market_diagnostics():
+    assert sb._parse_event(_event([]))["prices"] == {}
     assert sb._parse_event({"homeTeamName": "", "awayTeamName": "X"}) is None
 
 
@@ -189,16 +189,17 @@ def _board():
 
 def test_lookup_exact_and_fuzzy():
     board = _board()
-    assert sb.lookup(board, "Arsenal", "Chelsea")["event_id"] == "sr:match:Arsenal"
+    kickoff = "2026-08-24T19:00:00Z"
+    assert sb.lookup(board, "Arsenal", "Chelsea", kickoff)["event_id"] == "sr:match:Arsenal"
     # ESPN spells it "Hamburg SV"; the board says "Hamburger SV".
-    assert sb.lookup(board, "Hamburg SV", "SC Verl 1924") is not None
+    assert sb.lookup(board, "Hamburg SV", "SC Verl 1924", kickoff) is not None
 
 
 def test_exact_key_wins_over_fuzzy_candidates():
     """A name that resolves exactly is never put to the ambiguity scan."""
     board = _board()
     # "Chelsea FC" normalises to "chelsea", so this is the exact key.
-    assert sb.lookup(board, "Arsenal", "Chelsea FC", "")["event_id"] == "sr:match:Arsenal"
+    assert sb.lookup(board, "Arsenal", "Chelsea FC", "2026-08-24T19:00:00Z")["event_id"] == "sr:match:Arsenal"
 
 
 def test_lookup_rejects_ambiguity_rather_than_guessing():
@@ -292,3 +293,96 @@ def test_alias_keys_are_stored_normalised():
     for key in sb._ALIASES:
         assert key == " ".join(key.split()), key
         assert key == key.lower(), key
+
+
+# ── Complete catalogue and structured availability ─────────
+
+def _page_event(index, home="Home FC", away="Away FC"):
+    return {"eventId": f"e{index}", "homeTeamName": home,
+            "awayTeamName": away, "estimateStartTime": 1787598000000,
+            "markets": [{"id": "18", "specifier": "total=1.5", "outcomes": [
+                {"id": "12", "desc": "Over", "odds": "1.22", "isActive": True},
+                {"id": "13", "desc": "Under", "odds": "4.60", "isActive": True},
+            ]}]}
+
+
+def test_pagination_continues_until_declared_total(monkeypatch):
+    calls = []
+    def get(url):
+        page = int(url.split("pageNum=")[1])
+        calls.append(page)
+        count = 100 if page < 3 else 1
+        events = [_page_event((page - 1) * 100 + i,
+                              f"Home {page}-{i}", f"Away {page}-{i}")
+                  for i in range(count)]
+        return {"data": {"totalNum": 201,
+                         "tournaments": [{"name": "League", "events": events}]}}
+    monkeypatch.setattr(sb, "_get_json", get)
+    monkeypatch.setattr(sb, "_db_get", lambda key: None)
+    monkeypatch.setattr(sb, "_db_set", lambda key, value: None)
+    board = sb.fetch_board(force=True)
+    assert calls == [1, 2, 3]
+    assert sb.board_metadata(board)["is_complete"] is True
+    assert sb.board_metadata(board)["fetched_total"] == 201
+
+
+def test_incomplete_catalogue_does_not_claim_genuine_absence(monkeypatch):
+    monkeypatch.setattr(sb, "_db_get", lambda key: None)
+    monkeypatch.setattr(sb, "_db_set", lambda key, value: None)
+    monkeypatch.setattr(sb, "_get_json", lambda url: {
+        "data": {"totalNum": 300, "tournaments": [{
+            "name": "League", "events": [_page_event(int(url.split("pageNum=")[1]))]
+        }]}})
+    board = sb.fetch_board(max_pages=2, force=True)
+    assert sb.board_metadata(board)["is_complete"] is False
+    result = sb.match_fixture(board, "Missing", "Fixture",
+                              "2026-08-24T19:00:00Z")
+    assert result["status"] == "SPORTYBET_DATA_ERROR"
+
+
+def test_same_team_pair_on_multiple_dates_is_not_overwritten(monkeypatch):
+    events = [_page_event(1), _page_event(2)]
+    events[1]["estimateStartTime"] += 86400000
+    monkeypatch.setattr(sb, "_db_get", lambda key: None)
+    monkeypatch.setattr(sb, "_db_set", lambda key, value: None)
+    monkeypatch.setattr(sb, "_get_json", lambda url: {
+        "data": {"totalNum": 2, "tournaments": [{"name": "League",
+                                                   "events": events}]}})
+    board = sb.fetch_board(force=True)
+    assert len(board["home|away"]) == 2
+
+
+def _availability_board(outcomes=None, include_market=True, complete=True):
+    refs = ({"18|total=1.5": {"outcomes": outcomes if outcomes is not None else {
+        "12": {"active": True, "odds": 1.22},
+        "13": {"active": True, "odds": 4.6},
+    }}} if include_market else {})
+    return {"__meta__": {"is_complete": complete, "snapshot_id": "snap1"},
+            "home|away": [{"event_id": "e1", "home_team": "Home FC",
+                             "away_team": "Away FC", "home_squad": "",
+                             "away_squad": "", "kickoff_ms": 1787598000000,
+                             "competition": "Premier League", "prices": {},
+                             "margins": {}, "market_refs": refs}]}
+
+
+def test_exact_selection_availability_states():
+    args = ("Home FC", "Away FC", "2026-08-24T19:00:00Z",
+            "Premier League", "over_1_5")
+    assert sb.availability_for(_availability_board(), *args)["status"] == "BOOKABLE"
+    assert sb.availability_for(_availability_board(include_market=False), *args)["status"] == "MARKET_NOT_FOUND"
+    assert sb.availability_for(_availability_board(outcomes={}), *args)["status"] == "SELECTION_NOT_FOUND"
+    suspended = {"12": {"active": False, "odds": 1.22}}
+    assert sb.availability_for(_availability_board(suspended), *args)["status"] == "SELECTION_NOT_FOUND"
+    no_odds = {"12": {"active": True, "odds": None}}
+    assert sb.availability_for(_availability_board(no_odds), *args)["status"] == "ODDS_UNAVAILABLE"
+
+
+def test_kickoff_and_league_diagnostics_are_explicit():
+    board = _availability_board()
+    mismatch = sb.match_fixture(board, "Home FC", "Away FC",
+                                "2026-08-24T22:00:00Z", "Premier League")
+    assert mismatch["status"] == "KICKOFF_MISMATCH"
+    league = sb.match_fixture(board, "Home FC", "Away FC",
+                              "2026-08-24T19:00:00Z", "La Liga")
+    assert league["status"] == "MATCHED"
+    assert league["league_diagnostic"] == "LEAGUE_MISMATCH"

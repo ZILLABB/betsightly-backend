@@ -40,6 +40,14 @@ def test_expected_return_matches_this_slips_probability_and_odds():
     assert built["expected_return"] == pytest.approx(1.20)
 
 
+def test_slip_builder_requires_exact_sportybet_bookability():
+    pick = _pick()
+    pick["bookable"] = False
+    built = build_slip(2.0, pool=[pick], market_cap=10)
+    assert not built["ok"]
+    assert "SportyBet-bookable" in built["reason"]
+
+
 def test_rollover_rejects_markets_without_their_own_evidence():
     trusted = _pick("trusted", trusted=True)
     new_market = _pick("new", trusted=False)

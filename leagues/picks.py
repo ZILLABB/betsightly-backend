@@ -426,6 +426,20 @@ def build_picks(fixture: dict, model: dict,
             if mkt_prob:
                 edge = round(prob - mkt_prob, 4)
 
+        # Bookmaker availability is attached only after every prediction,
+        # calibration, ML-veto and value gate above has passed.  It describes
+        # whether this already-qualified prediction can be reproduced on
+        # SportyBet; it never changes the model probability.
+        try:
+            from leagues.sportybet import availability_from_fixture
+            sportybet_availability = availability_from_fixture(fixture, market)
+        except Exception as exc:
+            sportybet_availability = {
+                "status": "SPORTYBET_DATA_ERROR",
+                "sportybet_available": False,
+                "failure_reason": f"availability enrichment failed: {str(exc)[:120]}",
+            }
+
         picks.append({
             "match_id": fixture["match_id"],
             "market": market,
@@ -468,8 +482,9 @@ def build_picks(fixture: dict, model: dict,
             # Carried as a preference, never a filter. A pick that cannot be
             # booked is still a good pick, and dropping good picks to please
             # the bookmaker would be letting the tail wag the dog.
-            "bookable": bool(odds.get("sportybet_event_id")),
-            "sportybet_event_id": odds.get("sportybet_event_id"),
+            "bookable": bool(sportybet_availability.get("sportybet_available")),
+            "sportybet_event_id": sportybet_availability.get("event_id"),
+            "sportybet_availability": sportybet_availability,
             "edge": edge,
             "expected_value": round(prob * price - 1.0, 4),
             "_fixture": fixture,
@@ -548,6 +563,9 @@ def to_game(pick: dict) -> dict:
         "odds_are_real": pick["odds_are_real"],
         "odds_provider": pick["odds_provider"],
         "bookable": pick.get("bookable", False),
+        "sportybet_event_id": pick.get("sportybet_event_id"),
+        "sportybet_availability": pick.get("sportybet_availability"),
+        "market_margin": pick.get("market_margin"),
         "edge": pick["edge"],
         "expected_value": pick["expected_value"],
         "expected_goals": eg["total"],

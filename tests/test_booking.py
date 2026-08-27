@@ -72,6 +72,11 @@ def test_maps_a_tier_onto_selections():
 def test_the_three_way_market_maps_to_the_right_side():
     """1X2 outcome ids are Home=1, Draw=2, Away=3 — an easy place to slip."""
     board = _board()
+    board["arsenal|spurs"]["market_refs"] = {"1|": {"outcomes": {
+        "1": {"active": True, "odds": 1.8},
+        "2": {"active": True, "odds": 3.4},
+        "3": {"active": True, "odds": 4.2},
+    }}}
     for market, outcome in [("home_win", "1"), ("draw", "2"), ("away_win", "3")]:
         sels, _ = B.selections_for([_game("Arsenal", "Spurs", market)], board)
         assert sels[0]["outcomeId"] == outcome, market
@@ -82,7 +87,7 @@ def test_market_group_is_not_bookable():
     sels, unmapped = B.selections_for(
         [_game("Fulham", "Chelsea", "match_result")], _board())
     assert sels == []
-    assert "not bookable" in unmapped[0]["reason"]
+    assert "no SportyBet mapping" in unmapped[0]["reason"]
 
 
 def test_missing_market_key_is_not_bookable():
@@ -95,7 +100,7 @@ def test_fixture_absent_from_the_board_is_reported():
     sels, unmapped = B.selections_for(
         [_game("Someone", "Nobody", "over_1_5")], _board())
     assert sels == []
-    assert "not found" in unmapped[0]["reason"]
+    assert "not present" in unmapped[0]["reason"]
 
 
 def test_every_bookable_market_has_a_distinct_selection():
@@ -339,7 +344,7 @@ def test_store_survives_an_oversized_record():
         row = conn.execute(
             text("SELECT detail FROM tier_bookings WHERE publish_date=:d"
                  " AND tier='banker'"), {"d": DAY}).fetchone()
-    assert len(row[0]) <= 4000
+    assert len(row[0]) > 20000, "booking JSON must never be silently truncated"
 
 
 def test_bookings_for_tolerates_corrupt_rows():
@@ -447,11 +452,7 @@ def test_booking_drops_the_served_card_cache(monkeypatch):
 # ── Partial booking for singles ────────────────────────────
 
 def test_a_singles_tier_books_whatever_is_available(monkeypatch):
-    """Ten Over 1.5 picks are ten bets, so seven of them is seven bets.
-
-    Refusing the lot because three fixtures could not be matched is what left
-    that tier with no code at all — the seven bookable picks were fine.
-    """
+    """Available Over 1.5 legs may be shared, but the ticket is labelled."""
     sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",
              "specifier": "total=1.5"}]
     monkeypatch.setattr(B, "_post_share", lambda s: _share_response(sels))
@@ -462,6 +463,7 @@ def test_a_singles_tier_books_whatever_is_available(monkeypatch):
     assert record["status"] == "active"
     assert record["partial"] is True
     assert record["unbooked"] == ["Someone v Nobody"]
+    assert record["ticket_type"] == "accumulator"
 
 
 def test_an_accumulator_still_refuses_a_partial_slip(monkeypatch):
@@ -484,8 +486,8 @@ def test_a_complete_singles_tier_is_not_flagged_partial(monkeypatch):
     assert record["status"] == "active" and record["partial"] is False
 
 
-def test_book_card_allows_partial_only_for_singles(monkeypatch):
-    """The presentation field decides, not the tier name."""
+def test_book_card_does_not_misrepresent_an_invalid_one_leg_acca(monkeypatch):
+    """One surviving leg is insufficient for a multi-leg accumulator tier."""
     sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",
              "specifier": "total=1.5"}]
     monkeypatch.setattr(B, "_post_share", lambda s: _share_response(sels))
@@ -499,3 +501,91 @@ def test_book_card_allows_partial_only_for_singles(monkeypatch):
     })
     assert any(r.startswith("over_1_5") for r in report["booked"])
     assert any(r.startswith("5_odds") for r in report["failed"])
+
+
+# ── Replacement and accumulator partial variants ──────────
+
+def _exact_board():
+    board = _board()
+    board["__meta__"] = {"is_complete": True, "snapshot_id": "booking-snap"}
+    board["fulham|chelsea"]["market_refs"] = {
+        "18|total=1.5": {"outcomes": {
+            "12": {"active": True, "odds": 1.40},
+            "13": {"active": True, "odds": 4.6},
+        }}}
+    board["arsenal|spurs"]["market_refs"] = {"1|": {"outcomes": {
+        "1": {"active": True, "odds": 1.45},
+        "2": {"active": True, "odds": 3.4},
+        "3": {"active": True, "odds": 4.2},
+    }}}
+    return board
+
+
+def _qualified_game(home, away, market, confidence=.68, group="goals"):
+    return {**_game(home, away, market), "match_id": f"{home}-{away}",
+            "prediction_type": group, "confidence": confidence,
+            "odds": 1.3, "odds_are_real": True, "expected_value": .05,
+            "market_margin": .04, "safe_tier_eligible": True}
+
+
+def test_book_card_rebuilds_with_a_qualified_exactly_bookable_replacement(monkeypatch):
+    board = _exact_board()
+    last = {"selections": []}
+    def post(selections):
+        last["selections"] = selections
+        return _share_response(selections)
+    def read(_):
+        payload = _share_response(last["selections"])
+        payload["data"]["ticket"]["displayTotalOdds"] = "2.20"
+        return payload
+    monkeypatch.setattr(B, "_post_share", post)
+    monkeypatch.setattr(B, "_read_share", read)
+    monkeypatch.setattr("leagues.sportybet.fetch_board", lambda **k: board)
+    original = [_qualified_game("Fulham", "Chelsea", "over_1_5"),
+                _qualified_game("Missing", "Club", "home_win",
+                                group="match_result")]
+    candidates = [_qualified_game("Fulham", "Chelsea", "over_1_5"),
+                  _qualified_game("Arsenal", "Spurs", "home_win",
+                                  group="match_result")]
+    card = {"2_odds": {"games": original, "total_odds": 2.1,
+                        "booking_rule": {"selector": "accumulator", "target": 2,
+                                         "max_picks": 4, "min_confidence": .65,
+                                         "min_ev": .82, "band_low": .92,
+                                         "safe_only": True}},
+            "_booking_candidates": {"games": candidates}}
+    before = json.loads(json.dumps(original))
+    report = B.book_card(DAY, card)
+    record = B.bookings_for(DAY)["2_odds"]
+    assert report["booked"]
+    assert record["booking_status"] == "REBUILT_FULL"
+    assert record["replacement_count"] == 1
+    assert record["actual_sportybet_odds"] == 2.2
+    assert any(g["home_team"] == "Fulham" for g in record["final_booked_legs"])
+    assert original == before, "booking variants must not rewrite the prediction"
+
+
+def test_accumulator_falls_back_to_a_clearly_partial_ticket(monkeypatch):
+    board = _exact_board()
+    last = {"selections": []}
+    monkeypatch.setattr(B, "_post_share",
+                        lambda selections: last.update(selections=selections)
+                        or _share_response(selections))
+    monkeypatch.setattr(B, "_read_share",
+                        lambda code: _share_response(last["selections"]))
+    monkeypatch.setattr("leagues.sportybet.fetch_board", lambda **k: board)
+    original = [_qualified_game("Fulham", "Chelsea", "over_1_5"),
+                _qualified_game("Arsenal", "Spurs", "home_win",
+                                group="match_result"),
+                _qualified_game("Missing", "Club", "over_1_5")]
+    card = {"5_odds": {"games": original, "total_odds": 5.1,
+                        "booking_rule": {"selector": "accumulator", "target": 5,
+                                         "max_picks": 6, "min_confidence": .65,
+                                         "min_ev": .72}},
+            "_booking_candidates": {"games": []}}
+    B.book_card(DAY, card)
+    record = B.bookings_for(DAY)["5_odds"]
+    assert record["booking_status"] == "PARTIAL"
+    assert record["original_leg_count"] == 3
+    assert record["booked_leg_count"] == 2
+    assert record["excluded_leg_count"] == 1
+    assert record["ticket_type"] == "accumulator"

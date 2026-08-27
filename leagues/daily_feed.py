@@ -339,12 +339,14 @@ def build_daily_accumulators(force: bool = False) -> dict:
 
     rollover = _build_rollover(all_picks, today)
 
-    def mk_cat(sel, risk, reason_if_empty, presentation="accumulator"):
+    def mk_cat(sel, risk, reason_if_empty, presentation="accumulator",
+               booking_rule=None):
         picks_, total, joint = sel
         if not picks_:
             return {"selected": False, "games": [], "total_odds": 0,
                     "risk_level": risk, "hit_probability": 0,
-                    "presentation": presentation, "reason": reason_if_empty}
+                    "presentation": presentation, "reason": reason_if_empty,
+                    "booking_rule": booking_rule}
         return {
             "selected": True,
             # Ordered by kick-off so the card reads as the day runs: what is
@@ -360,6 +362,10 @@ def build_daily_accumulators(force: bool = False) -> dict:
             # multiplying singles together would state a risk nobody is taking.
             "hit_probability": round(joint, 3),
             "presentation": presentation,
+            # A list may remain independent predictions while the one share
+            # code which loads them is explicitly an accumulator ticket.
+            "sportybet_ticket_type": "accumulator",
+            "booking_rule": booking_rule,
             "reason": None,
         }
 
@@ -380,17 +386,44 @@ def build_daily_accumulators(force: bool = False) -> dict:
         "locked": False,
         "total_fixtures": len({p["match_id"] for p in day_picks}),
         "accumulators": {
-            "banker": mk_cat(banker, "Banker", "No pick met the banker threshold today."),
-            "2_odds": mk_cat(two, "Low", two_why),
-            "5_odds": mk_cat(five, "Medium", five_why),
-            "10_odds": mk_cat(ten, "High", ten_why),
+            "banker": mk_cat(
+                banker, "Banker", "No pick met the banker threshold today.",
+                booking_rule={"selector": "banker", "safe_only": True}),
+            "2_odds": mk_cat(
+                two, "Low", two_why,
+                booking_rule={"selector": "accumulator", "target": 2.0,
+                              "max_picks": 4, "min_confidence": FLOOR,
+                              "min_ev": 0.82, "band_low": 0.92,
+                              "safe_only": True}),
+            "5_odds": mk_cat(
+                five, "Medium", five_why,
+                booking_rule={"selector": "accumulator", "target": 5.0,
+                              "max_picks": 6,
+                              "min_confidence": MIN_CANDIDATE_CONFIDENCE,
+                              "min_ev": 0.72, "band_low": 0.80}),
+            "10_odds": mk_cat(
+                ten, "High", ten_why,
+                booking_rule={"selector": "accumulator", "target": 10.0,
+                              "max_picks": 8,
+                              "min_confidence": MIN_CANDIDATE_CONFIDENCE,
+                              "min_ev": 0.63, "band_low": 0.80}),
             "over_1_5": mk_cat(
                 (over_picks, over_total, over_avg) if over_picks else ([], 0, 0),
                 "Very Safe",
                 "No match cleared the Over 1.5 confidence bar today.",
                 presentation="singles",
+                booking_rule={"selector": "over_1_5", "min_confidence":
+                              OVER_MIN_CONFIDENCE, "max_picks": OVER_MAX_PICKS},
             ),
             "rollover": rollover,
+            # The locked prediction remains unchanged.  This bounded,
+            # deterministic snapshot only lets the later booking job find a
+            # qualifying replacement without rerunning the prediction engine.
+            "_booking_candidates": {
+                "games": _booking_candidate_snapshot(day_picks, limit=160),
+                "bounded": True,
+                "limit": 160,
+            },
         },
     }
 
@@ -418,6 +451,34 @@ def build_daily_accumulators(force: bool = False) -> dict:
 def _by_kickoff(games: list[dict]) -> list[dict]:
     """Order games by kick-off, earliest first."""
     return sorted(games, key=lambda g: (g.get("kickoff") or g.get("date") or "9999"))
+
+
+def _booking_candidate_snapshot(picks: list, limit: int = 160) -> list[dict]:
+    """Bounded deterministic, market/price-stratified qualified candidates."""
+    from leagues.picks import to_game
+    buckets: dict[tuple, list] = {}
+    for pick in picks:
+        price = float(pick.get("odds") or 1)
+        band = "short" if price < 1.35 else ("mid" if price < 1.7 else "long")
+        buckets.setdefault((pick.get("market_group"), band), []).append(pick)
+    for bucket in buckets.values():
+        bucket.sort(key=lambda p: (-p["confidence"], p["match_id"], p["market"]))
+    ordered, index = [], 0
+    keys = sorted(buckets)
+    while len(ordered) < limit:
+        progressed = False
+        for key in keys:
+            if index < len(buckets[key]):
+                game = to_game(buckets[key][index])
+                game.pop("added_at", None)
+                ordered.append(game)
+                progressed = True
+                if len(ordered) >= limit:
+                    break
+        if not progressed:
+            break
+        index += 1
+    return ordered
 
 
 def build_bookable_now() -> dict | None:
@@ -562,7 +623,8 @@ def _archive(date: str, accumulators: dict) -> None:
     except Exception:
         return
     for category, cat in accumulators.items():
-        if category == "rollover" or not cat.get("selected"):
+        if (category == "rollover" or category.startswith("_")
+                or not isinstance(cat, dict) or not cat.get("selected")):
             continue
         try:
             archive_slip(

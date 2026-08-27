@@ -29,8 +29,11 @@ does today.
 """
 
 import json
+import hashlib
 import logging
+import math
 import os
+import time
 import unicodedata
 import urllib.request
 
@@ -44,9 +47,47 @@ OPER_ID = os.getenv("SPORTYBET_OPER_ID", "2")  # Nigeria
 _MARKET_IDS = "1,18,10,29,11,19,20"
 
 _PAGE_SIZE = 100
-_MAX_PAGES = 12
+_MAX_PAGES = 40
 _CACHE_KEY = "sportybet_board"
 _CACHE_TTL_HOURS = 3.0
+try:
+    KICKOFF_TOLERANCE_MINUTES = max(
+        1, float(os.getenv("SPORTYBET_KICKOFF_TOLERANCE_MINUTES", "45")))
+except ValueError:
+    KICKOFF_TOLERANCE_MINUTES = 45.0
+
+
+# One canonical mapping used by pricing, candidate availability and booking.
+# Keeping these identifiers in two modules allowed the parser to say a market
+# existed while booking constructed a different selection tuple.
+MARKET_TO_SPORTYBET = {
+    "home_win":     ("1", "", "1"),
+    "draw":         ("1", "", "2"),
+    "away_win":     ("1", "", "3"),
+    "home_or_draw": ("10", "", "9"),
+    "home_or_away": ("10", "", "10"),
+    "away_or_draw": ("10", "", "11"),
+    "over_1_5":     ("18", "total=1.5", "12"),
+    "under_1_5":    ("18", "total=1.5", "13"),
+    "over_2_5":     ("18", "total=2.5", "12"),
+    "under_2_5":    ("18", "total=2.5", "13"),
+    "over_3_5":     ("18", "total=3.5", "12"),
+    "under_3_5":    ("18", "total=3.5", "13"),
+    "over_4_5":     ("18", "total=4.5", "12"),
+    "under_4_5":    ("18", "total=4.5", "13"),
+    "btts_yes":     ("29", "", "74"),
+    "btts_no":      ("29", "", "76"),
+    "dnb_home":     ("11", "", "4"),
+    "dnb_away":     ("11", "", "5"),
+    "home_over_0_5": ("19", "total=0.5", "12"),
+    "home_under_0_5": ("19", "total=0.5", "13"),
+    "home_over_1_5": ("19", "total=1.5", "12"),
+    "home_under_1_5": ("19", "total=1.5", "13"),
+    "away_over_0_5": ("20", "total=0.5", "12"),
+    "away_under_0_5": ("20", "total=0.5", "13"),
+    "away_over_1_5": ("20", "total=1.5", "12"),
+    "away_under_1_5": ("20", "total=1.5", "13"),
+}
 
 
 # ── Market vocabulary ──────────────────────────────────────
@@ -291,7 +332,7 @@ def _get_json(url: str, timeout: int = 30):
 
 
 def _parse_event(ev: dict) -> dict | None:
-    """One fixture's prices and per-market margins in our own vocabulary."""
+    """One fixture, including every exact market/outcome availability state."""
     home = ev.get("homeTeamName") or ""
     away = ev.get("awayTeamName") or ""
     if not home or not away:
@@ -299,53 +340,64 @@ def _parse_event(ev: dict) -> dict | None:
 
     prices: dict[str, float] = {}
     margins: dict[str, float] = {}
+    market_refs: dict[str, dict] = {}
+
+    def _active(value) -> bool:
+        # Some payloads omit isActive; an explicitly false/zero value is the
+        # only safe evidence that the outcome is suspended.
+        return value not in (False, 0, "0", "false", "False")
 
     for m in ev.get("markets") or []:
         mid = str(m.get("id") or "")
         spec = m.get("specifier") or ""
         outcomes = m.get("outcomes") or []
-
-        if mid in _FIXED:
-            mapping = _FIXED[mid]
-        elif mid in _OVER_UNDER and spec in _OVER_UNDER[mid]:
-            over_key, under_key = _OVER_UNDER[mid][spec]
-            mapping = {}
-            for o in outcomes:
-                desc = (o.get("desc") or "").lower()
-                if desc.startswith("over"):
-                    mapping[str(o.get("id"))] = over_key
-                elif desc.startswith("under"):
-                    mapping[str(o.get("id"))] = under_key
-        else:
+        canonical = {
+            key: outcome_id
+            for key, (market_id, wanted_spec, outcome_id)
+            in MARKET_TO_SPORTYBET.items()
+            if market_id == mid and wanted_spec == spec
+        }
+        if not canonical:
             continue
 
+        raw_outcomes = {str(o.get("id") or ""): o for o in outcomes}
         priced: dict[str, float] = {}
-        for o in outcomes:
-            key = mapping.get(str(o.get("id")))
-            if not key:
+        expected_keys: list[str] = []
+        market_key = f"{mid}|{spec}"
+        market_refs[market_key] = {"market_id": mid, "specifier": spec,
+                                   "outcomes": {}}
+
+        for key, outcome_id in canonical.items():
+            expected_keys.append(key)
+            o = raw_outcomes.get(outcome_id)
+            if o is None:
                 continue
+            active = _active(o.get("isActive", True))
+            raw_odds = o.get("odds")
             try:
-                price = float(o.get("odds"))
+                price = float(raw_odds)
             except (TypeError, ValueError):
-                continue
-            if price > 1.0:
+                price = None
+            valid_odds = price is not None and price > 1.0
+            market_refs[market_key]["outcomes"][outcome_id] = {
+                "outcome_id": outcome_id,
+                "active": active,
+                "odds": round(price, 3) if valid_odds else None,
+                "description": o.get("desc"),
+            }
+            if active and valid_odds:
                 priced[key] = price
 
-        # A margin only means something across a market's full set of
-        # outcomes. A partial quote — one side suspended — would read as a
-        # suspiciously cheap market and pull selection straight towards it.
-        if len(priced) < len(mapping) or not priced:
-            prices.update(priced)
-            continue
-
-        overround = sum(1.0 / p for p in priced.values()) / _COVERAGE.get(mid, 1.0)
-        margin = round(overround - 1.0, 5)
-        for key, price in priced.items():
-            prices[key] = round(price, 3)
-            margins[key] = margin
-
-    if not prices:
-        return None
+        # A margin only means something when every canonical outcome for that
+        # market is active and priced. A partial quote still keeps its valid
+        # prices but cannot masquerade as a suspiciously cheap market.
+        prices.update({key: round(price, 3) for key, price in priced.items()})
+        if expected_keys and len(priced) == len(expected_keys):
+            overround = (sum(1.0 / p for p in priced.values())
+                         / _COVERAGE.get(mid, 1.0))
+            margin = round(overround - 1.0, 5)
+            for key in priced:
+                margins[key] = margin
 
     return {
         "event_id": ev.get("eventId"),
@@ -356,20 +408,50 @@ def _parse_event(ev: dict) -> dict | None:
         "kickoff_ms": ev.get("estimateStartTime"),
         "prices": prices,
         "margins": margins,
+        "market_refs": market_refs,
     }
 
 
-def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
-    """The upcoming board keyed by "home|away". Cached; {} when unavailable."""
-    if not force:
-        cached = _db_get(_CACHE_KEY)
-        if cached:
-            import time
-            age_h = (time.time() - cached.get("fetched_at", 0)) / 3600.0
-            if age_h < _CACHE_TTL_HOURS and cached.get("fixtures"):
-                return cached["fixtures"]
+def board_metadata(board: dict | None) -> dict:
+    return dict((board or {}).get("__meta__") or {})
 
-    fixtures: dict[str, dict] = {}
+
+def _board_entries(board: dict | None):
+    """Yield entries from both the collision-safe and legacy test shapes."""
+    for key, value in (board or {}).items():
+        if key.startswith("__"):
+            continue
+        if isinstance(value, list):
+            for entry in value:
+                if isinstance(entry, dict):
+                    yield key, entry
+        elif isinstance(value, dict):
+            yield key, value
+
+
+def _snapshot(fixtures: dict, metadata: dict) -> dict:
+    return {"__meta__": metadata, **fixtures}
+
+
+def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
+    """Complete upcoming board, collision-safe and cached as one snapshot."""
+    cached = _db_get(_CACHE_KEY)
+    if not force and cached:
+        age_h = (time.time() - cached.get("fetched_at", 0)) / 3600.0
+        metadata = cached.get("metadata") or {}
+        # Old cache entries had no completeness metadata. Refetch them instead
+        # of reusing a board which may have silently stopped at page twelve.
+        if (age_h < _CACHE_TTL_HOURS and cached.get("fixtures")
+                and metadata.get("is_complete") is True):
+            return _snapshot(cached["fixtures"], metadata)
+
+    fixtures: dict[str, list[dict]] = {}
+    declared_total = 0
+    fetched_total = 0
+    page_count = 0
+    error = None
+    required_pages = 1
+
     try:
         for page in range(1, max_pages + 1):
             url = (f"{BASE_URL}/api/ng/factsCenter/pcUpcomingEvents"
@@ -377,83 +459,360 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
                    f"&pageSize={_PAGE_SIZE}&pageNum={page}")
             payload = _get_json(url)
             data = (payload or {}).get("data") or {}
+            if page == 1:
+                try:
+                    declared_total = max(0, int(data.get("totalNum") or 0))
+                except (TypeError, ValueError):
+                    declared_total = 0
+                required_pages = (math.ceil(declared_total / _PAGE_SIZE)
+                                  if declared_total else max_pages)
+
             tournaments = data.get("tournaments") or []
             if not tournaments:
+                # An empty page is complete only after the declared total has
+                # already been consumed. Otherwise it is a partial response.
+                if declared_total and fetched_total < declared_total:
+                    error = f"empty page {page} before declared total"
                 break
-            before = len(fixtures)
-            for t in tournaments:
-                for ev in t.get("events") or []:
+
+            page_count = page
+            page_events = 0
+            for tournament in tournaments:
+                for ev in tournament.get("events") or []:
+                    page_events += 1
                     parsed = _parse_event(ev)
                     if not parsed:
                         continue
-                    parsed["competition"] = t.get("name")
-                    key = f"{_norm(parsed['home_team'])}|{_norm(parsed['away_team'])}"
-                    fixtures[key] = parsed
-            if len(fixtures) == before:
+                    parsed["competition"] = tournament.get("name")
+                    key = (f"{_norm(parsed['home_team'])}|"
+                           f"{_norm(parsed['away_team'])}")
+                    bucket = fixtures.setdefault(key, [])
+                    # Pages can repeat a boundary event. Preserve genuinely
+                    # repeated fixtures on different dates, not duplicates.
+                    if not any(str(x.get("event_id")) == str(parsed.get("event_id"))
+                               for x in bucket):
+                        bucket.append(parsed)
+            fetched_total += page_events
+
+            if declared_total and fetched_total >= declared_total:
                 break
-            if len(fixtures) >= int(data.get("totalNum") or 0) > 0:
+            if page >= required_pages and not declared_total:
                 break
-    except Exception as e:
-        logger.warning(f"sportybet board fetch failed: {e}")
-        if not fixtures:
-            stale = _db_get(_CACHE_KEY)
-            return (stale or {}).get("fixtures") or {}
+
+        if declared_total and required_pages > max_pages:
+            error = (f"declared total needs {required_pages} pages; "
+                     f"defensive maximum is {max_pages}")
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {str(exc)[:180]}"
+        logger.warning(f"sportybet board fetch failed: {exc}")
+
+    is_complete = bool(declared_total and fetched_total >= declared_total
+                       and page_count >= required_pages and not error)
+    fetched_at = time.time()
+    snapshot_id = hashlib.sha256(
+        f"{fetched_at:.6f}|{declared_total}|{fetched_total}|{page_count}".encode()
+    ).hexdigest()[:16]
+    metadata = {
+        "snapshot_id": snapshot_id,
+        "declared_total": declared_total,
+        "fetched_total": fetched_total,
+        "page_count": page_count,
+        "required_pages": required_pages,
+        "is_complete": is_complete,
+        "fetched_at": fetched_at,
+        "error": error,
+    }
 
     if fixtures:
-        import time
-        _db_set(_CACHE_KEY, {"fetched_at": time.time(), "fixtures": fixtures})
-    logger.info(f"sportybet board: {len(fixtures)} fixtures priced")
-    return fixtures
+        _db_set(_CACHE_KEY, {"fetched_at": fetched_at, "fixtures": fixtures,
+                             "metadata": metadata})
+        board = _snapshot(fixtures, metadata)
+    else:
+        stale = cached or {}
+        stale_fixtures = stale.get("fixtures") or {}
+        stale_meta = dict(stale.get("metadata") or {})
+        stale_meta.update({"is_complete": False,
+                           "error": error or "no fixtures returned",
+                           "snapshot_id": stale_meta.get("snapshot_id")})
+        board = _snapshot(stale_fixtures, stale_meta) if stale_fixtures else {
+            "__meta__": metadata}
+
+    parsed_count = sum(1 for _ in _board_entries(board))
+    logger.info(
+        f"sportybet board: {parsed_count}/{declared_total or '?'} fixtures, "
+        f"{page_count} page(s), complete={is_complete}")
+    return board
 
 
-def _kickoff_ok(entry: dict, commence: str, tolerance_h: float = 6.0) -> bool:
-    """Whether a candidate fixture kicks off close enough to be the same match.
-
-    The guard that name matching cannot provide. Arsenal of London and Arsenal
-    de Sarandi normalise to the same single token, and no amount of string
-    care separates them — but they do not kick off within six hours of each
-    other. Where either feed is missing a time this abstains rather than
-    blocking, so a missing timestamp costs coverage but never correctness.
-    """
+def _kickoff_delta_minutes(entry: dict, commence: str) -> float | None:
     if not commence or not entry.get("kickoff_ms"):
-        return True
+        return None
     try:
         from datetime import datetime, timezone
         want = datetime.fromisoformat(commence.replace("Z", "+00:00"))
-        got = datetime.fromtimestamp(entry["kickoff_ms"] / 1000.0, tz=timezone.utc)
-        return abs((want - got).total_seconds()) <= tolerance_h * 3600
-    except Exception:
-        return True
-
-
-def lookup(board: dict, home: str, away: str,
-           commence: str = "") -> dict | None:
-    """One fixture's prices, tolerating naming differences between feeds."""
-    if not board:
+        if want.tzinfo is None:
+            want = want.replace(tzinfo=timezone.utc)
+        got = datetime.fromtimestamp(entry["kickoff_ms"] / 1000.0,
+                                     tz=timezone.utc)
+        return abs((want - got).total_seconds()) / 60.0
+    except (TypeError, ValueError, OSError):
         return None
+
+
+def _kickoff_ok(entry: dict, commence: str,
+                tolerance_h: float | None = None) -> bool:
+    """Strict time guard retained as a bool for existing callers/tests."""
+    delta = _kickoff_delta_minutes(entry, commence)
+    if delta is None:
+        return False
+    tolerance = (KICKOFF_TOLERANCE_MINUTES if tolerance_h is None
+                 else tolerance_h * 60.0)
+    return delta <= tolerance
+
+
+_COMPETITION_ALIASES = {
+    "carabao cup": "efl cup",
+    "english league cup": "efl cup",
+    "division profesional bolivia": "division profesional",
+    "división profesional bolivia": "division profesional",
+    "efl championship": "championship",
+}
+
+
+def _norm_competition(value: str) -> str:
+    n = (value or "").lower().translate(_LETTERS)
+    n = unicodedata.normalize("NFKD", n)
+    n = "".join(c for c in n if not unicodedata.combining(c))
+    n = " ".join("".join(c if c.isalnum() else " " for c in n).split())
+    return _COMPETITION_ALIASES.get(n, n)
+
+
+def _league_score(provider_league: str, sporty_competition: str) -> float:
+    a, b = _norm_competition(provider_league), _norm_competition(sporty_competition)
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    ta = {x for x in a.split() if len(x) > 2}
+    tb = {x for x in b.split() if len(x) > 2}
+    return len(ta & tb) / max(1, len(ta | tb))
+
+
+def match_fixture(board: dict, home: str, away: str, commence: str = "",
+                  league: str = "") -> dict:
+    """Resolve one provider fixture with explicit failure diagnostics."""
+    meta = board_metadata(board)
+    base = {"entry": None, "snapshot_id": meta.get("snapshot_id"),
+            "fixture_match_method": None, "fixture_match_confidence": 0.0,
+            "failure_reason": None, "league_diagnostic": None}
+    if not board or not any(True for _ in _board_entries(board)):
+        return {**base, "status": "SPORTYBET_DATA_ERROR",
+                "failure_reason": meta.get("error") or "SportyBet board unavailable"}
+
     h, a = _norm(home), _norm(away)
     hs, as_ = _squad(home), _squad(away)
-    hit = board.get(f"{h}|{a}")
-    if hit and _kickoff_ok(hit, commence):
-        return hit
-    # Both sides must agree, the squads must agree, and only one fixture may
-    # qualify. An ambiguous match is discarded rather than guessed: pricing a
-    # slip off the wrong fixture is a worse failure than showing an estimated
-    # price.
-    found = None
-    for key, val in board.items():
-        kh, ka = key.split("|", 1) if "|" in key else ("", "")
-        if not kh or not ka:
+    exact_key = f"{h}|{a}"
+    exact_values = board.get(exact_key) or []
+    if isinstance(exact_values, dict):
+        exact_values = [exact_values]
+
+    team_candidates: list[tuple[str, dict, str]] = []
+    for entry in exact_values:
+        if (entry.get("home_squad", "") == hs
+                and entry.get("away_squad", "") == as_):
+            team_candidates.append((exact_key, entry, "exact"))
+
+    if not team_candidates:
+        for key, entry in _board_entries(board):
+            kh, ka = key.split("|", 1) if "|" in key else ("", "")
+            if not kh or not ka:
+                continue
+            if (entry.get("home_squad", "") != hs
+                    or entry.get("away_squad", "") != as_):
+                continue
+            if _same_team(kh, h) and _same_team(ka, a):
+                team_candidates.append((key, entry, "normalized"))
+
+    if not team_candidates:
+        status = ("FIXTURE_NOT_FOUND" if (meta.get("is_complete") is True
+                  or ("is_complete" not in meta and bool(board)))
+                  else "SPORTYBET_DATA_ERROR")
+        why = ("fixture is not present on the complete SportyBet board"
+               if status == "FIXTURE_NOT_FOUND"
+               else "fixture missing from an incomplete SportyBet board")
+        return {**base, "status": status, "failure_reason": why}
+
+    timed: list[tuple[str, dict, str, float]] = []
+    unparsable = False
+    for key, entry, method in team_candidates:
+        delta = _kickoff_delta_minutes(entry, commence)
+        if delta is None:
+            unparsable = True
             continue
-        if val.get("home_squad", "") != hs or val.get("away_squad", "") != as_:
-            continue
-        if not _kickoff_ok(val, commence):
-            continue
-        if _same_team(kh, h) and _same_team(ka, a):
-            if found is not None:
-                return None
-            found = val
-    return found
+        if delta <= KICKOFF_TOLERANCE_MINUTES:
+            timed.append((key, entry, method, delta))
+
+    if not timed:
+        return {**base,
+                "status": "FIXTURE_MAPPING_FAILED" if unparsable else "KICKOFF_MISMATCH",
+                "failure_reason": ("kickoff timestamp missing or invalid"
+                                   if unparsable else
+                                   f"no team match within {KICKOFF_TOLERANCE_MINUTES} minutes")}
+
+    # Exact names and the nearest kickoff lead. League is supporting evidence
+    # and only resolves a collision; it can never override a team/time conflict.
+    ranked = sorted(
+        timed,
+        key=lambda item: (
+            item[2] == "exact",
+            _league_score(league, item[1].get("competition") or ""),
+            -item[3],
+        ),
+        reverse=True,
+    )
+    best = ranked[0]
+    if len(ranked) > 1:
+        first_key = (best[2] == "exact",
+                     round(_league_score(league, best[1].get("competition") or ""), 3),
+                     round(best[3], 2))
+        second = ranked[1]
+        second_key = (second[2] == "exact",
+                      round(_league_score(league, second[1].get("competition") or ""), 3),
+                      round(second[3], 2))
+        if first_key == second_key:
+            return {**base, "status": "FIXTURE_MAPPING_FAILED",
+                    "failure_reason": "multiple SportyBet fixtures match teams and kickoff"}
+
+    league_score = _league_score(league, best[1].get("competition") or "")
+    league_diag = "LEAGUE_MISMATCH" if league and league_score == 0 else None
+    confidence = 1.0 if best[2] == "exact" else 0.9
+    if best[3] > 5:
+        confidence -= 0.05
+    if league_diag:
+        confidence -= 0.1
+    return {**base, "status": "MATCHED", "entry": best[1],
+            "fixture_match_method": best[2],
+            "fixture_match_confidence": round(max(0.0, confidence), 2),
+            "league_diagnostic": league_diag}
+
+
+def availability_for(board: dict, home: str, away: str, commence: str,
+                     league: str, market: str) -> dict:
+    """Exact fixture + market + outcome + active odds availability."""
+    matched = match_fixture(board, home, away, commence, league)
+    base = {
+        "status": matched["status"], "sportybet_available": False,
+        "event_id": None, "market_id": None, "outcome_id": None,
+        "specifier": None, "sportybet_odds": None,
+        "fixture_match_method": matched.get("fixture_match_method"),
+        "fixture_match_confidence": matched.get("fixture_match_confidence", 0.0),
+        "failure_reason": matched.get("failure_reason"),
+        "board_snapshot_id": matched.get("snapshot_id"),
+        "league_diagnostic": matched.get("league_diagnostic"),
+    }
+    entry = matched.get("entry")
+    if matched["status"] != "MATCHED" or not entry:
+        return base
+
+    mapping = MARKET_TO_SPORTYBET.get(market)
+    if not mapping:
+        return {**base, "status": "MARKET_NOT_FOUND",
+                "event_id": entry.get("event_id"),
+                "failure_reason": f"market {market!r} has no SportyBet mapping"}
+    market_id, specifier, outcome_id = mapping
+    base.update({"event_id": entry.get("event_id"), "market_id": market_id,
+                 "outcome_id": outcome_id, "specifier": specifier or None})
+
+    refs = entry.get("market_refs")
+    if refs is None:
+        # Compatibility for old persisted snapshots and compact unit-test
+        # boards. A canonical price proves this exact selection was parsed.
+        price = (entry.get("prices") or {}).get(market)
+        if price and float(price) > 1.0:
+            return {**base, "status": "BOOKABLE", "sportybet_available": True,
+                    "sportybet_odds": float(price), "failure_reason": None}
+        return {**base, "status": "MARKET_NOT_FOUND",
+                "failure_reason": "requested market is not on the SportyBet event"}
+
+    market_ref = refs.get(f"{market_id}|{specifier}")
+    if not market_ref:
+        return {**base, "status": "MARKET_NOT_FOUND",
+                "failure_reason": "requested market is not on the SportyBet event"}
+    outcome = (market_ref.get("outcomes") or {}).get(outcome_id)
+    if not outcome:
+        return {**base, "status": "SELECTION_NOT_FOUND",
+                "failure_reason": "requested outcome is not on the SportyBet market"}
+    if not outcome.get("active", False):
+        return {**base, "status": "SELECTION_NOT_FOUND",
+                "failure_reason": "requested SportyBet outcome is suspended"}
+    price = outcome.get("odds")
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        price = None
+    if price is None or price <= 1.0:
+        return {**base, "status": "ODDS_UNAVAILABLE",
+                "failure_reason": "requested SportyBet outcome has no usable odds"}
+    return {**base, "status": "BOOKABLE", "sportybet_available": True,
+            "sportybet_odds": round(price, 3), "failure_reason": None}
+
+
+def availability_from_fixture(fixture: dict, market: str) -> dict:
+    """Selection availability after a fixture was enriched once per pipeline."""
+    odds = fixture.get("odds") or {}
+    match = fixture.get("_sportybet_match") or {}
+    mapping = MARKET_TO_SPORTYBET.get(market)
+    status = match.get("status") or "SPORTYBET_DATA_ERROR"
+    base = {
+        "status": status, "sportybet_available": False,
+        "event_id": odds.get("sportybet_event_id"),
+        "market_id": mapping[0] if mapping else None,
+        "outcome_id": mapping[2] if mapping else None,
+        "specifier": (mapping[1] or None) if mapping else None,
+        "sportybet_odds": None,
+        "fixture_match_method": match.get("fixture_match_method"),
+        "fixture_match_confidence": match.get("fixture_match_confidence", 0.0),
+        "failure_reason": match.get("failure_reason"),
+        "board_snapshot_id": (fixture.get("_sportybet_board_meta") or {}).get(
+            "snapshot_id") or odds.get("sportybet_snapshot_id"),
+        "league_diagnostic": match.get("league_diagnostic"),
+    }
+    if status != "MATCHED" or not odds.get("sportybet_event_id"):
+        return base
+    if not mapping:
+        return {**base, "status": "MARKET_NOT_FOUND",
+                "failure_reason": f"market {market!r} has no SportyBet mapping"}
+
+    market_id, specifier, outcome_id = mapping
+    refs = odds.get("sportybet_market_refs") or {}
+    market_ref = refs.get(f"{market_id}|{specifier}")
+    if not market_ref:
+        return {**base, "status": "MARKET_NOT_FOUND",
+                "failure_reason": "requested market is not on the SportyBet event"}
+    outcome = (market_ref.get("outcomes") or {}).get(outcome_id)
+    if not outcome:
+        return {**base, "status": "SELECTION_NOT_FOUND",
+                "failure_reason": "requested outcome is not on the SportyBet market"}
+    if not outcome.get("active", False):
+        return {**base, "status": "SELECTION_NOT_FOUND",
+                "failure_reason": "requested SportyBet outcome is suspended"}
+    price = outcome.get("odds")
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        price = None
+    if price is None or price <= 1.0:
+        return {**base, "status": "ODDS_UNAVAILABLE",
+                "failure_reason": "requested SportyBet outcome has no usable odds"}
+    return {**base, "status": "BOOKABLE", "sportybet_available": True,
+            "sportybet_odds": round(price, 3), "failure_reason": None}
+
+
+def lookup(board: dict, home: str, away: str, commence: str = "",
+           league: str = "") -> dict | None:
+    """Compatibility wrapper returning only a safely matched fixture."""
+    matched = match_fixture(board, home, away, commence, league)
+    return matched.get("entry") if matched.get("status") == "MATCHED" else None
 
 
 def apply_to_fixtures(fixtures: list[dict], board: dict | None = None) -> int:
@@ -478,12 +837,18 @@ def apply_to_fixtures(fixtures: list[dict], board: dict | None = None) -> int:
         return 0
 
     matched = 0
+    meta = board_metadata(board)
     for fx in fixtures:
         try:
-            hit = lookup(board, fx["home"]["name"], fx["away"]["name"],
-                         fx.get("commence_time", ""))
+            match = match_fixture(
+                board, fx["home"]["name"], fx["away"]["name"],
+                fx.get("commence_time", ""), fx.get("league", ""))
         except (KeyError, TypeError):
             continue
+        fx["_sportybet_match"] = {
+            key: value for key, value in match.items() if key != "entry"}
+        fx["_sportybet_board_meta"] = meta
+        hit = match.get("entry")
         if not hit:
             continue
         odds = dict(fx.get("odds") or {})
@@ -491,6 +856,9 @@ def apply_to_fixtures(fixtures: list[dict], board: dict | None = None) -> int:
         odds["margins"] = hit["margins"]
         odds["provider"] = "SportyBet"
         odds["sportybet_event_id"] = hit["event_id"]
+        odds["sportybet_market_refs"] = hit.get("market_refs")
+        odds["sportybet_competition"] = hit.get("competition")
+        odds["sportybet_snapshot_id"] = meta.get("snapshot_id")
         fx["odds"] = odds
         matched += 1
     return matched
@@ -498,16 +866,21 @@ def apply_to_fixtures(fixtures: list[dict], board: dict | None = None) -> int:
 
 def board_status() -> dict:
     """What the cache holds, for the admin dashboard and health checks."""
-    import time
     cached = _db_get(_CACHE_KEY) or {}
     fixtures = cached.get("fixtures") or {}
-    margins = [m for f in fixtures.values() for m in (f.get("margins") or {}).values()]
+    metadata = cached.get("metadata") or {}
+    board = _snapshot(fixtures, metadata)
+    entries = [entry for _, entry in _board_entries(board)]
+    margins = [m for f in entries for m in (f.get("margins") or {}).values()]
     out = {
-        "fixtures": len(fixtures),
+        "fixtures": len(entries),
         "cache_age_hours": (round((time.time() - cached["fetched_at"]) / 3600.0, 2)
                             if cached.get("fetched_at") else None),
         "base_url": BASE_URL,
         "priced_markets": len(margins),
+        **{k: metadata.get(k) for k in (
+            "snapshot_id", "declared_total", "fetched_total", "page_count",
+            "required_pages", "is_complete", "error")},
     }
     if margins:
         margins.sort()
