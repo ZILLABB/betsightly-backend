@@ -4,7 +4,7 @@ PostgreSQL persistence for the rollover chain.
 The chain previously lived in worldcup/data/wc_rollover_chain.json, which
 gets wiped on every Render container restart (no persistent disk on the
 Starter plan). Now persisted in the same Postgres that the rest of the
-app uses, so the 10-day chain survives deploys.
+app uses, so the challenge survives deploys.
 
 Falls back to a no-op (returning empty chain / accepting writes silently)
 if the DB isn't available — so local dev still works.
@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 class RolloverDay(Base):
-    """One day-slot of the WC rollover chain (1-3 picks per row)."""
+    """One day-slot of the rollover challenge (up to 6 picks per row)."""
     __tablename__ = "wc_rollover_days"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     chain_start_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
-    day_number = Column(Integer, nullable=False)  # 1-10
+    day_number = Column(Integer, nullable=False)  # 1-TARGET_DAYS
     date = Column(String(10), nullable=False, index=True)
     picks = Column(Text, nullable=False)  # JSON list of pick dicts
     combined_odds = Column(Float, nullable=False)

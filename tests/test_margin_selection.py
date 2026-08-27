@@ -12,7 +12,8 @@ up would not be.
 import pytest
 
 from leagues.picks import ESTIMATE_MARGIN
-from leagues.selection import _mean_margin, select_accumulator, select_banker
+from leagues.selection import (_mean_margin, select_accumulator, select_banker,
+                               select_rollover_day)
 
 
 def _pick(match_id, confidence, odds, margin=None, group="goals_over",
@@ -157,3 +158,15 @@ def test_floor_and_ceiling_can_both_bind():
         picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
         band_low=0.90, min_ev=1.20, max_leg_ev=1.04)
     assert not none, "an impossible window should return nothing, not crash"
+
+
+def test_rollover_can_use_up_to_six_short_safe_legs_inside_2x_to_3x():
+    groups = ["goals_over", "goals_under", "match_result"]
+    picks = [
+        _pick(f"r{i}", 0.90, 1.13, 0.02, group=groups[i % len(groups)])
+        for i in range(7)
+    ]
+    chosen, combined, joint = select_rollover_day(picks)
+    assert len(chosen) == 6
+    assert 2.0 <= combined <= 3.0
+    assert joint == pytest.approx(0.9 ** 6, abs=0.001)

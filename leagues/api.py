@@ -16,6 +16,7 @@ Provides:
 """
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -295,6 +296,23 @@ _SLIP_CACHE: dict = {}
 _SLIP_TTL = 1800
 
 
+def _cached_slip_is_placeable(result: dict, now: datetime | None = None) -> bool:
+    """A cached code must still contain only matches a user can book."""
+    from leagues.daily_feed import BOOKING_BUFFER
+
+    now = now or datetime.now(timezone.utc)
+    cutoff = now + BOOKING_BUFFER
+    kickoffs = [g.get("kickoff") or g.get("date")
+                for g in (result.get("games") or [])]
+    if not kickoffs or any(not k for k in kickoffs):
+        return False
+    try:
+        return all(datetime.fromisoformat(k.replace("Z", "+00:00")) > cutoff
+                   for k in kickoffs)
+    except (TypeError, ValueError):
+        return False
+
+
 @router.get("/slip-builder/targets")
 async def slip_builder_targets():
     """The targets offered, and what each is actually worth."""
@@ -307,9 +325,8 @@ async def slip_builder_targets():
         "max": MAX_TARGET,
         "max_legs": MAX_LEGS,
         "horizons": sorted(HORIZONS),
-        "note": ("Longer slips give up more of the stake to the bookmaker's "
-                 "margin — every added leg costs about 5%. The expected "
-                 "return shown with each slip is what it is worth on average."),
+        "note": ("The return shown is the model's joint hit probability "
+                 "multiplied by the displayed odds. It is an estimate, not a guarantee."),
     }
 
 
@@ -323,7 +340,8 @@ async def slip_builder_generate(target: float, horizon: str = "week",
 
     key = (round(float(target), 2), horizon, _publish_date())
     hit = _SLIP_CACHE.get(key)
-    if hit and not refresh and (_t.time() - hit["ts"]) < _SLIP_TTL:
+    if (hit and not refresh and (_t.time() - hit["ts"]) < _SLIP_TTL
+            and _cached_slip_is_placeable(hit["result"])):
         return {**hit["result"], "cached": True}
 
     try:
@@ -604,8 +622,9 @@ async def rebuild_rollover():
     The chain used to aim at ~1.9x a day, which forced two legs around 65% and
     left each day landing about 43% of the time. A ten-day chain needs every
     day, so that design completed 0.43^10 — two chances in ten thousand — and
-    it duly went 0 for 4 with every loss caused by the second leg. Days are now
-    a single pick near 80%.
+    it duly went 0 for 4 with every loss caused by the second leg. The current
+    challenge is three days, with each day constrained to 2x–3x and no more
+    than six evidence-backed picks.
 
     Days already published for future dates still carry the old two-leg build,
     so they are dropped and regenerated. Settled days are never touched: the

@@ -773,6 +773,16 @@ def check_all_pending() -> Dict[str, int]:
                     summary["still_pending"] += 1
 
             db.commit()
+            # The daily endpoint caches the locked card for 15 minutes. Its
+            # rollover section is refreshed from these rows, so leaving the
+            # cache intact makes a settled day continue to display as pending
+            # until both backend and frontend caches expire.
+            if summary["marked_won"] or summary["marked_lost"]:
+                try:
+                    from leagues.daily_feed import _accum_cache
+                    _accum_cache.update({"result": None, "ts": 0.0})
+                except Exception:
+                    pass
             _last_successful_check = datetime.now(timezone.utc).isoformat()
             logger.info(f"Results check complete: {summary}")
             return summary

@@ -47,6 +47,11 @@ PUBLISH_HOUR_WAT = 8
 BOOKING_BUFFER = timedelta(minutes=20)
 
 
+def _trusted_rollover_picks(picks: list) -> list:
+    """Markets with enough settled evidence for the site's safest challenge."""
+    return [p for p in picks if p.get("safe_tier_eligible")]
+
+
 def _wat_now() -> datetime:
     return datetime.now(timezone.utc) + WAT_OFFSET
 
@@ -575,7 +580,7 @@ def _archive(date: str, accumulators: dict) -> None:
 # ── Rollover chain ─────────────────────────────────────────
 
 def _build_rollover(all_picks: list, today: str) -> dict:
-    """10-day chain, one slot per match day, persisted to Postgres."""
+    """Short chain, one slot per match day, persisted to Postgres."""
     from leagues.engine import picks_for_date
     from leagues.selection import select_rollover_day
     from leagues.picks import to_game
@@ -654,7 +659,12 @@ def _build_rollover(all_picks: list, today: str) -> dict:
             break
         if date <= last_date:
             continue
-        chosen, combined, joint = select_rollover_day(by_date[date])
+        # A challenge advertised as the safest route cannot be where a new,
+        # uncalibrated market collects its first results.  Require the same
+        # 25-leg evidence gate as Banker and 2 Odds; an empty day is safer than
+        # another Under 3.5 leg with no settled record.
+        trusted = _trusted_rollover_picks(by_date[date])
+        chosen, combined, joint = select_rollover_day(trusted)
         if not chosen:
             continue
         # Earliest kick-off first, matching the category cards. The rollover
@@ -697,6 +707,8 @@ def _build_rollover(all_picks: list, today: str) -> dict:
                     "odds_are_real": p["odds_are_real"],
                     "confidence": p["confidence"],
                     "raw_confidence": p.get("raw_confidence"),
+                    "safe_tier_eligible": p.get("safe_tier_eligible", False),
+                    "calibration_sample": p.get("calibration_sample", 0),
                     "status": "pending",
                 }
                 for p in chosen

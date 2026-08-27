@@ -36,14 +36,14 @@ nothing selection can key on predicts a leg beating its own stated confidence
 import collections
 import logging
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
 # Targets the UI offers. Capped at 100 deliberately: past that the leg count
 # climbs fast and every leg is another slice of the bookmaker's margin, so the
 # product stops being a bet and becomes a lottery ticket. 100 already needs
-# fifteen legs and returns about 42 in every 100 staked.
+# roughly fifteen legs on a typical board.
 TARGETS = [10, 20, 30, 50, 70, 100]
 MAX_TARGET = 100
 MIN_TARGET = 2
@@ -63,13 +63,12 @@ POOL_DAYS = 7
 #   today   12 legs, 51.7x, lands 1.88%, legs averaging 72% confidence
 #   week    13 legs, 60.2x, lands 3.98%, legs averaging 78%
 #
-# The week is twice as likely to come in and made of better picks, because 526
-# fixtures simply contain more good ones than 31 do. What it costs is time: it
-# settles over seven days rather than tonight. Someone who wants a result this
-# evening is not making a mistake by choosing the worse odds, so both are
-# offered and the difference is stated.
+# A week-sized board can contain higher-confidence combinations than one day.
+# What it costs is time: it settles over seven WAT dates rather than tonight.
+# Both horizons remain because that timing trade-off is a real user choice.
 HORIZONS = {"today": 1, "week": POOL_DAYS}
 DEFAULT_HORIZON = "week"
+WAT = timezone(timedelta(hours=1))
 
 # Reached within this fraction of the target and it counts as a hit. Prices
 # move in coarse steps, so insisting on exactly 50.0 would reject a 48.6x slip
@@ -81,8 +80,7 @@ BAND_HIGH = 1.45
 # How close two picks must be on cost before the bookmaker's cut decides
 # between them. Sorting on cost alone drifted into the dearest markets on the
 # board — double chance runs about two points above 1X2 — and a twelve-leg
-# slip multiplies that twelve times: the week horizon returned N39 per N100
-# against today's N57 largely on margin, not on merit.
+# slip multiplies that many times, so margin remains a useful tie-breaker.
 _COST_TIE_BAND = 0.02
 
 
@@ -115,10 +113,7 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
 
     now_dt = datetime.now(timezone.utc)
     now = now_dt.isoformat().replace("+00:00", "Z")
-    days = HORIZONS.get(horizon, POOL_DAYS)
-    # Inclusive of the last day: a "today" slip may use anything kicking off
-    # before midnight, not only the next few hours.
-    until = (now_dt + timedelta(days=days)).strftime("%Y-%m-%d") + "T23:59:59Z"
+    until = _horizon_end(now_dt, horizon).isoformat().replace("+00:00", "Z")
 
     out = []
     for p in picks:
@@ -133,6 +128,20 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
         if p["confidence"] >= floor:
             out.append(p)
     return out
+
+
+def _horizon_end(now_dt: datetime, horizon: str) -> datetime:
+    """Inclusive end of a 1- or 7-calendar-day horizon in audience time.
+
+    ``today`` used to add one full day and then round to midnight, so it
+    included tomorrow as well.  BetSightly publishes in WAT; defining the
+    calendar there keeps "today" true around UTC midnight too.
+    """
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=timezone.utc)
+    days = HORIZONS.get(horizon, POOL_DAYS)
+    wat_date = now_dt.astimezone(WAT).date() + timedelta(days=days - 1)
+    return datetime.combine(wat_date, time.max, tzinfo=WAT).astimezone(timezone.utc)
 
 
 def _best_per_fixture_group(pool: list) -> list:
@@ -194,14 +203,12 @@ def build_slip(target: float, pool: list | None = None,
     if odds > target * BAND_HIGH:
         logger.info(f"slip for {target}x overshot to {odds:.1f}x")
 
-    from leagues.picks import ESTIMATE_MARGIN
-    # Expected return per unit staked. Every leg multiplies in another slice of
-    # the book's cut, so this falls as the slip lengthens — which is the single
-    # most important number on the screen and the one nobody else shows.
-    ev = 1.0
-    for p in legs:
-        m = p.get("market_margin")
-        ev *= 1.0 / (1.0 + ((ESTIMATE_MARGIN - 1.0) if m is None else m))
+    # Model-estimated return per unit staked is the chance every leg lands
+    # multiplied by the actual combined payout.  The previous implementation
+    # multiplied generic market margins instead, which described a theoretical
+    # bookmaker rather than the slip on screen and could disagree materially
+    # with its own displayed probability and odds.
+    expected_return = joint * odds
 
     return {
         "ok": True,
@@ -209,7 +216,7 @@ def build_slip(target: float, pool: list | None = None,
         "odds": round(odds, 2),
         "legs": len(legs),
         "hit_probability": round(joint, 5),
-        "expected_return": round(ev, 4),
+        "expected_return": round(expected_return, 4),
         "avg_confidence": round(sum(p["confidence"] for p in legs) / len(legs), 4),
         "bookable_legs": sum(1 for p in legs if p.get("bookable")),
         "picks": legs,
