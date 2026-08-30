@@ -176,64 +176,6 @@ def _dedupe_by_fixture(legs: list[dict]) -> list[dict]:
     return out
 
 
-def _value_bets(days_ahead: int = 2, limit: int = 5) -> list[dict]:
-    """Genuine +EV bets, or an empty list when the shop is unavailable.
-
-    Wrapped because this is the one part of the dataset that reaches a paid
-    third-party API with a monthly credit budget. A marketing job must never
-    be the reason the budget is spent or the reason a post fails.
-    """
-    try:
-        from leagues.engine import run_pipeline
-        from leagues.odds_shop import shop_odds, lookup, SLUG_TO_ODDS_KEY
-        from collections import Counter
-
-        _, fixtures = run_pipeline(days_ahead=days_ahead)
-        ranked = [s for s, _ in Counter(f["league_slug"] for f in fixtures).most_common()
-                  if s in SLUG_TO_ODDS_KEY]
-        shopped = shop_odds(ranked[:6])
-        if not shopped:
-            return []
-
-        rows = []
-        for f in fixtures:
-            hit = lookup(shopped, f["home"]["name"], f["away"]["name"])
-            if not hit:
-                continue
-            for outcome, o in hit["outcomes"].items():
-                cp, bp = o.get("consensus_prob"), o.get("best_price")
-                if not cp or not bp:
-                    continue
-                ev = cp * bp - 1
-                if ev < 0.02:
-                    continue
-                label = {"home_win": f["home"]["name"],
-                         "away_win": f["away"]["name"]}.get(outcome, "Draw")
-                rows.append({
-                    "match_id": f["match_id"],
-                    "home_team": f["home"]["name"],
-                    "away_team": f["away"]["name"],
-                    "league": f["league"],
-                    "kickoff": f["commence_time"],
-                    "prediction": f"{label} Win" if outcome != "draw" else "Draw",
-                    "confidence": round(cp, 4),
-                    "odds": bp,
-                    "book": o.get("best_book"),
-                    "book_count": o.get("books"),
-                    "edge_pct": round(ev * 100, 1),
-                    "slug": match_slug(f["home"]["name"], f["away"]["name"]),
-                    # Exchange prices are quoted before commission, which eats
-                    # 2-5% of a thin edge. Channels must be able to say so.
-                    "is_exchange": (o.get("best_book") or "").lower() in
-                        ("betfair", "smarkets", "matchbook", "betdaq"),
-                })
-        rows.sort(key=lambda r: -r["edge_pct"])
-        return rows[:limit]
-    except Exception as e:
-        logger.warning(f"growth: value bets unavailable ({e})")
-        return []
-
-
 def _recent_results(days: int = 7) -> dict:
     """Yesterday's settled slips plus the running record."""
     try:
@@ -312,7 +254,7 @@ def _recent_results(days: int = 7) -> dict:
                 "by_category": {}}
 
 
-def build(include_value_bets: bool = True) -> Optional[dict]:
+def build() -> Optional[dict]:
     """The day's marketing dataset, or None when nothing is published yet.
 
     Returns None rather than an empty skeleton so a caller cannot mistake
@@ -363,7 +305,6 @@ def build(include_value_bets: bool = True) -> Optional[dict]:
         "banker": tiers["banker"],
         "over_1_5": tiers["over_1_5"],
         "rollover": rollover,
-        "value_bets": _value_bets() if include_value_bets else [],
         "results": _recent_results(),
         "metadata": {
             "source": "leagues",

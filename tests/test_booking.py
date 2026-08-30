@@ -397,6 +397,18 @@ def test_fingerprint_tracks_the_market_not_just_the_fixture():
     assert B.leg_fingerprint(over) != B.leg_fingerprint(under)
 
 
+def test_selection_fingerprint_uses_exact_sportybet_tuple_and_ignores_order():
+    first = [
+        {"eventId": "e1", "marketId": "18", "outcomeId": "12",
+         "specifier": "total=1.5"},
+        {"eventId": "e2", "marketId": "1", "outcomeId": "1", "specifier": ""},
+    ]
+    changed = [dict(first[0], outcomeId="13"), first[1]]
+
+    assert B.selection_fingerprint(first) == B.selection_fingerprint(list(reversed(first)))
+    assert B.selection_fingerprint(first) != B.selection_fingerprint(changed)
+
+
 def test_a_changed_tier_is_rebooked_not_skipped(monkeypatch):
     sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",
              "specifier": "total=1.5"}]
@@ -589,3 +601,42 @@ def test_accumulator_falls_back_to_a_clearly_partial_ticket(monkeypatch):
     assert record["booked_leg_count"] == 2
     assert record["excluded_leg_count"] == 1
     assert record["ticket_type"] == "accumulator"
+
+
+def test_generated_booking_reuses_same_valid_fingerprint(monkeypatch):
+    games = [_game("Fulham", "Chelsea", "over_1_5")]
+    monkeypatch.setattr(B, "generated_booking_for", lambda _: {
+        "status": "active", "share_code": "HELD42",
+        "actual_sportybet_odds": 1.4,
+    })
+    monkeypatch.setattr(B, "validate_code_details",
+                        lambda code, selections: (True, "ok", 1.42))
+    monkeypatch.setattr(B, "create_booking",
+                        lambda *args, **kwargs: pytest.fail("minted a duplicate code"))
+
+    record = B.create_or_reuse_generated_booking(games, _board())
+
+    assert record["share_code"] == "HELD42"
+    assert record["code_reused"] is True
+    assert record["actual_sportybet_odds"] == 1.42
+
+
+def test_generated_booking_force_creates_and_persists_new_code(monkeypatch):
+    games = [_game("Fulham", "Chelsea", "over_1_5")]
+    stored = {}
+    monkeypatch.setattr(B, "generated_booking_for",
+                        lambda _: pytest.fail("force must bypass reuse"))
+    monkeypatch.setattr(B, "create_booking", lambda *args, **kwargs: {
+        "status": "active", "share_code": "NEW123",
+    })
+    monkeypatch.setattr(B, "_store_generated_booking",
+                        lambda fingerprint, record: stored.update({
+                            "fingerprint": fingerprint, "record": record,
+                        }))
+
+    record = B.create_or_reuse_generated_booking(
+        games, _board(), predicted_odds=1.4, force=True)
+
+    assert record["share_code"] == "NEW123"
+    assert record["code_reused"] is False
+    assert stored["record"]["share_code"] == "NEW123"

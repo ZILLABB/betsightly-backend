@@ -53,7 +53,7 @@ async def track(request: Request, payload: dict = Body(default={})):
             source=payload.get("utm_source"),
             medium=payload.get("utm_medium"),
             campaign=payload.get("utm_campaign"),
-            content_tag=payload.get("utm_content"),
+            content_tag=payload.get("content_tag") or payload.get("utm_content"),
             ref=payload.get("ref"),
             referrer=payload.get("referrer"),
             ip=ip,
@@ -178,11 +178,10 @@ async def admin_me(admin: str = Depends(require_admin)):
 # ── Admin: dataset + content ───────────────────────────────
 
 @router.get("/daily")
-async def growth_daily(admin: str = Depends(require_admin),
-                       value_bets: bool = Query(True)):
+async def growth_daily(admin: str = Depends(require_admin)):
     """Today's marketing dataset, exactly as the generators see it."""
     from growth.dataset import build
-    data = build(include_value_bets=value_bets)
+    data = build()
     if not data:
         raise HTTPException(404, "No published card yet today.")
     return {"status": "success", "data": data}

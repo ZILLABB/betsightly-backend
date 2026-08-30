@@ -9,8 +9,8 @@ are eight templates times seven platforms, and a rule enforced in fifty-six
 places is a rule that will eventually be missed in one of them. Everything
 funnels through `_finalise()`.
 
-A template that returns None means "nothing to say today" — no value bets, no
-settled results, a tier that could not be built. That is a normal outcome and
+A template that returns None means "nothing to say today" — no settled
+results, a tier that could not be built. That is a normal outcome and
 produces no content rather than an empty post.
 """
 

@@ -21,7 +21,6 @@ SITE = "https://www.betsightly.com"
 # Landing pages a piece of content can point at.
 LANDINGS = {
     "predictions": "/predictions",
-    "value": "/value",
     "results": "/results",
     "rollover": "/rollover",
     "home": "/",

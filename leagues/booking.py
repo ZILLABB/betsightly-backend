@@ -84,6 +84,10 @@ def _ensure_table(conn) -> None:
         " occurred_at VARCHAR(32) NOT NULL, publish_date VARCHAR(10),"
         " tier VARCHAR(24), league VARCHAR(160), market VARCHAR(64),"
         " reason VARCHAR(64), status VARCHAR(32), count INTEGER NOT NULL)"))
+    conn.execute(text(
+        "CREATE TABLE IF NOT EXISTS generated_bookings ("
+        " leg_fingerprint VARCHAR(64) PRIMARY KEY, share_code VARCHAR(32),"
+        " detail TEXT NOT NULL, created_at VARCHAR(32) NOT NULL)"))
 
 
 def _store(publish_date: str, tier: str, record: dict) -> None:
@@ -155,6 +159,49 @@ def bookings_for(publish_date: str) -> dict:
     return out
 
 
+def generated_booking_for(fingerprint: str) -> dict | None:
+    """A previously validated generated code for this exact normalized slip."""
+    from sqlalchemy import text
+    from database import engine
+    try:
+        with engine.begin() as conn:
+            _ensure_table(conn)
+            row = conn.execute(text(
+                "SELECT detail FROM generated_bookings "
+                "WHERE leg_fingerprint=:fingerprint"),
+                {"fingerprint": fingerprint}).fetchone()
+        return json.loads(row[0]) if row and row[0] else None
+    except Exception as exc:
+        logger.warning(f"generated booking lookup failed: {exc}")
+        return None
+
+
+def _store_generated_booking(fingerprint: str, record: dict) -> None:
+    from sqlalchemy import text
+    from database import engine
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        params = {
+            "fingerprint": fingerprint,
+            "code": record.get("share_code"),
+            "detail": json.dumps(record),
+            "created": now,
+        }
+        with engine.begin() as conn:
+            _ensure_table(conn)
+            updated = conn.execute(text(
+                "UPDATE generated_bookings SET share_code=:code, detail=:detail, "
+                "created_at=:created WHERE leg_fingerprint=:fingerprint"),
+                params).rowcount
+            if not updated:
+                conn.execute(text(
+                    "INSERT INTO generated_bookings "
+                    "(leg_fingerprint,share_code,detail,created_at) "
+                    "VALUES (:fingerprint,:code,:detail,:created)"), params)
+    except Exception as exc:
+        logger.warning(f"generated booking persist failed: {exc}")
+
+
 def _audit(publish_date: str, tier: str, status: str, games: list,
            reason: str | None = None, once: bool = False) -> None:
     """Durable counters; audit failure can never block prediction publishing."""
@@ -211,6 +258,18 @@ def leg_fingerprint(games: list) -> str:
         ]))
     parts.sort()
     return hashlib.md5("~".join(parts).encode()).hexdigest()[:16]
+
+
+def selection_fingerprint(selections: list) -> str:
+    """Stable identity of the exact SportyBet legs a generated code contains."""
+    import hashlib
+    parts = sorted("|".join([
+        str(selection.get("eventId") or ""),
+        str(selection.get("marketId") or ""),
+        str(selection.get("outcomeId") or ""),
+        str(selection.get("specifier") or ""),
+    ]) for selection in (selections or []))
+    return hashlib.sha256("~".join(parts).encode()).hexdigest()[:32]
 
 
 def selections_for(games: list, board: dict) -> tuple[list, list]:
@@ -445,6 +504,51 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
         "partial": bool(unmapped),
         "unbooked": [u["match"] for u in unmapped],
     }
+
+
+def create_or_reuse_generated_booking(games: list, board: dict,
+                                      predicted_odds: float | None = None,
+                                      force: bool = False) -> dict:
+    """Return one validated code per exact generated leg set.
+
+    The in-memory API cache is only an optimisation. This persisted fingerprint
+    lookup is what prevents a restart or second worker from minting another
+    code for an identical slip. Reuse still performs SportyBet readback, so an
+    expired or changed code is replaced rather than trusted blindly.
+    """
+    selections, unmapped = selections_for(games, board)
+    fingerprint = (selection_fingerprint(selections) if selections
+                   else leg_fingerprint(games))
+    if not force and selections and not unmapped:
+        prior = generated_booking_for(fingerprint)
+        code = (prior or {}).get("share_code")
+        expired = False
+        try:
+            expires = (prior or {}).get("expires_at")
+            expired = bool(expires and datetime.fromisoformat(
+                expires.replace("Z", "+00:00")) <= datetime.now(timezone.utc))
+        except (TypeError, ValueError):
+            expired = True
+        if (prior or {}).get("status") == "active" and code and not expired:
+            ok, _, actual_odds = validate_code_details(code, selections)
+            if ok:
+                reused = dict(prior)
+                reused.update({
+                    "code_reused": True,
+                    "readback_validation": "PASSED",
+                    "sportybet_selection_fingerprint": fingerprint,
+                })
+                if actual_odds is not None:
+                    reused["actual_sportybet_odds"] = actual_odds
+                return reused
+
+    record = create_booking(
+        games, board, booking_status="FULL", predicted_odds=predicted_odds)
+    record["code_reused"] = False
+    record["sportybet_selection_fingerprint"] = fingerprint
+    if record.get("status") == "active":
+        _store_generated_booking(fingerprint, record)
+    return record
 
 
 def _qualified_shape(game: dict) -> dict:

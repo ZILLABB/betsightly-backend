@@ -254,79 +254,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
     return {"heading": f"Today's Top {len(legs)}", "legs": legs, "url": url}
 
 
-# ── Template C — Value ─────────────────────────────────────
-
-def value_alert(data: dict, platform: str, ref: str | None = None) -> dict | None:
-    bets = data.get("value_bets") or []
-    if not bets:
-        return None
-    top = bets[0]
-    url = build_url("value", channel=platform, campaign="value_alert",
-                    content="value", ref=ref)
-    match = f"{top['home_team']} vs {top['away_team']}"
-    # The caveat travels with the number or the number is misleading.
-    caveat = (" (exchange price — before commission)" if top.get("is_exchange") else "")
-
-    if platform == "telegram":
-        lines = [
-            "\U0001f4b0 *Betsightly Value Alert*", "",
-            f"*{match}*", f"{top['league']}", "",
-            f"➡️ {top['prediction']}",
-            f"\U0001f3e6 Best price: {top['odds']:.2f} at {top['book']}{caveat}",
-            f"\U0001f4c8 Edge vs the market: +{top['edge_pct']}%",
-            f"\U0001f50d Compared across {top['book_count']} bookmakers",
-            "",
-            "_The edge only exists at the book named above — a different book "
-            "prices this differently._", "",
-            f"[More value bets]({url})",
-        ]
-        return {"text": "\n".join(lines), "parse_mode": "Markdown", "url": url}
-
-    if platform == "x":
-        return {"text": (
-            f"\U0001f4b0 Value Alert\n\n{match}\n"
-            f"{top['prediction']} @ {top['odds']:.2f} ({top['book']})\n"
-            f"+{top['edge_pct']}% vs {top['book_count']}-book consensus\n\n{url}"
-        ), "url": url}
-
-    if platform == "instagram":
-        return {"caption": (
-            f"\U0001f4b0 VALUE ALERT\n\n{match}\n{top['league']}\n\n"
-            f"{top['prediction']}\n"
-            f"Best price {top['odds']:.2f} at {top['book']}\n"
-            f"+{top['edge_pct']}% against a {top['book_count']}-book consensus\n\n"
-            f"The edge only exists at that book.\n\nLink in bio\n\n"
-            f"#bettingvalue #footballpredictions #valuebetting"
-        ), "url": url, "card": {"kind": "value", "bet": top}}
-
-    if platform == "facebook":
-        return {"text": (
-            f"\U0001f4b0 Value Alert\n\n{match} ({top['league']})\n"
-            f"{top['prediction']} — best price {top['odds']:.2f} at {top['book']}{caveat}\n"
-            f"That is +{top['edge_pct']}% against the consensus of {top['book_count']} bookmakers.\n\n"
-            f"The edge exists only at that book, not at whichever one you normally use.\n\n{url}"
-        ), "url": url}
-
-    if platform in ("tiktok", "youtube"):
-        return {
-            "hook": "This bookmaker is out of step with forty others.",
-            "script": [
-                f"{match}.",
-                f"Most books price {top['prediction']} around the same number.",
-                f"{top['book']} is offering {top['odds']:.2f}.",
-                f"Against the consensus of {top['book_count']} books, that is a {top['edge_pct']} percent edge.",
-                "You have to bet it at that book. Anywhere else, the edge is gone.",
-            ],
-            "cta": "Full value list on the site — link in bio.",
-            "title": f"Value Bet: {match}",
-            "description": f"+{top['edge_pct']}% edge at {top['book']}. {url}",
-            "url": url,
-        }
-
-    return {"heading": "Value Bets", "bets": bets, "url": url}
-
-
-# ── Template D — Accumulator (2 / 5 / 10 odds) ─────────────
+# ── Accumulator (2 / 5 / 10 odds) ──────────────────────────
 
 def accumulator(data: dict, platform: str, tier_key: str = "two_odds",
                 ref: str | None = None) -> dict | None:
@@ -549,7 +477,6 @@ def results(data: dict, platform: str, ref: str | None = None) -> dict | None:
 TEMPLATES = {
     "best_pick": best_pick,
     "daily_5": daily_5,
-    "value": value_alert,
     "two_odds": lambda d, p, ref=None: accumulator(d, p, "two_odds", ref),
     "five_odds": lambda d, p, ref=None: accumulator(d, p, "five_odds", ref),
     "ten_odds": lambda d, p, ref=None: accumulator(d, p, "ten_odds", ref),

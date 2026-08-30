@@ -298,9 +298,9 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
     # Book it. A slip nobody can place is only half the feature — but a failed
     # booking must not lose the slip, so this reports rather than raises.
     try:
-        from leagues.booking import create_booking
-        out["booking"] = create_booking(
-            games, board, booking_status="FULL", predicted_odds=built["odds"])
+        from leagues.booking import create_or_reuse_generated_booking
+        out["booking"] = create_or_reuse_generated_booking(
+            games, board, predicted_odds=built["odds"], force=force)
     except Exception as e:
         logger.warning(f"slip booking failed: {e}")
         out["booking"] = {"status": "failed", "share_code": None,
