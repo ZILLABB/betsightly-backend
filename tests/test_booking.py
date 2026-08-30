@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from database import engine
 from leagues import booking as B
+from leagues import daily_feed as D
 
 
 DAY = "1999-02-02"
@@ -52,6 +53,41 @@ def _board():
 def _game(home, away, market, kickoff="2026-08-24T19:00:00Z"):
     return {"home_team": home, "away_team": away, "market": market,
             "kickoff": kickoff, "prediction": f"{market} on {home}"}
+
+
+def test_available_now_books_every_selected_tier(monkeypatch):
+    """Replacement cards must never fall back to manual SportyBet entry."""
+    calls = []
+
+    def fake_create(games, board, **kwargs):
+        calls.append((games, board, kwargs))
+        return {"status": "active", "share_code": f"LIVE{len(calls)}",
+                "booking_status": "FULL"}
+
+    monkeypatch.setattr(B, "create_booking", fake_create)
+    tiers = {
+        "banker": {"selected": True, "games": [_game("A", "B", "home_win")],
+                   "total_odds": 1.5, "presentation": "accumulator"},
+        "2_odds": {"selected": True, "games": [_game("C", "D", "home_win")],
+                   "total_odds": 2.1, "presentation": "accumulator"},
+        "5_odds": {"selected": True, "games": [_game("E", "F", "home_win")],
+                   "total_odds": 5.2, "presentation": "accumulator"},
+        "10_odds": {"selected": True, "games": [_game("G", "H", "home_win")],
+                    "total_odds": 10.3, "presentation": "accumulator"},
+        "over_1_5": {"selected": True,
+                     "games": [_game("I", "J", "over_1_5")],
+                     "total_odds": 1.25, "presentation": "singles"},
+        "not_available": {"selected": False, "games": []},
+    }
+
+    result = D._attach_live_bookings(tiers, {"snapshot": "same-board"})
+
+    assert len(calls) == 5
+    assert [result[t]["booking"]["share_code"] for t in
+            ("banker", "2_odds", "5_odds", "10_odds", "over_1_5")] == [
+                "LIVE1", "LIVE2", "LIVE3", "LIVE4", "LIVE5"]
+    assert calls[-1][2]["allow_partial"] is True
+    assert all(call[2]["booking_status"] == "FULL" for call in calls)
 
 
 # ── Mapping ────────────────────────────────────────────────

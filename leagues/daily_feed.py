@@ -481,6 +481,34 @@ def _booking_candidate_snapshot(picks: list, limit: int = 160) -> list[dict]:
     return ordered
 
 
+def _attach_live_bookings(accumulators: dict, board: dict) -> dict:
+    """Create and validate a SportyBet code for every live replacement tier.
+
+    The available-now card is intentionally not persisted as the published
+    record, but that must not make it a manual-entry card.  Each selected tier
+    still goes through the same create -> read back -> exact-leg validation
+    path as the morning card and carries its own booking result in the API.
+    """
+    from leagues.booking import create_booking
+
+    for tier, data in (accumulators or {}).items():
+        if tier.startswith("_") or not isinstance(data, dict):
+            continue
+        games = data.get("games") or []
+        if not data.get("selected") or not games:
+            continue
+        data["booking"] = create_booking(
+            games,
+            board,
+            allow_partial=data.get("presentation") == "singles",
+            booking_status="FULL",
+            original_games=games,
+            predicted_odds=data.get("total_odds"),
+            ticket_type=data.get("sportybet_ticket_type", "accumulator"),
+        )
+    return accumulators
+
+
 def build_bookable_now() -> dict | None:
     """A slip built only from fixtures that have not kicked off yet.
 
@@ -511,7 +539,8 @@ def build_bookable_now() -> dict | None:
     today = now.strftime("%Y-%m-%d")
     live = [p for p in all_picks
             if p["_fixture"]["commence_time"] >= bookable_from
-            and p["_fixture"]["commence_time"][:10] == today]
+            and p["_fixture"]["commence_time"][:10] == today
+            and p.get("bookable")]
     if not live:
         return None
 
@@ -547,19 +576,28 @@ def build_bookable_now() -> dict | None:
                 "hit_probability": round(joint, 3),
                 "presentation": presentation, "reason": None}
 
+    accumulators = {
+        "banker": cat(banker, "Banker"),
+        "2_odds": cat(two, "Low"),
+        "5_odds": cat(five, "Medium"),
+        "10_odds": cat(ten, "High"),
+        "over_1_5": cat((over, over_total, over_avg) if over else ([], 0, 0),
+                        "Very Safe", presentation="singles"),
+    }
+
+    # Reuse the cached board populated by run_pipeline where possible.  A
+    # single snapshot is shared by every tier so the selections and codes are
+    # validated against the same view of SportyBet availability.
+    from leagues import sportybet
+    board = sportybet.fetch_board()
+    _attach_live_bookings(accumulators, board)
+
     return {
         "status": "success",
         "date": today,
         "generated_at": now.isoformat(),
         "kickoffs_remaining": len({p["match_id"] for p in live}),
-        "accumulators": {
-            "banker": cat(banker, "Banker"),
-            "2_odds": cat(two, "Low"),
-            "5_odds": cat(five, "Medium"),
-            "10_odds": cat(ten, "High"),
-            "over_1_5": cat((over, over_total, over_avg) if over else ([], 0, 0),
-                            "Very Safe", presentation="singles"),
-        },
+        "accumulators": accumulators,
     }
 
 
