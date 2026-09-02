@@ -301,6 +301,22 @@ def test_validation_survives_an_unreadable_code(monkeypatch):
 
 # ── Storage and idempotency ────────────────────────────────
 
+
+def test_replacement_cannot_reuse_fixture_reserved_by_another_tier(monkeypatch):
+    blocked = {"match_id": "shared", "market": "over_1_5",
+               "confidence": 0.90, "market_margin": 0.02}
+    allowed = {"match_id": "fresh", "market": "home_win",
+               "confidence": 0.75, "market_margin": 0.04}
+    monkeypatch.setattr(
+        B, "_select_bookable_variant",
+        lambda combo, rule: (combo, 2.0, combo[0]["confidence"]),
+    )
+    rebuilt = B._select_replacements(
+        [], [blocked, allowed], 1, {}, 1,
+        excluded_fixtures={"shared"},
+    )
+    assert [game["match_id"] for game in rebuilt] == ["fresh"]
+
 def test_booking_the_card_is_idempotent(monkeypatch):
     """The daily job may retry, and the in-process loop calls the same path."""
     sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",

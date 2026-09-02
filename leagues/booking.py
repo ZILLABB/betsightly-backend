@@ -634,14 +634,17 @@ def _replacement_details(original: list, final: list, unavailable: list) -> list
 
 def _select_replacements(available: list, candidates: list,
                          unavailable_count: int, rule: dict,
-                         original_count: int) -> list:
+                         original_count: int,
+                         excluded_fixtures: set | None = None) -> list:
     """Fill only missing slots, then verify with the tier's real selector."""
     if unavailable_count <= 0:
         return available
     used_fixtures = {g.get("match_id") for g in available}
+    excluded_fixtures = excluded_fixtures or set()
     used_signatures = {(g.get("match_id"), g.get("market")) for g in available}
     pool = [g for g in candidates
             if g.get("match_id") not in used_fixtures
+            and g.get("match_id") not in excluded_fixtures
             and (g.get("match_id"), g.get("market")) not in used_signatures]
     pool.sort(key=lambda g: (-g.get("confidence", 0),
                              g.get("market_margin") is None,
@@ -699,6 +702,20 @@ def book_card(publish_date: str, accumulators: dict,
     if snapshot:
         _audit(publish_date, "_qualified_pool", "QUALIFIED", snapshot, once=True)
 
+    # Reserve every fixture already assigned to another accumulator before
+    # looking for SportyBet replacements. Without this second-stage guard, a
+    # clean model card could become concentrated again during booking.
+    portfolio_originals = {
+        tier: {
+            game.get("match_id") for game in (data.get("games") or [])
+            if game.get("match_id")
+        }
+        for tier, data in (accumulators or {}).items()
+        if (not tier.startswith("_") and tier != "over_1_5"
+            and isinstance(data, dict))
+    }
+    claimed_replacements: set = set()
+
     for tier, data in (accumulators or {}).items():
         if tier.startswith("_"):
             continue
@@ -728,6 +745,12 @@ def book_card(publish_date: str, accumulators: dict,
         unchanged = (prior.get("leg_fingerprint") == leg_fingerprint(games))
         if prior.get("status") == "active" and unchanged and not force:
             report["skipped"].append(f"{tier}: {prior.get('share_code')}")
+            if tier != "over_1_5":
+                claimed_replacements.update(
+                    game.get("match_id")
+                    for game in (prior.get("final_booked_legs") or games)
+                    if game.get("match_id")
+                )
             continue
 
         predicted_odds = data.get("total_odds")
@@ -742,9 +765,15 @@ def book_card(publish_date: str, accumulators: dict,
             # Replacement is selected only from the locked, already-qualified
             # snapshot and with the exact same tier rule captured at publish.
             rule = data.get("booking_rule") or {}
+            excluded = set(claimed_replacements)
+            if tier != "over_1_5":
+                for other_tier, fixture_ids in portfolio_originals.items():
+                    if other_tier != tier:
+                        excluded.update(fixture_ids)
             rebuilt = _select_replacements(
                 available_original, bookable_candidates,
-                len(unavailable_original), rule, len(games))
+                len(unavailable_original), rule, len(games),
+                excluded_fixtures=excluded)
             if rebuilt:
                 replacements = _replacement_details(
                     games, rebuilt, unavailable_original)
@@ -782,6 +811,12 @@ def book_card(publish_date: str, accumulators: dict,
                         "reason": "no valid full, rebuilt, or partial ticket",
                     }
         _store(publish_date, tier, record)
+        if tier != "over_1_5":
+            claimed_replacements.update(
+                game.get("match_id")
+                for game in (record.get("final_booked_legs") or [])
+                if game.get("match_id")
+            )
         _audit(publish_date, tier, record.get("booking_status", "UNAVAILABLE"),
                games, record.get("reason"))
         if record["status"] == "active":
