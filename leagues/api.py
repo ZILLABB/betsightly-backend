@@ -384,6 +384,7 @@ async def get_results(days: int = 30, category: str | None = None):
     """
     try:
         from leagues.picks_db import get_history, performance_summary
+        from leagues.rollover_db import history as rollover_history
         history = get_history(limit_days=days, category=category)
 
         by_date: dict[str, dict] = {}
@@ -421,6 +422,7 @@ async def get_results(days: int = 30, category: str | None = None):
             "summary": summary,
             "totals": totals,
             "history": history,
+            "rollover_history": rollover_history(limit_days=days),
             "by_date": by_date,
         }
     except Exception as e:

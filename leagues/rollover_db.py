@@ -12,7 +12,7 @@ if the DB isn't available — so local dev still works.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Float
@@ -108,6 +108,36 @@ def load_chain(default_start_date: str) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"Rollover DB load failed (using empty chain): {e}")
         return {"start_date": default_start_date, "days": [], "status": "active"}
+
+
+def history(limit_days: int = 90) -> List[Dict[str, Any]]:
+    """Every rollover day in the window, across current and older chains."""
+    cutoff = (datetime.utcnow() - timedelta(days=max(1, limit_days))).strftime("%Y-%m-%d")
+    try:
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(RolloverDay)
+                .filter(RolloverDay.date >= cutoff)
+                .order_by(RolloverDay.date.desc(), RolloverDay.day_number.desc())
+                .all()
+            )
+            out = []
+            seen = set()
+            for row in rows:
+                key = (row.chain_start_date, row.day_number)
+                if key in seen:
+                    continue
+                seen.add(key)
+                item = _day_dict(row)
+                item["chain_start_date"] = row.chain_start_date
+                out.append(item)
+            return out
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Rollover history load failed: {e}")
+        return []
 
 
 def append_day(chain_start_date: str, day: Dict[str, Any]) -> bool:

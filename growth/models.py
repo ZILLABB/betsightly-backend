@@ -236,7 +236,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Times are UTC. WAT is UTC+1, so 07:00 UTC is the 08:00 WAT card publish.
     "schedule": {
         "daily_5": "07:30",
-        "value": "11:00",
+        "rollover": "07:35",
         "two_odds": "14:00",
         "results": "21:00",
     },
@@ -253,7 +253,14 @@ def get_setting(key: str, default: Any = None) -> Any:
             row = db.query(GrowthSetting).filter(GrowthSetting.key == key).first()
             if not row or row.value is None:
                 return DEFAULT_SETTINGS.get(key, default)
-            return json.loads(row.value)
+            value = json.loads(row.value)
+            if key == "schedule" and isinstance(value, dict):
+                # Existing installations keep their saved schedule row across
+                # deploys. Merge in newly supported templates and remove the
+                # retired Value post instead of requiring a manual DB edit.
+                value = {**DEFAULT_SETTINGS["schedule"], **value}
+                value.pop("value", None)
+            return value
         finally:
             db.close()
     except Exception:

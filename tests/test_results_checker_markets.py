@@ -1,8 +1,12 @@
 """Settlement coverage for every market the prediction engine publishes."""
 
+from datetime import datetime, timezone
+
 import pytest
 
-from leagues.results_checker import _evaluate_pick
+from leagues.results_checker import (
+    _evaluate_pick, _missing_result_expired, _rollover_day_status,
+)
 
 
 @pytest.mark.parametrize(
@@ -50,3 +54,24 @@ def test_legacy_goals_row_can_still_settle_from_its_label():
     pick = {"market": "goals", "prediction": "Under 3.5 Goals"}
     assert _evaluate_pick(pick, 2, 1) == "won"
 
+
+def test_missing_result_only_voids_after_the_reporting_grace():
+    pick = {"commence_time": "2026-08-30T20:00:00Z"}
+    assert not _missing_result_expired(
+        pick, datetime(2026, 9, 1, 19, 59, tzinfo=timezone.utc))
+    assert _missing_result_expired(
+        pick, datetime(2026, 9, 1, 20, 0, tzinfo=timezone.utc))
+
+
+@pytest.mark.parametrize(
+    "legs,expected",
+    [
+        (["won", "won"], "won"),
+        (["won", "void"], "won"),
+        (["void", "void"], "void"),
+        (["won", "pending"], "pending"),
+        (["won", "lost", "void"], "lost"),
+    ],
+)
+def test_rollover_day_settlement_handles_void_legs(legs, expected):
+    assert _rollover_day_status(legs) == expected

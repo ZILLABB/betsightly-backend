@@ -18,15 +18,15 @@ single day's 31 fixtures takes twelve legs averaging 72% confidence and lands
 78% and lands 3.98% — more than double, because a bigger board simply contains
 better picks, not because the search is cleverer.
 
-*The search is greedy on cost, not exhaustive.* `select_accumulator`
-enumerates combinations, which is right for a five-leg tier and impossible at
-thirteen. Ordering by
+*The search is a bounded multi-start search.* `select_accumulator` enumerates
+combinations, which is right for a five-leg tier and impossible at thirteen.
+Ordering by
 
     cost = -log(probability) / log(odds)
 
-buys the required log-odds as cheaply as possible in log-probability, which is
-the same objective the card's selector optimises, reached in n log n instead
-of combinatorially.
+buys the required log-odds as cheaply as possible in log-probability. Trying
+several strong starting legs avoids committing the ticket to the first greedy
+path when a nearby combination has a better chance of landing.
 
 What it does not do is create an edge. Measured across 393 settled legs,
 nothing selection can key on predicts a leg beating its own stated confidence
@@ -158,7 +158,9 @@ def build_slip(target: float, pool: list | None = None,
                horizon: str = DEFAULT_HORIZON,
                require_bookable: bool = True) -> dict:
     """The slip most likely to land at `target`, or an honest refusal."""
-    from leagues.selection import MARKET_CAP
+    from leagues.selection import (
+        MARKET_CAP, TEAM_TO_SCORE_CAP, exposure_group,
+    )
     cap = MARKET_CAP if market_cap is None else market_cap
 
     if pool is None:
@@ -174,22 +176,54 @@ def build_slip(target: float, pool: list | None = None,
 
     candidates = _best_per_fixture_group(pool)
 
-    seen_fixtures: set = set()
-    groups: collections.Counter = collections.Counter()
-    odds, joint, legs = 1.0, 1.0, []
+    def _candidate(seed: dict | None = None):
+        seen_fixtures: set = set()
+        groups: collections.Counter = collections.Counter()
+        exposures: collections.Counter = collections.Counter()
+        odds, joint, legs = 1.0, 1.0, []
 
-    for p in candidates:
-        if len(legs) >= max_legs:
-            break
-        if p["match_id"] in seen_fixtures or groups[p["market_group"]] >= cap:
-            continue
-        seen_fixtures.add(p["match_id"])
-        groups[p["market_group"]] += 1
-        odds *= p["odds"]
-        joint *= p["confidence"]
-        legs.append(p)
-        if odds >= target * BAND_LOW:
-            break
+        ordered = ([seed] if seed is not None else []) + candidates
+        for p in ordered:
+            if p in legs or len(legs) >= max_legs:
+                continue
+            group = p["market_group"]
+            exposure = exposure_group(group)
+            if p["match_id"] in seen_fixtures or groups[group] >= cap:
+                continue
+            if (exposure == "team_to_score"
+                    and exposures[exposure] >= TEAM_TO_SCORE_CAP):
+                continue
+            seen_fixtures.add(p["match_id"])
+            groups[group] += 1
+            exposures[exposure] += 1
+            odds *= p["odds"]
+            joint *= p["confidence"]
+            legs.append(p)
+            if odds >= target * BAND_LOW:
+                break
+        return odds, joint, legs
+
+    # Include the ordinary cost-first path, then seed the search with each of
+    # the strongest alternatives. This stays bounded on a live board while
+    # finding discrete combinations a single greedy pass misses.
+    attempts = [_candidate()]
+    attempts.extend(_candidate(seed) for seed in candidates[:48])
+    qualifying = [attempt for attempt in attempts
+                  if attempt[0] >= target * BAND_LOW]
+    if qualifying:
+        in_band = [attempt for attempt in qualifying
+                   if attempt[0] <= target * BAND_HIGH]
+        choices = in_band or qualifying
+        odds, joint, legs = max(
+            choices,
+            key=lambda attempt: (
+                attempt[1],
+                -abs(math.log(attempt[0] / target)),
+                -len(attempt[2]),
+            ),
+        )
+    else:
+        odds, joint, legs = max(attempts, key=lambda attempt: attempt[0])
 
     if odds < target * BAND_LOW:
         # Say which limit bit, because "not available" hides two different
@@ -248,10 +282,28 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
         return {"status": "error",
                 "reason": f"Horizon must be one of {sorted(HORIZONS)}."}
 
-    qualified_pool = _pool(horizon, force=force)
+    try:
+        qualified_pool = _pool(horizon, force=force)
+    except Exception as exc:
+        logger.warning(f"slip candidate refresh failed: {exc}")
+        return {
+            "status": "unavailable",
+            "horizon": horizon,
+            "reason": ("The prediction board could not be refreshed right "
+                       "now. Please try the build again shortly."),
+        }
     try:
         from leagues import sportybet
-        board = sportybet.fetch_board(force=True)
+        # A normal build should use the healthy cached live board. Forcing a
+        # network refresh on every click made valid builds fail on temporary
+        # SportyBet errors. Explicit regeneration still requests a refresh.
+        try:
+            board = sportybet.fetch_board(force=force)
+        except Exception:
+            if not force:
+                raise
+            logger.warning("Live SportyBet refresh failed; trying cached board")
+            board = sportybet.fetch_board(force=False)
         bookable_pool = []
         for pick in qualified_pool:
             fixture = pick["_fixture"]

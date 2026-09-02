@@ -44,6 +44,11 @@ SCORES_SPORTS_WC = ["soccer_fifa_world_cup"]
 
 _last_successful_check: Optional[str] = None
 
+# A result missing for this long is overwhelmingly likely to be postponed,
+# cancelled, or absent from the source rather than merely still in play.  At
+# that point only the missing leg is voided; known legs retain their results.
+MISSING_RESULT_GRACE = timedelta(hours=48)
+
 
 # ── ESPN scores fetcher (PRIMARY — no API key needed) ────────
 
@@ -602,6 +607,31 @@ def _already_checked_today(rows) -> bool:
         return False
 
 
+def _missing_result_expired(pick: dict, now: datetime | None = None) -> bool:
+    """Whether a scoreless fixture has had a fair result-reporting window."""
+    raw = pick.get("commence_time") or ""
+    if not raw:
+        return False
+    try:
+        kickoff = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    return (now or datetime.now(timezone.utc)) >= kickoff + MISSING_RESULT_GRACE
+
+
+def _rollover_day_status(results: list[str]) -> str:
+    """Settle an accumulator correctly when one or more legs are void."""
+    if not results or any(result == "pending" for result in results):
+        return "pending"
+    if any(result == "lost" for result in results):
+        return "lost"
+    if all(result == "void" for result in results):
+        return "void"
+    if all(result in ("won", "void") for result in results):
+        return "won"
+    return "pending"
+
+
 # ── Fuzzy team name matching ─────────────────────────────────
 
 def _fuzzy_match_team(pick_name: str, score_keys: list[str]) -> Optional[str]:
@@ -654,7 +684,9 @@ def _sync_chain_to_db():
 def check_all_pending() -> Dict[str, int]:
     """Scan all pending rollover days; mark won/lost where matches finished."""
     global _last_successful_check
-    summary = {"checked_chain_days": 0, "marked_won": 0, "marked_lost": 0, "still_pending": 0, "api_calls": 0, "source": "none"}
+    summary = {"checked_chain_days": 0, "marked_won": 0, "marked_lost": 0,
+               "marked_void": 0, "still_pending": 0, "api_calls": 0,
+               "source": "none"}
     try:
         from leagues.rollover_db import RolloverDay
         from database import SessionLocal
@@ -688,17 +720,12 @@ def check_all_pending() -> Dict[str, int]:
                 summary["still_pending"] = len(pending)
                 return summary
 
-            if _already_checked_today(checkable):
-                logger.info("Results check: already checked after today's last game — skipping")
-                summary["still_pending"] = len(pending)
-                return summary
-
             finished, source = _collect_finished_scores(checkable, has_club_picks=True)
             summary["source"] = source
             summary["api_calls"] = len(finished)
             if not finished:
-                logger.info("Results check: no finished matches from any source")
-                return summary
+                logger.info("Results check: no finished matches from any source; "
+                            "checking expired fixtures for voids")
 
             score_keys = list(finished.keys())
 
@@ -747,8 +774,14 @@ def check_all_pending() -> Dict[str, int]:
                                 logger.info(f"Day {row.day_number}: fuzzy matched '{home} vs {away}' → '{fuzzy_key}'")
 
                     if not match_data:
-                        logger.info(f"Day {row.day_number}: no score yet for {home} vs {away} (composite={composite})")
-                        pick_results.append("pending")
+                        if _missing_result_expired(pick):
+                            logger.warning(
+                                f"Day {row.day_number}: no score after 48h for "
+                                f"{home} vs {away}; voiding this leg only")
+                            pick_results.append("void")
+                        else:
+                            logger.info(f"Day {row.day_number}: no score yet for {home} vs {away} (composite={composite})")
+                            pick_results.append("pending")
                         continue
                     r = _evaluate_pick(pick, match_data["home_score"], match_data["away_score"])
                     logger.info(f"Day {row.day_number}: {home} vs {away} → {match_data['home_score']}-{match_data['away_score']} → {r}")
@@ -763,12 +796,16 @@ def check_all_pending() -> Dict[str, int]:
                         pick["status"] = outcome
                 row.picks = json.dumps(picks)
 
-                if any(r == "lost" for r in pick_results):
-                    row.status = "lost"
+                day_status = _rollover_day_status(pick_results)
+                if day_status == "lost":
+                    row.status = day_status
                     summary["marked_lost"] += 1
-                elif all(r == "won" for r in pick_results):
-                    row.status = "won"
+                elif day_status == "won":
+                    row.status = day_status
                     summary["marked_won"] += 1
+                elif day_status == "void":
+                    row.status = day_status
+                    summary["marked_void"] += 1
                 else:
                     summary["still_pending"] += 1
 
@@ -777,7 +814,7 @@ def check_all_pending() -> Dict[str, int]:
             # rollover section is refreshed from these rows, so leaving the
             # cache intact makes a settled day continue to display as pending
             # until both backend and frontend caches expire.
-            if summary["marked_won"] or summary["marked_lost"]:
+            if summary["marked_won"] or summary["marked_lost"] or summary["marked_void"]:
                 try:
                     from leagues.daily_feed import _accum_cache
                     _accum_cache.update({"result": None, "ts": 0.0})

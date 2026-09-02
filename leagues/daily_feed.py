@@ -14,6 +14,7 @@ chance every leg wins — so a 10x slip is presented as the long shot it is.
 
 import json
 import logging
+from math import prod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -215,37 +216,35 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # card was not making five bets, they were making one at triple stake, and
     # nothing on the site said so.
     #
-    # Safest tier first, so banker and 2 odds get first refusal on the best
-    # picks; the long tiers are built from longer prices anyway and lose least
-    # by being excluded. If a tier cannot be built from what is left it falls
-    # back to the full pool rather than going empty — on a thin day a shared
-    # leg beats no slip at all.
-    # Counted, not a flat set: on a thin day full independence is impossible —
-    # banker, 2 odds, 5 odds and 10 odds want thirteen legs and there may only
-    # be nine fixtures left after the booking buffer. Falling straight back to
-    # the whole pool put every tier back on the same picks, which is the exact
-    # failure this exists to stop, so the limit is relaxed one step at a time
-    # and stops at the first level that can actually build the tier.
-    fixture_uses: dict = {}
+    # Give the rollover first refusal on the best qualified combination. It is
+    # a multi-day chain, so duplicating one of its fixtures in a public tier
+    # turns one loss into two products failing at once.
+    rollover = _build_rollover(all_picks, today)
+
+    # A fixture is allowed in one accumulator product only. Previous fallback
+    # logic relaxed this to two and then unlimited reuse on a thin board; one
+    # bad game consequently killed several tiers together. An unavailable
+    # tier is more honest than presenting the same bet as diversification.
+    fixture_uses: dict = {
+        game.get("match_id"): 1
+        for game in rollover.get("games", [])
+        if game.get("match_id")
+    }
 
     def _tier(target, max_picks, floor, min_ev, band_low=0.80,
               safe_only=False):
-        sel, why = ([], 0.0, 0.0), None
         tier_picks = ([p for p in day_picks if p.get("safe_tier_eligible")]
                       if safe_only else day_picks)
-        for limit in (1, 2, None):
-            pool = ([p for p in tier_picks
-                     if fixture_uses.get(p["match_id"], 0) < limit]
-                    if limit is not None else tier_picks)
-            sel, why = _select_tier(pool, target, max_picks, floor, min_ev,
-                                    band_low=band_low)
-            if sel[0]:
-                break
+        pool = [p for p in tier_picks if p["match_id"] not in fixture_uses]
+        sel, why = _select_tier(pool, target, max_picks, floor, min_ev,
+                                band_low=band_low)
         for pick in sel[0]:
             fixture_uses[pick["match_id"]] = fixture_uses.get(pick["match_id"], 0) + 1
         return sel, why
 
-    safe_picks = [p for p in day_picks if p.get("safe_tier_eligible")]
+    safe_picks = [p for p in day_picks
+                  if p.get("safe_tier_eligible")
+                  and p["match_id"] not in fixture_uses]
     banker = select_banker(safe_picks)
     for _p in banker[0]:
         fixture_uses[_p["match_id"]] = fixture_uses.get(_p["match_id"], 0) + 1
@@ -256,14 +255,13 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # maximising landing alone drifts it down to 1.63x, which is not 2 odds.
     two, two_why = _tier(2.0, 4, FLOOR, 0.82, band_low=0.92,
                          safe_only=True)
-    # The long tiers reach down to the per-market floors, which lets them use
-    # a 1.60-1.80 leg from a market that has earned it instead of stacking six
-    # short ones. Fewer legs is worth a lot here: 5x from 3 legs at 1.80
-    # returns 0.84 and lands 14.4%, against 0.75 and 11.7% from 5 at 1.45.
-    five, five_why = _tier(5.0, 6, MIN_CANDIDATE_CONFIDENCE, 0.72)
-    # Reaching 10x from legs that are never priced above ~1.45 takes seven of
-    # them; capping at six made the tier unbuildable rather than merely long.
-    ten, ten_why = _tier(10.0, 8, MIN_CANDIDATE_CONFIDENCE, 0.63)
+    # Long tiers now keep the full 65% publication floor. They may use more
+    # shorter legs when that produces the highest joint chance, but they no
+    # longer buy the target by reaching down to a riskier 55% match-result
+    # leg. The selector already maximises the chance every leg lands and the
+    # EV gate still rejects combinations whose accumulated margin is too high.
+    five, five_why = _tier(5.0, 8, FLOOR, 0.72)
+    ten, ten_why = _tier(10.0, 10, FLOOR, 0.63)
 
     # Over 1.5 — a list of singles, one per fixture, safest first.
     #
@@ -337,8 +335,6 @@ def build_daily_accumulators(force: bool = False) -> dict:
     for p in over_picks:
         over_total *= p["odds"]
 
-    rollover = _build_rollover(all_picks, today)
-
     def mk_cat(sel, risk, reason_if_empty, presentation="accumulator",
                booking_rule=None):
         picks_, total, joint = sel
@@ -398,14 +394,14 @@ def build_daily_accumulators(force: bool = False) -> dict:
             "5_odds": mk_cat(
                 five, "Medium", five_why,
                 booking_rule={"selector": "accumulator", "target": 5.0,
-                              "max_picks": 6,
-                              "min_confidence": MIN_CANDIDATE_CONFIDENCE,
+                              "max_picks": 8,
+                              "min_confidence": FLOOR,
                               "min_ev": 0.72, "band_low": 0.80}),
             "10_odds": mk_cat(
                 ten, "High", ten_why,
                 booking_rule={"selector": "accumulator", "target": 10.0,
-                              "max_picks": 8,
-                              "min_confidence": MIN_CANDIDATE_CONFIDENCE,
+                              "max_picks": 10,
+                              "min_confidence": FLOOR,
                               "min_ev": 0.63, "band_low": 0.80}),
             "over_1_5": mk_cat(
                 (over_picks, over_total, over_avg) if over_picks else ([], 0, 0),
@@ -526,8 +522,7 @@ def build_bookable_now() -> dict | None:
     its losers, which is the exact failure the lock exists to prevent.
     """
     from leagues.engine import run_pipeline
-    from leagues.picks import (
-        MIN_CANDIDATE_CONFIDENCE, MIN_PUBLISHABLE_CONFIDENCE, to_game)
+    from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
     from leagues.selection import select_banker
 
     now = datetime.now(timezone.utc)
@@ -545,10 +540,22 @@ def build_bookable_now() -> dict | None:
         return None
 
     F = MIN_PUBLISHABLE_CONFIDENCE
-    banker = select_banker(live)
-    two, _ = _select_tier(live, 2.0, 4, F, 0.82)
-    five, _ = _select_tier(live, 5.0, 6, F, 0.72)
-    ten, _ = _select_tier(live, 10.0, 8, F, 0.63)
+    rollover = _build_rollover([], today)
+    fixture_uses = {
+        game.get("match_id") for game in rollover.get("games", [])
+        if game.get("match_id")
+    }
+
+    def available() -> list:
+        return [p for p in live if p["match_id"] not in fixture_uses]
+
+    banker = select_banker(available())
+    fixture_uses.update(p["match_id"] for p in banker[0])
+    two, _ = _select_tier(available(), 2.0, 4, F, 0.82, band_low=0.92)
+    fixture_uses.update(p["match_id"] for p in two[0])
+    five, _ = _select_tier(available(), 5.0, 8, F, 0.72)
+    fixture_uses.update(p["match_id"] for p in five[0])
+    ten, _ = _select_tier(available(), 10.0, 10, F, 0.63)
 
     over, seen = [], set()
     for p in sorted(live, key=lambda x: -x["confidence"]):
@@ -690,12 +697,11 @@ def _build_rollover(all_picks: list, today: str) -> dict:
             load_chain as _db_load,
             append_day as _db_append,
             reset_chain as _db_reset,
-            update_day_status as _db_update,
         )
         db_available = True
     except Exception:
         db_available = False
-        _db_load = _db_append = _db_reset = _db_update = None  # type: ignore
+        _db_load = _db_append = _db_reset = None  # type: ignore
 
     chain_path = DATA_DIR / "rollover_chain.json"
     if db_available:
@@ -716,18 +722,10 @@ def _build_rollover(all_picks: list, today: str) -> dict:
         except Exception:
             chain = {"start_date": today, "days": [], "status": "active"}
 
-    # Void days whose matches finished more than two days ago but never
-    # resolved — otherwise one unresolvable day freezes the chain forever.
-    stale_cutoff = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d")
-    for day in chain.get("days", []):
-        if day.get("status") == "pending" and day.get("date", "") < stale_cutoff:
-            day["status"] = "void"
-            logger.info(f"Voiding stale rollover day {day.get('date')}")
-            if db_available:
-                try:
-                    _db_update(day["date"], "void")
-                except Exception:
-                    pass
+    # Result status belongs to the result checker.  This reader used to void
+    # an entire day solely because its date was two days old, before the
+    # checker had a chance to grade the scores it *could* find.  That both
+    # erased real wins/losses and made chains appear never to complete.
 
     # Start fresh once the chain is complete
     if len(chain.get("days", [])) >= TARGET_DAYS:
@@ -878,4 +876,10 @@ def _build_rollover(all_picks: list, today: str) -> dict:
         "target_days": TARGET_DAYS,
         "cumulative_odds": round(cumulative, 2),
         "today_hit_probability": today_day.get("hit_probability") if today_day else None,
+        "completion_probability": round(
+            prod(
+                float(d.get("hit_probability") or d.get("avg_confidence") or 0)
+                for d in chain.get("days", [])
+            ), 4
+        ) if chain.get("days") else None,
     }

@@ -331,6 +331,53 @@ def accumulator(data: dict, platform: str, tier_key: str = "two_odds",
     return {"heading": f"{tier['label']} Accumulator", "tier": tier, "url": url}
 
 
+# ── Rollover ───────────────────────────────────────────────
+
+def rollover(data: dict, platform: str, ref: str | None = None) -> dict | None:
+    tier = data.get("rollover") or {}
+    legs = tier.get("legs") or []
+    if not tier.get("selected") or not legs:
+        return None
+
+    day = tier.get("day_number") or 1
+    target = tier.get("target_days") or 3
+    hit = float(tier.get("hit_probability") or 0)
+    complete = tier.get("completion_probability")
+    url = build_url("rollover", channel=platform, campaign="rollover",
+                    content=f"day_{day}", ref=ref)
+
+    if platform == "telegram":
+        lines = [f"🔁 *Rollover · Day {day} of {target}*",
+                 f"_{_nice_date(data.get('date'))}_", ""]
+        for leg in legs:
+            lines += [
+                f"• *{leg['home_team']} vs {leg['away_team']}*",
+                f"    {leg['prediction']} @ {_odds_str(leg)} "
+                f"({safe_confidence(leg['confidence'])})",
+            ]
+        lines += ["", f"💵 Today’s odds: *{tier['total_odds']:.2f}x*",
+                  f"📊 Today’s slip lands about *{hit:.0%}* of the time."]
+        if complete is not None:
+            lines.append(
+                f"All {target} scheduled days land about *{float(complete):.0%}* "
+                "of the time at the current model estimates."
+            )
+        lines += _booking_lines(tier)
+        lines += ["", f"[Open the rollover challenge]({url})"]
+        return {"text": "\n".join(lines), "parse_mode": "Markdown", "url": url}
+
+    if platform == "x":
+        return {"text": (
+            f"🔁 Rollover Day {day}/{target} — {tier['total_odds']:.2f}x\n\n"
+            + "\n".join(f"• {leg['home_team']} v {leg['away_team']}: "
+                         f"{leg['prediction']}" for leg in legs)
+            + f"\n\nDaily landing estimate: {hit:.0%}\n{url}"
+        ), "url": url}
+
+    return {"heading": f"Rollover Day {day} of {target}",
+            "tier": tier, "url": url}
+
+
 # ── Template E — Over 1.5 ──────────────────────────────────
 
 def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
@@ -425,6 +472,13 @@ def results(data: dict, platform: str, ref: str | None = None) -> dict | None:
             else:
                 mark = "✅" if slip["status"] == "won" else "❌"
                 lines.append(f"{mark} {slip['label']} ({slip['total_odds']:.2f}x)")
+        for day in res.get("rollover_settled", []):
+            mark = {"won": "✅", "lost": "❌", "void": "➖"}.get(
+                day.get("status"), "⏳")
+            lines.append(
+                f"{mark} Rollover Day {day.get('day_number')} "
+                f"({float(day.get('combined_odds') or 0):.2f}x)"
+            )
         singles = res.get("singles") or {}
         if singles.get("settled"):
             lines.append("")
@@ -480,6 +534,7 @@ TEMPLATES = {
     "two_odds": lambda d, p, ref=None: accumulator(d, p, "two_odds", ref),
     "five_odds": lambda d, p, ref=None: accumulator(d, p, "five_odds", ref),
     "ten_odds": lambda d, p, ref=None: accumulator(d, p, "ten_odds", ref),
+    "rollover": rollover,
     "over_1_5": over_15,
     "results": results,
 }

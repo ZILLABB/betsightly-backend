@@ -55,6 +55,19 @@ MIN_USEFUL_ODDS = 1.12
 # on a day with 35 of them.
 MARKET_CAP = 3
 
+# Home-team and away-team goal markets are separate calibration groups, but
+# to a bettor they are the same exposure: "this team scores". Counting the
+# two groups separately allowed as many as six of those legs on one ticket.
+TEAM_TO_SCORE_GROUPS = {"team_goals_home", "team_goals_away"}
+TEAM_TO_SCORE_CAP = 3
+
+
+def exposure_group(market_group: str) -> str:
+    """Group markets by the risk pattern a bettor is actually taking."""
+    if market_group in TEAM_TO_SCORE_GROUPS:
+        return "team_to_score"
+    return market_group
+
 # How close two slips have to score before the bookmaker's margin decides
 # between them. Expected value already moves with price — a tighter market
 # quotes a longer price for the same probability, so it scores higher without
@@ -247,6 +260,7 @@ def select_accumulator(
     for size in range(1, min(max_picks, len(candidates)) + 1):
         for combo in itertools.combinations(candidates, size):
             groups: dict[str, int] = {}
+            exposures: dict[str, int] = {}
             fixtures_used: set[str] = set()
             ok = True
             for p in combo:
@@ -259,6 +273,12 @@ def select_accumulator(
                 g = p["market_group"]
                 groups[g] = groups.get(g, 0) + 1
                 if groups[g] > MARKET_CAP:
+                    ok = False
+                    break
+                exposure = exposure_group(g)
+                exposures[exposure] = exposures.get(exposure, 0) + 1
+                if (exposure == "team_to_score"
+                        and exposures[exposure] > TEAM_TO_SCORE_CAP):
                     ok = False
                     break
             if not ok:

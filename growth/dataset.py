@@ -158,8 +158,15 @@ def _rollover_block(cat: dict, today: str) -> dict:
         "days_lost": lost,
         "total_odds": round(float(cat.get("total_odds") or 0.0), 2),
         "hit_probability": round(float(cat.get("today_hit_probability") or 0.0), 4),
+        "completion_probability": (
+            round(float(cat.get("completion_probability")), 4)
+            if cat.get("completion_probability") is not None else None
+        ),
         "legs": legs,
         "leg_count": len(legs),
+        "booking": ((cat.get("booking") or {})
+                    if (cat.get("booking") or {}).get("status") == "active"
+                    else None),
     }
 
 
@@ -216,6 +223,15 @@ def _recent_results(days: int = 7) -> dict:
             })
 
         summary = performance_summary(limit_days=days)
+        try:
+            from leagues.rollover_db import history as rollover_history
+            rollover_settled = [
+                row for row in rollover_history(limit_days=days)
+                if row.get("date") == yesterday
+                and row.get("status") in ("won", "lost", "void")
+            ]
+        except Exception:
+            rollover_settled = []
 
         # Slips and singles are counted in different units and must not be
         # added together. Doing so is why Telegram announced 70 wins while the
@@ -237,6 +253,7 @@ def _recent_results(days: int = 7) -> dict:
         return {
             "date": yesterday,
             "slips_settled": settled_yesterday,
+            "rollover_settled": rollover_settled,
             # Headline figures are the slips — one bet, one outcome. Singles
             # are reported alongside rather than folded in.
             "won": slips["won"],

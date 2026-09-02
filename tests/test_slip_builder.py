@@ -4,13 +4,15 @@ import pytest
 
 from leagues.api import _cached_slip_is_placeable
 from leagues.daily_feed import _trusted_rollover_picks
+from leagues.selection import select_accumulator
 from leagues.slip_builder import _horizon_end, build_slip
 
 
-def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True):
+def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True,
+          market_group="goals"):
     return {
         "match_id": match_id,
-        "market_group": "goals",
+        "market_group": market_group,
         "odds": odds,
         "confidence": confidence,
         "bookable": True,
@@ -46,6 +48,43 @@ def test_slip_builder_requires_exact_sportybet_bookability():
     built = build_slip(2.0, pool=[pick], market_cap=10)
     assert not built["ok"]
     assert "SportyBet-bookable" in built["reason"]
+
+
+def test_builder_caps_home_and_away_team_goal_picks_together():
+    team_goals = [
+        _pick(f"team-{i}", odds=1.5, confidence=0.80,
+              market_group=("team_goals_home" if i % 2 == 0
+                            else "team_goals_away"))
+        for i in range(6)
+    ]
+    alternatives = [
+        _pick(f"other-{i}", odds=1.5, confidence=0.78,
+              market_group=f"other_{i}")
+        for i in range(4)
+    ]
+    built = build_slip(10.0, pool=team_goals + alternatives,
+                       max_legs=8, market_cap=3)
+    assert built["ok"]
+    selected_team_goals = [
+        pick for pick in built["picks"]
+        if pick["market_group"] in {"team_goals_home", "team_goals_away"}
+    ]
+    assert len(selected_team_goals) <= 3
+    assert len({pick["market_group"] for pick in built["picks"]}) >= 3
+
+
+def test_tier_selector_cannot_bypass_team_goal_cap_by_switching_sides():
+    team_goals = [
+        _pick(f"team-{i}", odds=1.5, confidence=0.80,
+              market_group=("team_goals_home" if i % 2 == 0
+                            else "team_goals_away"))
+        for i in range(6)
+    ]
+    selected, _, _ = select_accumulator(
+        team_goals, target_odds=5.0, max_picks=6,
+        min_confidence=0.5, min_ev=0.0,
+    )
+    assert selected == []
 
 
 def test_rollover_rejects_markets_without_their_own_evidence():
