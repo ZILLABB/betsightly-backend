@@ -342,17 +342,35 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     hit = _SLIP_CACHE.get(key)
     if (hit and not refresh and (_t.time() - hit["ts"]) < _SLIP_TTL
             and _cached_slip_is_placeable(hit["result"])):
-        return {**hit["result"], "cached": True}
+        response = {**hit["result"], "cached": True}
+        try:
+            from leagues.builder_runs import record_run
+            record_run(target, horizon, refresh, response, cached=True)
+        except Exception as exc:
+            logger.warning(f"Builder run audit failed: {exc}")
+        return response
 
     try:
         result = generate(target, horizon=horizon, force=refresh)
     except Exception as e:
         logger.error(f"Slip build failed: {e}", exc_info=True)
+        try:
+            from leagues.builder_runs import record_run
+            record_run(target, horizon, refresh,
+                       {"status": "error", "reason": type(e).__name__})
+        except Exception as exc:
+            logger.warning(f"Builder run audit failed: {exc}")
         raise HTTPException(500, str(e))
 
     if result.get("status") == "success":
         _SLIP_CACHE[key] = {"result": result, "ts": _t.time()}
-    return {**result, "cached": False}
+    response = {**result, "cached": False}
+    try:
+        from leagues.builder_runs import record_run
+        record_run(target, horizon, refresh, response)
+    except Exception as exc:
+        logger.warning(f"Builder run audit failed: {exc}")
+    return response
 
 
 @router.get("/notification-log")

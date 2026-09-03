@@ -11,9 +11,11 @@ SYSTEM_EVENT = "SYSTEM_EVENT"
 
 USER_EVENT_TYPES = {
     "pageview", "prediction_viewed", "rollover_viewed", "builder_opened",
-    "builder_target_selected", "builder_generated", "builder_bookable",
-    "booking_code_viewed", "booking_code_copied", "sportybet_open_clicked",
-    "fallback_shown", "replacement_used", "partial_booking_created",
+    "builder_target_selected", "builder_generate_requested", "builder_generated",
+    "builder_bookable", "booking_code_viewed", "booking_code_copied",
+    "sportybet_opened", "sportybet_open_clicked", "fallback_shown",
+    "alternative_market_used", "replacement_used", "partial_booking_used",
+    "partial_booking_created",
     "results_viewed", "telegram_join_clicked", "cta_click", "registration",
     "outbound", "code_regenerated", "replacement_details_opened",
 }

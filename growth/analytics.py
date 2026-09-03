@@ -29,6 +29,8 @@ ALIASES = {
     "code_displayed": "booking_code_viewed",
     "code_copied": "booking_code_copied",
     "telegram_click": "telegram_join_clicked",
+    "sportybet_open_clicked": "sportybet_opened",
+    "partial_booking_created": "partial_booking_used",
 }
 EVENT_TYPES = USER_EVENT_TYPES | SYSTEM_EVENT_TYPES | set(ALIASES)
 
@@ -331,7 +333,7 @@ def summary(days: int = 1, start: Optional[str] = None,
             item_copiers = {event.visitor_hash for event in items
                             if _canonical(event) == "booking_code_copied" and event.visitor_hash}
             item_opens = {event.visitor_hash for event in items
-                          if _canonical(event) == "sportybet_open_clicked" and event.visitor_hash}
+                          if _canonical(event) == "sportybet_opened" and event.visitor_hash}
             rows.append({
                 "key": label, "count": len(items), "visitors": len(visitors),
                 "returning": len(visitors & returning), "sessions": len(sessions),
@@ -360,7 +362,7 @@ def summary(days: int = 1, start: Optional[str] = None,
              and _area(e) in prediction_sources),
             ("Code copied", lambda e: _canonical(e) == "booking_code_copied"
              and _area(e) in prediction_sources),
-            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_open_clicked"
+            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_opened"
              and _area(e) in prediction_sources),
         ]),
         "builder": _progression_funnel(user_events, [
@@ -371,7 +373,7 @@ def summary(days: int = 1, start: Optional[str] = None,
              and _area(e) == "BUILD_SLIP"),
             ("Code copied", lambda e: _canonical(e) == "booking_code_copied"
              and _area(e) == "BUILD_SLIP"),
-            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_open_clicked"
+            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_opened"
              and _area(e) == "BUILD_SLIP"),
         ]),
         "rollover": _progression_funnel(user_events, [
@@ -380,7 +382,7 @@ def summary(days: int = 1, start: Optional[str] = None,
              and _area(e) == "ROLLOVER"),
             ("Code copied", lambda e: _canonical(e) == "booking_code_copied"
              and _area(e) == "ROLLOVER"),
-            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_open_clicked"
+            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_opened"
              and _area(e) == "ROLLOVER"),
         ]),
     }
@@ -477,6 +479,8 @@ def summary(days: int = 1, start: Optional[str] = None,
         "prediction_viewers": len({e.visitor_hash for e in user_events
                                     if _canonical(e) == "prediction_viewed" and e.visitor_hash}),
         "rollover_views": counts["rollover_viewed"],
+        "rollover_users": len({e.visitor_hash for e in user_events
+                                if _canonical(e) == "rollover_viewed" and e.visitor_hash}),
         "builder_opened": counts["builder_opened"],
         "builder_users": len({e.visitor_hash for e in user_events
                               if _canonical(e) == "builder_opened" and e.visitor_hash}),
@@ -487,9 +491,9 @@ def summary(days: int = 1, start: Optional[str] = None,
         "total_copy_actions": len(copy_events),
         "unique_code_copiers": len(copied_visitors),
         "unique_codes_copied": len(copied_entities),
-        "sportybet_opened": counts["sportybet_open_clicked"],
+        "sportybet_opened": counts["sportybet_opened"],
         "sportybet_openers": len({e.visitor_hash for e in user_events
-                                  if _canonical(e) == "sportybet_open_clicked" and e.visitor_hash}),
+                                  if _canonical(e) == "sportybet_opened" and e.visitor_hash}),
         "code_copy_rate": (round(len(converted_entities) / len(valid_entities), 4)
                            if valid_entities else None),
         "user_copy_rate": (round(len(converted_visitors) / len(viewed_visitors), 4)
@@ -499,21 +503,104 @@ def summary(days: int = 1, start: Optional[str] = None,
         "codes_validated": system_counts["booking_code_validated"],
         "codes_copied": len(copy_events),
     }
+    # PostHog owns human/product analytics. During the fixed dual-validation
+    # window the legacy values stay alongside it so discrepancies are visible.
+    try:
+        from growth.posthog_adapter import summary as posthog_summary
+        posthog = posthog_summary(start, end)
+    except Exception as exc:
+        posthog = {"data": {}, "meta": {"source": "posthog", "status": "unavailable",
+                   "as_of": None, "freshness_seconds": None,
+                   "reason": f"adapter_failed:{type(exc).__name__}"}}
+    legacy_comparison = {"totals": dict(totals), "analytics_quality": analytics_quality}
+    provider_data = posthog.get("data") or {}
+    if provider_data.get("totals"):
+        totals.update(provider_data["totals"])
+    try:
+        from leagues.builder_runs import summary as builder_run_summary
+        builder_backend = builder_run_summary(start, end)
+    except Exception as exc:
+        builder_backend = {"requests": 0, "tickets_produced": 0,
+                           "ticket_rate": None, "cache_hits": 0,
+                           "by_target": [], "failures": [],
+                           "status": f"unavailable:{type(exc).__name__}"}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    from growth.metric_contracts import conversion, retention as retention_contract, source_meta
+    metric_contracts = {
+        "code_copy_rate": conversion(totals.get("unique_code_copiers", 0),
+                                     totals.get("valid_code_viewers", 0)),
+        "sportybet_open_rate": conversion(totals.get("sportybet_openers", 0),
+                                           totals.get("valid_code_viewers", 0)),
+        "builder_ticket_rate": conversion(builder_backend.get("tickets_produced", 0),
+                                           builder_backend.get("requests", 0)),
+    }
+    provider_retention = provider_data.get("retention") or retention
+    for label, item in provider_retention.items():
+        metric_contracts[f"retention_{label}"] = retention_contract(
+            item.get("returned", 0), item.get("eligible", 0))
+    prediction_return = provider_data.get("prediction_day_return") or {}
+    metric_contracts["prediction_day_return"] = retention_contract(
+        prediction_return.get("returned", 0), prediction_return.get("eligible", 0))
+    overlap = ("pageviews", "prediction_viewers", "builder_users", "valid_code_viewers",
+               "unique_code_copiers", "sportybet_openers")
+    legacy_comparison["difference"] = {
+        name: ((totals.get(name, 0) - legacy_comparison["totals"].get(name, 0))
+               if provider_data.get("totals") else None) for name in overlap}
+    sources = {
+        "human_analytics": posthog["meta"],
+        "backend_facts": source_meta("betsightly_db", now_iso),
+        "sportybet_catalogue": source_meta(
+            "sportybet", sportybet.get("fetched_at") or sportybet.get("as_of") or now_iso,
+            ("unavailable" if not sportybet else "stale"
+             if sportybet.get("error") or (sportybet.get("cache_age_hours") or 0) > 6
+             else "fresh"),
+            int((sportybet.get("cache_age_hours") or 0) * 3600) if sportybet else None),
+    }
+    section_meta = {
+        "audience": sources["human_analytics"],
+        "product": sources["human_analytics"],
+        "predictions": sources["backend_facts"],
+        "sportybet": sources["backend_facts"],
+        "operations": sources["backend_facts"],
+    }
     payload = {
         "window_days": (datetime.strptime(end, "%Y-%m-%d") -
                         datetime.strptime(start, "%Y-%m-%d")).days + 1,
         "start": start, "end": end, "totals": totals,
-        "funnel": funnels["prediction"], "funnels": funnels,
-        "retention": retention, "daily": daily, "active_users": active_users,
-        "builder": builder, "analytics_quality": analytics_quality,
+        "funnel": (provider_data.get("funnels") or funnels)["prediction"],
+        "funnels": provider_data.get("funnels") or funnels,
+        "retention": provider_data.get("retention") or retention,
+        "prediction_day_return": provider_data.get("prediction_day_return") or {},
+        "daily": provider_data.get("daily") or daily,
+        "active_users": provider_data.get("active_users") or active_users,
+        "builder": builder, "builder_backend": builder_backend,
+        "analytics_quality": analytics_quality,
         "system_event_counts": dict(system_counts),
-        "by_source": dimension("source"), "by_campaign": dimension("campaign"),
-        "by_path": dimension("path"), "by_country": dimension("country_code"),
-        "by_device": dimension("device_category"), "by_os": dimension("os_family"),
-        "by_browser": dimension("browser_family"), "by_tier": dimension("tier"),
+        "by_source": provider_data.get("by_source") or dimension("source"),
+        "by_campaign": provider_data.get("by_campaign") or dimension("campaign"),
+        "by_path": provider_data.get("by_path") or dimension("path"),
+        "by_country": provider_data.get("by_country") or dimension("country_code"),
+        "by_device": provider_data.get("by_device") or dimension("device_category"),
+        "by_os": provider_data.get("by_os") or dimension("os_family"),
+        "by_browser": provider_data.get("by_browser") or dimension("browser_family"),
+        "by_region": provider_data.get("by_region") or dimension("region"),
+        "by_tier": dimension("tier"),
         "by_product_source": dimension("product_source"),
         "booking": booking, "sportybet": sportybet,
         "prediction_performance": prediction_performance, "operations": operations,
+        "analytics_provider": posthog["meta"], "sources": sources,
+        "section_meta": section_meta, "metric_contracts": metric_contracts,
+        "legacy_comparison": legacy_comparison,
+        "analytics_health": {
+            "provider": posthog["meta"], "quality": analytics_quality,
+            "schema_validation_errors": totals.get("schema_validation_errors"),
+            "dual_write_comparison": legacy_comparison.get("difference"),
+            "vercel_pageview_variance": {"status": "unavailable",
+                                         "reason": "Vercel aggregate API is not configured"},
+            "dual_write_until": os.getenv("ANALYTICS_DUAL_WRITE_UNTIL",
+                                           "2026-09-17T23:59:59Z"),
+            "migration_complete": False,
+        },
         "limitations": [
             "Historical events are not fabricated; missing enrichment remains unknown.",
             "Anonymous browser identity can be cleared and does not link devices.",
