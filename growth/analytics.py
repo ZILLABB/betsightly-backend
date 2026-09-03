@@ -1,5 +1,7 @@
 """First-party, privacy-safe product and operations analytics for BetSightly."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
@@ -7,26 +9,19 @@ import os
 import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Optional
-from urllib.parse import urlparse
+from typing import Callable, Optional
 
-from sqlalchemy import func, text
+from sqlalchemy import text
 
 from database import SessionLocal, engine
+from growth.analytics_enrichment import (
+    PRODUCT_SOURCES, SYSTEM_EVENT, SYSTEM_EVENT_TYPES, USER_EVENT,
+    USER_EVENT_TYPES, classify_event, device_info, product_source,
+    traffic_source,
+)
 from growth.models import GrowthEvent, ensure_tables
 
 logger = logging.getLogger(__name__)
-
-EVENT_TYPES = {
-    "pageview", "prediction_viewed", "rollover_viewed", "builder_opened",
-    "builder_target_selected", "builder_generated", "builder_bookable",
-    "booking_code_generated", "booking_code_validated", "booking_code_viewed",
-    "booking_code_copied", "sportybet_open_clicked", "fallback_shown",
-    "replacement_used", "partial_booking_created", "results_viewed",
-    "telegram_join_clicked", "telegram_click", "cta_click", "registration",
-    "outbound", "code_generated", "code_validated", "code_displayed",
-    "code_copied", "code_regenerated", "replacement_details_opened",
-}
 
 ALIASES = {
     "code_generated": "booking_code_generated",
@@ -35,15 +30,7 @@ ALIASES = {
     "code_copied": "booking_code_copied",
     "telegram_click": "telegram_join_clicked",
 }
-
-REFERRER_SOURCES = {
-    "google.": "google", "bing.": "bing", "duckduckgo.": "duckduckgo",
-    "t.co": "x", "twitter.com": "x", "x.com": "x",
-    "facebook.": "facebook", "fb.": "facebook", "instagram.": "instagram",
-    "tiktok.": "tiktok", "youtube.": "youtube", "youtu.be": "youtube",
-    "t.me": "telegram", "telegram.": "telegram", "reddit.": "reddit",
-    "linkedin.": "linkedin", "wa.me": "whatsapp", "whatsapp.": "whatsapp",
-}
+EVENT_TYPES = USER_EVENT_TYPES | SYSTEM_EVENT_TYPES | set(ALIASES)
 
 _cache: dict = {"key": None, "at": 0.0, "value": None}
 CACHE_SECONDS = 60
@@ -58,100 +45,95 @@ def _visitor_hash(ip: str, user_agent: str, date: str,
                   visitor_id: Optional[str] = None) -> str:
     if visitor_id:
         return _hash(f"visitor|{visitor_id[:128]}")
+    # Compatibility for browsers that block localStorage. It is intentionally
+    # daily-scoped, so it cannot become a long-lived IP-based identity.
     return _hash(f"legacy|{ip}|{user_agent}|{date}")
 
 
-def _classify_referrer(referrer: Optional[str]):
-    if not referrer:
-        return None, None
+def _bounded_int(value, maximum: int) -> Optional[int]:
     try:
-        host = (urlparse(referrer).hostname or "").lower()
-    except Exception:
-        return None, None
-    if not host:
-        return None, None
-    if "betsightly" in host:
-        return None, host
-    for needle, source in REFERRER_SOURCES.items():
-        if needle in host:
-            return source, host
-    return "referral", host
-
-
-def _device(user_agent: str) -> tuple[str, str]:
-    ua = (user_agent or "").lower()
-    if any(x in ua for x in ("ipad", "tablet")):
-        device = "tablet"
-    elif any(x in ua for x in ("mobile", "iphone", "android")):
-        device = "mobile"
-    else:
-        device = "desktop"
-    if "android" in ua:
-        os_family = "Android"
-    elif any(x in ua for x in ("iphone", "ipad", "ios")):
-        os_family = "iOS"
-    elif "windows" in ua:
-        os_family = "Windows"
-    elif any(x in ua for x in ("macintosh", "mac os")):
-        os_family = "macOS"
-    elif "linux" in ua:
-        os_family = "Linux"
-    else:
-        os_family = "Other"
-    return device, os_family
+        number = int(value)
+        return number if 0 < number <= maximum else None
+    except (TypeError, ValueError):
+        return None
 
 
 def record(*, event_type: str, path: Optional[str] = None,
            source: Optional[str] = None, medium: Optional[str] = None,
            campaign: Optional[str] = None, content_tag: Optional[str] = None,
-           ref: Optional[str] = None, referrer: Optional[str] = None,
-           ip: str = "", user_agent: str = "", visitor_id: Optional[str] = None,
-           session_id: Optional[str] = None, event_id: Optional[str] = None,
-           tier: Optional[str] = None, target_odds: Optional[float] = None,
+           utm_term: Optional[str] = None, ref: Optional[str] = None,
+           referrer: Optional[str] = None, ip: str = "", user_agent: str = "",
+           visitor_id: Optional[str] = None, session_id: Optional[str] = None,
+           event_id: Optional[str] = None, tier: Optional[str] = None,
+           target_odds: Optional[float] = None,
            booking_status: Optional[str] = None, leg_count: Optional[int] = None,
-           actual_odds: Optional[float] = None, country: Optional[str] = None,
+           actual_odds: Optional[float] = None,
+           country_code: Optional[str] = None, region: Optional[str] = None,
+           city: Optional[str] = None, timezone_name: Optional[str] = None,
+           browser: Optional[str] = None, screen_width=None, screen_height=None,
+           booking_id: Optional[str] = None, product_area: Optional[str] = None,
+           geo_source: Optional[str] = None,
            metadata: Optional[dict] = None) -> bool:
-    """Record one product event; duplicate event ids are accepted as no-ops."""
+    """Record one event; duplicate event IDs are accepted as successful no-ops."""
     try:
         ensure_tables()
-        event_type = ALIASES.get(event_type, event_type)
-        if event_type not in EVENT_TYPES:
+        canonical = ALIASES.get(event_type, event_type)
+        if event_type not in EVENT_TYPES and canonical not in EVENT_TYPES:
             return False
+        event_class = classify_event(canonical)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        vhash = _visitor_hash(ip, user_agent, today, visitor_id)
-        shash = _hash(f"session|{session_id}") if session_id else None
+        is_user = event_class == USER_EVENT
+        vhash = _visitor_hash(ip, user_agent, today, visitor_id) if is_user else None
+        shash = _hash(f"session|{session_id}") if is_user and session_id else None
         event_key = _hash(f"event|{event_id}") if event_id else None
-        ref_source, ref_host = _classify_referrer(referrer)
-        source = source or ref_source or "direct"
-        medium = medium or ("organic" if ref_source in ("google", "bing", "duckduckgo")
-                            else ("referral" if ref_source else "none"))
-        device, os_family = _device(user_agent)
+        acquisition, normalized_medium, ref_host = traffic_source(
+            source, medium, referrer)
+        detected = device_info(user_agent) if is_user else {
+            "device_type": None, "operating_system": None, "browser": None}
+        area = product_source(product_area, content_tag, path, tier)
+        country_code = (country_code or "").strip().upper()
+        if len(country_code) != 2 or not country_code.isalpha():
+            country_code = None
+
         db = SessionLocal()
         try:
             if event_key and db.query(GrowthEvent.id).filter(
                     GrowthEvent.event_key == event_key).first():
                 return True
-            seen = db.query(GrowthEvent.id).filter(
-                GrowthEvent.visitor_hash == vhash).first()
+            seen = bool(vhash and db.query(GrowthEvent.id).filter(
+                GrowthEvent.visitor_hash == vhash).first())
+            details = dict(metadata or {})
+            if geo_source:
+                details["geo_source"] = geo_source
             db.add(GrowthEvent(
-                event_date=today, event_type=event_type,
+                event_date=today, event_type=canonical, event_class=event_class,
                 path=(path or "")[:256] or None,
-                source=(source or "")[:64] or None,
-                medium=(medium or "")[:64] or None,
+                source=(acquisition or "Unknown")[:64],
+                medium=(normalized_medium or "")[:64] or None,
                 campaign=(campaign or "")[:64] or None,
                 content_tag=(content_tag or "")[:64] or None,
+                utm_term=(utm_term or "")[:64] or None,
                 ref=(ref or "")[:64] or None,
                 visitor_hash=vhash, session_hash=shash, event_key=event_key,
-                is_new_visitor=seen is None,
+                is_new_visitor=is_user and not seen,
                 referrer_host=(ref_host or "")[:128] or None,
                 tier=(tier or "")[:32] or None,
                 target_odds=float(target_odds) if target_odds is not None else None,
                 booking_status=(booking_status or "")[:32] or None,
-                leg_count=int(leg_count) if leg_count is not None else None,
+                leg_count=_bounded_int(leg_count, 100),
                 actual_odds=float(actual_odds) if actual_odds is not None else None,
-                country=(country or "")[:8].upper() or None,
-                device_category=device, os_family=os_family,
-                metadata_json=json.dumps(metadata or {}, separators=(",", ":"))[:2000],
+                country=country_code, country_code=country_code,
+                region=(region or "")[:96] or None,
+                city=(city or "")[:96] or None,
+                timezone=(timezone_name or "")[:64] or None,
+                device_category=detected["device_type"],
+                os_family=detected["operating_system"],
+                browser_family=(browser or detected["browser"] or "")[:32] or None,
+                screen_width=_bounded_int(screen_width, 20000),
+                screen_height=_bounded_int(screen_height, 20000),
+                booking_id=(booking_id or "")[:64] or None,
+                product_source=area if area in PRODUCT_SOURCES else "OTHER",
+                metadata_json=json.dumps(details, separators=(",", ":"))[:2000],
             ))
             db.commit()
             _cache["at"] = 0
@@ -173,11 +155,36 @@ def _dates(days: int, start: Optional[str] = None, end: Optional[str] = None):
     return begin.strftime("%Y-%m-%d"), finish.strftime("%Y-%m-%d")
 
 
+def _canonical(event: GrowthEvent) -> str:
+    return ALIASES.get(event.event_type, event.event_type)
+
+
+def _is_user(event: GrowthEvent) -> bool:
+    if event.event_class:
+        return event.event_class == USER_EVENT
+    return classify_event(_canonical(event)) == USER_EVENT
+
+
+def _event_time(event: GrowthEvent):
+    return (event.created_at or datetime.min, event.id or 0)
+
+
+def _entity(event: GrowthEvent) -> str:
+    return (event.booking_id or
+            f"{event.visitor_hash}|{event.product_source or event.content_tag}|"
+            f"{event.tier}|{event.event_date}")
+
+
+def _area(event: GrowthEvent) -> str:
+    return product_source(event.product_source, event.content_tag,
+                          event.path, event.tier)
+
+
 def _booking_metrics(start: str, end: str) -> dict:
     empty = {"attempts": 0, "full": 0, "rebuilt": 0, "partial": 0,
              "unavailable": 0, "failed": 0, "validation_failed": 0,
-             "no_code_rate": None, "success_rate": None, "by_tier": [],
-             "failures": []}
+             "no_code_rate": None, "success_rate": None,
+             "validation_success_rate": None, "by_tier": [], "failures": []}
     try:
         with engine.begin() as conn:
             rows = conn.execute(text(
@@ -187,7 +194,8 @@ def _booking_metrics(start: str, end: str) -> dict:
                 {"s": start, "e": end}).fetchall()
         by_tier, failures, odds = defaultdict(Counter), Counter(), defaultdict(list)
         for _, tier, _, booking_status, actual, detail in rows:
-            bucket = by_tier[tier or "unknown"]
+            tier = tier or "unknown"
+            bucket = by_tier[tier]
             bucket["generated"] += 1
             normalized = (booking_status or "UNAVAILABLE").upper()
             status_key = {"FULL": "full", "REBUILT_FULL": "rebuilt",
@@ -199,20 +207,22 @@ def _booking_metrics(start: str, end: str) -> dict:
                     reason = json.loads(detail or "{}").get("reason") or normalized
                 except Exception:
                     reason = normalized
-                failures[(str(reason)[:80], tier or "unknown")] += 1
+                failures[(str(reason)[:80], tier)] += 1
             if actual:
                 odds[tier].append(float(actual))
         out, total = dict(empty), len(rows)
         out["attempts"] = total
         for key in ("full", "rebuilt", "partial", "unavailable", "failed", "validation_failed"):
-            out[key] = sum(v[key] for v in by_tier.values())
-        success = out["full"] + out["rebuilt"] + out["partial"]
-        out["success_rate"] = round(success / total, 4) if total else None
-        out["no_code_rate"] = round((total - success) / total, 4) if total else None
-        out["by_tier"] = [{"tier": tier, **dict(counts),
+            out[key] = sum(values[key] for values in by_tier.values())
+        successful = out["full"] + out["rebuilt"] + out["partial"]
+        validated = successful + out["validation_failed"]
+        out["success_rate"] = round(successful / total, 4) if total else None
+        out["no_code_rate"] = round((total - successful) / total, 4) if total else None
+        out["validation_success_rate"] = round(successful / validated, 4) if validated else None
+        out["by_tier"] = [{"tier": tier, **dict(values),
                            "avg_actual_odds": (round(sum(odds[tier]) / len(odds[tier]), 2)
                                                if odds[tier] else None)}
-                          for tier, counts in sorted(by_tier.items())]
+                          for tier, values in sorted(by_tier.items())]
         out["failures"] = [{"reason": reason, "tier": tier, "count": count}
                            for (reason, tier), count in failures.most_common(12)]
         return out
@@ -221,9 +231,35 @@ def _booking_metrics(start: str, end: str) -> dict:
         return empty
 
 
+def _progression_funnel(events: list[GrowthEvent],
+                        stages: list[tuple[str, Callable[[GrowthEvent], bool]]]) -> list[dict]:
+    by_visitor = defaultdict(list)
+    for event in events:
+        if event.visitor_hash:
+            by_visitor[event.visitor_hash].append(event)
+    progressed = {visitor: None for visitor in by_visitor}
+    output = []
+    previous = None
+    for label, predicate in stages:
+        next_progressed = {}
+        for visitor, after in progressed.items():
+            matches = [e for e in by_visitor[visitor]
+                       if predicate(e) and (after is None or _event_time(e) >= after)]
+            if matches:
+                next_progressed[visitor] = min(_event_time(e) for e in matches)
+        count = len(next_progressed)
+        conversion = count / previous if previous else (1.0 if count and previous is None else None)
+        output.append({"label": label, "count": count,
+                       "conversion": round(conversion, 4) if conversion is not None else None,
+                       "dropoff": round(1 - conversion, 4) if conversion is not None else None})
+        progressed = next_progressed
+        previous = count
+    return output
+
+
 def summary(days: int = 1, start: Optional[str] = None,
             end: Optional[str] = None) -> dict:
-    """One cached command-center payload built from bounded aggregate reads."""
+    """One cached command-center payload with user and system metrics separated."""
     start, end = _dates(days, start, end)
     key = (start, end)
     if _cache["key"] == key and time.time() - _cache["at"] < CACHE_SECONDS:
@@ -233,69 +269,133 @@ def summary(days: int = 1, start: Optional[str] = None,
     try:
         events = db.query(GrowthEvent).filter(
             GrowthEvent.event_date >= start, GrowthEvent.event_date <= end).all()
-        visitor_ids = {e.visitor_hash for e in events if e.visitor_hash}
-        first_dates = {}
-        if visitor_ids:
-            rows = db.query(GrowthEvent.visitor_hash, func.min(GrowthEvent.event_date)).filter(
-                GrowthEvent.visitor_hash.in_(visitor_ids)).group_by(GrowthEvent.visitor_hash).all()
-            first_dates = dict(rows)
-        active_users = {}
-        today_dt = datetime.now(timezone.utc)
-        for label, window in (("dau", 1), ("wau", 7), ("mau", 30)):
-            cutoff = (today_dt - timedelta(days=window - 1)).strftime("%Y-%m-%d")
-            active_users[label] = db.query(
-                func.count(func.distinct(GrowthEvent.visitor_hash))).filter(
-                    GrowthEvent.event_date >= cutoff).scalar() or 0
+        user_events = [event for event in events if _is_user(event)]
+        system_events = [event for event in events if not _is_user(event)]
+        visitor_ids = {event.visitor_hash for event in user_events if event.visitor_hash}
+        identity_events = (db.query(GrowthEvent).filter(
+            GrowthEvent.visitor_hash.in_(visitor_ids)).all() if visitor_ids else [])
+        identity_events = [event for event in identity_events if _is_user(event)]
+        recent_cutoff = (datetime.now(timezone.utc) - timedelta(days=29)).strftime("%Y-%m-%d")
+        recent_events = db.query(GrowthEvent).filter(
+            GrowthEvent.event_date >= recent_cutoff).all()
+        recent_user_events = [event for event in recent_events if _is_user(event)]
     finally:
         db.close()
 
-    counts = Counter(ALIASES.get(e.event_type, e.event_type) for e in events)
+    counts = Counter(_canonical(event) for event in user_events)
+    system_counts = Counter(_canonical(event) for event in system_events)
     visitor_dates = defaultdict(set)
-    for event in events:
-        if event.visitor_hash:
-            visitor_dates[event.visitor_hash].add(event.event_date)
-    new = {v for v in visitor_ids if first_dates.get(v, start) >= start}
-    returning = {v for v in visitor_ids
-                 if first_dates.get(v, start) < start or len(visitor_dates[v]) > 1}
+    first_dates = {}
+    for event in identity_events:
+        if not event.visitor_hash:
+            continue
+        visitor_dates[event.visitor_hash].add(event.event_date)
+        first_dates[event.visitor_hash] = min(first_dates.get(event.visitor_hash, event.event_date),
+                                              event.event_date)
+    new = {visitor for visitor in visitor_ids if first_dates.get(visitor, start) >= start}
+    returning = {visitor for visitor in visitor_ids
+                 if first_dates.get(visitor, start) < start or len(visitor_dates[visitor]) > 1}
+
+    active_users = {}
+    now = datetime.now(timezone.utc)
+    for label, window in (("dau", 1), ("wau", 7), ("mau", 30)):
+        cutoff = (now - timedelta(days=window - 1)).strftime("%Y-%m-%d")
+        active_users[label] = len({event.visitor_hash for event in recent_user_events
+                                   if event.event_date >= cutoff and event.visitor_hash})
+
+    valid_views = [event for event in user_events if _canonical(event) == "booking_code_viewed"]
+    copy_events = [event for event in user_events if _canonical(event) == "booking_code_copied"]
+    valid_entities = {_entity(event) for event in valid_views}
+    copied_entities = {_entity(event) for event in copy_events}
+    viewed_visitors = {event.visitor_hash for event in valid_views if event.visitor_hash}
+    copied_visitors = {event.visitor_hash for event in copy_events if event.visitor_hash}
+    converted_entities = copied_entities & valid_entities
+    converted_visitors = copied_visitors & viewed_visitors
 
     def dimension(name: str):
         grouped = defaultdict(list)
-        for event in events:
-            grouped[getattr(event, name) or "unknown"].append(event)
+        for event in user_events:
+            value = ((event.country_code or event.country) if name == "country_code"
+                     else getattr(event, name))
+            grouped[value or "unknown"].append(event)
         rows = []
         for label, items in grouped.items():
-            visitors = {e.visitor_hash for e in items if e.visitor_hash}
-            copies = sum(ALIASES.get(e.event_type, e.event_type) == "booking_code_copied" for e in items)
-            generated = sum(ALIASES.get(e.event_type, e.event_type) == "booking_code_generated" for e in items)
-            rows.append({"key": label, "count": len(items), "visitors": len(visitors),
-                         "code_copies": copies,
-                         "copy_rate": round(copies / generated, 4) if generated else None})
+            visitors = {event.visitor_hash for event in items if event.visitor_hash}
+            sessions = {event.session_hash for event in items if event.session_hash}
+            prediction_viewers = {event.visitor_hash for event in items
+                                  if _canonical(event) == "prediction_viewed" and event.visitor_hash}
+            builder_users = {event.visitor_hash for event in items
+                             if _canonical(event) == "builder_opened" and event.visitor_hash}
+            item_viewers = {event.visitor_hash for event in items
+                            if _canonical(event) == "booking_code_viewed" and event.visitor_hash}
+            item_copiers = {event.visitor_hash for event in items
+                            if _canonical(event) == "booking_code_copied" and event.visitor_hash}
+            item_opens = {event.visitor_hash for event in items
+                          if _canonical(event) == "sportybet_open_clicked" and event.visitor_hash}
+            rows.append({
+                "key": label, "count": len(items), "visitors": len(visitors),
+                "returning": len(visitors & returning), "sessions": len(sessions),
+                "prediction_viewers": len(prediction_viewers),
+                "prediction_views": sum(_canonical(e) == "prediction_viewed" for e in items),
+                "builders": len(builder_users), "code_copiers": len(item_copiers),
+                "copy_actions": sum(_canonical(e) == "booking_code_copied" for e in items),
+                "sportybet_opens": len(item_opens),
+                "prediction_view_rate": round(len(prediction_viewers) / len(visitors), 4) if visitors else None,
+                "builder_usage_rate": round(len(builder_users) / len(visitors), 4) if visitors else None,
+                "copy_conversion": round(len(item_copiers & item_viewers) / len(item_viewers), 4)
+                                   if item_viewers else None,
+                "sportybet_open_rate": round(len(item_opens & item_viewers) / len(item_viewers), 4)
+                                       if item_viewers else None,
+                "return_rate": round(len(visitors & returning) / len(visitors), 4) if visitors else None,
+            })
         return sorted(rows, key=lambda row: row["visitors"], reverse=True)[:25]
 
-    stages = [("Visitors", None), ("Predictions viewed", "prediction_viewed"),
-              ("Builder opened", "builder_opened"), ("Slip generated", "builder_generated"),
-              ("Code generated", "booking_code_generated"),
-              ("Code validated", "booking_code_validated"),
-              ("Code copied", "booking_code_copied"),
-              ("SportyBet opened", "sportybet_open_clicked")]
-    funnel, previous = [], len(visitor_ids)
-    for label, event_type in stages:
-        value = len(visitor_ids) if event_type is None else counts[event_type]
-        conversion = value / previous if previous else None
-        funnel.append({"label": label, "count": value,
-                       "conversion": round(conversion, 4) if conversion is not None else None,
-                       "dropoff": round(1 - conversion, 4) if conversion is not None else None})
-        previous = value
+    prediction_sources = {"PREDICTIONS", "BANKER", "TWO_ODDS", "FIVE_ODDS",
+                          "TEN_ODDS", "OVER_1_5", "FALLBACK"}
+    funnels = {
+        "prediction": _progression_funnel(user_events, [
+            ("Visitors", lambda e: True),
+            ("Predictions viewed", lambda e: _canonical(e) == "prediction_viewed"),
+            ("Valid code displayed", lambda e: _canonical(e) == "booking_code_viewed"
+             and _area(e) in prediction_sources),
+            ("Code copied", lambda e: _canonical(e) == "booking_code_copied"
+             and _area(e) in prediction_sources),
+            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_open_clicked"
+             and _area(e) in prediction_sources),
+        ]),
+        "builder": _progression_funnel(user_events, [
+            ("Builder opened", lambda e: _canonical(e) == "builder_opened"),
+            ("Target selected", lambda e: _canonical(e) == "builder_target_selected"),
+            ("Slip generated", lambda e: _canonical(e) == "builder_generated"),
+            ("Valid code displayed", lambda e: _canonical(e) == "booking_code_viewed"
+             and _area(e) == "BUILD_SLIP"),
+            ("Code copied", lambda e: _canonical(e) == "booking_code_copied"
+             and _area(e) == "BUILD_SLIP"),
+            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_open_clicked"
+             and _area(e) == "BUILD_SLIP"),
+        ]),
+        "rollover": _progression_funnel(user_events, [
+            ("Rollover viewed", lambda e: _canonical(e) == "rollover_viewed"),
+            ("Valid code displayed", lambda e: _canonical(e) == "booking_code_viewed"
+             and _area(e) == "ROLLOVER"),
+            ("Code copied", lambda e: _canonical(e) == "booking_code_copied"
+             and _area(e) == "ROLLOVER"),
+            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_open_clicked"
+             and _area(e) == "ROLLOVER"),
+        ]),
+    }
 
     daily = []
-    for date in sorted({e.event_date for e in events}):
-        day = [e for e in events if e.event_date == date]
+    for date in sorted({event.event_date for event in user_events}):
+        day = [event for event in user_events if event.event_date == date]
         daily.append({"date": date,
                       "visitors": len({e.visitor_hash for e in day if e.visitor_hash}),
+                      "sessions": len({e.session_hash for e in day if e.session_hash}),
                       "events": len(day),
-                      "builds": sum(ALIASES.get(e.event_type, e.event_type) == "builder_generated" for e in day),
-                      "codes": sum(ALIASES.get(e.event_type, e.event_type) == "booking_code_generated" for e in day),
-                      "copies": sum(ALIASES.get(e.event_type, e.event_type) == "booking_code_copied" for e in day)})
+                      "builds": sum(_canonical(e) == "builder_generated" for e in day),
+                      "codes_displayed": len({_entity(e) for e in day
+                                              if _canonical(e) == "booking_code_viewed"}),
+                      "copy_actions": sum(_canonical(e) == "booking_code_copied" for e in day)})
 
     retention, today = {}, datetime.now(timezone.utc).date()
     for offset in (1, 3, 7, 14, 30):
@@ -305,30 +405,33 @@ def summary(days: int = 1, start: Optional[str] = None,
             if first + timedelta(days=offset) > today:
                 continue
             eligible += 1
-            matched += (first + timedelta(days=offset)).isoformat() in visitor_dates.get(visitor, set())
+            matched += (first + timedelta(days=offset)).isoformat() in visitor_dates[visitor]
         retention[f"d{offset}"] = {"rate": round(matched / eligible, 4) if eligible else None,
                                      "returned": matched, "eligible": eligible}
 
     booking = _booking_metrics(start, end)
-    builder_events = [event for event in events
-                      if ALIASES.get(event.event_type, event.event_type)
-                      in ("builder_target_selected", "builder_generated", "builder_bookable")]
+    builder_events = [event for event in user_events if _area(event) == "BUILD_SLIP"]
+    builder_generators = {e.visitor_hash for e in builder_events
+                          if _canonical(e) == "builder_generated" and e.visitor_hash}
+    builder_viewers = {e.visitor_hash for e in builder_events
+                       if _canonical(e) == "booking_code_viewed" and e.visitor_hash}
     targets = Counter(str(int(event.target_odds)) for event in builder_events
-                      if event.target_odds)
-    generated = [event for event in builder_events
-                 if ALIASES.get(event.event_type, event.event_type) == "builder_generated"]
+                      if event.target_odds and _canonical(event) == "builder_target_selected")
+    generated = [event for event in builder_events if _canonical(event) == "builder_generated"]
     builder = {
-        "targets": [{"key": key, "count": count} for key, count in targets.most_common()],
+        "targets": [{"key": name, "count": count} for name, count in targets.most_common()],
         "most_popular_target": targets.most_common(1)[0][0] if targets else None,
-        "generated": len(generated),
-        "bookable": counts["builder_bookable"],
-        "success_rate": round(counts["builder_bookable"] / len(generated), 4) if generated else None,
-        "average_legs": round(sum(e.leg_count or 0 for e in generated) / len(generated), 1) if generated else None,
-        "average_actual_odds": round(sum(e.actual_odds or 0 for e in generated) /
-                                     len([e for e in generated if e.actual_odds]), 2)
-        if any(e.actual_odds for e in generated) else None,
+        "generated": len(generated), "bookable": len(builder_viewers),
+        "success_rate": round(len(builder_viewers & builder_generators) / len(builder_generators), 4)
+                        if builder_generators else None,
+        "average_legs": round(sum(e.leg_count or 0 for e in generated) / len(generated), 1)
+                        if generated else None,
+        "average_actual_odds": (round(sum(e.actual_odds for e in generated if e.actual_odds) /
+                                      len([e for e in generated if e.actual_odds]), 2)
+                                if any(e.actual_odds for e in generated) else None),
         "regenerations": counts["code_regenerated"],
     }
+
     try:
         from leagues.sportybet import board_status
         sportybet = board_status()
@@ -345,32 +448,77 @@ def summary(days: int = 1, start: Optional[str] = None,
     except Exception:
         operations = {"runs": []}
 
-    codes = counts["booking_code_generated"]
+    def coverage(attribute: str, unknown=(None, "", "unknown", "Unknown", "Other")):
+        if not user_events:
+            return None
+        known = sum(getattr(event, attribute, None) not in unknown for event in user_events)
+        return round(known / len(user_events), 4)
+
+    analytics_quality = {
+        "geo_coverage": (round(sum(bool(e.country_code or e.country) for e in user_events) /
+                               len(user_events), 4) if user_events else None),
+        "device_coverage": coverage("device_category"),
+        "os_coverage": coverage("os_family"),
+        "browser_coverage": coverage("browser_family"),
+        "referrer_attribution": (round(sum((e.source or "").lower() not in
+                                           {"", "unknown", "direct"} for e in user_events) /
+                                         len(user_events), 4) if user_events else None),
+        "stable_visitor_coverage": (round(sum(bool(e.visitor_hash and e.session_hash)
+                                              for e in user_events) / len(user_events), 4)
+                                    if user_events else None),
+    }
+
+    totals = {
+        "events": len(user_events), "system_events": len(system_events),
+        "pageviews": counts["pageview"], "visitors": len(visitor_ids),
+        "sessions": len({e.session_hash for e in user_events if e.session_hash}),
+        "new_visitors": len(new), "returning_visitors": len(returning),
+        "predictions_viewed": counts["prediction_viewed"],
+        "prediction_viewers": len({e.visitor_hash for e in user_events
+                                    if _canonical(e) == "prediction_viewed" and e.visitor_hash}),
+        "rollover_views": counts["rollover_viewed"],
+        "builder_opened": counts["builder_opened"],
+        "builder_users": len({e.visitor_hash for e in user_events
+                              if _canonical(e) == "builder_opened" and e.visitor_hash}),
+        "slip_builds": counts["builder_generated"],
+        "slip_generators": len(builder_generators),
+        "valid_codes_displayed": len(valid_entities),
+        "valid_code_viewers": len(viewed_visitors),
+        "total_copy_actions": len(copy_events),
+        "unique_code_copiers": len(copied_visitors),
+        "unique_codes_copied": len(copied_entities),
+        "sportybet_opened": counts["sportybet_open_clicked"],
+        "sportybet_openers": len({e.visitor_hash for e in user_events
+                                  if _canonical(e) == "sportybet_open_clicked" and e.visitor_hash}),
+        "code_copy_rate": (round(len(converted_entities) / len(valid_entities), 4)
+                           if valid_entities else None),
+        "user_copy_rate": (round(len(converted_visitors) / len(viewed_visitors), 4)
+                           if viewed_visitors else None),
+        # Compatibility names now intentionally refer only to system events.
+        "codes_generated": system_counts["booking_code_generated"],
+        "codes_validated": system_counts["booking_code_validated"],
+        "codes_copied": len(copy_events),
+    }
     payload = {
-        "window_days": days, "start": start, "end": end,
-        "totals": {"events": len(events), "pageviews": counts["pageview"],
-                   "visitors": len(visitor_ids), "new_visitors": len(new),
-                   "returning_visitors": len(returning),
-                   "predictions_viewed": counts["prediction_viewed"],
-                   "rollover_views": counts["rollover_viewed"],
-                   "builder_opened": counts["builder_opened"],
-                   "slip_builds": counts["builder_generated"],
-                   "codes_generated": codes,
-                   "codes_validated": counts["booking_code_validated"],
-                   "codes_copied": counts["booking_code_copied"],
-                   "sportybet_opened": counts["sportybet_open_clicked"],
-                   "code_copy_rate": round(counts["booking_code_copied"] / codes, 4) if codes else None},
-        "funnel": funnel, "retention": retention, "daily": daily,
-        "active_users": active_users, "builder": builder,
+        "window_days": (datetime.strptime(end, "%Y-%m-%d") -
+                        datetime.strptime(start, "%Y-%m-%d")).days + 1,
+        "start": start, "end": end, "totals": totals,
+        "funnel": funnels["prediction"], "funnels": funnels,
+        "retention": retention, "daily": daily, "active_users": active_users,
+        "builder": builder, "analytics_quality": analytics_quality,
+        "system_event_counts": dict(system_counts),
         "by_source": dimension("source"), "by_campaign": dimension("campaign"),
-        "by_path": dimension("path"), "by_country": dimension("country"),
+        "by_path": dimension("path"), "by_country": dimension("country_code"),
         "by_device": dimension("device_category"), "by_os": dimension("os_family"),
-        "by_tier": dimension("tier"), "booking": booking,
-        "sportybet": sportybet, "prediction_performance": prediction_performance,
-        "operations": operations,
-        "limitations": ["Anonymous retention is approximate and begins when persistent browser IDs deploy.",
-                        "Code copied and SportyBet opened do not prove a bet was placed.",
-                        "Country is available only when the hosting edge supplies it."],
+        "by_browser": dimension("browser_family"), "by_tier": dimension("tier"),
+        "by_product_source": dimension("product_source"),
+        "booking": booking, "sportybet": sportybet,
+        "prediction_performance": prediction_performance, "operations": operations,
+        "limitations": [
+            "Historical events are not fabricated; missing enrichment remains unknown.",
+            "Anonymous browser identity can be cleared and does not link devices.",
+            "Code copied and SportyBet opened do not prove a bet was placed.",
+        ],
     }
     _cache.update({"key": key, "at": time.time(), "value": payload})
     return payload
@@ -379,14 +527,16 @@ def summary(days: int = 1, start: Optional[str] = None,
 def compare(days: int = 1, start: Optional[str] = None,
             end: Optional[str] = None) -> dict:
     current = summary(days, start, end)
-    s = datetime.strptime(current["start"], "%Y-%m-%d")
-    e = datetime.strptime(current["end"], "%Y-%m-%d")
-    width = (e - s).days + 1
-    previous_end = s - timedelta(days=1)
+    first = datetime.strptime(current["start"], "%Y-%m-%d")
+    last = datetime.strptime(current["end"], "%Y-%m-%d")
+    width = (last - first).days + 1
+    previous_end = first - timedelta(days=1)
     previous_start = previous_end - timedelta(days=width - 1)
-    previous = summary(width, previous_start.strftime("%Y-%m-%d"), previous_end.strftime("%Y-%m-%d"))
+    previous = summary(width, previous_start.strftime("%Y-%m-%d"),
+                       previous_end.strftime("%Y-%m-%d"))
     booking_keys = ("attempts", "full", "rebuilt", "partial", "unavailable",
-                    "failed", "validation_failed", "success_rate", "no_code_rate")
+                    "failed", "validation_failed", "success_rate", "no_code_rate",
+                    "validation_success_rate")
     current_values = {**current["totals"],
                       **{key: current["booking"].get(key) for key in booking_keys}}
     previous_values = {**previous["totals"],
@@ -396,5 +546,4 @@ def compare(days: int = 1, start: Optional[str] = None,
         old = previous_values.get(metric)
         changes[metric] = (round((value - old) / old, 4)
                            if isinstance(value, (int, float)) and old else None)
-    return {"current": current_values, "previous": previous_values,
-            "changes": changes}
+    return {"current": current_values, "previous": previous_values, "changes": changes}

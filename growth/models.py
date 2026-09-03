@@ -154,22 +154,24 @@ class GrowthSetting(Base):
 class GrowthEvent(Base):
     """One attributed visit or action on the site.
 
-    Deliberately not per-user: no account system exists, and building a
-    cross-site identity graph for marketing attribution is not something to
-    add quietly. A hashed, rotating visitor id answers "how many people and
-    where from" without storing anything that identifies a person.
+    Deliberately not tied to an account: the frontend creates a random,
+    first-party browser ID and the API stores only a keyed hash. It survives
+    normal return visits but cannot link browsers or devices. A separate
+    session hash scopes one tab session. Raw IP addresses are never stored.
     """
     __tablename__ = "growth_events"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_date = Column(String(10), nullable=False, index=True)
-    event_type = Column(String(32), nullable=False, index=True)  # pageview|telegram_click|...
+    event_type = Column(String(40), nullable=False, index=True)
+    event_class = Column(String(16), nullable=True, index=True)  # USER_EVENT|SYSTEM_EVENT
     path = Column(String(256), nullable=True)
 
     source = Column(String(64), nullable=True, index=True)     # utm_source
     medium = Column(String(64), nullable=True)                 # utm_medium
     campaign = Column(String(64), nullable=True, index=True)   # utm_campaign
     content_tag = Column(String(64), nullable=True)            # utm_content
+    utm_term = Column(String(64), nullable=True)
     ref = Column(String(64), nullable=True, index=True)        # creator referral
 
     visitor_hash = Column(String(32), nullable=True, index=True)
@@ -187,8 +189,17 @@ class GrowthEvent(Base):
     leg_count = Column(Integer, nullable=True)
     actual_odds = Column(Float, nullable=True)
     country = Column(String(8), nullable=True, index=True)
+    country_code = Column(String(2), nullable=True, index=True)
+    region = Column(String(96), nullable=True)
+    city = Column(String(96), nullable=True)
+    timezone = Column(String(64), nullable=True)
     device_category = Column(String(16), nullable=True, index=True)
     os_family = Column(String(24), nullable=True)
+    browser_family = Column(String(32), nullable=True)
+    screen_width = Column(Integer, nullable=True)
+    screen_height = Column(Integer, nullable=True)
+    booking_id = Column(String(64), nullable=True, index=True)
+    product_source = Column(String(24), nullable=True, index=True)
     metadata_json = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -232,10 +243,16 @@ def ensure_tables() -> bool:
         existing = {c["name"] for c in inspect(engine).get_columns("growth_events")}
         additions = {
             "session_hash": "VARCHAR(32)", "event_key": "VARCHAR(64)",
+            "event_class": "VARCHAR(16)",
             "tier": "VARCHAR(32)", "target_odds": "FLOAT",
             "booking_status": "VARCHAR(32)", "leg_count": "INTEGER",
             "actual_odds": "FLOAT", "country": "VARCHAR(8)",
+            "country_code": "VARCHAR(2)", "region": "VARCHAR(96)",
+            "city": "VARCHAR(96)", "timezone": "VARCHAR(64)",
             "device_category": "VARCHAR(16)", "os_family": "VARCHAR(24)",
+            "browser_family": "VARCHAR(32)", "screen_width": "INTEGER",
+            "screen_height": "INTEGER", "booking_id": "VARCHAR(64)",
+            "product_source": "VARCHAR(24)", "utm_term": "VARCHAR(64)",
             "metadata_json": "TEXT",
         }
         with engine.begin() as conn:
@@ -249,6 +266,9 @@ def ensure_tables() -> bool:
             conn.execute(text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS ux_growth_events_event_key "
                 "ON growth_events (event_key)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_growth_events_class_date "
+                "ON growth_events (event_class, event_date)"))
         return True
     except Exception as e:
         logger.warning(f"Could not ensure growth tables: {e}")

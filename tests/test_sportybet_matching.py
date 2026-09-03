@@ -326,6 +326,26 @@ def test_pagination_continues_until_declared_total(monkeypatch):
     assert sb.board_metadata(board)["fetched_total"] == 201
 
 
+def test_catalogue_distinguishes_raw_records_from_unique_fixtures(monkeypatch):
+    pages = {
+        1: [_page_event(1), _page_event(2)],
+        2: [_page_event(2), _page_event(3)],  # boundary duplicate
+    }
+    monkeypatch.setattr(sb, "_db_get", lambda key: None)
+    monkeypatch.setattr(sb, "_db_set", lambda key, value: None)
+    monkeypatch.setattr(sb, "_get_json", lambda url: {
+        "data": {"totalNum": 3, "tournaments": [{
+            "name": "League", "events": pages[int(url.split("pageNum=")[1])]
+        }]}})
+    board = sb.fetch_board(force=True)
+    meta = sb.board_metadata(board)
+    assert meta["declared_total"] == 3
+    assert meta["raw_fetched_records"] == 4
+    assert meta["unique_indexed_fixtures"] == 3
+    assert meta["duplicates_removed"] == 1
+    assert meta["is_complete"] is True
+
+
 def test_incomplete_catalogue_does_not_claim_genuine_absence(monkeypatch):
     monkeypatch.setattr(sb, "_db_get", lambda key: None)
     monkeypatch.setattr(sb, "_db_set", lambda key, value: None)

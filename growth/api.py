@@ -40,6 +40,7 @@ async def track(request: Request, payload: dict = Body(default={})):
     """
     try:
         from growth import analytics
+        from growth.analytics_enrichment import request_geo
         from growth.models import ensure_tables
 
         ensure_tables()
@@ -47,6 +48,11 @@ async def track(request: Request, payload: dict = Body(default={})):
         ip = fwd.split(",")[0].strip() if fwd else (
             request.client.host if request.client else "")
 
+        geo = request_geo(request.headers, payload.get("timezone"))
+        metadata = (dict(payload.get("metadata"))
+                    if isinstance(payload.get("metadata"), dict) else {})
+        if payload.get("client_timestamp"):
+            metadata["client_timestamp"] = str(payload["client_timestamp"])[:64]
         analytics.record(
             event_type=str(payload.get("event") or "pageview"),
             path=payload.get("path"),
@@ -54,6 +60,7 @@ async def track(request: Request, payload: dict = Body(default={})):
             medium=payload.get("utm_medium"),
             campaign=payload.get("utm_campaign"),
             content_tag=payload.get("content_tag") or payload.get("utm_content"),
+            utm_term=payload.get("utm_term"),
             ref=payload.get("ref"),
             referrer=payload.get("referrer"),
             ip=ip,
@@ -66,8 +73,14 @@ async def track(request: Request, payload: dict = Body(default={})):
             booking_status=payload.get("booking_status"),
             leg_count=payload.get("leg_count"),
             actual_odds=payload.get("actual_odds"),
-            country=request.headers.get("x-vercel-ip-country") or payload.get("country"),
-            metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+            country_code=geo["country_code"], region=geo["region"],
+            city=geo["city"], timezone_name=geo["timezone"],
+            geo_source=geo["geo_source"],
+            screen_width=payload.get("screen_width"),
+            screen_height=payload.get("screen_height"),
+            booking_id=payload.get("booking_id"),
+            product_area=payload.get("product_source"),
+            metadata=metadata,
         )
     except Exception as e:
         logger.debug(f"growth track failed: {e}")

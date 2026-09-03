@@ -447,7 +447,12 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
 
     fixtures: dict[str, list[dict]] = {}
     declared_total = 0
-    fetched_total = 0
+    raw_fetched_records = 0
+    parsed_records = 0
+    unique_indexed_fixtures = 0
+    duplicates_removed = 0
+    invalid_records = 0
+    seen_fixture_ids: set[str] = set()
     page_count = 0
     error = None
     required_pages = 1
@@ -471,7 +476,7 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
             if not tournaments:
                 # An empty page is complete only after the declared total has
                 # already been consumed. Otherwise it is a partial response.
-                if declared_total and fetched_total < declared_total:
+                if declared_total and unique_indexed_fixtures < declared_total:
                     error = f"empty page {page} before declared total"
                 break
 
@@ -482,19 +487,26 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
                     page_events += 1
                     parsed = _parse_event(ev)
                     if not parsed:
+                        invalid_records += 1
                         continue
+                    parsed_records += 1
                     parsed["competition"] = tournament.get("name")
                     key = (f"{_norm(parsed['home_team'])}|"
                            f"{_norm(parsed['away_team'])}")
                     bucket = fixtures.setdefault(key, [])
                     # Pages can repeat a boundary event. Preserve genuinely
                     # repeated fixtures on different dates, not duplicates.
-                    if not any(str(x.get("event_id")) == str(parsed.get("event_id"))
-                               for x in bucket):
-                        bucket.append(parsed)
-            fetched_total += page_events
+                    fixture_id = str(parsed.get("event_id") or
+                                     f"{key}|{parsed.get('kickoff_ms')}")
+                    if fixture_id in seen_fixture_ids:
+                        duplicates_removed += 1
+                        continue
+                    seen_fixture_ids.add(fixture_id)
+                    bucket.append(parsed)
+                    unique_indexed_fixtures += 1
+            raw_fetched_records += page_events
 
-            if declared_total and fetched_total >= declared_total:
+            if declared_total and unique_indexed_fixtures >= declared_total:
                 break
             if page >= required_pages and not declared_total:
                 break
@@ -506,16 +518,23 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
         error = f"{type(exc).__name__}: {str(exc)[:180]}"
         logger.warning(f"sportybet board fetch failed: {exc}")
 
-    is_complete = bool(declared_total and fetched_total >= declared_total
+    is_complete = bool(declared_total and unique_indexed_fixtures >= declared_total
                        and page_count >= required_pages and not error)
     fetched_at = time.time()
     snapshot_id = hashlib.sha256(
-        f"{fetched_at:.6f}|{declared_total}|{fetched_total}|{page_count}".encode()
+        f"{fetched_at:.6f}|{declared_total}|{raw_fetched_records}|"
+        f"{unique_indexed_fixtures}|{page_count}".encode()
     ).hexdigest()[:16]
     metadata = {
         "snapshot_id": snapshot_id,
         "declared_total": declared_total,
-        "fetched_total": fetched_total,
+        # fetched_total remains as a compatibility alias for old consumers.
+        "fetched_total": raw_fetched_records,
+        "raw_fetched_records": raw_fetched_records,
+        "parsed_records": parsed_records,
+        "unique_indexed_fixtures": unique_indexed_fixtures,
+        "duplicates_removed": duplicates_removed,
+        "invalid_records": invalid_records,
         "page_count": page_count,
         "required_pages": required_pages,
         "is_complete": is_complete,
@@ -539,7 +558,8 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
 
     parsed_count = sum(1 for _ in _board_entries(board))
     logger.info(
-        f"sportybet board: {parsed_count}/{declared_total or '?'} fixtures, "
+        f"sportybet board: {parsed_count}/{declared_total or '?'} unique fixtures "
+        f"from {raw_fetched_records} records ({duplicates_removed} duplicates), "
         f"{page_count} page(s), complete={is_complete}")
     return board
 
@@ -871,9 +891,19 @@ def board_status() -> dict:
     metadata = cached.get("metadata") or {}
     board = _snapshot(fixtures, metadata)
     entries = [entry for _, entry in _board_entries(board)]
+    unique_count = len(entries)
+    raw_count = metadata.get("raw_fetched_records", metadata.get("fetched_total"))
+    if raw_count is None:
+        raw_count = unique_count
     margins = [m for f in entries for m in (f.get("margins") or {}).values()]
     out = {
-        "fixtures": len(entries),
+        "fixtures": unique_count,
+        "raw_fetched_records": raw_count,
+        "unique_indexed_fixtures": metadata.get("unique_indexed_fixtures", unique_count),
+        # Old cached snapshots did not distinguish duplicates from parse
+        # failures, so leave those fields unknown instead of inventing a cause.
+        "duplicates_removed": metadata.get("duplicates_removed"),
+        "invalid_records": metadata.get("invalid_records"),
         "cache_age_hours": (round((time.time() - cached["fetched_at"]) / 3600.0, 2)
                             if cached.get("fetched_at") else None),
         "base_url": BASE_URL,
