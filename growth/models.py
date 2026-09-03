@@ -173,8 +173,23 @@ class GrowthEvent(Base):
     ref = Column(String(64), nullable=True, index=True)        # creator referral
 
     visitor_hash = Column(String(32), nullable=True, index=True)
+    session_hash = Column(String(32), nullable=True, index=True)
+    event_key = Column(String(64), nullable=True, index=True)
     is_new_visitor = Column(Boolean, default=True)
     referrer_host = Column(String(128), nullable=True)
+
+    # Non-sensitive product context. Keeping commonly grouped dimensions in
+    # columns avoids parsing JSON for every dashboard request; metadata holds
+    # optional details that are not used as primary dimensions.
+    tier = Column(String(32), nullable=True, index=True)
+    target_odds = Column(Float, nullable=True)
+    booking_status = Column(String(32), nullable=True, index=True)
+    leg_count = Column(Integer, nullable=True)
+    actual_odds = Column(Float, nullable=True)
+    country = Column(String(8), nullable=True, index=True)
+    device_category = Column(String(16), nullable=True, index=True)
+    os_family = Column(String(24), nullable=True)
+    metadata_json = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
@@ -210,6 +225,30 @@ def ensure_tables() -> bool:
     try:
         from database import engine
         Base.metadata.create_all(bind=engine, tables=_TABLES)
+        # create_all does not add columns to an existing installation. This
+        # project already uses additive runtime migrations for operational
+        # tables, so analytics follows the same safe, idempotent pattern.
+        from sqlalchemy import inspect, text
+        existing = {c["name"] for c in inspect(engine).get_columns("growth_events")}
+        additions = {
+            "session_hash": "VARCHAR(32)", "event_key": "VARCHAR(64)",
+            "tier": "VARCHAR(32)", "target_odds": "FLOAT",
+            "booking_status": "VARCHAR(32)", "leg_count": "INTEGER",
+            "actual_odds": "FLOAT", "country": "VARCHAR(8)",
+            "device_category": "VARCHAR(16)", "os_family": "VARCHAR(24)",
+            "metadata_json": "TEXT",
+        }
+        with engine.begin() as conn:
+            for name, sql_type in additions.items():
+                if name not in existing:
+                    conn.execute(text(
+                        f"ALTER TABLE growth_events ADD COLUMN {name} {sql_type}"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_growth_events_date_visitor "
+                "ON growth_events (event_date, visitor_hash)"))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_growth_events_event_key "
+                "ON growth_events (event_key)"))
         return True
     except Exception as e:
         logger.warning(f"Could not ensure growth tables: {e}")

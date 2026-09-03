@@ -58,6 +58,16 @@ async def track(request: Request, payload: dict = Body(default={})):
             referrer=payload.get("referrer"),
             ip=ip,
             user_agent=request.headers.get("user-agent", ""),
+            visitor_id=payload.get("visitor_id"),
+            session_id=payload.get("session_id"),
+            event_id=payload.get("event_id"),
+            tier=payload.get("tier"),
+            target_odds=payload.get("target_odds"),
+            booking_status=payload.get("booking_status"),
+            leg_count=payload.get("leg_count"),
+            actual_odds=payload.get("actual_odds"),
+            country=request.headers.get("x-vercel-ip-country") or payload.get("country"),
+            metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
         )
     except Exception as e:
         logger.debug(f"growth track failed: {e}")
@@ -285,11 +295,24 @@ async def growth_retry(admin: str = Depends(require_admin)):
 
 @router.get("/analytics")
 async def growth_analytics(admin: str = Depends(require_admin),
-                           days: int = Query(7, ge=1, le=90)):
+                           days: int = Query(1, ge=1, le=90),
+                           start: Optional[str] = Query(None),
+                           end: Optional[str] = Query(None)):
     from growth.analytics import compare, summary
+    if bool(start) != bool(end):
+        raise HTTPException(400, "Custom range requires both start and end dates.")
+    if start and end:
+        try:
+            from datetime import datetime
+            first = datetime.strptime(start, "%Y-%m-%d")
+            last = datetime.strptime(end, "%Y-%m-%d")
+            if last < first or (last - first).days > 90:
+                raise ValueError
+        except ValueError:
+            raise HTTPException(400, "Choose a valid range of 90 days or less.")
     return {"status": "success",
-            "summary": summary(days),
-            "vs_previous": compare(days)}
+            "summary": summary(days, start, end),
+            "vs_previous": compare(days, start, end)}
 
 
 @router.get("/status")
