@@ -86,7 +86,7 @@ _COST_TIE_BAND = 0.02
 
 
 def _cost(pick: dict) -> float:
-    p = max(1e-6, min(0.999, pick["confidence"]))
+    p = max(1e-6, min(0.999, pick.get("evidence_adjusted_probability", pick["confidence"])))
     o = max(1.0001, pick["odds"])
     return -math.log(p) / math.log(o)
 
@@ -181,6 +181,7 @@ def build_slip(target: float, pool: list | None = None,
     for pick in pool:
         decision = evaluate_leg_trust(pick)
         pick["trust"] = decision
+        pick["evidence_adjusted_probability"] = decision["evidence_adjusted_probability"]
         if decision["accepted"]:
             trusted_pool.append(pick)
         else:
@@ -218,7 +219,7 @@ def build_slip(target: float, pool: list | None = None,
             groups[group] += 1
             exposures[exposure] += 1
             odds *= p["odds"]
-            joint *= p["confidence"]
+            joint *= p.get("evidence_adjusted_probability", p["confidence"])
             legs.append(p)
             if odds >= target * BAND_LOW:
                 break
@@ -282,6 +283,7 @@ def build_slip(target: float, pool: list | None = None,
         "hit_probability": round(joint, 5),
         "expected_return": round(expected_return, 4),
         "avg_confidence": round(sum(p["confidence"] for p in legs) / len(legs), 4),
+        "avg_evidence_probability": round(sum(p.get("evidence_adjusted_probability",p["confidence"]) for p in legs)/len(legs),4),
         "minimum_trust_score": min(p["trust"]["trust_score"] for p in legs),
         "average_trust_score": round(sum(p["trust"]["trust_score"] for p in legs) / len(legs), 1),
         "lowest_trust_grade": max(p["trust"]["trust_grade"] for p in legs),
@@ -404,6 +406,7 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
         "hit_probability": built["hit_probability"],
         "expected_return": built["expected_return"],
         "avg_confidence": built["avg_confidence"],
+        "avg_evidence_probability": built.get("avg_evidence_probability", built["avg_confidence"]),
         "minimum_trust_score": built.get("minimum_trust_score"),
         "average_trust_score": built.get("average_trust_score"),
         "lowest_trust_grade": built.get("lowest_trust_grade"),

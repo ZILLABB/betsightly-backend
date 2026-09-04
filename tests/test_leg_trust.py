@@ -24,7 +24,7 @@ def test_trusted_leg_is_accepted():
 
 
 def test_sparse_market_is_rejected_conservatively():
-    decision = evaluate_leg_trust(_pick(calibration_sample=3, safe_tier_eligible=False))
+    decision = evaluate_leg_trust(_pick(market="unknown_market", calibration_sample=3, safe_tier_eligible=False))
     assert not decision["accepted"]
     assert "insufficient_market_evidence" in decision["rejection_reasons"]
 

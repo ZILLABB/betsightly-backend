@@ -32,6 +32,12 @@ class LegTrust:
     trust_grade: str
     accepted: bool
     rejection_reasons: tuple[str, ...]
+    evidence_state: str
+    historical_reliability_estimate: float | None
+    live_reliability_estimate: float | None
+    evidence_adjusted_probability: float
+    lower_reliability_bound: float
+    evidence_level: str
     def to_dict(self) -> dict:
         value = asdict(self)
         value["rejection_reasons"] = list(self.rejection_reasons)
@@ -45,6 +51,10 @@ def evaluate_leg_trust(pick: dict, *, minimum_samples: int | None = None) -> dic
     raw = pick.get("raw_confidence")
     raw = float(raw) if raw is not None else None
     sample = int(pick.get("calibration_sample") or 0)
+    from leagues.evidence_fusion import fused_market_evidence
+    fused = fused_market_evidence(pick.get("market", ""), confidence,
+                                  (pick.get("_fixture") or {}).get("league"),
+                                  pick.get("calibration_evidence"))
     availability = pick.get("sportybet_availability") or {}
     bookable = bool(pick.get("bookable") and availability.get("sportybet_available", True)
                     and availability.get("status", "BOOKABLE") == "BOOKABLE")
@@ -57,7 +67,11 @@ def evaluate_leg_trust(pick: dict, *, minimum_samples: int | None = None) -> dic
     complete = bool(pick.get("match_id") and pick.get("market") and fixture.get("commence_time"))
     reasons = []
     if not bookable: reasons.append("sportybet_selection_not_exactly_bookable")
-    if not pick.get("safe_tier_eligible", sample >= minimum_samples): reasons.append("insufficient_market_evidence")
+    if (not pick.get("safe_tier_eligible", sample >= minimum_samples)
+            and fused["state"] not in ("SUPPORTED", "PROVEN")):
+        reasons.append("insufficient_market_evidence")
+    if fused["state"] in ("SHADOW", "REJECTED"):
+        reasons.append("market_evidence_restricted")
     if confidence <= 0 or confidence >= 1: reasons.append("invalid_calibrated_probability")
     if model_delta is not None and model_delta > .15: reasons.append("large_internal_model_disagreement")
     if market_delta is not None and market_delta > .25: reasons.append("large_model_market_disagreement")
@@ -66,7 +80,7 @@ def evaluate_leg_trust(pick: dict, *, minimum_samples: int | None = None) -> dic
     cal_error = (abs(float(cell["promised"]) - float(cell["actual"]))
                  if cell.get("promised") is not None and cell.get("actual") is not None else None)
     score = 100
-    score -= 30 if sample < minimum_samples else (8 if sample < minimum_samples * 2 else 0)
+    score -= (0 if fused["state"] in ("SUPPORTED","PROVEN") else 30) if sample < minimum_samples else (8 if sample < minimum_samples * 2 else 0)
     score -= 6 if implied is None else min(20, round((market_delta or 0) * 50))
     score -= 4 if model_delta is None else (15 if model_delta > .10 else 0)
     score -= min(20, round(cal_error * 100)) if cal_error is not None else 0
@@ -78,4 +92,7 @@ def evaluate_leg_trust(pick: dict, *, minimum_samples: int | None = None) -> dic
                     implied, market_delta, model_delta,
                     "current_board" if availability.get("board_snapshot_id") else "unknown",
                     bookable, "complete" if complete else "incomplete", score, grade,
-                    not reasons and grade in ("A", "B"), tuple(reasons)).to_dict()
+                    not reasons and grade in ("A", "B"), tuple(reasons), fused["state"],
+                    fused["historical_reliability_estimate"],fused["live_reliability_estimate"],
+                    fused["evidence_adjusted_probability"],fused["lower_reliability_bound"],
+                    fused["hierarchy_level"]).to_dict()

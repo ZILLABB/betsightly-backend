@@ -43,9 +43,10 @@ def test_week_horizon_contains_exactly_seven_wat_dates():
 def test_expected_return_matches_this_slips_probability_and_odds():
     built = build_slip(2.0, pool=[_pick()], market_cap=10)
     assert built["ok"]
-    assert built["hit_probability"] == pytest.approx(0.60)
+    assert built["hit_probability"] == pytest.approx(
+        built["picks"][0]["evidence_adjusted_probability"])
     assert built["odds"] == pytest.approx(2.0)
-    assert built["expected_return"] == pytest.approx(1.20)
+    assert built["expected_return"] == pytest.approx(built["hit_probability"] * 2.0)
 
 
 def test_slip_builder_requires_exact_sportybet_bookability():
