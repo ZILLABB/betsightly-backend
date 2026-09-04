@@ -41,6 +41,17 @@ def test_stale_or_missing_sportybet_selection_is_rejected():
     assert not decision["accepted"]
 
 
+def test_poor_lower_reliability_bound_rejects_leg(monkeypatch):
+    monkeypatch.setattr("leagues.evidence_fusion.fused_market_evidence", lambda *args, **kwargs: {
+        "state": "SUPPORTED", "historical_reliability_estimate": .55,
+        "live_reliability_estimate": None, "evidence_adjusted_probability": .54,
+        "lower_reliability_bound": .42, "hierarchy_level": "market_global",
+    })
+    decision = evaluate_leg_trust(_pick(confidence=.78))
+    assert not decision["accepted"]
+    assert "weak_reliability_lower_bound" in decision["rejection_reasons"]
+
+
 def test_no_vig_probability_normalizes_complete_market():
     assert no_vig_probability(2.0, [2.0, 2.0]) == pytest.approx(.5)
     assert no_vig_probability(2.0, [2.0]) is None

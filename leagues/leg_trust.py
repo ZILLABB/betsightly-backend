@@ -72,6 +72,9 @@ def evaluate_leg_trust(pick: dict, *, minimum_samples: int | None = None) -> dic
         reasons.append("insufficient_market_evidence")
     if fused["state"] in ("SHADOW", "REJECTED"):
         reasons.append("market_evidence_restricted")
+    uncertainty_gap = max(0.0, confidence - fused["lower_reliability_bound"])
+    if fused["lower_reliability_bound"] < .50 or uncertainty_gap > .30:
+        reasons.append("weak_reliability_lower_bound")
     if confidence <= 0 or confidence >= 1: reasons.append("invalid_calibrated_probability")
     if model_delta is not None and model_delta > .15: reasons.append("large_internal_model_disagreement")
     if market_delta is not None and market_delta > .25: reasons.append("large_model_market_disagreement")
@@ -84,6 +87,7 @@ def evaluate_leg_trust(pick: dict, *, minimum_samples: int | None = None) -> dic
     score -= 6 if implied is None else min(20, round((market_delta or 0) * 50))
     score -= 4 if model_delta is None else (15 if model_delta > .10 else 0)
     score -= min(20, round(cal_error * 100)) if cal_error is not None else 0
+    score -= min(20, round(uncertainty_gap * 50))
     score -= 40 if not bookable else 0
     score -= 25 if not complete else 0
     score = max(0, min(100, int(score)))
