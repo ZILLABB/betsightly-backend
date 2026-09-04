@@ -170,20 +170,58 @@ def test_builder_does_not_accept_odds_below_requested_target():
     assert built["best_reachable"] == pytest.approx(3.38)
 
 
-def test_builder_excludes_dnb_until_push_math_is_supported():
-    pick = _pick(
-        "dnb-test",
-        odds=2.00,
-        confidence=0.80,
-        market_group="draw_no_bet",
-    )
-    pick["market"] = "dnb_home"
+def test_dnb_settlement_math_models_draw_as_push():
+    pick = {
+        "market": "dnb_home",
+        "odds": 1.50,
+        "confidence": 0.80,
+        "evidence_adjusted_probability": 0.80,
+        "_model": {
+            "probabilities": {
+                "home_win": 0.50,
+                "draw": 0.25,
+                "away_win": 0.25,
+            }
+        },
+    }
 
-    built = build_slip(
-        2.00,
-        pool=[pick],
-        market_cap=10,
+    settlement = slip_builder._leg_settlement_probabilities(pick)
+
+    assert settlement is not None
+
+    win, push, loss = settlement
+
+    assert win == pytest.approx(0.60)
+    assert push == pytest.approx(0.25)
+    assert loss == pytest.approx(0.15)
+
+
+def test_dnb_push_reduces_payout_without_losing_accumulator():
+    dnb = {
+        "market": "dnb_home",
+        "odds": 2.00,
+        "confidence": 0.80,
+        "evidence_adjusted_probability": 0.80,
+        "_model": {
+            "probabilities": {
+                "home_win": 0.50,
+                "draw": 0.25,
+                "away_win": 0.25,
+            }
+        },
+    }
+
+    binary = {
+        "market": "over_1_5",
+        "odds": 2.00,
+        "confidence": 0.70,
+        "evidence_adjusted_probability": 0.70,
+    }
+
+    distribution = slip_builder._positive_payout_distribution(
+        [dnb, binary]
     )
 
-    assert not built["ok"]
-    assert built["trust_rejection_reasons"]["dnb_push_math_pending"] == 1
+    assert distribution[4.0] == pytest.approx(0.42)
+    assert distribution[2.0] == pytest.approx(0.175)
+    assert sum(distribution.values()) == pytest.approx(0.595)

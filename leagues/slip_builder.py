@@ -85,22 +85,122 @@ BAND_HIGH = 1.45
 _COST_TIE_BAND = 0.02
 
 
+DNB_MARKETS = {"dnb_home", "dnb_away"}
+
+
+def _leg_settlement_probabilities(
+    pick: dict,
+) -> tuple[float, float, float] | None:
+    """Return (win, push, loss) probabilities for one Builder leg.
+
+    Normal markets are binary.
+
+    DNB confidence is conditional on a decisive result, while a draw voids
+    that leg. Convert the conditional DNB probability back into unconditional
+    win / push / loss probabilities before accumulator maths.
+    """
+    probability = max(
+        0.0,
+        min(
+            1.0,
+            float(
+                pick.get(
+                    "evidence_adjusted_probability",
+                    pick.get("confidence", 0.0),
+                )
+            ),
+        ),
+    )
+
+    if pick.get("market") not in DNB_MARKETS:
+        return probability, 0.0, 1.0 - probability
+
+    model_probabilities = (pick.get("_model") or {}).get("probabilities") or {}
+    draw_probability = model_probabilities.get("draw")
+
+    # Never silently treat DNB as binary when its push probability is missing.
+    if draw_probability is None:
+        return None
+
+    push_probability = max(
+        0.0,
+        min(1.0, float(draw_probability)),
+    )
+    decisive_probability = 1.0 - push_probability
+
+    win_probability = probability * decisive_probability
+    loss_probability = (1.0 - probability) * decisive_probability
+
+    return (
+        win_probability,
+        push_probability,
+        loss_probability,
+    )
+
+
+def _positive_payout_distribution(
+    legs: list[dict],
+) -> dict[float, float]:
+    """Probability distribution of positive accumulator payout factors.
+
+    Losing branches are omitted because they return zero.
+
+    A DNB win contributes its quoted odds. A DNB push contributes 1.00.
+    """
+    states: dict[float, float] = {1.0: 1.0}
+
+    for pick in legs:
+        settlement = _leg_settlement_probabilities(pick)
+        if settlement is None:
+            return {}
+
+        win_probability, push_probability, _ = settlement
+        odds = float(pick["odds"])
+
+        next_states: dict[float, float] = {}
+
+        for payout, probability in states.items():
+            win_payout = payout * odds
+            next_states[win_payout] = (
+                next_states.get(win_payout, 0.0) + probability * win_probability
+            )
+
+            if push_probability:
+                next_states[payout] = (
+                    next_states.get(payout, 0.0) + probability * push_probability
+                )
+
+        states = next_states
+
+    return states
+
+
 def _cost(pick: dict) -> float:
-    p = max(1e-6, min(0.999, pick.get("evidence_adjusted_probability", pick["confidence"])))
+    settlement = _leg_settlement_probabilities(pick)
+
+    # Missing DNB draw information should make the leg maximally unattractive.
+    if settlement is None:
+        return float("inf")
+
+    win_probability, _, _ = settlement
+
+    # Target construction uses the probability of actually winning at the
+    # quoted odds. A DNB push keeps the ticket alive but contributes 1.00x.
+    p = max(1e-6, min(0.999, win_probability))
     o = max(1.0001, pick["odds"])
+
     return -math.log(p) / math.log(o)
 
 
 def _order_key(pick: dict):
     """Cost first, banded; the cheaper market breaks the tie."""
     from leagues.picks import ESTIMATE_MARGIN
+
     m = pick.get("market_margin")
     margin = (ESTIMATE_MARGIN - 1.0) if m is None else m
     # Bookability outranks margin for the same reason it does on the card: an
     # unbookable leg costs the whole slip its code, a point of margin does not.
-    return (round(_cost(pick) / _COST_TIE_BAND),
-            not pick.get("bookable"),
-            margin)
+    return (round(_cost(pick) / _COST_TIE_BAND), not pick.get("bookable"), margin)
 
 
 def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
@@ -124,8 +224,9 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
         # of a slip somebody is about to place.
         if (p["_fixture"].get("commence_time") or "") <= now:
             continue
-        floor = max(min_confidence_for(p["market"], fit=fit),
-                    MIN_PUBLISHABLE_CONFIDENCE)
+        floor = max(
+            min_confidence_for(p["market"], fit=fit), MIN_PUBLISHABLE_CONFIDENCE
+        )
         if p["confidence"] >= floor:
             out.append(p)
     return out
@@ -154,14 +255,21 @@ def _best_per_fixture_group(pool: list) -> list:
     return sorted(best.values(), key=_order_key)
 
 
-def build_slip(target: float, pool: list | None = None,
-               max_legs: int = MAX_LEGS, market_cap: int | None = None,
-               horizon: str = DEFAULT_HORIZON,
-               require_bookable: bool = True) -> dict:
+def build_slip(
+    target: float,
+    pool: list | None = None,
+    max_legs: int = MAX_LEGS,
+    market_cap: int | None = None,
+    horizon: str = DEFAULT_HORIZON,
+    require_bookable: bool = True,
+) -> dict:
     """The slip most likely to land at `target`, or an honest refusal."""
     from leagues.selection import (
-        MARKET_CAP, TEAM_TO_SCORE_CAP, exposure_group,
+        MARKET_CAP,
+        TEAM_TO_SCORE_CAP,
+        exposure_group,
     )
+
     cap = MARKET_CAP if market_cap is None else market_cap
 
     if pool is None:
@@ -172,10 +280,13 @@ def build_slip(target: float, pool: list | None = None,
     if require_bookable:
         pool = [pick for pick in pool if pick.get("bookable")]
         if not pool:
-            return {"ok": False,
-                    "reason": "No exact SportyBet-bookable selections are available right now."}
+            return {
+                "ok": False,
+                "reason": "No exact SportyBet-bookable selections are available right now.",
+            }
 
     from leagues.leg_trust import evaluate_leg_trust
+
     trust_rejections: collections.Counter = collections.Counter()
     trusted_pool = []
     for pick in pool:
@@ -185,25 +296,26 @@ def build_slip(target: float, pool: list | None = None,
             "evidence_adjusted_probability"
         ]
 
-        # Draw No Bet has win / push / loss settlement states. Until Builder
-        # models push-adjusted accumulator payouts completely, fail closed
-        # rather than treating DNB like an ordinary binary leg.
-        if pick.get("market") in {"dnb_home", "dnb_away"}:
-            trust_rejections.update(["dnb_push_math_pending"])
+        if (
+            pick.get("market") in DNB_MARKETS
+            and _leg_settlement_probabilities(pick) is None
+        ):
+            trust_rejections.update(["dnb_missing_draw_probability"])
             continue
 
         if decision["accepted"]:
             trusted_pool.append(pick)
         else:
             trust_rejections.update(
-                decision["rejection_reasons"]
-                or ["trust_grade_below_b"]
+                decision["rejection_reasons"] or ["trust_grade_below_b"]
             )
 
     pool = trusted_pool
     if not pool:
         return {
-            "ok": False, "target": target, "best_reachable": 1.0,
+            "ok": False,
+            "target": target,
+            "best_reachable": 1.0,
             "trusted_leg_count": 0,
             "trust_rejection_reasons": dict(trust_rejections),
             "reason": "No selections meet the Builder's evidence and bookability standard right now.",
@@ -218,24 +330,37 @@ def build_slip(target: float, pool: list | None = None,
         odds, joint, legs = 1.0, 1.0, []
 
         ordered = ([seed] if seed is not None else []) + candidates
+
         for p in ordered:
             if p in legs or len(legs) >= max_legs:
                 continue
+
             group = p["market_group"]
             exposure = exposure_group(group)
+
             if p["match_id"] in seen_fixtures or groups[group] >= cap:
                 continue
-            if (exposure == "team_to_score"
-                    and exposures[exposure] >= TEAM_TO_SCORE_CAP):
+
+            if exposure == "team_to_score" and exposures[exposure] >= TEAM_TO_SCORE_CAP:
                 continue
+
+            settlement = _leg_settlement_probabilities(p)
+            if settlement is None:
+                continue
+
+            win_probability, _, _ = settlement
+
             seen_fixtures.add(p["match_id"])
             groups[group] += 1
             exposures[exposure] += 1
+
             odds *= p["odds"]
-            joint *= p.get("evidence_adjusted_probability", p["confidence"])
+            joint *= win_probability
             legs.append(p)
+
             if odds >= target:
                 break
+
         return odds, joint, legs
 
     # Include the ordinary cost-first path, then seed the search with each of
@@ -243,11 +368,11 @@ def build_slip(target: float, pool: list | None = None,
     # finding discrete combinations a single greedy pass misses.
     attempts = [_candidate()]
     attempts.extend(_candidate(seed) for seed in candidates[:48])
-    qualifying = [attempt for attempt in attempts
-              if attempt[0] >= target]
+    qualifying = [attempt for attempt in attempts if attempt[0] >= target]
     if qualifying:
-        in_band = [attempt for attempt in qualifying
-                   if attempt[0] <= target * BAND_HIGH]
+        in_band = [
+            attempt for attempt in qualifying if attempt[0] <= target * BAND_HIGH
+        ]
         choices = in_band or qualifying
         odds, joint, legs = max(
             choices,
@@ -263,9 +388,11 @@ def build_slip(target: float, pool: list | None = None,
     if odds < target:
         # Say which limit bit, because "not available" hides two different
         # answers: the board was thin, or the rules would not allow it.
-        limit = ("the board does not currently hold enough qualifying picks"
-                 if len(legs) < max_legs
-                 else f"reaching it would take more than {max_legs} legs")
+        limit = (
+            "the board does not currently hold enough qualifying picks"
+            if len(legs) < max_legs
+            else f"reaching it would take more than {max_legs} legs"
+        )
         return {
             "ok": False,
             "target": target,
@@ -273,20 +400,37 @@ def build_slip(target: float, pool: list | None = None,
             "legs": len(legs),
             "trusted_leg_count": len(candidates),
             "trust_rejection_reasons": dict(trust_rejections),
-            "reason": (f"The best qualifying slip right now reaches "
-                       f"{odds:.1f}x — {limit}. Lowering standards to reach "
-                       f"{target:g}x would not make it a better bet."),
+            "reason": (
+                f"The best qualifying slip right now reaches "
+                f"{odds:.1f}x — {limit}. Lowering standards to reach "
+                f"{target:g}x would not make it a better bet."
+            ),
         }
 
     if odds > target * BAND_HIGH:
         logger.info(f"slip for {target}x overshot to {odds:.1f}x")
 
-    # Model-estimated return per unit staked is the chance every leg lands
-    # multiplied by the actual combined payout.  The previous implementation
-    # multiplied generic market margins instead, which described a theoretical
-    # bookmaker rather than the slip on screen and could disagree materially
-    # with its own displayed probability and odds.
-    expected_return = joint * odds
+    # Calculate the full positive-payout distribution. Normal binary legs
+    # have one positive branch; DNB legs can either win at their quoted odds
+    # or push at 1.00x.
+    payout_distribution = _positive_payout_distribution(legs)
+
+    expected_return = sum(
+        payout * probability for payout, probability in payout_distribution.items()
+    )
+
+    no_loss_probability = sum(payout_distribution.values())
+
+    target_hit_probability = sum(
+        probability
+        for payout, probability in payout_distribution.items()
+        if payout >= target
+    )
+
+    push_survival_probability = max(
+        0.0,
+        no_loss_probability - joint,
+    )
 
     return {
         "ok": True,
@@ -295,10 +439,29 @@ def build_slip(target: float, pool: list | None = None,
         "legs": len(legs),
         "hit_probability": round(joint, 5),
         "expected_return": round(expected_return, 4),
+        "target_hit_probability": round(
+            target_hit_probability,
+            5,
+        ),
+        "no_loss_probability": round(
+            no_loss_probability,
+            5,
+        ),
+        "push_survival_probability": round(
+            push_survival_probability,
+            5,
+        ),
+        "dnb_leg_count": sum(1 for p in legs if p.get("market") in DNB_MARKETS),
         "avg_confidence": round(sum(p["confidence"] for p in legs) / len(legs), 4),
-        "avg_evidence_probability": round(sum(p.get("evidence_adjusted_probability",p["confidence"]) for p in legs)/len(legs),4),
+        "avg_evidence_probability": round(
+            sum(p.get("evidence_adjusted_probability", p["confidence"]) for p in legs)
+            / len(legs),
+            4,
+        ),
         "minimum_trust_score": min(p["trust"]["trust_score"] for p in legs),
-        "average_trust_score": round(sum(p["trust"]["trust_score"] for p in legs) / len(legs), 1),
+        "average_trust_score": round(
+            sum(p["trust"]["trust_score"] for p in legs) / len(legs), 1
+        ),
         "lowest_trust_grade": max(p["trust"]["trust_grade"] for p in legs),
         "trust_rejection_reasons": dict(trust_rejections),
         "bookable_legs": sum(1 for p in legs if p.get("bookable")),
@@ -306,8 +469,9 @@ def build_slip(target: float, pool: list | None = None,
     }
 
 
-def generate(target: float, horizon: str = DEFAULT_HORIZON,
-             force: bool = False) -> dict:
+def generate(
+    target: float, horizon: str = DEFAULT_HORIZON, force: bool = False
+) -> dict:
     """Build a slip for `target` and book it. The endpoint's whole job."""
     from leagues.picks import to_game
 
@@ -316,13 +480,16 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
     except (TypeError, ValueError):
         return {"status": "error", "reason": "Target must be a number."}
     if not (MIN_TARGET <= target <= MAX_TARGET):
-        return {"status": "error",
-                "reason": f"Choose a target between {MIN_TARGET:g} and "
-                          f"{MAX_TARGET:g}."}
+        return {
+            "status": "error",
+            "reason": f"Choose a target between {MIN_TARGET:g} and {MAX_TARGET:g}.",
+        }
 
     if horizon not in HORIZONS:
-        return {"status": "error",
-                "reason": f"Horizon must be one of {sorted(HORIZONS)}."}
+        return {
+            "status": "error",
+            "reason": f"Horizon must be one of {sorted(HORIZONS)}.",
+        }
 
     timing_started = monotonic_time.perf_counter()
     timings: dict[str, int] = {}
@@ -342,12 +509,15 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
                 "candidate_retrieval": elapsed_ms(stage_started),
                 "total": elapsed_ms(timing_started),
             },
-            "reason": ("The prediction board could not be refreshed right "
-                       "now. Please try the build again shortly."),
+            "reason": (
+                "The prediction board could not be refreshed right "
+                "now. Please try the build again shortly."
+            ),
         }
     timings["candidate_retrieval"] = elapsed_ms(stage_started)
     try:
         from leagues import sportybet
+
         # A normal build should use the healthy cached live board. Forcing a
         # network refresh on every click made valid builds fail on temporary
         # SportyBet errors. Explicit regeneration still requests a refresh.
@@ -371,13 +541,16 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
             # measured week board). A refreshed/different snapshot still gets
             # a full revalidation, preserving booking correctness.
             availability = pick.get("sportybet_availability") or {}
-            if (not snapshot_id
-                    or availability.get("board_snapshot_id") != snapshot_id):
+            if not snapshot_id or availability.get("board_snapshot_id") != snapshot_id:
                 fixture = pick["_fixture"]
                 availability = sportybet.availability_for(
-                    board, fixture["home"]["name"], fixture["away"]["name"],
-                    fixture.get("commence_time", ""), fixture.get("league", ""),
-                    pick["market"])
+                    board,
+                    fixture["home"]["name"],
+                    fixture["away"]["name"],
+                    fixture.get("commence_time", ""),
+                    fixture.get("league", ""),
+                    pick["market"],
+                )
             if not availability.get("sportybet_available"):
                 continue
             candidate = dict(pick)
@@ -392,8 +565,9 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
         board, bookable_pool = {}, []
 
     stage_started = monotonic_time.perf_counter()
-    built = build_slip(target, pool=bookable_pool,
-                       horizon=horizon, require_bookable=True)
+    built = build_slip(
+        target, pool=bookable_pool, horizon=horizon, require_bookable=True
+    )
     timings["combination_search"] = elapsed_ms(stage_started)
     # Target-odds scoring is the final, sub-millisecond portion of the bounded
     # combination search. Keep it explicit in operational output so a future
@@ -401,8 +575,12 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
     timings["target_odds_optimization"] = 0
     if not built.get("ok"):
         timings["total"] = elapsed_ms(timing_started)
-        return {"status": "unavailable", "horizon": horizon,
-                "timing_ms": timings, **built}
+        return {
+            "status": "unavailable",
+            "horizon": horizon,
+            "timing_ms": timings,
+            **built,
+        }
 
     games = [to_game(p) for p in built["picks"]]
     kickoffs = sorted(g.get("kickoff") or "" for g in games if g.get("kickoff"))
@@ -417,9 +595,24 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
         "odds": built["odds"],
         "legs": built["legs"],
         "hit_probability": built["hit_probability"],
+        "target_hit_probability": built.get(
+            "target_hit_probability",
+            built["hit_probability"],
+        ),
+        "no_loss_probability": built.get(
+            "no_loss_probability",
+            built["hit_probability"],
+        ),
+        "push_survival_probability": built.get(
+            "push_survival_probability",
+            0.0,
+        ),
+        "dnb_leg_count": built.get("dnb_leg_count", 0),
         "expected_return": built["expected_return"],
         "avg_confidence": built["avg_confidence"],
-        "avg_evidence_probability": built.get("avg_evidence_probability", built["avg_confidence"]),
+        "avg_evidence_probability": built.get(
+            "avg_evidence_probability", built["avg_confidence"]
+        ),
         "minimum_trust_score": built.get("minimum_trust_score"),
         "average_trust_score": built.get("average_trust_score"),
         "lowest_trust_grade": built.get("lowest_trust_grade"),
@@ -433,12 +626,17 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
     stage_started = monotonic_time.perf_counter()
     try:
         from leagues.booking import create_or_reuse_generated_booking
+
         out["booking"] = create_or_reuse_generated_booking(
-            games, board, predicted_odds=built["odds"], force=force)
+            games, board, predicted_odds=built["odds"], force=force
+        )
     except Exception as e:
         logger.warning(f"slip booking failed: {e}")
-        out["booking"] = {"status": "failed", "share_code": None,
-                          "reason": f"Booking unavailable: {str(e)[:120]}"}
+        out["booking"] = {
+            "status": "failed",
+            "share_code": None,
+            "reason": f"Booking unavailable: {str(e)[:120]}",
+        }
     timings["booking_total"] = elapsed_ms(stage_started)
     booking_timings = (out.get("booking") or {}).get("timing_ms") or {}
     timings["booking_code_generation"] = booking_timings.get("code_generation", 0)
