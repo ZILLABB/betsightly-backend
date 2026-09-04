@@ -181,12 +181,25 @@ def build_slip(target: float, pool: list | None = None,
     for pick in pool:
         decision = evaluate_leg_trust(pick)
         pick["trust"] = decision
-        pick["evidence_adjusted_probability"] = decision["evidence_adjusted_probability"]
+        pick["evidence_adjusted_probability"] = decision[
+            "evidence_adjusted_probability"
+        ]
+
+        # Draw No Bet has win / push / loss settlement states. Until Builder
+        # models push-adjusted accumulator payouts completely, fail closed
+        # rather than treating DNB like an ordinary binary leg.
+        if pick.get("market") in {"dnb_home", "dnb_away"}:
+            trust_rejections.update(["dnb_push_math_pending"])
+            continue
+
         if decision["accepted"]:
             trusted_pool.append(pick)
         else:
-            trust_rejections.update(decision["rejection_reasons"] or
-                                    ["trust_grade_below_b"])
+            trust_rejections.update(
+                decision["rejection_reasons"]
+                or ["trust_grade_below_b"]
+            )
+
     pool = trusted_pool
     if not pool:
         return {
@@ -221,7 +234,7 @@ def build_slip(target: float, pool: list | None = None,
             odds *= p["odds"]
             joint *= p.get("evidence_adjusted_probability", p["confidence"])
             legs.append(p)
-            if odds >= target * BAND_LOW:
+            if odds >= target:
                 break
         return odds, joint, legs
 
@@ -231,7 +244,7 @@ def build_slip(target: float, pool: list | None = None,
     attempts = [_candidate()]
     attempts.extend(_candidate(seed) for seed in candidates[:48])
     qualifying = [attempt for attempt in attempts
-                  if attempt[0] >= target * BAND_LOW]
+              if attempt[0] >= target]
     if qualifying:
         in_band = [attempt for attempt in qualifying
                    if attempt[0] <= target * BAND_HIGH]
@@ -247,7 +260,7 @@ def build_slip(target: float, pool: list | None = None,
     else:
         odds, joint, legs = max(attempts, key=lambda attempt: attempt[0])
 
-    if odds < target * BAND_LOW:
+    if odds < target:
         # Say which limit bit, because "not available" hides two different
         # answers: the board was thin, or the rules would not allow it.
         limit = ("the board does not currently hold enough qualifying picks"

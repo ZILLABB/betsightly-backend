@@ -149,3 +149,41 @@ def test_generate_reuses_availability_from_same_board_snapshot(monkeypatch):
     assert result["booking"]["share_code"] == "ABC123"
     assert result["timing_ms"]["fixture_matching"] >= 0
     assert result["timing_ms"]["validation_readback"] == 4
+
+
+def test_builder_does_not_accept_odds_below_requested_target():
+    picks = [
+        _pick("target-1", odds=1.50, confidence=0.80),
+        _pick("target-2", odds=1.50, confidence=0.80),
+        _pick("target-3", odds=1.50, confidence=0.80),
+    ]
+
+    # 1.50 ^ 3 = 3.375, which is below the requested 3.50x.
+    built = build_slip(
+        3.50,
+        pool=picks,
+        max_legs=3,
+        market_cap=10,
+    )
+
+    assert not built["ok"]
+    assert built["best_reachable"] == pytest.approx(3.38)
+
+
+def test_builder_excludes_dnb_until_push_math_is_supported():
+    pick = _pick(
+        "dnb-test",
+        odds=2.00,
+        confidence=0.80,
+        market_group="draw_no_bet",
+    )
+    pick["market"] = "dnb_home"
+
+    built = build_slip(
+        2.00,
+        pool=[pick],
+        market_cap=10,
+    )
+
+    assert not built["ok"]
+    assert built["trust_rejection_reasons"]["dnb_push_math_pending"] == 1
