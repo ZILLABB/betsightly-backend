@@ -1,4 +1,5 @@
 """Builder-only fusion of replay and current live calibration evidence."""
+
 from __future__ import annotations
 
 import json
@@ -6,18 +7,21 @@ import math
 from functools import lru_cache
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent / "data" / "replay"
 
 PROMOTED = {
     "over_1_5",
-    "under_3_5",
+    "over_2_5",
     "under_4_5",
     "home_or_draw",
     "away_or_draw",
     "home_or_away",
     "dnb_home",
     "dnb_away",
+    "home_over_0_5",
+    "away_over_0_5",
+    "home_over_1_5",
+    "away_over_1_5",
 }
 
 RESTRICTED = {
@@ -26,6 +30,8 @@ RESTRICTED = {
     "home_win",
     "draw",
     "away_win",
+    "under_2_5",
+    "under_3_5",
 }
 
 # Two hundred observations gives useful binomial resolution, while uncertainty
@@ -79,14 +85,7 @@ def _wilson_lower(rate, n, z=1.96):
 
     denominator = 1 + z * z / n
     centre = (rate + z * z / (2 * n)) / denominator
-    margin = (
-        z
-        * math.sqrt(
-            rate * (1 - rate) / n
-            + z * z / (4 * n * n)
-        )
-        / denominator
-    )
+    margin = z * math.sqrt(rate * (1 - rate) / n + z * z / (4 * n * n)) / denominator
 
     return max(0.0, centre - margin)
 
@@ -127,10 +126,7 @@ def _partial_pool(global_cell, bucket_cell, league_cell):
 
         weight = n / (n + MIN_CELL_N)
 
-        estimates.append(
-            global_rate
-            + weight * (float(cell["actual"]) - global_rate)
-        )
+        estimates.append(global_rate + weight * (float(cell["actual"]) - global_rate))
 
     n = min(
         int(league_cell["n"]),
@@ -162,21 +158,11 @@ def fused_market_evidence(
 
     global_cell = summary.get(market) or {}
 
-    bucket_cell = (
-        (buckets.get(market) or {})
-        .get(_bucket(probability))
-        or {}
-    )
+    bucket_cell = (buckets.get(market) or {}).get(_bucket(probability)) or {}
 
-    league_key = " ".join(
-        str(league or "").lower().split()
-    )
+    league_key = " ".join(str(league or "").lower().split())
 
-    league_cell = (
-        (leagues.get(market) or {})
-        .get(league_key)
-        or {}
-    )
+    league_cell = (leagues.get(market) or {}).get(league_key) or {}
 
     joint_cell = _partial_pool(
         global_cell,
@@ -201,19 +187,19 @@ def fused_market_evidence(
         level = "market_global"
 
     hist_n = int(cell.get("n") or 0)
-    hist_rate = float(
-        cell.get("actual") or probability
+    hist_rate = float(cell.get("actual") or probability)
+
+    signed_hist_error = float(cell.get("calibration_error") or 0)
+    absolute_hist_error = abs(signed_hist_error)
+
+    # Positive means predicted > actual: dangerous overconfidence.
+    # Negative means actual > predicted: conservative, not a reason to reject.
+    overconfidence_error = max(
+        0.0,
+        signed_hist_error,
     )
 
-    hist_error = abs(
-        float(cell.get("calibration_error") or 0)
-    )
-
-    recent = (
-        (recency.get(market) or {})
-        .get("last_2_seasons")
-        or {}
-    )
+    recent = (recency.get(market) or {}).get("last_2_seasons") or {}
 
     recent_n = int(recent.get("n") or 0)
     recent_rate = recent.get("actual")
@@ -226,28 +212,15 @@ def fused_market_evidence(
         recent_n / MIN_CELL_N,
     )
 
-    evidence_strength = (
-        fidelity_weight
-        * (0.65 + 0.35 * recency_weight)
-    )
+    evidence_strength = fidelity_weight * (0.65 + 0.35 * recency_weight)
 
-    # Recent historical evidence nudges the estimate without replacing the
-    # narrower league/confidence evidence chosen above.
-    if (
-        recent_n >= MIN_CELL_N
-        and recent_rate is not None
-    ):
-        hist_rate = (
-            0.80 * hist_rate
-            + 0.20 * float(recent_rate)
-        )
-
+    # Recent historical evidence nudges only the market-wide estimate.
+    # Narrower league/confidence cells keep their own directly relevant rate.
+    if level == "market_global" and recent_n >= MIN_CELL_N and recent_rate is not None:
+        hist_rate = 0.80 * hist_rate + 0.20 * float(recent_rate)
     # Historical evidence acts as a bounded prior for the fused mean.
-    # Huge replay volume therefore cannot overwhelm live production evidence.
-    prior_n = (
-        min(PRIOR_TRIAL_CAP, hist_n)
-        * evidence_strength
-    )
+    # Huge replay volume therefore cannot overwhelm current live evidence.
+    prior_n = min(PRIOR_TRIAL_CAP, hist_n) * evidence_strength
 
     alpha = hist_rate * prior_n
     beta = (1 - hist_rate) * prior_n
@@ -263,11 +236,7 @@ def fused_market_evidence(
 
     effective_n = alpha + beta
 
-    estimate = (
-        alpha / effective_n
-        if effective_n
-        else probability
-    )
+    estimate = alpha / effective_n if effective_n else probability
 
     # Mean fusion stays intentionally bounded, but statistical uncertainty
     # should still acknowledge that hundreds/thousands of validated replay
@@ -278,8 +247,7 @@ def fused_market_evidence(
     # unrealistic certainty.
     uncertainty_n = max(
         effective_n,
-        min(hist_n, 1000) * evidence_strength
-        + live_n,
+        min(hist_n, 1000) * evidence_strength + live_n,
     )
 
     lower = _wilson_lower(
@@ -305,8 +273,7 @@ def fused_market_evidence(
     live_conflict = bool(
         live_n >= MIN_LIVE_CONFLICT_N
         and live_rate is not None
-        and abs(float(live_rate) - hist_rate)
-        > conflict_gap
+        and abs(float(live_rate) - hist_rate) > conflict_gap
     )
 
     # Calibration tolerance becomes tighter as historical evidence grows,
@@ -328,18 +295,14 @@ def fused_market_evidence(
 
     reliable = (
         hist_n >= MIN_CELL_N
-        and hist_error <= calibration_limit
+        and overconfidence_error <= calibration_limit
         and evidence_strength >= 0.60
     )
 
     if market in RESTRICTED:
         state = "SHADOW"
 
-    elif (
-        market in PROMOTED
-        and reliable
-        and not live_conflict
-    ):
+    elif market in PROMOTED and reliable and not live_conflict:
         state = "SUPPORTED"
 
     elif reliable:
@@ -354,10 +317,7 @@ def fused_market_evidence(
     if estimate < probability:
         adjusted = estimate
     else:
-        adjusted = (
-            probability
-            + 0.25 * (estimate - probability)
-        )
+        adjusted = probability + 0.25 * (estimate - probability)
 
     if live_conflict and live_rate is not None:
         adjusted = min(
@@ -367,10 +327,7 @@ def fused_market_evidence(
 
     # Uncertainty now materially affects Builder ranking instead of merely
     # being reported as metadata.
-    adjusted = (
-        0.75 * adjusted
-        + 0.25 * lower
-    )
+    adjusted = 0.75 * adjusted + 0.25 * lower
 
     return {
         "state": state,
@@ -401,7 +358,11 @@ def fused_market_evidence(
             4,
         ),
         "historical_calibration_error": round(
-            hist_error,
+            absolute_hist_error,
+            4,
+        ),
+        "historical_overconfidence_error": round(
+            overconfidence_error,
             4,
         ),
         "calibration_error_limit": round(

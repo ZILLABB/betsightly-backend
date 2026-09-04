@@ -87,6 +87,40 @@ _COST_TIE_BAND = 0.02
 
 DNB_MARKETS = {"dnb_home", "dnb_away"}
 
+# Builder-only candidate floors backed by Phase 2A replay evidence.
+#
+# These do not change the daily card or normal prediction tiers. They only
+# allow the Builder to consider these markets before the stricter evidence,
+# trust and exact-bookability gates decide whether a leg is actually usable.
+BUILDER_MARKET_FLOORS = {
+    "over_2_5": 0.60,
+    "home_over_1_5": 0.65,
+    "away_over_1_5": 0.65,
+}
+
+
+def _market_cap_for_target(target: float) -> int:
+    """Allow one extra leg per market group only for high Builder targets."""
+    from leagues.selection import MARKET_CAP
+
+    if target >= 70:
+        return 4
+
+    return MARKET_CAP
+
+
+def _team_to_score_cap_for_target(target: float) -> int:
+    """Allow extra team-to-score diversity only for higher Builder targets."""
+    from leagues.selection import TEAM_TO_SCORE_CAP
+
+    if target >= 70:
+        return 5
+
+    if target >= 50:
+        return 4
+
+    return TEAM_TO_SCORE_CAP
+
 
 def _leg_settlement_probabilities(
     pick: dict,
@@ -204,31 +238,76 @@ def _order_key(pick: dict):
 
 
 def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
-    """Every publishable pick within the horizon, best-first by cost."""
-    from leagues.engine import run_pipeline
-    from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, min_confidence_for
+    """Every Builder-qualified pick within the requested horizon."""
     from leagues.calibrator import fit_calibration
+    from leagues.engine import run_pipeline
+    from leagues.picks import (
+        MIN_CANDIDATE_CONFIDENCE,
+        MIN_PUBLISHABLE_CONFIDENCE,
+        build_picks,
+        min_confidence_for,
+    )
 
-    picks, _ = run_pipeline(days_ahead=POOL_DAYS, force=force)
+    # run_pipeline still performs the expensive work exactly once:
+    # fixtures, SportyBet matching, model prediction and ML overlay.
+    #
+    # Its returned picks have already passed the normal publication floors,
+    # though, so rebuild picks from the already-evaluated fixtures using the
+    # Builder-only market overrides. This is NOT a second prediction run.
+    _, fixtures = run_pipeline(
+        days_ahead=POOL_DAYS,
+        force=force,
+    )
+
     fit = fit_calibration()
+    picks = []
+
+    for fixture in fixtures:
+        model = fixture.get("_model")
+        if not model:
+            continue
+
+        picks.extend(
+            build_picks(
+                fixture,
+                model,
+                min_confidence=MIN_CANDIDATE_CONFIDENCE,
+                fit=fit,
+                market_floor_overrides=BUILDER_MARKET_FLOORS,
+            )
+        )
 
     now_dt = datetime.now(timezone.utc)
     now = now_dt.isoformat().replace("+00:00", "Z")
     until = _horizon_end(now_dt, horizon).isoformat().replace("+00:00", "Z")
 
     out = []
+
     for p in picks:
-        if (p["_fixture"].get("commence_time") or "") > until:
+        commence_time = p["_fixture"].get("commence_time") or ""
+
+        if commence_time > until:
             continue
-        # A fixture already under way cannot be booked, so it cannot be part
-        # of a slip somebody is about to place.
-        if (p["_fixture"].get("commence_time") or "") <= now:
+
+        if commence_time <= now:
             continue
-        floor = max(
-            min_confidence_for(p["market"], fit=fit), MIN_PUBLISHABLE_CONFIDENCE
+
+        normal_floor = max(
+            min_confidence_for(
+                p["market"],
+                fit=fit,
+            ),
+            MIN_PUBLISHABLE_CONFIDENCE,
         )
+
+        floor = BUILDER_MARKET_FLOORS.get(
+            p["market"],
+            normal_floor,
+        )
+
         if p["confidence"] >= floor:
             out.append(p)
+
     return out
 
 
@@ -264,13 +343,10 @@ def build_slip(
     require_bookable: bool = True,
 ) -> dict:
     """The slip most likely to land at `target`, or an honest refusal."""
-    from leagues.selection import (
-        MARKET_CAP,
-        TEAM_TO_SCORE_CAP,
-        exposure_group,
-    )
+    from leagues.selection import exposure_group
 
-    cap = MARKET_CAP if market_cap is None else market_cap
+    cap = _market_cap_for_target(target) if market_cap is None else market_cap
+    team_to_score_cap = _team_to_score_cap_for_target(target)
 
     if pool is None:
         pool = _pool(horizon)
@@ -341,7 +417,7 @@ def build_slip(
             if p["match_id"] in seen_fixtures or groups[group] >= cap:
                 continue
 
-            if exposure == "team_to_score" and exposures[exposure] >= TEAM_TO_SCORE_CAP:
+            if exposure == "team_to_score" and exposures[exposure] >= team_to_score_cap:
                 continue
 
             settlement = _leg_settlement_probabilities(p)
@@ -439,6 +515,7 @@ def build_slip(
         "legs": len(legs),
         "hit_probability": round(joint, 5),
         "expected_return": round(expected_return, 4),
+        "expected_return_basis": "model_estimate",
         "target_hit_probability": round(
             target_hit_probability,
             5,
@@ -609,6 +686,10 @@ def generate(
         ),
         "dnb_leg_count": built.get("dnb_leg_count", 0),
         "expected_return": built["expected_return"],
+        "expected_return_basis": built.get(
+            "expected_return_basis",
+            "model_estimate",
+        ),
         "avg_confidence": built["avg_confidence"],
         "avg_evidence_probability": built.get(
             "avg_evidence_probability", built["avg_confidence"]

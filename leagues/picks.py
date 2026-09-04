@@ -75,21 +75,32 @@ MARKET_LABELS = {
 # right. Overs and unders belong together here — they are the same opinion
 # about goals, so a slip holding both is not diversified.
 MARKET_GROUP = {
-    "home_win": "match_result", "away_win": "match_result", "draw": "match_result",
-    "home_or_draw": "double_chance", "away_or_draw": "double_chance",
+    "home_win": "match_result",
+    "away_win": "match_result",
+    "draw": "match_result",
+    "home_or_draw": "double_chance",
+    "away_or_draw": "double_chance",
     "home_or_away": "double_chance",
-    "over_1_5": "goals", "over_2_5": "goals", "over_3_5": "goals",
-    "under_1_5": "goals", "under_2_5": "goals",
-    "under_3_5": "goals", "under_4_5": "goals",
-    "btts_yes": "btts", "btts_no": "btts",
+    "over_1_5": "goals",
+    "over_2_5": "goals",
+    "over_3_5": "goals",
+    "under_1_5": "goals",
+    "under_2_5": "goals",
+    "under_3_5": "goals",
+    "under_4_5": "goals",
+    "btts_yes": "btts",
+    "btts_no": "btts",
     # Separate groups for MARKET_CAP, which exists to stop a slip riding on
     # one market being right. Team totals are the diversity the board was
     # missing: on a full Saturday only nine match_result picks cleared their
     # floor against 170 goals picks, so every slip was capped at three legs
     # of anything useful and could not pass ~41x.
-    "home_over_0_5": "team_goals_home", "home_over_1_5": "team_goals_home",
-    "away_over_0_5": "team_goals_away", "away_over_1_5": "team_goals_away",
-    "dnb_home": "dnb", "dnb_away": "dnb",
+    "home_over_0_5": "team_goals_home",
+    "home_over_1_5": "team_goals_home",
+    "away_over_0_5": "team_goals_away",
+    "away_over_1_5": "team_goals_away",
+    "dnb_home": "dnb",
+    "dnb_away": "dnb",
 }
 
 # Used for calibration, and deliberately *not* the same split.
@@ -107,8 +118,11 @@ MARKET_GROUP = {
 # The unders were being dragged down by a correction fitted on the overs.
 # Same argument for both-teams-to-score, which is also a yes/no pair.
 CALIBRATION_GROUP = {
-    "home_win": "match_result", "away_win": "match_result", "draw": "match_result",
-    "home_or_draw": "double_chance", "away_or_draw": "double_chance",
+    "home_win": "match_result",
+    "away_win": "match_result",
+    "draw": "match_result",
+    "home_or_draw": "double_chance",
+    "away_or_draw": "double_chance",
     "home_or_away": "double_chance",
     # One cell per goal line, not one per direction.
     #
@@ -135,18 +149,22 @@ CALIBRATION_GROUP = {
     "under_2_5": "goals_under_2_5",
     "under_3_5": "goals_under_3_5",
     "under_4_5": "goals_under_4_5",
-    "btts_yes": "btts_yes", "btts_no": "btts_no",
+    "btts_yes": "btts_yes",
+    "btts_no": "btts_no",
     # Tracked apart from the totals they are derived from. A team-total pick
     # is a different claim from a match-total one — "the home side scores"
     # can be right on a match that finishes 1-0 under every goals line — so
     # folding them into goals_over would average two different accuracies
     # into one correction and misprice both.
-    "home_over_0_5": "team_goals_home", "home_over_1_5": "team_goals_home",
-    "away_over_0_5": "team_goals_away", "away_over_1_5": "team_goals_away",
+    "home_over_0_5": "team_goals_home",
+    "home_over_1_5": "team_goals_home",
+    "away_over_0_5": "team_goals_away",
+    "away_over_1_5": "team_goals_away",
     # Draw no bet is the 1X2 opinion with the draw removed, and it is right
     # or wrong on different matches from a straight win pick, so it earns its
     # own record rather than inheriting match_result's.
-    "dnb_home": "dnb", "dnb_away": "dnb",
+    "dnb_home": "dnb",
+    "dnb_away": "dnb",
 }
 
 # Markets a book gives us a real price for, mapped to the odds key.
@@ -161,16 +179,27 @@ CALIBRATION_GROUP = {
 # ones that changed — over_1_5, both BTTS sides and all three double chance
 # selections — are exactly the markets the card leans on most.
 REAL_ODDS_KEY = {
-    "home_win": "home_win", "away_win": "away_win", "draw": "draw",
-    "home_or_draw": "home_or_draw", "away_or_draw": "away_or_draw",
+    "home_win": "home_win",
+    "away_win": "away_win",
+    "draw": "draw",
+    "home_or_draw": "home_or_draw",
+    "away_or_draw": "away_or_draw",
     "home_or_away": "home_or_away",
-    "over_1_5": "over_1_5", "over_2_5": "over_2_5", "over_3_5": "over_3_5",
-    "under_1_5": "under_1_5", "under_2_5": "under_2_5",
-    "under_3_5": "under_3_5", "under_4_5": "under_4_5",
-    "dnb_home": "dnb_home", "dnb_away": "dnb_away",
-    "home_over_0_5": "home_over_0_5", "home_over_1_5": "home_over_1_5",
-    "away_over_0_5": "away_over_0_5", "away_over_1_5": "away_over_1_5",
-    "btts_yes": "btts_yes", "btts_no": "btts_no",
+    "over_1_5": "over_1_5",
+    "over_2_5": "over_2_5",
+    "over_3_5": "over_3_5",
+    "under_1_5": "under_1_5",
+    "under_2_5": "under_2_5",
+    "under_3_5": "under_3_5",
+    "under_4_5": "under_4_5",
+    "dnb_home": "dnb_home",
+    "dnb_away": "dnb_away",
+    "home_over_0_5": "home_over_0_5",
+    "home_over_1_5": "home_over_1_5",
+    "away_over_0_5": "away_over_0_5",
+    "away_over_1_5": "away_over_1_5",
+    "btts_yes": "btts_yes",
+    "btts_no": "btts_no",
 }
 
 
@@ -178,6 +207,7 @@ def _ml_for(model: dict, market: str) -> float | None:
     """The trained ensemble's probability for this market, if it has one."""
     try:
         from leagues.ml_models import market_probability
+
         p = market_probability(model.get("ml"), market)
         return round(float(p), 4) if p is not None else None
     except Exception:
@@ -285,8 +315,9 @@ MIN_EVIDENCE_LEGS = 25
 MIN_CANDIDATE_CONFIDENCE = min(MIN_CONFIDENCE_BY_GROUP.values())
 
 
-def min_confidence_for(market: str, default: float = MIN_PUBLISHABLE_CONFIDENCE,
-                       fit: dict | None = None) -> float:
+def min_confidence_for(
+    market: str, default: float = MIN_PUBLISHABLE_CONFIDENCE, fit: dict | None = None
+) -> float:
     """The floor this market has to clear, on its own measured record.
 
     A floor *below* the standard one has to be earned: the market's
@@ -304,6 +335,7 @@ def min_confidence_for(market: str, default: float = MIN_PUBLISHABLE_CONFIDENCE,
     if fit is None:
         try:
             from leagues.calibrator import fit_calibration
+
             fit = fit_calibration()
         except Exception:
             return default
@@ -311,9 +343,13 @@ def min_confidence_for(market: str, default: float = MIN_PUBLISHABLE_CONFIDENCE,
     return floor if n >= MIN_EVIDENCE_LEGS else default
 
 
-def build_picks(fixture: dict, model: dict,
-                min_confidence: float = MIN_PUBLISHABLE_CONFIDENCE,
-                fit: dict | None = None) -> list[dict]:
+def build_picks(
+    fixture: dict,
+    model: dict,
+    min_confidence: float = MIN_PUBLISHABLE_CONFIDENCE,
+    fit: dict | None = None,
+    market_floor_overrides: dict[str, float] | None = None,
+) -> list[dict]:
     """All viable picks for one fixture, best first.
 
     A pick must clear `min_confidence` and carry odds of at least 1.05.
@@ -331,6 +367,7 @@ def build_picks(fixture: dict, model: dict,
 
     if fit is None:
         from leagues.calibrator import fit_calibration
+
         fit = fit_calibration()
 
     raw_probs = model["probabilities"]
@@ -348,7 +385,11 @@ def build_picks(fixture: dict, model: dict,
         # blanket minimum. A tier wanting only safe picks still gets them; a
         # tier reaching for a multiplier can use a longer leg from a market
         # that has earned it.
-        if prob < max(min_confidence_for(market, fit=fit), min_confidence):
+        market_floor = min_confidence_for(market, fit=fit)
+        if market_floor_overrides and market in market_floor_overrides:
+            market_floor = market_floor_overrides[market]
+
+        if prob < max(market_floor, min_confidence):
             continue
         # Double chance only when it is genuinely safe — otherwise it wins
         # every selection on price alone and adds no information.
@@ -358,10 +399,10 @@ def build_picks(fixture: dict, model: dict,
         # label reads as a double chance it is not. over_3_5 sits well below
         # the confidence floor on any normal fixture.
         #
-        # under_3_5 is back: it is a common, well-priced market that clears the
-        # floor on roughly 40% of fixtures, and it was the only thing on the
-        # board pulling in the opposite direction to Over 1.5. Excluding it left
-        # the card betting one way on goals and nothing else.
+        # home_or_away is rarely offered and its label is ambiguous.
+        # over_3_5 remains excluded from the publishable candidate set.
+        # Under 2.5 and Under 3.5 may still be generated here for other product
+        # surfaces, but the Builder evidence gate explicitly restricts them.
         if market in ("home_or_away", "over_3_5"):
             continue
 
@@ -397,7 +438,8 @@ def build_picks(fixture: dict, model: dict,
             logger.debug(
                 f"dropped {market} on {fixture['match_id']}: "
                 f"conf {prob:.3f} vs price {price:.2f} implies "
-                f"{prob * price - 1:.0%} edge")
+                f"{prob * price - 1:.0%} edge"
+            )
             continue
 
         ml_prob = _ml_for(model, market)
@@ -409,7 +451,8 @@ def build_picks(fixture: dict, model: dict,
         if ml_prob is not None and abs(prob - ml_prob) > 0.15:
             logger.debug(
                 f"dropped {market} on {fixture['match_id']}: "
-                f"league/market model {prob:.3f} vs ML {ml_prob:.3f}")
+                f"league/market model {prob:.3f} vs ML {ml_prob:.3f}"
+            )
             continue
 
         # Value only means something against a real, de-vigged market price
@@ -432,6 +475,7 @@ def build_picks(fixture: dict, model: dict,
         # SportyBet; it never changes the model probability.
         try:
             from leagues.sportybet import availability_from_fixture
+
             sportybet_availability = availability_from_fixture(fixture, market)
         except Exception as exc:
             sportybet_availability = {
@@ -440,61 +484,67 @@ def build_picks(fixture: dict, model: dict,
                 "failure_reason": f"availability enrichment failed: {str(exc)[:120]}",
             }
 
-        picks.append({
-            "match_id": fixture["match_id"],
-            "market": market,
-            "market_group": MARKET_GROUP[market],
-            "prediction": MARKET_LABELS[market].format(home=home, away=away),
-            "confidence": round(prob, 4),
-            # Kept so the calibration's effect stays auditable after the fact
-            "raw_confidence": round(raw_prob, 4),
-            # The trained ensemble's view of this same market. It may veto a
-            # severe disagreement above, but never boosts the published
-            # confidence. Null means it had no compatible opinion.
-            "ml_confidence": ml_prob,
-            "market_implied_probability": round(1.0 / price, 4) if is_real else None,
-            "calibration_group": calibration_group,
-            "calibration_sample": calibration_sample,
-            "calibration_evidence": {
-                key: calibration_cell.get(key)
-                for key in ("n", "promised", "actual")
-                if calibration_cell.get(key) is not None
-            },
-            # Banker and 2 Odds only admit markets with enough *published,
-            # settled* evidence of their own. Longer tiers may still collect
-            # that evidence, clearly labelled as developing markets.
-            "safe_tier_eligible": calibration_sample >= MIN_EVIDENCE_LEGS,
-            "odds": round(price, 2),
-            "odds_are_real": is_real,
-            "odds_provider": odds.get("provider") if is_real else None,
-            # The book's cut on the market this price came from. Null where
-            # the price is our own estimate, because an estimated price has a
-            # flat margin by construction and ranking on it would be ranking
-            # on nothing. Selection uses it to break ties: the same pick is
-            # worth more from a market the book prices tightly, and that
-            # difference is free — it needs no second feed and cannot decay.
-            "market_margin": (odds.get("margins") or {}).get(real_key) if is_real else None,
-            # Whether this pick could become part of a booking code, known
-            # before selection rather than discovered after it.
-            #
-            # Fixtures come from ESPN and codes come from SportyBet, and the
-            # two feeds do not name every club alike — so roughly a fifth of
-            # published legs turn out to have no bookable counterpart. Finding
-            # that out at booking time is too late: a tier is refused a code
-            # when any one leg is unmatched, so a single unmatched pick has
-            # been costing an entire tier its code after the card was locked.
-            #
-            # Carried as a preference, never a filter. A pick that cannot be
-            # booked is still a good pick, and dropping good picks to please
-            # the bookmaker would be letting the tail wag the dog.
-            "bookable": bool(sportybet_availability.get("sportybet_available")),
-            "sportybet_event_id": sportybet_availability.get("event_id"),
-            "sportybet_availability": sportybet_availability,
-            "edge": edge,
-            "expected_value": round(prob * price - 1.0, 4),
-            "_fixture": fixture,
-            "_model": model,
-        })
+        picks.append(
+            {
+                "match_id": fixture["match_id"],
+                "market": market,
+                "market_group": MARKET_GROUP[market],
+                "prediction": MARKET_LABELS[market].format(home=home, away=away),
+                "confidence": round(prob, 4),
+                # Kept so the calibration's effect stays auditable after the fact
+                "raw_confidence": round(raw_prob, 4),
+                # The trained ensemble's view of this same market. It may veto a
+                # severe disagreement above, but never boosts the published
+                # confidence. Null means it had no compatible opinion.
+                "ml_confidence": ml_prob,
+                "market_implied_probability": round(1.0 / price, 4)
+                if is_real
+                else None,
+                "calibration_group": calibration_group,
+                "calibration_sample": calibration_sample,
+                "calibration_evidence": {
+                    key: calibration_cell.get(key)
+                    for key in ("n", "promised", "actual")
+                    if calibration_cell.get(key) is not None
+                },
+                # Banker and 2 Odds only admit markets with enough *published,
+                # settled* evidence of their own. Longer tiers may still collect
+                # that evidence, clearly labelled as developing markets.
+                "safe_tier_eligible": calibration_sample >= MIN_EVIDENCE_LEGS,
+                "odds": round(price, 2),
+                "odds_are_real": is_real,
+                "odds_provider": odds.get("provider") if is_real else None,
+                # The book's cut on the market this price came from. Null where
+                # the price is our own estimate, because an estimated price has a
+                # flat margin by construction and ranking on it would be ranking
+                # on nothing. Selection uses it to break ties: the same pick is
+                # worth more from a market the book prices tightly, and that
+                # difference is free — it needs no second feed and cannot decay.
+                "market_margin": (odds.get("margins") or {}).get(real_key)
+                if is_real
+                else None,
+                # Whether this pick could become part of a booking code, known
+                # before selection rather than discovered after it.
+                #
+                # Fixtures come from ESPN and codes come from SportyBet, and the
+                # two feeds do not name every club alike — so roughly a fifth of
+                # published legs turn out to have no bookable counterpart. Finding
+                # that out at booking time is too late: a tier is refused a code
+                # when any one leg is unmatched, so a single unmatched pick has
+                # been costing an entire tier its code after the card was locked.
+                #
+                # Carried as a preference, never a filter. A pick that cannot be
+                # booked is still a good pick, and dropping good picks to please
+                # the bookmaker would be letting the tail wag the dog.
+                "bookable": bool(sportybet_availability.get("sportybet_available")),
+                "sportybet_event_id": sportybet_availability.get("event_id"),
+                "sportybet_availability": sportybet_availability,
+                "edge": edge,
+                "expected_value": round(prob * price - 1.0, 4),
+                "_fixture": fixture,
+                "_model": model,
+            }
+        )
 
     picks.sort(key=lambda p: p["confidence"], reverse=True)
     return picks
@@ -510,7 +560,15 @@ def to_game(pick: dict) -> dict:
     sources = ["market + Poisson" if m.get("has_market") else "league base + Poisson"]
     if pick.get("ml_confidence") is not None:
         sources.append("trained ML ensemble")
-    if pick["market"] in ("home_win", "away_win", "draw", "home_or_draw", "away_or_draw", "dnb_home", "dnb_away") and m.get("elo_agreement"):
+    if pick["market"] in (
+        "home_win",
+        "away_win",
+        "draw",
+        "home_or_draw",
+        "away_or_draw",
+        "dnb_home",
+        "dnb_away",
+    ) and m.get("elo_agreement"):
         sources.append("Elo")
 
     return {

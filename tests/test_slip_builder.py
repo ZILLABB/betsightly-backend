@@ -2,15 +2,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from leagues import slip_builder
 from leagues.api import _cached_slip_is_placeable
 from leagues.daily_feed import _trusted_rollover_picks
 from leagues.selection import select_accumulator
 from leagues.slip_builder import _horizon_end, build_slip
-from leagues import slip_builder
 
 
-def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True,
-          market_group="goals"):
+def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True, market_group="goals"):
     return {
         "match_id": match_id,
         "market": "over_1_5",
@@ -20,8 +19,11 @@ def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True,
         "bookable": True,
         "safe_tier_eligible": trusted,
         "calibration_sample": 25 if trusted else 0,
-        "sportybet_availability": {"status": "BOOKABLE", "sportybet_available": True,
-                                     "board_snapshot_id": "test"},
+        "sportybet_availability": {
+            "status": "BOOKABLE",
+            "sportybet_available": True,
+            "board_snapshot_id": "test",
+        },
         "_fixture": {"commence_time": "2099-01-01T12:00:00Z"},
     }
 
@@ -44,7 +46,8 @@ def test_expected_return_matches_this_slips_probability_and_odds():
     built = build_slip(2.0, pool=[_pick()], market_cap=10)
     assert built["ok"]
     assert built["hit_probability"] == pytest.approx(
-        built["picks"][0]["evidence_adjusted_probability"])
+        built["picks"][0]["evidence_adjusted_probability"]
+    )
     assert built["odds"] == pytest.approx(2.0)
     assert built["expected_return"] == pytest.approx(built["hit_probability"] * 2.0)
 
@@ -59,37 +62,76 @@ def test_slip_builder_requires_exact_sportybet_bookability():
 
 def test_builder_caps_home_and_away_team_goal_picks_together():
     team_goals = [
-        _pick(f"team-{i}", odds=1.5, confidence=0.80,
-              market_group=("team_goals_home" if i % 2 == 0
-                            else "team_goals_away"))
+        _pick(
+            f"team-{i}",
+            odds=1.5,
+            confidence=0.80,
+            market_group=("team_goals_home" if i % 2 == 0 else "team_goals_away"),
+        )
         for i in range(6)
     ]
     alternatives = [
-        _pick(f"other-{i}", odds=1.5, confidence=0.78,
-              market_group=f"other_{i}")
+        _pick(f"other-{i}", odds=1.5, confidence=0.78, market_group=f"other_{i}")
         for i in range(4)
     ]
-    built = build_slip(10.0, pool=team_goals + alternatives,
-                       max_legs=8, market_cap=3)
+    built = build_slip(10.0, pool=team_goals + alternatives, max_legs=8, market_cap=3)
     assert built["ok"]
     selected_team_goals = [
-        pick for pick in built["picks"]
+        pick
+        for pick in built["picks"]
         if pick["market_group"] in {"team_goals_home", "team_goals_away"}
     ]
     assert len(selected_team_goals) <= 3
     assert len({pick["market_group"] for pick in built["picks"]}) >= 3
 
 
+def test_builder_market_cap_increases_only_for_high_targets():
+    assert slip_builder._market_cap_for_target(10) == 3
+    assert slip_builder._market_cap_for_target(20) == 3
+    assert slip_builder._market_cap_for_target(30) == 3
+    assert slip_builder._market_cap_for_target(50) == 3
+    assert slip_builder._market_cap_for_target(70) == 4
+    assert slip_builder._market_cap_for_target(100) == 4
+
+
+def test_high_target_builder_can_use_four_legs_from_one_market_group():
+    picks = [
+        _pick(
+            f"high-target-{i}",
+            odds=3.0,
+            confidence=0.80,
+            market_group="goals",
+        )
+        for i in range(4)
+    ]
+
+    built = build_slip(
+        70.0,
+        pool=picks,
+        max_legs=4,
+    )
+
+    assert built["ok"]
+    assert built["legs"] == 4
+    assert built["odds"] >= 70.0
+
+
 def test_tier_selector_cannot_bypass_team_goal_cap_by_switching_sides():
     team_goals = [
-        _pick(f"team-{i}", odds=1.5, confidence=0.80,
-              market_group=("team_goals_home" if i % 2 == 0
-                            else "team_goals_away"))
+        _pick(
+            f"team-{i}",
+            odds=1.5,
+            confidence=0.80,
+            market_group=("team_goals_home" if i % 2 == 0 else "team_goals_away"),
+        )
         for i in range(6)
     ]
     selected, _, _ = select_accumulator(
-        team_goals, target_odds=5.0, max_picks=6,
-        min_confidence=0.5, min_ev=0.0,
+        team_goals,
+        target_odds=5.0,
+        max_picks=6,
+        min_confidence=0.5,
+        min_ev=0.0,
     )
     assert selected == []
 
@@ -116,31 +158,53 @@ def test_cache_rejects_missing_or_invalid_kickoffs():
 
 def test_generate_reuses_availability_from_same_board_snapshot(monkeypatch):
     availability = {
-        "status": "BOOKABLE", "sportybet_available": True,
-        "sportybet_odds": 2.0, "board_snapshot_id": "snap-1",
+        "status": "BOOKABLE",
+        "sportybet_available": True,
+        "sportybet_odds": 2.0,
+        "board_snapshot_id": "snap-1",
     }
     pick = {
-        **_pick(), "sportybet_availability": availability,
-        "_fixture": {"home": {"name": "Home"}, "away": {"name": "Away"},
-                     "commence_time": "2026-09-04T12:00:00Z", "league": "League"},
+        **_pick(),
+        "sportybet_availability": availability,
+        "_fixture": {
+            "home": {"name": "Home"},
+            "away": {"name": "Away"},
+            "commence_time": "2026-09-04T12:00:00Z",
+            "league": "League",
+        },
     }
     monkeypatch.setattr(slip_builder, "_pool", lambda *a, **k: [pick])
-    monkeypatch.setattr("leagues.sportybet.fetch_board", lambda **k: {
-        "__meta__": {"snapshot_id": "snap-1"}})
+    monkeypatch.setattr(
+        "leagues.sportybet.fetch_board",
+        lambda **k: {"__meta__": {"snapshot_id": "snap-1"}},
+    )
     monkeypatch.setattr(
         "leagues.sportybet.availability_for",
         lambda *a, **k: pytest.fail("same-snapshot pick must not be rematched"),
     )
-    monkeypatch.setattr(slip_builder, "build_slip", lambda *a, **k: {
-        "ok": True, "odds": 2.0, "legs": 1, "hit_probability": 0.6,
-        "expected_return": 1.2, "avg_confidence": 0.6, "picks": [pick],
-    })
-    monkeypatch.setattr("leagues.picks.to_game", lambda p: {
-        "kickoff": "2026-09-04T12:00:00Z"})
+    monkeypatch.setattr(
+        slip_builder,
+        "build_slip",
+        lambda *a, **k: {
+            "ok": True,
+            "odds": 2.0,
+            "legs": 1,
+            "hit_probability": 0.6,
+            "expected_return": 1.2,
+            "avg_confidence": 0.6,
+            "picks": [pick],
+        },
+    )
+    monkeypatch.setattr(
+        "leagues.picks.to_game", lambda p: {"kickoff": "2026-09-04T12:00:00Z"}
+    )
     monkeypatch.setattr(
         "leagues.booking.create_or_reuse_generated_booking",
-        lambda *a, **k: {"status": "active", "share_code": "ABC123",
-                         "timing_ms": {"validation_readback": 4}},
+        lambda *a, **k: {
+            "status": "active",
+            "share_code": "ABC123",
+            "timing_ms": {"validation_readback": 4},
+        },
     )
 
     result = slip_builder.generate(2, horizon="week")
@@ -218,10 +282,19 @@ def test_dnb_push_reduces_payout_without_losing_accumulator():
         "evidence_adjusted_probability": 0.70,
     }
 
-    distribution = slip_builder._positive_payout_distribution(
-        [dnb, binary]
-    )
+    distribution = slip_builder._positive_payout_distribution([dnb, binary])
 
     assert distribution[4.0] == pytest.approx(0.42)
     assert distribution[2.0] == pytest.approx(0.175)
     assert sum(distribution.values()) == pytest.approx(0.595)
+
+
+def test_builder_team_goal_cap_scales_only_for_high_targets():
+    assert slip_builder._team_to_score_cap_for_target(10) == 3
+    assert slip_builder._team_to_score_cap_for_target(20) == 3
+    assert slip_builder._team_to_score_cap_for_target(30) == 3
+
+    assert slip_builder._team_to_score_cap_for_target(50) == 4
+
+    assert slip_builder._team_to_score_cap_for_target(70) == 5
+    assert slip_builder._team_to_score_cap_for_target(100) == 5
