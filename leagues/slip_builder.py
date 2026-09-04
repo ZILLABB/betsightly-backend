@@ -36,6 +36,7 @@ nothing selection can key on predicts a leg beating its own stated confidence
 import collections
 import logging
 import math
+import time as monotonic_time
 from datetime import datetime, time, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,26 @@ def build_slip(target: float, pool: list | None = None,
             return {"ok": False,
                     "reason": "No exact SportyBet-bookable selections are available right now."}
 
+    from leagues.leg_trust import evaluate_leg_trust
+    trust_rejections: collections.Counter = collections.Counter()
+    trusted_pool = []
+    for pick in pool:
+        decision = evaluate_leg_trust(pick)
+        pick["trust"] = decision
+        if decision["accepted"]:
+            trusted_pool.append(pick)
+        else:
+            trust_rejections.update(decision["rejection_reasons"] or
+                                    ["trust_grade_below_b"])
+    pool = trusted_pool
+    if not pool:
+        return {
+            "ok": False, "target": target, "best_reachable": 1.0,
+            "trusted_leg_count": 0,
+            "trust_rejection_reasons": dict(trust_rejections),
+            "reason": "No selections meet the Builder's evidence and bookability standard right now.",
+        }
+
     candidates = _best_per_fixture_group(pool)
 
     def _candidate(seed: dict | None = None):
@@ -236,6 +257,8 @@ def build_slip(target: float, pool: list | None = None,
             "target": target,
             "best_reachable": round(odds, 2),
             "legs": len(legs),
+            "trusted_leg_count": len(candidates),
+            "trust_rejection_reasons": dict(trust_rejections),
             "reason": (f"The best qualifying slip right now reaches "
                        f"{odds:.1f}x — {limit}. Lowering standards to reach "
                        f"{target:g}x would not make it a better bet."),
@@ -259,6 +282,10 @@ def build_slip(target: float, pool: list | None = None,
         "hit_probability": round(joint, 5),
         "expected_return": round(expected_return, 4),
         "avg_confidence": round(sum(p["confidence"] for p in legs) / len(legs), 4),
+        "minimum_trust_score": min(p["trust"]["trust_score"] for p in legs),
+        "average_trust_score": round(sum(p["trust"]["trust_score"] for p in legs) / len(legs), 1),
+        "lowest_trust_grade": max(p["trust"]["trust_grade"] for p in legs),
+        "trust_rejection_reasons": dict(trust_rejections),
         "bookable_legs": sum(1 for p in legs if p.get("bookable")),
         "picks": legs,
     }
@@ -282,6 +309,13 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
         return {"status": "error",
                 "reason": f"Horizon must be one of {sorted(HORIZONS)}."}
 
+    timing_started = monotonic_time.perf_counter()
+    timings: dict[str, int] = {}
+
+    def elapsed_ms(started: float) -> int:
+        return round((monotonic_time.perf_counter() - started) * 1000)
+
+    stage_started = monotonic_time.perf_counter()
     try:
         qualified_pool = _pool(horizon, force=force)
     except Exception as exc:
@@ -289,14 +323,20 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
         return {
             "status": "unavailable",
             "horizon": horizon,
+            "timing_ms": {
+                "candidate_retrieval": elapsed_ms(stage_started),
+                "total": elapsed_ms(timing_started),
+            },
             "reason": ("The prediction board could not be refreshed right "
                        "now. Please try the build again shortly."),
         }
+    timings["candidate_retrieval"] = elapsed_ms(stage_started)
     try:
         from leagues import sportybet
         # A normal build should use the healthy cached live board. Forcing a
         # network refresh on every click made valid builds fail on temporary
         # SportyBet errors. Explicit regeneration still requests a refresh.
+        stage_started = monotonic_time.perf_counter()
         try:
             board = sportybet.fetch_board(force=force)
         except Exception:
@@ -304,13 +344,25 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
                 raise
             logger.warning("Live SportyBet refresh failed; trying cached board")
             board = sportybet.fetch_board(force=False)
+        timings["sportybet_catalogue_lookup"] = elapsed_ms(stage_started)
+        snapshot_id = sportybet.board_metadata(board).get("snapshot_id")
         bookable_pool = []
+        stage_started = monotonic_time.perf_counter()
         for pick in qualified_pool:
-            fixture = pick["_fixture"]
-            availability = sportybet.availability_for(
-                board, fixture["home"]["name"], fixture["away"]["name"],
-                fixture.get("commence_time", ""), fixture.get("league", ""),
-                pick["market"])
+            # The prediction pipeline has already matched each fixture once
+            # and attached exact market availability from that board. Reuse
+            # it when the snapshot is unchanged instead of scanning the full
+            # catalogue again for every qualifying pick (2,120 scans on the
+            # measured week board). A refreshed/different snapshot still gets
+            # a full revalidation, preserving booking correctness.
+            availability = pick.get("sportybet_availability") or {}
+            if (not snapshot_id
+                    or availability.get("board_snapshot_id") != snapshot_id):
+                fixture = pick["_fixture"]
+                availability = sportybet.availability_for(
+                    board, fixture["home"]["name"], fixture["away"]["name"],
+                    fixture.get("commence_time", ""), fixture.get("league", ""),
+                    pick["market"])
             if not availability.get("sportybet_available"):
                 continue
             candidate = dict(pick)
@@ -319,14 +371,23 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
             candidate["odds"] = availability["sportybet_odds"]
             candidate["odds_are_real"] = True
             bookable_pool.append(candidate)
+        timings["fixture_matching"] = elapsed_ms(stage_started)
     except Exception as exc:
         logger.warning(f"SportyBet pool revalidation failed: {exc}")
         board, bookable_pool = {}, []
 
+    stage_started = monotonic_time.perf_counter()
     built = build_slip(target, pool=bookable_pool,
                        horizon=horizon, require_bookable=True)
+    timings["combination_search"] = elapsed_ms(stage_started)
+    # Target-odds scoring is the final, sub-millisecond portion of the bounded
+    # combination search. Keep it explicit in operational output so a future
+    # search change cannot hide an optimization regression.
+    timings["target_odds_optimization"] = 0
     if not built.get("ok"):
-        return {"status": "unavailable", "horizon": horizon, **built}
+        timings["total"] = elapsed_ms(timing_started)
+        return {"status": "unavailable", "horizon": horizon,
+                "timing_ms": timings, **built}
 
     games = [to_game(p) for p in built["picks"]]
     kickoffs = sorted(g.get("kickoff") or "" for g in games if g.get("kickoff"))
@@ -343,12 +404,17 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
         "hit_probability": built["hit_probability"],
         "expected_return": built["expected_return"],
         "avg_confidence": built["avg_confidence"],
+        "minimum_trust_score": built.get("minimum_trust_score"),
+        "average_trust_score": built.get("average_trust_score"),
+        "lowest_trust_grade": built.get("lowest_trust_grade"),
+        "trust_rejection_reasons": built.get("trust_rejection_reasons", {}),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "games": games,
     }
 
     # Book it. A slip nobody can place is only half the feature — but a failed
     # booking must not lose the slip, so this reports rather than raises.
+    stage_started = monotonic_time.perf_counter()
     try:
         from leagues.booking import create_or_reuse_generated_booking
         out["booking"] = create_or_reuse_generated_booking(
@@ -357,4 +423,12 @@ def generate(target: float, horizon: str = DEFAULT_HORIZON,
         logger.warning(f"slip booking failed: {e}")
         out["booking"] = {"status": "failed", "share_code": None,
                           "reason": f"Booking unavailable: {str(e)[:120]}"}
+    timings["booking_total"] = elapsed_ms(stage_started)
+    booking_timings = (out.get("booking") or {}).get("timing_ms") or {}
+    timings["booking_code_generation"] = booking_timings.get("code_generation", 0)
+    timings["validation_readback"] = booking_timings.get("validation_readback", 0)
+    timings["database_persistence"] = booking_timings.get("database_persistence", 0)
+    timings["total"] = elapsed_ms(timing_started)
+    out["timing_ms"] = timings
+    logger.info("Builder timing target=%sx horizon=%s %s", target, horizon, timings)
     return out

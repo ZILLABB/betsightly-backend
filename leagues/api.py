@@ -236,9 +236,12 @@ async def trigger_tier_booking(force: bool = False):
         card = build_daily_accumulators()
         if not card:
             raise HTTPException(404, "no card to book")
-        return {"status": "success",
-                **book_card(_publish_date(),
-                            card.get("accumulators") or {}, force=force)}
+        result = book_card(_publish_date(), card.get("accumulators") or {}, force=force)
+        # Manual incident recovery must become visible immediately, just like
+        # the scheduler path. Otherwise the cached code-free card survives.
+        from leagues import daily_feed
+        daily_feed._accum_cache.update({"result": None, "ts": 0.0})
+        return {"status": "success", **result}
     except HTTPException:
         raise
     except Exception as e:
@@ -294,6 +297,7 @@ async def get_bookings(date: str | None = None):
 # answer — there is one best combination, not one per visitor.
 _SLIP_CACHE: dict = {}
 _SLIP_TTL = 1800
+_SLIP_LOCKS: dict = {}
 
 
 def _cached_slip_is_placeable(result: dict, now: datetime | None = None) -> bool:
@@ -350,8 +354,25 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             logger.warning(f"Builder run audit failed: {exc}")
         return response
 
+    # Coalesce identical work. The model/board/booking functions are blocking,
+    # so move them off the event loop while one coroutine owns this key.
+    import asyncio
+    lock = _SLIP_LOCKS.setdefault(key, asyncio.Lock())
     try:
-        result = generate(target, horizon=horizon, force=refresh)
+        async with lock:
+            hit = _SLIP_CACHE.get(key)
+            if (hit and not refresh and (_t.time() - hit["ts"]) < _SLIP_TTL
+                    and _cached_slip_is_placeable(hit["result"])):
+                result = {**hit["result"], "cached": True}
+                try:
+                    from leagues.builder_runs import record_run
+                    record_run(target, horizon, refresh, result, cached=True)
+                except Exception as exc:
+                    logger.warning(f"Builder run audit failed: {exc}")
+                return result
+            result = await asyncio.to_thread(generate, target, horizon=horizon, force=refresh)
+            if result.get("status") == "success":
+                _SLIP_CACHE[key] = {"result": result, "ts": _t.time()}
     except Exception as e:
         logger.error(f"Slip build failed: {e}", exc_info=True)
         try:
@@ -362,8 +383,6 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             logger.warning(f"Builder run audit failed: {exc}")
         raise HTTPException(500, str(e))
 
-    if result.get("status") == "success":
-        _SLIP_CACHE[key] = {"result": result, "ts": _t.time()}
     response = {**result, "cached": False}
     try:
         from leagues.builder_runs import record_run

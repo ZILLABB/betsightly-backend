@@ -29,6 +29,7 @@ opening the card an hour apart get the same slip.
 import json
 import itertools
 import logging
+import time
 import urllib.request
 from datetime import datetime, timezone
 
@@ -383,10 +384,23 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
     that cannot be booked still has to publish its picks, with an honest note
     instead of a code.
     """
+    timing_started = time.perf_counter()
+    timings: dict[str, int] = {}
+
+    def elapsed_ms(started: float) -> int:
+        return round((time.perf_counter() - started) * 1000)
+
+    def finished(payload: dict) -> dict:
+        timings["total"] = elapsed_ms(timing_started)
+        payload["timing_ms"] = dict(timings)
+        return payload
+
     now = datetime.now(timezone.utc).isoformat()
     original_games = original_games or games
     replacements = replacements or []
+    stage_started = time.perf_counter()
     selections, unmapped = selections_for(games, board)
+    timings["selection_mapping"] = elapsed_ms(stage_started)
     base = {
         "booking_status": "UNAVAILABLE",
         "original_leg_count": len(original_games),
@@ -408,9 +422,9 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
     }
 
     if not selections:
-        return {**base, "status": "unavailable", "share_code": None, "legs": 0,
+        return finished({**base, "status": "unavailable", "share_code": None, "legs": 0,
                 "unmapped": unmapped, "priced_at": now,
-                "reason": "no leg could be matched to a SportyBet selection"}
+                "reason": "no leg could be matched to a SportyBet selection"})
 
     # Partial slips are refused for accumulators. A four-leg code under a
     # five-leg tier is a different bet from the one on the card, and the reader
@@ -423,40 +437,45 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
     # be matched left that tier with no code at all on 25 August, which helped
     # nobody: the seven bookable picks were perfectly good.
     if unmapped and not allow_partial:
-        return {**base, "status": "unavailable", "share_code": None,
+        return finished({**base, "status": "unavailable", "share_code": None,
                 "legs": len(selections), "unmapped": unmapped, "priced_at": now,
                 "reason": (f"{len(unmapped)} of {len(games)} legs could not be "
-                           f"matched; a partial slip is not the published tier")}
+                           f"matched; a partial slip is not the published tier")})
 
+    stage_started = time.perf_counter()
     try:
         payload = _post_share(selections)
     except Exception as e:
+        timings["code_generation"] = elapsed_ms(stage_started)
         logger.warning(f"booking request failed: {e}")
-        return {**base, "status": "failed", "booking_status": "BOOKING_FAILED",
+        return finished({**base, "status": "failed", "booking_status": "BOOKING_FAILED",
                 "share_code": None, "legs": len(selections),
                 "unmapped": [], "priced_at": now,
-                "reason": f"booking request failed: {str(e)[:120]}"}
+                "reason": f"booking request failed: {str(e)[:120]}"})
+    timings["code_generation"] = elapsed_ms(stage_started)
 
     if payload.get("bizCode") != 10000:
-        return {**base, "status": "failed", "booking_status": "BOOKING_FAILED",
+        return finished({**base, "status": "failed", "booking_status": "BOOKING_FAILED",
                 "share_code": None, "legs": len(selections),
                 "unmapped": [], "priced_at": now,
-                "reason": f"bookmaker refused: {payload.get('message')}"}
+                "reason": f"bookmaker refused: {payload.get('message')}"})
 
     data = payload.get("data") or {}
     code = data.get("shareCode")
     if not code:
-        return {**base, "status": "failed", "booking_status": "BOOKING_FAILED",
+        return finished({**base, "status": "failed", "booking_status": "BOOKING_FAILED",
                 "share_code": None, "legs": len(selections),
                 "unmapped": [], "priced_at": now,
-                "reason": "response carried no share code"}
+                "reason": "response carried no share code"})
 
+    stage_started = time.perf_counter()
     ok, why, actual_odds = validate_code_details(code, selections)
+    timings["validation_readback"] = elapsed_ms(stage_started)
     if not ok:
-        return {**base, "status": "invalid", "booking_status": "VALIDATION_FAILED",
+        return finished({**base, "status": "invalid", "booking_status": "VALIDATION_FAILED",
                 "share_code": None, "legs": len(selections),
                 "unmapped": [], "priced_at": now,
-                "reason": f"validation failed: {why}"}
+                "reason": f"validation failed: {why}"})
 
     expires = None
     if data.get("deadline"):
@@ -476,7 +495,7 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
         actual_odds = round(actual_odds, 3) if actual_odds > 1.0 else None
 
     final_status = booking_status or ("PARTIAL" if unmapped else "FULL")
-    return {**base,
+    return finished({**base,
         "status": "active",
         "booking_status": final_status,
         "share_code": code,
@@ -503,7 +522,7 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
         # everything on screen.
         "partial": bool(unmapped),
         "unbooked": [u["match"] for u in unmapped],
-    }
+    })
 
 
 def create_or_reuse_generated_booking(games: list, board: dict,
@@ -516,11 +535,16 @@ def create_or_reuse_generated_booking(games: list, board: dict,
     code for an identical slip. Reuse still performs SportyBet readback, so an
     expired or changed code is replaced rather than trusted blindly.
     """
+    timing_started = time.perf_counter()
+    stage_started = time.perf_counter()
     selections, unmapped = selections_for(games, board)
+    selection_ms = round((time.perf_counter() - stage_started) * 1000)
     fingerprint = (selection_fingerprint(selections) if selections
                    else leg_fingerprint(games))
     if not force and selections and not unmapped:
+        stage_started = time.perf_counter()
         prior = generated_booking_for(fingerprint)
+        persistence_ms = round((time.perf_counter() - stage_started) * 1000)
         code = (prior or {}).get("share_code")
         expired = False
         try:
@@ -530,7 +554,9 @@ def create_or_reuse_generated_booking(games: list, board: dict,
         except (TypeError, ValueError):
             expired = True
         if (prior or {}).get("status") == "active" and code and not expired:
+            stage_started = time.perf_counter()
             ok, _, actual_odds = validate_code_details(code, selections)
+            validation_ms = round((time.perf_counter() - stage_started) * 1000)
             if ok:
                 reused = dict(prior)
                 reused.update({
@@ -540,14 +566,32 @@ def create_or_reuse_generated_booking(games: list, board: dict,
                 })
                 if actual_odds is not None:
                     reused["actual_sportybet_odds"] = actual_odds
+                reused["timing_ms"] = {
+                    "selection_mapping": selection_ms,
+                    "code_generation": 0,
+                    "validation_readback": validation_ms,
+                    "database_persistence": persistence_ms,
+                    "total": round((time.perf_counter() - timing_started) * 1000),
+                }
                 return reused
 
     record = create_booking(
         games, board, booking_status="FULL", predicted_odds=predicted_odds)
     record["code_reused"] = False
     record["sportybet_selection_fingerprint"] = fingerprint
+    create_timings = record.get("timing_ms") or {}
+    persistence_ms = 0
     if record.get("status") == "active":
+        stage_started = time.perf_counter()
         _store_generated_booking(fingerprint, record)
+        persistence_ms = round((time.perf_counter() - stage_started) * 1000)
+    record["timing_ms"] = {
+        "selection_mapping": selection_ms + create_timings.get("selection_mapping", 0),
+        "code_generation": create_timings.get("code_generation", 0),
+        "validation_readback": create_timings.get("validation_readback", 0),
+        "database_persistence": persistence_ms,
+        "total": round((time.perf_counter() - timing_started) * 1000),
+    }
     return record
 
 

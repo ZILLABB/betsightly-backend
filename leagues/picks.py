@@ -455,6 +455,11 @@ def build_picks(fixture: dict, model: dict,
             "market_implied_probability": round(1.0 / price, 4) if is_real else None,
             "calibration_group": calibration_group,
             "calibration_sample": calibration_sample,
+            "calibration_evidence": {
+                key: calibration_cell.get(key)
+                for key in ("n", "promised", "actual")
+                if calibration_cell.get(key) is not None
+            },
             # Banker and 2 Odds only admit markets with enough *published,
             # settled* evidence of their own. Longer tiers may still collect
             # that evidence, clearly labelled as developing markets.
@@ -555,6 +560,7 @@ def to_game(pick: dict) -> dict:
         "calibration_group": pick.get("calibration_group"),
         "calibration_sample": pick.get("calibration_sample", 0),
         "safe_tier_eligible": pick.get("safe_tier_eligible", False),
+        "trust": pick.get("trust"),
         "model_sources": sources,
         "models_used": len(sources),
         "odds": pick["odds"],

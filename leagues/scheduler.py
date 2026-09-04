@@ -110,21 +110,47 @@ def _finish(run_date: str, report: dict) -> None:
         logger.warning(f"daily run bookkeeping failed: {e}")
 
 
-def _step(report: dict, name: str, fn):
+def _persist_progress(run_date: str, report: dict) -> None:
+    """Durably expose the active step without marking the run finished."""
+    import json
+    from sqlalchemy import text
+    from database import engine
+    try:
+        with engine.begin() as conn:
+            _ensure_table(conn)
+            conn.execute(text(
+                "UPDATE daily_runs SET status = 'running', report = :r WHERE run_date = :d"),
+                {"d": run_date, "r": json.dumps(report)[:8000]})
+    except Exception as exc:
+        logger.warning(f"daily run progress bookkeeping failed: {exc}")
+
+
+def _step(report: dict, name: str, fn, run_date: str | None = None):
     """Run one step, recording what happened without letting it end the run.
 
     A failure to settle yesterday must not stop today's card being published,
     and a Telegram outage must not stop either. Each step is recorded and the
     run continues.
     """
+    report["steps"][name] = {"status": "running", "started_at": _now()}
+    if run_date:
+        _persist_progress(run_date, report)
     try:
         result = fn()
-        report["steps"][name] = {"ok": True, "detail": result}
+        report["steps"][name] = {"status": "complete", "ok": True,
+                                 "started_at": report["steps"][name]["started_at"],
+                                 "finished_at": _now(), "detail": result}
+        if run_date:
+            _persist_progress(run_date, report)
         return result
     except Exception as e:
         logger.error(f"daily run step '{name}' failed: {e}", exc_info=True)
-        report["steps"][name] = {"ok": False, "error": str(e)[:300]}
+        report["steps"][name] = {"status": "failed", "ok": False,
+                                 "started_at": report["steps"][name]["started_at"],
+                                 "finished_at": _now(), "error": str(e)[:300]}
         report["failed"].append(name)
+        if run_date:
+            _persist_progress(run_date, report)
         return None
 
 
@@ -152,14 +178,14 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
         slips = settle_published_slips()
         return {"scores": summary, "slips": slips}
 
-    _step(report, "settle", _settle)
+    _step(report, "settle", _settle, run_date)
 
     def _recalibrate():
         from leagues.calibrator import fit_calibration
         fit = fit_calibration(force=True)
         return {"legs": fit.get("n", 0)}
 
-    _step(report, "calibrate", _recalibrate)
+    _step(report, "calibrate", _recalibrate, run_date)
 
     # 2. Build and lock the card. First write wins, so calling this again
     #    later in the day returns the same card rather than replacing it.
@@ -176,7 +202,7 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
             "tiers": {k: len(v.get("games") or []) for k, v in accs.items()},
         }
 
-    _step(report, "card", _publish_card)
+    _step(report, "card", _publish_card, run_date)
 
     # 3. Book the tiers. After the lock, so a code always describes the card
     #    that was actually published, and before distribution, so the Telegram
@@ -194,7 +220,7 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
         daily_feed._accum_cache.update({"result": None, "ts": 0})
         return report
 
-    _step(report, "book", _book)
+    _step(report, "book", _book, run_date)
 
     # 4. Tell subscribers, counted off the card that was actually published.
     #
@@ -219,7 +245,7 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
                                  predictions_count=count, categories=cats)
         return {"sent": True, "picks": count}
 
-    _step(report, "alert", _alert)
+    _step(report, "alert", _alert, run_date)
 
     # 5. Distribution. Its own duplicate guard sits on
     #    (publish_date, channel, template), so this is safe on a retry too.
@@ -228,7 +254,7 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
             from growth.engine import run_daily
             return run_daily(publish=True)
 
-        _step(report, "distribute", _distribute)
+        _step(report, "distribute", _distribute, run_date)
     else:
         report["steps"]["distribute"] = {"ok": True, "detail": "skipped"}
 

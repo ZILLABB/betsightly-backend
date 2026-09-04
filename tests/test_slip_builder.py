@@ -6,17 +6,23 @@ from leagues.api import _cached_slip_is_placeable
 from leagues.daily_feed import _trusted_rollover_picks
 from leagues.selection import select_accumulator
 from leagues.slip_builder import _horizon_end, build_slip
+from leagues import slip_builder
 
 
 def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True,
           market_group="goals"):
     return {
         "match_id": match_id,
+        "market": "over_1_5",
         "market_group": market_group,
         "odds": odds,
         "confidence": confidence,
         "bookable": True,
         "safe_tier_eligible": trusted,
+        "calibration_sample": 25 if trusted else 0,
+        "sportybet_availability": {"status": "BOOKABLE", "sportybet_available": True,
+                                     "board_snapshot_id": "test"},
+        "_fixture": {"commence_time": "2099-01-01T12:00:00Z"},
     }
 
 
@@ -105,3 +111,40 @@ def test_cache_rejects_missing_or_invalid_kickoffs():
     now = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
     assert not _cached_slip_is_placeable({"games": []}, now)
     assert not _cached_slip_is_placeable({"games": [{"kickoff": "bad"}]}, now)
+
+
+def test_generate_reuses_availability_from_same_board_snapshot(monkeypatch):
+    availability = {
+        "status": "BOOKABLE", "sportybet_available": True,
+        "sportybet_odds": 2.0, "board_snapshot_id": "snap-1",
+    }
+    pick = {
+        **_pick(), "sportybet_availability": availability,
+        "_fixture": {"home": {"name": "Home"}, "away": {"name": "Away"},
+                     "commence_time": "2026-09-04T12:00:00Z", "league": "League"},
+    }
+    monkeypatch.setattr(slip_builder, "_pool", lambda *a, **k: [pick])
+    monkeypatch.setattr("leagues.sportybet.fetch_board", lambda **k: {
+        "__meta__": {"snapshot_id": "snap-1"}})
+    monkeypatch.setattr(
+        "leagues.sportybet.availability_for",
+        lambda *a, **k: pytest.fail("same-snapshot pick must not be rematched"),
+    )
+    monkeypatch.setattr(slip_builder, "build_slip", lambda *a, **k: {
+        "ok": True, "odds": 2.0, "legs": 1, "hit_probability": 0.6,
+        "expected_return": 1.2, "avg_confidence": 0.6, "picks": [pick],
+    })
+    monkeypatch.setattr("leagues.picks.to_game", lambda p: {
+        "kickoff": "2026-09-04T12:00:00Z"})
+    monkeypatch.setattr(
+        "leagues.booking.create_or_reuse_generated_booking",
+        lambda *a, **k: {"status": "active", "share_code": "ABC123",
+                         "timing_ms": {"validation_readback": 4}},
+    )
+
+    result = slip_builder.generate(2, horizon="week")
+
+    assert result["status"] == "success"
+    assert result["booking"]["share_code"] == "ABC123"
+    assert result["timing_ms"]["fixture_matching"] >= 0
+    assert result["timing_ms"]["validation_readback"] == 4
