@@ -1,0 +1,26 @@
+{
+  "snapshot": {
+    "snapshot_id": "d5aa61ce521f4a0e",
+    "declared_total": 2118,
+    "fetched_total": 2118,
+    "raw_fetched_records": 2118,
+    "parsed_records": 2118,
+    "unique_indexed_fixtures": 2118,
+    "duplicates_removed": 0,
+    "invalid_records": 0,
+    "page_count": 22,
+    "required_pages": 22,
+    "is_complete": true,
+    "fetched_at": 1788530177.042898,
+    "error": null
+  },
+  "espn_total": 552,
+  "counts": {
+    "matched": 432,
+    "missing_from_sportybet": 111,
+    "competition_mismatch": 36,
+    "youth_reserve_mismatch": 4,
+    "kickoff_mismatch": 5
+  },
+  "safe_alias_candidates": []
+}
