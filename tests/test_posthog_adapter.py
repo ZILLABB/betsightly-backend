@@ -29,9 +29,15 @@ def test_posthog_adapter_queries_once_then_uses_cache(monkeypatch):
         if "GROUP BY toDate" in query:
             return FakeResponse([["2026-09-03", 10, 11, 20, 3, 2]])
         if "GROUP BY 1" in query:
-            return FakeResponse([["NG", 8, 12]])
+            return FakeResponse([["NG", 8, 12, 3, 9, 6, 4, 3, 2, 1]])
         if "countIf(yesterday>0)" in query:
             return FakeResponse([[7, 4]])
+        if "arrayExists" in query:
+            return FakeResponse([[8, 4, 8, 3, 7, 2, 5, 1, 2, 1]])
+        if "FROM (SELECT distinct_id" in query:
+            width = (6 if "builder_target_selected" in query else
+                     4 if "rollover_viewed" in query else 5)
+            return FakeResponse([[10 - i for i in range(width)]])
         if "properties.$is_first_day" in query:
             return FakeResponse([[10, 20, 30, 4]])
         return FakeResponse([[40, 10, 11, 20, 8, 2, 4, 3, 3, 2, 1, 0]])
@@ -72,3 +78,23 @@ def test_posthog_adapter_serves_stale_cache_on_query_failure(monkeypatch):
     assert result["data"]["totals"]["visitors"] == 9
     assert result["meta"]["source"] == "posthog"
     assert result["meta"]["status"] == "stale"
+
+
+def test_posthog_adapter_rejects_malformed_provider_rows(monkeypatch):
+    db = create_engine("sqlite://", poolclass=StaticPool,
+                       connect_args={"check_same_thread": False})
+    monkeypatch.setattr(adapter, "engine", db)
+    monkeypatch.setenv("POSTHOG_PROJECT_ID", "42")
+    monkeypatch.setenv("POSTHOG_PERSONAL_API_KEY", "secret")
+    adapter._memory.clear()
+
+    # A short totals row previously produced a partially populated, "fresh"
+    # dashboard. Shape drift must degrade the provider explicitly instead.
+    result = adapter.summary(
+        "2026-09-01", "2026-09-02",
+        lambda *args, **kwargs: FakeResponse([[1, 2, 3]]),
+    )
+
+    assert result["data"] == {}
+    assert result["meta"]["status"] == "unavailable"
+    assert result["meta"]["reason"] == "query_failed:ValueError"

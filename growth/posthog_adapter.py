@@ -39,7 +39,22 @@ def _query(project: str, key: str, host: str, hogql: str,
     )
     response.raise_for_status()
     body = response.json()
-    return body.get("results") or []
+    if not isinstance(body, dict) or "results" not in body:
+        raise ValueError("PostHog response has no results field")
+    results = body["results"]
+    if results is None:
+        return []
+    if not isinstance(results, list):
+        raise ValueError("PostHog results is not a row list")
+    return results
+
+
+def _validated_rows(rows: list, width: int, query_name: str) -> list:
+    """Reject provider shape drift instead of publishing plausible zeroes."""
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) != width:
+            raise ValueError(f"{query_name} returned an unexpected row shape")
+    return rows
 
 
 def _read_cache(cache_key: str) -> tuple[dict | None, datetime | None]:
@@ -153,7 +168,7 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
     """
     daily_sql = f"""
       SELECT toDate(timestamp), uniq(distinct_id),
-        uniq(toString(properties.$session_id)), count(),
+        uniqIf(toString(properties.$session_id), notEmpty(toString(properties.$session_id))), count(),
         countIf(event='builder_generated'), countIf(event='booking_code_copied')
       FROM events WHERE {where} GROUP BY toDate(timestamp) ORDER BY toDate(timestamp)
     """
@@ -212,7 +227,11 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
         AND timestamp<addDays(toDateTime('{end} 00:00:00'),1)
     """
     try:
-        total_rows = _query(project, key, host, totals_sql, transport)
+        def run(hogql: str, width: int, name: str) -> list:
+            return _validated_rows(
+                _query(project, key, host, hogql, transport), width, name)
+
+        total_rows = run(totals_sql, 12, "totals")
         row = total_rows[0] if total_rows else [0] * 12
         totals = dict(zip(("events", "visitors", "sessions", "pageviews",
                            "prediction_viewers", "rollover_users", "builder_users", "slip_generators",
@@ -221,29 +240,30 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
                           [int(value or 0) for value in row]))
         totals["total_copy_actions"] = totals["unique_code_copiers"]
         totals["sportybet_opened"] = totals["sportybet_openers"]
-        daily_rows = _query(project, key, host, daily_sql, transport)
+        daily_rows = run(daily_sql, 6, "daily")
         data = {
             "totals": totals,
             "daily": [{"date": str(r[0]), "visitors": int(r[1] or 0),
                        "sessions": int(r[2] or 0), "events": int(r[3] or 0),
                        "builds": int(r[4] or 0), "copy_actions": int(r[5] or 0)}
                       for r in daily_rows],
-            "by_country": _dimension(_query(project, key, host,
-                dim_sql("properties.$geoip_country_code"), transport)),
-            "by_device": _dimension(_query(project, key, host,
-                dim_sql("properties.$device_type"), transport)),
-            "by_browser": _dimension(_query(project, key, host,
-                dim_sql("properties.$browser"), transport)),
-            "by_os": _dimension(_query(project, key, host,
-                dim_sql("properties.$os"), transport)),
-            "by_region": _dimension(_query(project, key, host,
-                dim_sql("properties.$geoip_subdivision_1_name"), transport)),
-            "by_source": _dimension(_query(project, key, host,
-                dim_sql("coalesce(properties.$utm_source, properties.$referring_domain)"), transport)),
-            "by_campaign": _dimension(_query(project, key, host,
-                dim_sql("properties.$utm_campaign"), transport)),
-            "by_path": _dimension(_query(project, key, host,
-                dim_sql("properties.$pathname"), transport)),
+            "by_country": _dimension(run(
+                dim_sql("properties.$geoip_country_code"), 10, "country")),
+            "by_device": _dimension(run(
+                dim_sql("properties.$device_type"), 10, "device")),
+            "by_browser": _dimension(run(
+                dim_sql("properties.$browser"), 10, "browser")),
+            "by_os": _dimension(run(
+                dim_sql("properties.$os"), 10, "os")),
+            "by_region": _dimension(run(
+                dim_sql("properties.$geoip_subdivision_1_name"), 10, "region")),
+            "by_source": _dimension(run(
+                dim_sql("coalesce(properties.$utm_source, properties.$referring_domain)"),
+                10, "source")),
+            "by_campaign": _dimension(run(
+                dim_sql("properties.$utm_campaign"), 10, "campaign")),
+            "by_path": _dimension(run(
+                dim_sql("properties.$pathname"), 10, "path")),
         }
         funnel_specs = {
             "prediction": (["$pageview", "prediction_viewed", "booking_code_viewed",
@@ -261,9 +281,9 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
                           "Code copied", "SportyBet opened"]),
         }
         data["funnels"] = {name: _funnel(
-            _query(project, key, host, funnel_sql(events), transport), labels)
+            run(funnel_sql(events), len(labels), f"{name}_funnel"), labels)
             for name, (events, labels) in funnel_specs.items()}
-        rr = _query(project, key, host, retention_sql, transport)
+        rr = run(retention_sql, 10, "retention")
         values = rr[0] if rr else [0] * 10
         data["retention"] = {}
         for index, day in enumerate((1, 3, 7, 14, 30)):
@@ -271,12 +291,12 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
             data["retention"][f"d{day}"] = {
                 "eligible": eligible, "returned": returned,
                 "rate": round(returned / eligible, 4) if eligible else None}
-        pr = _query(project, key, host, prediction_return_sql, transport)
+        pr = run(prediction_return_sql, 2, "prediction_day_return")
         eligible, returned = ([int(value or 0) for value in pr[0]] if pr else [0, 0])
         data["prediction_day_return"] = {
             "eligible": eligible, "returned": min(returned, eligible),
             "rate": round(min(returned, eligible) / eligible, 4) if eligible else None}
-        ar = _query(project, key, host, active_sql, transport)
+        ar = run(active_sql, 4, "active_users")
         av = [int(value or 0) for value in (ar[0] if ar else [0, 0, 0, 0])]
         data["active_users"] = {"dau": av[0], "wau": av[1], "mau": av[2]}
         data["totals"]["new_visitors"] = av[3]
