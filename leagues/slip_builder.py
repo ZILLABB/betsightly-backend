@@ -399,13 +399,25 @@ def build_slip(
 
     candidates = _best_per_fixture_group(pool)
 
-    def _candidate(seed: dict | None = None):
+    def _candidate(
+        seed: dict | None = None,
+        candidate_pool: list | None = None,
+    ):
+        search_pool = (
+            candidates
+            if candidate_pool is None
+            else candidate_pool
+        )
+
         seen_fixtures: set = set()
         groups: collections.Counter = collections.Counter()
         exposures: collections.Counter = collections.Counter()
         odds, joint, legs = 1.0, 1.0, []
 
-        ordered = ([seed] if seed is not None else []) + candidates
+        ordered = (
+            ([seed] if seed is not None else [])
+            + search_pool
+        )
 
         for p in ordered:
             if p in legs or len(legs) >= max_legs:
@@ -414,13 +426,21 @@ def build_slip(
             group = p["market_group"]
             exposure = exposure_group(group)
 
-            if p["match_id"] in seen_fixtures or groups[group] >= cap:
+            if (
+                p["match_id"] in seen_fixtures
+                or groups[group] >= cap
+            ):
                 continue
 
-            if exposure == "team_to_score" and exposures[exposure] >= team_to_score_cap:
+            if (
+                exposure == "team_to_score"
+                and exposures[exposure]
+                >= team_to_score_cap
+            ):
                 continue
 
             settlement = _leg_settlement_probabilities(p)
+
             if settlement is None:
                 continue
 
@@ -439,27 +459,97 @@ def build_slip(
 
         return odds, joint, legs
 
-    # Include the ordinary cost-first path, then seed the search with each of
-    # the strongest alternatives. This stays bounded on a live board while
-    # finding discrete combinations a single greedy pass misses.
-    attempts = [_candidate()]
-    attempts.extend(_candidate(seed) for seed in candidates[:48])
-    qualifying = [attempt for attempt in attempts if attempt[0] >= target]
-    if qualifying:
-        in_band = [
-            attempt for attempt in qualifying if attempt[0] <= target * BAND_HIGH
-        ]
-        choices = in_band or qualifying
-        odds, joint, legs = max(
-            choices,
-            key=lambda attempt: (
-                attempt[1],
-                -abs(math.log(attempt[0] / target)),
-                -len(attempt[2]),
+    def _attempt_rank(attempt):
+        attempt_odds, attempt_joint, attempt_legs = attempt
+
+        return (
+            attempt_odds <= target * BAND_HIGH,
+            attempt_joint,
+            -abs(
+                math.log(
+                    attempt_odds / target
+                )
             ),
+            -len(attempt_legs),
         )
-    else:
-        odds, joint, legs = max(attempts, key=lambda attempt: attempt[0])
+
+    def _search(candidate_pool: list):
+        attempts = [
+            _candidate(
+                candidate_pool=candidate_pool,
+            )
+        ]
+
+        attempts.extend(
+            _candidate(
+                seed,
+                candidate_pool,
+            )
+            for seed in candidate_pool[:48]
+        )
+
+        qualifying = [
+            attempt
+            for attempt in attempts
+            if attempt[0] >= target
+        ]
+
+        if qualifying:
+            return max(
+                qualifying,
+                key=_attempt_rank,
+            )
+
+        return max(
+            attempts,
+            key=lambda attempt: attempt[0],
+        )
+
+    # First run the existing bounded multi-start search.
+    odds, joint, legs = _search(candidates)
+
+    # A greedy path can occasionally reserve a scarce market-group slot
+    # for a slightly weaker leg. Test the selected fixtures one at a time:
+    # removing one may expose a later candidate that makes the complete
+    # target slip more likely to land.
+    #
+    # Two passes keep this bounded while allowing one improvement to expose
+    # a second nearby improvement.
+    if odds >= target:
+        best = (odds, joint, legs)
+
+        for _ in range(2):
+            improved = best
+
+            for selected in best[2]:
+                reduced = [
+                    candidate
+                    for candidate in candidates
+                    if candidate["match_id"]
+                    != selected["match_id"]
+                ]
+
+                alternative = _search(reduced)
+
+                if alternative[0] < target:
+                    continue
+
+                if (
+                    _attempt_rank(alternative)
+                    > _attempt_rank(improved)
+                ):
+                    improved = alternative
+
+            if (
+                _attempt_rank(improved)
+                <= _attempt_rank(best)
+            ):
+                break
+
+            best = improved
+
+        odds, joint, legs = best
+
 
     if odds < target:
         # Say which limit bit, because "not available" hides two different

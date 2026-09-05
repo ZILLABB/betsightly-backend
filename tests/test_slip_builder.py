@@ -93,6 +93,86 @@ def test_builder_market_cap_increases_only_for_high_targets():
     assert slip_builder._market_cap_for_target(70) == 4
     assert slip_builder._market_cap_for_target(100) == 4
 
+def test_builder_locally_replaces_a_weaker_selected_fixture(
+    monkeypatch,
+):
+    # Keep this test focused on combination search rather than the separate
+    # trust/evidence model. Use each pick's supplied confidence directly.
+    monkeypatch.setattr(
+        "leagues.leg_trust.evaluate_leg_trust",
+        lambda pick: {
+            "accepted": True,
+            "evidence_adjusted_probability": pick["confidence"],
+            "trust_score": 90,
+            "trust_grade": "A",
+            "rejection_reasons": [],
+        },
+    )
+
+    # Preserve the artificial ordering so the stronger replacement sits
+    # outside the first 48 seeded alternatives.
+    monkeypatch.setattr(
+        slip_builder,
+        "_best_per_fixture_group",
+        lambda pool: list(pool),
+    )
+
+    blocker = _pick(
+        "bad-fixture",
+        odds=2.90,
+        confidence=0.80,
+        market_group="goals",
+    )
+
+    decoys = [
+        _pick(
+            "bad-fixture",
+            odds=3.00,
+            confidence=0.70,
+            market_group="goals",
+        )
+        for _ in range(48)
+    ]
+
+    replacement = _pick(
+        "better-fixture",
+        odds=2.00,
+        confidence=0.90,
+        market_group="goals",
+    )
+
+    anchor = _pick(
+        "anchor",
+        odds=2.00,
+        confidence=0.90,
+        market_group="other",
+    )
+
+    built = build_slip(
+        4.0,
+        pool=[
+            blocker,
+            *decoys,
+            replacement,
+            anchor,
+        ],
+        max_legs=2,
+        market_cap=1,
+    )
+
+    assert built["ok"]
+    assert built["odds"] == pytest.approx(4.0)
+    assert built["hit_probability"] == pytest.approx(
+        0.81,
+    )
+
+    assert {
+        pick["match_id"]
+        for pick in built["picks"]
+    } == {
+        "better-fixture",
+        "anchor",
+    }
 
 def test_high_target_builder_can_use_four_legs_from_one_market_group():
     picks = [
