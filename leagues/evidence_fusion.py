@@ -22,14 +22,14 @@ PROMOTED = {
     "away_over_0_5",
     "home_over_1_5",
     "away_over_1_5",
+    "home_win",
+    "away_win",
 }
 
 RESTRICTED = {
     "btts_yes",
     "btts_no",
-    "home_win",
     "draw",
-    "away_win",
     "under_2_5",
     "under_3_5",
 }
@@ -275,6 +275,13 @@ def fused_market_evidence(
         and live_rate is not None
         and abs(float(live_rate) - hist_rate) > conflict_gap
     )
+    # A current settled cohort can also contradict the probability being
+    # claimed even when it happens to resemble the broader replay baseline.
+    claim_conflict = bool(
+        live_n >= MIN_LIVE_CONFLICT_N
+        and live_rate is not None
+        and probability - float(live_rate) > max(0.12, 1.96 * live_se)
+    )
 
     # Calibration tolerance becomes tighter as historical evidence grows,
     # bounded between 3pp and 6pp.
@@ -299,7 +306,7 @@ def fused_market_evidence(
         and evidence_strength >= 0.60
     )
 
-    if market in RESTRICTED:
+    if market in RESTRICTED or live_conflict or claim_conflict:
         state = "SHADOW"
 
     elif market in PROMOTED and reliable and not live_conflict:

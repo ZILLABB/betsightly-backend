@@ -87,6 +87,10 @@ _COST_TIE_BAND = 0.02
 
 DNB_MARKETS = {"dnb_home", "dnb_away"}
 
+
+def _market_distribution(picks: list[dict]) -> dict[str, int]:
+    return dict(collections.Counter(str(p.get("market") or "unknown") for p in picks))
+
 # Builder-only candidate floors backed by Phase 2A replay evidence.
 #
 # These do not change the daily card or normal prediction tiers. They only
@@ -343,6 +347,10 @@ def build_slip(
         pool = _pool(horizon)
     if not pool:
         return {"ok": False, "reason": "No qualifying picks are available right now."}
+    diagnostics = {
+        "candidate_count_initial": len(pool),
+        "market_distribution_initial": _market_distribution(pool),
+    }
 
     if require_bookable:
         pool = [pick for pick in pool if pick.get("bookable")]
@@ -351,6 +359,8 @@ def build_slip(
                 "ok": False,
                 "reason": "No exact SportyBet-bookable selections are available right now.",
             }
+    diagnostics["after_bookability"] = len(pool)
+    diagnostics["market_distribution_after_bookability"] = _market_distribution(pool)
 
     from leagues.leg_trust import evaluate_leg_trust
 
@@ -378,6 +388,8 @@ def build_slip(
             )
 
     pool = trusted_pool
+    diagnostics["after_trust"] = len(pool)
+    diagnostics["market_distribution_after_trust"] = _market_distribution(pool)
     if not pool:
         return {
             "ok": False,
@@ -386,16 +398,25 @@ def build_slip(
             "best_reachable": 1.0,
             "trusted_leg_count": 0,
             "trust_rejection_reasons": dict(trust_rejections),
+            "selection_diagnostics": diagnostics,
             "reason": "No selections meet the Builder's evidence and bookability standard right now.",
         }
 
     from leagues.fixture_ranker import canonical_fixture_recommendations
     candidates = canonical_fixture_recommendations(pool)
+    diagnostics["after_policy_and_canonical_ranking"] = len(candidates)
+    diagnostics["after_min_useful_odds"] = sum(1 for p in candidates if p.get("odds", 0) >= 1.12)
+    diagnostics["after_search_bound"] = len(candidates)
+    diagnostics["market_distribution_after_canonical_ranking"] = _market_distribution(candidates)
+    diagnostics["public_rank_distribution"] = dict(collections.Counter(str(p.get("public_rank")) for p in candidates))
+    diagnostics["trust_distribution"] = dict(collections.Counter(str((p.get("trust") or {}).get("evidence_state")) for p in candidates))
+    diagnostics["quality_constraints"] = {"market_cap": cap, "team_to_score_cap": team_to_score_cap, "under_cap": 2, "max_legs": max_legs}
     if not candidates:
         return {
             "ok": False, "result_status": "NO_SAFE_COMBINATION",
             "target": target, "best_reachable": 1.0, "trusted_leg_count": 0,
             "trust_rejection_reasons": dict(trust_rejections),
+            "selection_diagnostics": diagnostics,
             "reason": "No fixture has a top-ranked market that meets the Builder quality policy.",
         }
 
@@ -556,6 +577,20 @@ def build_slip(
 
         odds, joint, legs = best
 
+    selected_groups = collections.Counter(p.get("market_group") for p in legs)
+    selected_exposures = collections.Counter(exposure_group(p.get("market_group")) for p in legs)
+    selected_under_count = sum(
+        str(p.get("market", "")).startswith("under_") for p in legs
+    )
+    diagnostics["after_exposure"] = len(legs)
+    diagnostics["selected_market_distribution"] = _market_distribution(legs)
+    diagnostics["binding_constraints"] = [
+        *[f"market_group:{group}" for group, count in selected_groups.items()
+          if count >= cap],
+        *(["team_to_score"] if selected_exposures["team_to_score"] >= team_to_score_cap else []),
+        *(["under"] if selected_under_count >= 2 else []),
+        *(["max_legs"] if len(legs) >= max_legs else []),
+    ]
 
     if odds < target:
         # Say which limit bit, because "not available" hides two different
@@ -576,6 +611,7 @@ def build_slip(
             "hit_probability": round(joint, 5),
             "trusted_leg_count": len(candidates),
             "trust_rejection_reasons": dict(trust_rejections),
+            "selection_diagnostics": diagnostics,
             "reason": (
                 f"The best qualifying slip right now reaches "
                 f"{odds:.1f}x — {limit}. Lowering standards to reach "
@@ -647,6 +683,7 @@ def build_slip(
         ),
         "lowest_trust_grade": max(p["trust"]["trust_grade"] for p in legs),
         "trust_rejection_reasons": dict(trust_rejections),
+        "selection_diagnostics": diagnostics,
         "bookable_legs": sum(1 for p in legs if p.get("bookable")),
         "picks": legs,
     }

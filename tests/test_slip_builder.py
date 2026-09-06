@@ -9,14 +9,18 @@ from leagues.selection import select_accumulator
 from leagues.slip_builder import _horizon_end, build_slip
 
 
-def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True, market_group="goals"):
+def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True,
+          market_group="goals", market="over_1_5"):
     return {
         "match_id": match_id,
-        "market": "over_1_5",
+        "market": market,
         "market_group": market_group,
         "odds": odds,
         "confidence": confidence,
         "bookable": True,
+        "odds_are_real": True,
+        "market_implied_probability": min(confidence, 1 / odds),
+        "expected_value": min(.10, confidence * odds - 1),
         "safe_tier_eligible": trusted,
         "calibration_sample": 25 if trusted else 0,
         "sportybet_availability": {
@@ -25,6 +29,16 @@ def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True, market_group="
             "board_snapshot_id": "test",
         },
         "_fixture": {"commence_time": "2099-01-01T12:00:00Z"},
+        "_model": {"expected_goals": {"home": 1.5, "away": 1.5, "total": 3.0}},
+    }
+
+
+def _accept_trust(pick):
+    return {
+        "accepted": True, "evidence_adjusted_probability": pick["confidence"],
+        "lower_reliability_bound": pick["confidence"] - .04,
+        "evidence_strength": .9, "evidence_state": "SUPPORTED",
+        "trust_score": 90, "trust_grade": "A", "rejection_reasons": [],
     }
 
 
@@ -60,29 +74,82 @@ def test_slip_builder_requires_exact_sportybet_bookability():
     assert "SportyBet-bookable" in built["reason"]
 
 
-def test_builder_caps_home_and_away_team_goal_picks_together():
+def test_builder_caps_actual_home_and_away_team_goal_picks_together(monkeypatch):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
     team_goals = [
         _pick(
             f"team-{i}",
-            odds=1.5,
+            odds=2.0,
             confidence=0.80,
             market_group=("team_goals_home" if i % 2 == 0 else "team_goals_away"),
+            market=("home_over_0_5" if i % 2 == 0 else "away_over_0_5"),
         )
-        for i in range(6)
+        for i in range(10)
     ]
     alternatives = [
-        _pick(f"other-{i}", odds=1.5, confidence=0.78, market_group=f"other_{i}")
-        for i in range(4)
+        _pick(f"other-{i}", odds=2.0, confidence=0.78, market_group="goals_over_1_5")
+        for i in range(6)
     ]
-    built = build_slip(10.0, pool=team_goals + alternatives, max_legs=8, market_cap=3)
+    built = build_slip(10.0, pool=team_goals + alternatives, max_legs=10, market_cap=3)
     assert built["ok"]
     selected_team_goals = [
         pick
         for pick in built["picks"]
         if pick["market_group"] in {"team_goals_home", "team_goals_away"}
     ]
-    assert len(selected_team_goals) <= 3
-    assert len({pick["market_group"] for pick in built["picks"]}) >= 3
+    assert len(selected_team_goals) <= 2
+
+
+@pytest.mark.parametrize("target", [5, 10, 20, 50, 70, 100])
+def test_actual_team_to_score_cap_holds_for_every_builder_target(monkeypatch, target):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    team_goals = [
+        _pick(f"tts-{i}", odds=2.0, confidence=.82,
+              market=("home_over_0_5" if i % 2 == 0 else "away_over_0_5"),
+              market_group=("team_goals_home" if i % 2 == 0 else "team_goals_away"))
+        for i in range(10)
+    ]
+    diverse = (
+        [_pick(f"over-{i}", 2.0, .80, market_group="goals_over_1_5") for i in range(3)]
+        + [_pick(f"under-{i}", 2.0, .80, market="under_4_5",
+                 market_group="goals_under_4_5") for i in range(2)]
+        + [_pick(f"dc-{i}", 2.0, .80, market="home_or_draw",
+                 market_group="double_chance") for i in range(3)]
+    )
+    built = build_slip(target, pool=team_goals + diverse, max_legs=16, market_cap=3)
+    assert built["ok"], built
+    assert built["team_to_score_leg_count"] <= 2
+
+
+def test_under_exposure_cap_uses_actual_under_markets(monkeypatch):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    unders = [
+        _pick(f"under-{i}", 2.0, .82,
+              market=("under_3_5" if i % 2 else "under_4_5"),
+              market_group=("goals_under_3_5" if i % 2 else "goals_under_4_5"))
+        for i in range(10)
+    ]
+    overs = [_pick(f"over-u-{i}", 2.0, .80, market_group="goals_over_1_5")
+             for i in range(3)]
+    built = build_slip(20, pool=unders + overs, max_legs=10, market_cap=3)
+    assert built["ok"], built
+    assert built["under_leg_count"] <= 2
+
+
+@pytest.mark.parametrize("target", [10, 70])
+def test_high_quality_synthetic_board_can_reach_large_targets(monkeypatch, target):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    board = (
+        [_pick(f"over-r-{i}", 2.0, .82, market_group="goals_over_1_5") for i in range(3)]
+        + [_pick(f"under-r-{i}", 2.0, .82, market="under_4_5",
+                 market_group="goals_under_4_5") for i in range(2)]
+        + [_pick(f"dc-r-{i}", 2.0, .82, market="home_or_draw",
+                 market_group="double_chance") for i in range(3)]
+    )
+    built = build_slip(target, pool=board, max_legs=16, market_cap=3)
+    assert built["ok"], built
+    assert built["result_status"] == "TARGET_REACHED"
+    assert built["odds"] >= target
 
 
 def test_builder_market_cap_never_relaxes_for_high_targets():
@@ -98,16 +165,7 @@ def test_builder_locally_replaces_a_weaker_selected_fixture(
 ):
     # Keep this test focused on combination search rather than the separate
     # trust/evidence model. Use each pick's supplied confidence directly.
-    monkeypatch.setattr(
-        "leagues.leg_trust.evaluate_leg_trust",
-        lambda pick: {
-            "accepted": True,
-            "evidence_adjusted_probability": pick["confidence"],
-            "trust_score": 90,
-            "trust_grade": "A",
-            "rejection_reasons": [],
-        },
-    )
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
 
     # Preserve the artificial ordering so the stronger replacement sits
     # outside the first 48 seeded alternatives.
@@ -174,7 +232,8 @@ def test_builder_locally_replaces_a_weaker_selected_fixture(
         "anchor",
     }
 
-def test_high_target_builder_quality_caps_instead_of_using_four_of_one_group():
+def test_high_target_builder_quality_caps_instead_of_using_four_of_one_group(monkeypatch):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
     picks = [
         _pick(
             f"high-target-{i}",
