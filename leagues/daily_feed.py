@@ -188,6 +188,12 @@ def build_daily_accumulators(force: bool = False) -> dict:
     if not day_picks:
         return None
 
+    # Rank football opinions before any product asks them to buy a multiplier.
+    from leagues.fixture_ranker import canonical_fixture_recommendations
+    day_picks = canonical_fixture_recommendations(day_picks)
+    if not day_picks:
+        return None
+
     # Floors are on expected value — payout times the chance it lands.
     #
     # Each leg gives up roughly 6% to the bookmaker's margin, so a slip's value

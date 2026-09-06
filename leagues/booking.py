@@ -636,7 +636,7 @@ def _select_bookable_variant(candidates: list, rule: dict) -> tuple[list, float,
                                       or g.get("safe_tier_eligible"))]
     selector = rule.get("selector")
     if selector == "banker":
-        return select_banker(pool)
+        return select_banker(pool, canonicalize=False)
     if selector == "rollover":
         return select_rollover_day(pool)
     if selector == "over_1_5":
@@ -656,7 +656,7 @@ def _select_bookable_variant(candidates: list, rule: dict) -> tuple[list, float,
         min_confidence=rule.get("min_confidence", 0.65),
         min_ev=rule.get("min_ev", 0.0),
         prefer=rule.get("prefer", "joint"),
-        band_low=rule.get("band_low", 0.80))
+        band_low=rule.get("band_low", 0.80), canonicalize=False)
 
 
 def _replacement_details(original: list, final: list, unavailable: list) -> list:

@@ -100,24 +100,15 @@ BUILDER_MARKET_FLOORS = {
 
 
 def _market_cap_for_target(target: float) -> int:
-    """Allow one extra leg per market group only for high Builder targets."""
+    """Use the public market cap at every target; quality never relaxes."""
     from leagues.selection import MARKET_CAP
-
-    if target >= 70:
-        return 4
 
     return MARKET_CAP
 
 
 def _team_to_score_cap_for_target(target: float) -> int:
-    """Allow extra team-to-score diversity only for higher Builder targets."""
+    """Use the public Team-to-Score cap at every target."""
     from leagues.selection import TEAM_TO_SCORE_CAP
-
-    if target >= 70:
-        return 5
-
-    if target >= 50:
-        return 4
 
     return TEAM_TO_SCORE_CAP
 
@@ -390,6 +381,7 @@ def build_slip(
     if not pool:
         return {
             "ok": False,
+            "result_status": "NO_SAFE_COMBINATION",
             "target": target,
             "best_reachable": 1.0,
             "trusted_leg_count": 0,
@@ -397,7 +389,15 @@ def build_slip(
             "reason": "No selections meet the Builder's evidence and bookability standard right now.",
         }
 
-    candidates = _best_per_fixture_group(pool)
+    from leagues.fixture_ranker import canonical_fixture_recommendations
+    candidates = canonical_fixture_recommendations(pool)
+    if not candidates:
+        return {
+            "ok": False, "result_status": "NO_SAFE_COMBINATION",
+            "target": target, "best_reachable": 1.0, "trusted_leg_count": 0,
+            "trust_rejection_reasons": dict(trust_rejections),
+            "reason": "No fixture has a top-ranked market that meets the Builder quality policy.",
+        }
 
     def _candidate(
         seed: dict | None = None,
@@ -412,6 +412,7 @@ def build_slip(
         seen_fixtures: set = set()
         groups: collections.Counter = collections.Counter()
         exposures: collections.Counter = collections.Counter()
+        under_count = 0
         odds, joint, legs = 1.0, 1.0, []
 
         ordered = (
@@ -439,6 +440,9 @@ def build_slip(
             ):
                 continue
 
+            if str(p.get("market", "")).startswith("under_") and under_count >= 2:
+                continue
+
             settlement = _leg_settlement_probabilities(p)
 
             if settlement is None:
@@ -449,6 +453,8 @@ def build_slip(
             seen_fixtures.add(p["match_id"])
             groups[group] += 1
             exposures[exposure] += 1
+            if str(p.get("market", "")).startswith("under_"):
+                under_count += 1
 
             odds *= p["odds"]
             joint *= win_probability
@@ -561,9 +567,13 @@ def build_slip(
         )
         return {
             "ok": False,
+            "result_status": "QUALITY_CAPPED",
             "target": target,
             "best_reachable": round(odds, 2),
+            "achieved_odds": round(odds, 2),
             "legs": len(legs),
+            "picks": legs,
+            "hit_probability": round(joint, 5),
             "trusted_leg_count": len(candidates),
             "trust_rejection_reasons": dict(trust_rejections),
             "reason": (
@@ -600,6 +610,7 @@ def build_slip(
 
     return {
         "ok": True,
+        "result_status": "TARGET_REACHED",
         "target": target,
         "odds": round(odds, 2),
         "legs": len(legs),
@@ -619,6 +630,11 @@ def build_slip(
             5,
         ),
         "dnb_leg_count": sum(1 for p in legs if p.get("market") in DNB_MARKETS),
+        "team_to_score_leg_count": sum(1 for p in legs if p.get("market") in {"home_over_0_5", "away_over_0_5"}),
+        "under_leg_count": sum(1 for p in legs if str(p.get("market", "")).startswith("under_")),
+        "fixture_rank_1_count": sum(1 for p in legs if p.get("fixture_rank") == 1),
+        "fixture_rank_2_count": sum(1 for p in legs if p.get("fixture_rank") == 2),
+        "fixture_rank_3_plus_count": sum(1 for p in legs if int(p.get("fixture_rank") or 99) >= 3),
         "avg_confidence": round(sum(p["confidence"] for p in legs) / len(legs), 4),
         "avg_evidence_probability": round(
             sum(p.get("evidence_adjusted_probability", p["confidence"]) for p in legs)

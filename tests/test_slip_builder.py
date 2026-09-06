@@ -85,13 +85,13 @@ def test_builder_caps_home_and_away_team_goal_picks_together():
     assert len({pick["market_group"] for pick in built["picks"]}) >= 3
 
 
-def test_builder_market_cap_increases_only_for_high_targets():
+def test_builder_market_cap_never_relaxes_for_high_targets():
     assert slip_builder._market_cap_for_target(10) == 3
     assert slip_builder._market_cap_for_target(20) == 3
     assert slip_builder._market_cap_for_target(30) == 3
     assert slip_builder._market_cap_for_target(50) == 3
-    assert slip_builder._market_cap_for_target(70) == 4
-    assert slip_builder._market_cap_for_target(100) == 4
+    assert slip_builder._market_cap_for_target(70) == 3
+    assert slip_builder._market_cap_for_target(100) == 3
 
 def test_builder_locally_replaces_a_weaker_selected_fixture(
     monkeypatch,
@@ -174,7 +174,7 @@ def test_builder_locally_replaces_a_weaker_selected_fixture(
         "anchor",
     }
 
-def test_high_target_builder_can_use_four_legs_from_one_market_group():
+def test_high_target_builder_quality_caps_instead_of_using_four_of_one_group():
     picks = [
         _pick(
             f"high-target-{i}",
@@ -191,9 +191,8 @@ def test_high_target_builder_can_use_four_legs_from_one_market_group():
         max_legs=4,
     )
 
-    assert built["ok"]
-    assert built["legs"] == 4
-    assert built["odds"] >= 70.0
+    assert not built["ok"]
+    assert built["result_status"] == "QUALITY_CAPPED"
 
 
 def test_tier_selector_cannot_bypass_team_goal_cap_by_switching_sides():
@@ -369,12 +368,6 @@ def test_dnb_push_reduces_payout_without_losing_accumulator():
     assert sum(distribution.values()) == pytest.approx(0.595)
 
 
-def test_builder_team_goal_cap_scales_only_for_high_targets():
-    assert slip_builder._team_to_score_cap_for_target(10) == 3
-    assert slip_builder._team_to_score_cap_for_target(20) == 3
-    assert slip_builder._team_to_score_cap_for_target(30) == 3
-
-    assert slip_builder._team_to_score_cap_for_target(50) == 4
-
-    assert slip_builder._team_to_score_cap_for_target(70) == 5
-    assert slip_builder._team_to_score_cap_for_target(100) == 5
+def test_builder_team_goal_cap_never_scales_with_target():
+    for target in (10, 20, 30, 50, 70, 100):
+        assert slip_builder._team_to_score_cap_for_target(target) == 2

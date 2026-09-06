@@ -59,7 +59,8 @@ MARKET_CAP = 3
 # to a bettor they are the same exposure: "this team scores". Counting the
 # two groups separately allowed as many as six of those legs on one ticket.
 TEAM_TO_SCORE_GROUPS = {"team_goals_home", "team_goals_away"}
-TEAM_TO_SCORE_CAP = 3
+TEAM_TO_SCORE_CAP = 2
+UNDER_CAP = 2
 
 
 def exposure_group(market_group: str) -> str:
@@ -187,6 +188,7 @@ def select_accumulator(
     prefer: str = "ev",
     band_low: float = 0.80,
     band_high: float = 1.45,
+    canonicalize: bool = True,
 ) -> tuple[list[dict], float, float]:
     """Pick the best slip that reaches `target_odds`.
 
@@ -206,6 +208,9 @@ def select_accumulator(
     Returns (picks, combined_odds, joint_probability). Empty when the day
     cannot support the target honestly.
     """
+    from leagues.fixture_ranker import canonical_fixture_recommendations
+    if canonicalize:
+        picks = canonical_fixture_recommendations(picks, safe_only=target_odds <= 2.0)
     pool = [
         p for p in picks
         if p["confidence"] >= min_confidence and p["odds"] >= MIN_USEFUL_ODDS
@@ -261,6 +266,7 @@ def select_accumulator(
         for combo in itertools.combinations(candidates, size):
             groups: dict[str, int] = {}
             exposures: dict[str, int] = {}
+            under_count = 0
             fixtures_used: set[str] = set()
             ok = True
             for p in combo:
@@ -281,6 +287,11 @@ def select_accumulator(
                         and exposures[exposure] > TEAM_TO_SCORE_CAP):
                     ok = False
                     break
+                if str(p.get("market", "")).startswith("under_"):
+                    under_count += 1
+                    if under_count > UNDER_CAP:
+                        ok = False
+                        break
             if not ok:
                 continue
 
@@ -354,8 +365,9 @@ def select_accumulator(
 
 
 def select_banker(picks: list[dict], max_picks: int = 1,
-                  min_confidence: float = 0.72,
-                  min_price: float = MIN_USEFUL_ODDS) -> tuple[list[dict], float, float]:
+                   min_confidence: float = 0.72,
+                   min_price: float = MIN_USEFUL_ODDS,
+                   canonicalize: bool = True) -> tuple[list[dict], float, float]:
     """The single most reliable pick of the day.
 
     One pick, not two. Two legs multiply: on 14 August the best pair came out
@@ -387,6 +399,9 @@ def select_banker(picks: list[dict], max_picks: int = 1,
     be worth staking at all. Real quotes break ties, since only a real price
     can be genuinely mispriced in our favour.
     """
+    from leagues.fixture_ranker import canonical_fixture_recommendations
+    if canonicalize:
+        picks = canonical_fixture_recommendations(picks, safe_only=True)
     pool = [
         p for p in picks
         if p["confidence"] >= min_confidence and p["odds"] >= min_price
