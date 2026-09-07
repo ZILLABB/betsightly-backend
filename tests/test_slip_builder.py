@@ -251,7 +251,35 @@ def test_high_target_builder_quality_caps_instead_of_using_four_of_one_group(mon
     )
 
     assert not built["ok"]
-    assert built["result_status"] == "QUALITY_CAPPED"
+    assert built["result_status"] == "EXPOSURE_CAPPED"
+    assert built["optimization_status"] == "OPTIMAL"
+
+
+def test_builder_can_use_deeper_public_alternative_without_repeating_fixture(monkeypatch):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    fixture_alternatives = [
+        _pick("shared", 1.10, .90, market="over_1_5", market_group="goals"),
+        _pick("shared", 1.12, .88, market="under_4_5", market_group="under"),
+        _pick("shared", 2.00, .70, market="home_or_draw", market_group="double_chance"),
+    ]
+    anchor = _pick("anchor-deep", 2.00, .82, market_group="other")
+    built = build_slip(4, pool=fixture_alternatives + [anchor], max_legs=2,
+                       market_cap=3)
+    assert built["ok"], built
+    assert built["optimization_status"] == "OPTIMAL"
+    assert len({pick["match_id"] for pick in built["picks"]}) == len(built["picks"])
+    assert any(p["match_id"] == "shared" and p["public_rank"] >= 3
+               for p in built["picks"])
+
+
+def test_builder_restricted_alternative_never_enters_optimizer(monkeypatch):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    restricted = _pick("restricted", 3.0, .90, market="under_2_5",
+                       market_group="under")
+    safe = _pick("safe", 2.0, .82)
+    built = build_slip(3, pool=[restricted, safe], max_legs=2, market_cap=3)
+    assert all(p["market"] != "under_2_5" for p in built.get("picks", []))
+    assert built["after_policy"] == 1
 
 
 def test_tier_selector_cannot_bypass_team_goal_cap_by_switching_sides():

@@ -119,7 +119,10 @@ def _public_eligible(pick: dict, *, safe_only: bool) -> tuple[bool, str | None]:
     return True, None
 
 
-def canonical_fixture_recommendations(picks: list[dict], *, safe_only: bool = False) -> list[dict]:
+def canonical_fixture_recommendations(
+    picks: list[dict], *, safe_only: bool = False,
+    include_all_eligible: bool = False,
+) -> list[dict]:
     """Model-rank everything, then recompute public rank among eligible markets."""
     if os.getenv("FIXTURE_RANKED_SELECTOR", "1").lower() in {"0", "false", "off"}:
         return picks
@@ -187,8 +190,22 @@ def canonical_fixture_recommendations(picks: list[dict], *, safe_only: bool = Fa
                         best_market=best_public.get("market"), public_quality_gap=public_gap,
                         quality_gap_from_best=public_gap, fixture_alternatives=alternatives,
                         rejected_fixture_alternatives=rejected[:4])
-            if public_rank > 2 or (public_rank == 2 and public_gap > allowed_gap):
+            if (not include_all_eligible and
+                    (public_rank > 2 or
+                     (public_rank == 2 and public_gap > allowed_gap))):
                 continue
             pick["selection_reason_codes"] += [f"PUBLIC_RANK_{public_rank}"]
             selected.append(pick)
     return selected
+
+
+def builder_fixture_candidates(picks: list[dict]) -> list[dict]:
+    """All independently approved alternatives for Builder optimization.
+
+    Daily products intentionally remain rank-1/close-rank-2. Builder may
+    inspect deeper public ranks, but restricted/disabled markets still never
+    cross the policy boundary and the final optimizer keeps one leg/fixture.
+    """
+    return canonical_fixture_recommendations(
+        picks, include_all_eligible=True,
+    )

@@ -29,6 +29,7 @@ opening the card an hour apart get the same slip.
 import json
 import itertools
 import logging
+import threading
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -38,6 +39,8 @@ from leagues.sportybet import MARKET_TO_SPORTYBET
 logger = logging.getLogger(__name__)
 
 BASE_URL = None  # resolved from the adapter so there is one host to change
+_GENERATED_BOOKING_LOCKS: dict[str, threading.Lock] = {}
+_GENERATED_BOOKING_LOCKS_GUARD = threading.Lock()
 
 
 def _base() -> str:
@@ -528,6 +531,21 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
 def create_or_reuse_generated_booking(games: list, board: dict,
                                       predicted_odds: float | None = None,
                                       force: bool = False) -> dict:
+    """Serialize identical selection sets so concurrent requests reuse one code."""
+    selections, _ = selections_for(games, board)
+    fingerprint = (selection_fingerprint(selections) if selections
+                   else leg_fingerprint(games))
+    with _GENERATED_BOOKING_LOCKS_GUARD:
+        lock = _GENERATED_BOOKING_LOCKS.setdefault(fingerprint, threading.Lock())
+    with lock:
+        return _create_or_reuse_generated_booking(
+            games, board, predicted_odds=predicted_odds, force=force,
+        )
+
+
+def _create_or_reuse_generated_booking(games: list, board: dict,
+                                       predicted_odds: float | None = None,
+                                       force: bool = False) -> dict:
     """Return one validated code per exact generated leg set.
 
     The in-memory API cache is only an optimisation. This persisted fingerprint
@@ -541,7 +559,10 @@ def create_or_reuse_generated_booking(games: list, board: dict,
     selection_ms = round((time.perf_counter() - stage_started) * 1000)
     fingerprint = (selection_fingerprint(selections) if selections
                    else leg_fingerprint(games))
-    if not force and selections and not unmapped:
+    # A refresh may change the board or selected legs, but it must not mint a
+    # second code when the exact deterministic selection fingerprint is still
+    # active. Failed/unavailable records are not reused and can recover.
+    if selections and not unmapped:
         stage_started = time.perf_counter()
         prior = generated_booking_for(fingerprint)
         persistence_ms = round((time.perf_counter() - stage_started) * 1000)

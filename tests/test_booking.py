@@ -673,11 +673,10 @@ def test_generated_booking_reuses_same_valid_fingerprint(monkeypatch):
     assert record["actual_sportybet_odds"] == 1.42
 
 
-def test_generated_booking_force_creates_and_persists_new_code(monkeypatch):
+def test_generated_booking_force_creates_when_no_valid_code_exists(monkeypatch):
     games = [_game("Fulham", "Chelsea", "over_1_5")]
     stored = {}
-    monkeypatch.setattr(B, "generated_booking_for",
-                        lambda _: pytest.fail("force must bypass reuse"))
+    monkeypatch.setattr(B, "generated_booking_for", lambda _: None)
     monkeypatch.setattr(B, "create_booking", lambda *args, **kwargs: {
         "status": "active", "share_code": "NEW123",
     })
@@ -692,3 +691,33 @@ def test_generated_booking_force_creates_and_persists_new_code(monkeypatch):
     assert record["share_code"] == "NEW123"
     assert record["code_reused"] is False
     assert stored["record"]["share_code"] == "NEW123"
+
+
+def test_concurrent_generated_booking_requests_mint_one_code(monkeypatch):
+    import threading
+    import time
+
+    games = [_game("Fulham", "Chelsea", "over_1_5")]
+    stored = {}
+    calls = []
+    monkeypatch.setattr(B, "generated_booking_for", lambda _: stored.get("record"))
+    monkeypatch.setattr(B, "validate_code_details",
+                        lambda code, selections: (True, "ok", 1.42))
+
+    def create(*args, **kwargs):
+        calls.append(1)
+        time.sleep(.03)
+        return {"status": "active", "share_code": "ONE123"}
+
+    monkeypatch.setattr(B, "create_booking", create)
+    monkeypatch.setattr(B, "_store_generated_booking",
+                        lambda fingerprint, record: stored.update(record=record))
+    results = []
+    workers = [threading.Thread(target=lambda: results.append(
+        B.create_or_reuse_generated_booking(games, _board()))) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert len(calls) == 1
+    assert [result["share_code"] for result in results] == ["ONE123", "ONE123"]

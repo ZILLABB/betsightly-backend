@@ -329,6 +329,95 @@ def _best_per_fixture_group(pool: list) -> list:
     return sorted(best.values(), key=_order_key)
 
 
+def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
+                       market_cap: int, team_to_score_cap: int,
+                       under_cap: int = 2) -> tuple[float, float, list[dict], str]:
+    """Solve the Builder's binary selection problem with HiGHS MILP.
+
+    The first solve maximizes evidence-adjusted joint probability subject to
+    reaching the target. If that is infeasible, the second solve verifies the
+    maximum reachable multiplier under exactly the same safety constraints.
+    """
+    import numpy as np
+    from scipy.optimize import Bounds, LinearConstraint, milp
+    from scipy.sparse import csr_matrix
+    from leagues.selection import exposure_group
+
+    valid = []
+    probabilities = []
+    for pick in candidates:
+        settlement = _leg_settlement_probabilities(pick)
+        if settlement is None or float(pick.get("odds") or 0) <= 1.0:
+            continue
+        probability = settlement[0]
+        if probability <= 0:
+            continue
+        valid.append(pick)
+        probabilities.append(probability)
+    if not valid:
+        return 1.0, 1.0, [], "OPTIMAL"
+
+    size = len(valid)
+    rows: list[list[float]] = []
+    upper: list[float] = []
+
+    def limited(indices, limit):
+        row = [0.0] * size
+        for index in indices:
+            row[index] = 1.0
+        rows.append(row)
+        upper.append(float(limit))
+
+    limited(range(size), max_legs)
+    fixtures: dict[str, list[int]] = collections.defaultdict(list)
+    groups: dict[str, list[int]] = collections.defaultdict(list)
+    for index, pick in enumerate(valid):
+        fixtures[str(pick.get("match_id"))].append(index)
+        groups[str(pick.get("market_group") or "other")].append(index)
+    for indices in fixtures.values():
+        limited(indices, 1)
+    for indices in groups.values():
+        limited(indices, market_cap)
+    limited((i for i, p in enumerate(valid)
+             if exposure_group(p.get("market_group")) == "team_to_score"),
+            team_to_score_cap)
+    limited((i for i, p in enumerate(valid)
+             if str(p.get("market", "")).startswith("under_")), under_cap)
+
+    log_odds = np.array([math.log(float(p["odds"])) for p in valid])
+    risk = np.array([-math.log(max(1e-9, min(.999999, p)))
+                     for p in probabilities])
+    matrix = csr_matrix(np.asarray(rows, dtype=float))
+    base_constraint = LinearConstraint(matrix, -np.inf, np.asarray(upper))
+    target_constraint = LinearConstraint(
+        csr_matrix(-log_odds.reshape(1, -1)), -np.inf,
+        np.array([-math.log(target)]),
+    )
+    options = {"time_limit": 8.0, "mip_rel_gap": 1e-7}
+
+    reached = milp(
+        risk, integrality=np.ones(size), bounds=Bounds(0, 1),
+        constraints=(base_constraint, target_constraint), options=options,
+    )
+    result = reached
+    if reached.x is None:
+        # Verify the maximum possible odds instead of describing a greedy
+        # incumbent as "best reachable".
+        result = milp(
+            -log_odds, integrality=np.ones(size), bounds=Bounds(0, 1),
+            constraints=base_constraint, options=options,
+        )
+    if result.x is None:
+        return 1.0, 1.0, [], "HEURISTIC"
+
+    selected = [valid[i] for i, value in enumerate(result.x) if value >= .5]
+    odds = math.prod(float(p["odds"]) for p in selected)
+    joint = math.prod(probabilities[i] for i, value in enumerate(result.x)
+                      if value >= .5)
+    status = "OPTIMAL" if result.status == 0 else "BOUNDED_OPTIMAL"
+    return odds, joint, selected, status
+
+
 def build_slip(
     target: float,
     pool: list | None = None,
@@ -346,7 +435,14 @@ def build_slip(
     if pool is None:
         pool = _pool(horizon)
     if not pool:
-        return {"ok": False, "reason": "No qualifying picks are available right now."}
+        return {"ok": False, "result_status": "NO_SAFE_COMBINATION",
+                "target": target, "best_reachable": 1.0,
+                "optimization_status": "OPTIMAL", "candidate_count_initial": 0,
+                "after_bookability": 0, "after_trust": 0, "after_policy": 0,
+                "optimizer_candidate_count": 0, "fixture_count": 0,
+                "market_distribution": {}, "binding_constraints": [],
+                "max_legs": max_legs,
+                "reason": "No qualifying picks are available right now."}
     diagnostics = {
         "candidate_count_initial": len(pool),
         "market_distribution_initial": _market_distribution(pool),
@@ -357,6 +453,15 @@ def build_slip(
         if not pool:
             return {
                 "ok": False,
+                "result_status": "INSUFFICIENT_BOOKABLE_FIXTURES",
+                "target": target,
+                "best_reachable": 1.0,
+                "optimization_status": "OPTIMAL",
+                "candidate_count_initial": diagnostics["candidate_count_initial"],
+                "after_bookability": 0, "after_trust": 0, "after_policy": 0,
+                "optimizer_candidate_count": 0, "fixture_count": 0,
+                "market_distribution": {}, "binding_constraints": [],
+                "max_legs": max_legs,
                 "reason": "No exact SportyBet-bookable selections are available right now.",
             }
     diagnostics["after_bookability"] = len(pool)
@@ -402,11 +507,13 @@ def build_slip(
             "reason": "No selections meet the Builder's evidence and bookability standard right now.",
         }
 
-    from leagues.fixture_ranker import canonical_fixture_recommendations
-    candidates = canonical_fixture_recommendations(pool)
+    from leagues.fixture_ranker import builder_fixture_candidates
+    candidates = builder_fixture_candidates(pool)
     diagnostics["after_policy_and_canonical_ranking"] = len(candidates)
     diagnostics["after_min_useful_odds"] = sum(1 for p in candidates if p.get("odds", 0) >= 1.12)
-    diagnostics["after_search_bound"] = len(candidates)
+    diagnostics["after_policy"] = len(candidates)
+    diagnostics["optimizer_candidate_count"] = len(candidates)
+    diagnostics["fixture_count"] = len({p.get("match_id") for p in candidates})
     diagnostics["market_distribution_after_canonical_ranking"] = _market_distribution(candidates)
     diagnostics["public_rank_distribution"] = dict(collections.Counter(str(p.get("public_rank")) for p in candidates))
     diagnostics["trust_distribution"] = dict(collections.Counter(str((p.get("trust") or {}).get("evidence_state")) for p in candidates))
@@ -532,8 +639,17 @@ def build_slip(
             key=lambda attempt: attempt[0],
         )
 
-    # First run the existing bounded multi-start search.
-    odds, joint, legs = _search(candidates)
+    # Solve the complete approved pool. The old bounded greedy search remains
+    # only as a resilience fallback if the numerical optimizer is unavailable.
+    try:
+        odds, joint, legs, optimization_status = _verified_optimize(
+            candidates, target, max_legs, cap, team_to_score_cap,
+        )
+    except Exception as exc:
+        logger.warning("verified Builder optimization unavailable: %s", exc)
+        odds, joint, legs = _search(candidates)
+        optimization_status = "HEURISTIC"
+    diagnostics["optimization_status"] = optimization_status
 
     # A greedy path can occasionally reserve a scarce market-group slot
     # for a slightly weaker leg. Test the selected fixtures one at a time:
@@ -542,7 +658,7 @@ def build_slip(
     #
     # Two passes keep this bounded while allowing one improvement to expose
     # a second nearby improvement.
-    if odds >= target:
+    if optimization_status == "HEURISTIC" and odds >= target:
         best = (odds, joint, legs)
 
         for _ in range(2):
@@ -595,14 +711,19 @@ def build_slip(
     if odds < target:
         # Say which limit bit, because "not available" hides two different
         # answers: the board was thin, or the rules would not allow it.
-        limit = (
-            "the board does not currently hold enough qualifying picks"
-            if len(legs) < max_legs
-            else f"reaching it would take more than {max_legs} legs"
-        )
+        binding = diagnostics["binding_constraints"]
+        if "max_legs" in binding:
+            result_status = "MAX_LEGS_CAPPED"
+        elif binding:
+            result_status = "EXPOSURE_CAPPED"
+        else:
+            result_status = "QUALITY_CAPPED"
+        verified = optimization_status in {"OPTIMAL", "BOUNDED_OPTIMAL"}
+        description = ("The strongest verified combination" if verified
+                       else "The current search found a qualifying combination")
         return {
             "ok": False,
-            "result_status": "QUALITY_CAPPED",
+            "result_status": result_status,
             "target": target,
             "best_reachable": round(odds, 2),
             "achieved_odds": round(odds, 2),
@@ -610,11 +731,20 @@ def build_slip(
             "picks": legs,
             "hit_probability": round(joint, 5),
             "trusted_leg_count": len(candidates),
+            "optimization_status": optimization_status,
+            "candidate_count_initial": diagnostics["candidate_count_initial"],
+            "after_bookability": diagnostics.get("after_bookability", 0),
+            "after_trust": diagnostics.get("after_trust", 0),
+            "after_policy": diagnostics.get("after_policy", 0),
+            "optimizer_candidate_count": len(candidates),
+            "fixture_count": diagnostics.get("fixture_count", 0),
+            "market_distribution": diagnostics.get("market_distribution_after_canonical_ranking", {}),
+            "binding_constraints": binding,
+            "max_legs": max_legs,
             "trust_rejection_reasons": dict(trust_rejections),
             "selection_diagnostics": diagnostics,
             "reason": (
-                f"The best qualifying slip right now reaches "
-                f"{odds:.1f}x — {limit}. Lowering standards to reach "
+                f"{description} reaches {odds:.2f}x. Lowering standards to reach "
                 f"{target:g}x would not make it a better bet."
             ),
         }
@@ -647,6 +777,7 @@ def build_slip(
     return {
         "ok": True,
         "result_status": "TARGET_REACHED",
+        "optimization_status": optimization_status,
         "target": target,
         "odds": round(odds, 2),
         "legs": len(legs),
@@ -683,6 +814,15 @@ def build_slip(
         ),
         "lowest_trust_grade": max(p["trust"]["trust_grade"] for p in legs),
         "trust_rejection_reasons": dict(trust_rejections),
+        "candidate_count_initial": diagnostics["candidate_count_initial"],
+        "after_bookability": diagnostics.get("after_bookability", 0),
+        "after_trust": diagnostics.get("after_trust", 0),
+        "after_policy": diagnostics.get("after_policy", 0),
+        "optimizer_candidate_count": len(candidates),
+        "fixture_count": diagnostics.get("fixture_count", 0),
+        "market_distribution": diagnostics.get("market_distribution_after_canonical_ranking", {}),
+        "binding_constraints": diagnostics["binding_constraints"],
+        "max_legs": max_legs,
         "selection_diagnostics": diagnostics,
         "bookable_legs": sum(1 for p in legs if p.get("bookable")),
         "picks": legs,
@@ -806,6 +946,8 @@ def generate(
     kickoffs = sorted(g.get("kickoff") or "" for g in games if g.get("kickoff"))
     out = {
         "status": "success",
+        "result_status": built.get("result_status", "TARGET_REACHED"),
+        "optimization_status": built.get("optimization_status", "HEURISTIC"),
         "target": target,
         "horizon": horizon,
         # When the slip actually resolves, so a "today" pick is visibly today
@@ -841,6 +983,12 @@ def generate(
         "average_trust_score": built.get("average_trust_score"),
         "lowest_trust_grade": built.get("lowest_trust_grade"),
         "trust_rejection_reasons": built.get("trust_rejection_reasons", {}),
+        "selection_diagnostics": built.get("selection_diagnostics", {}),
+        **{key: built.get(key) for key in (
+            "candidate_count_initial", "after_bookability", "after_trust",
+            "after_policy", "optimizer_candidate_count", "fixture_count",
+            "market_distribution", "binding_constraints", "max_legs",
+        )},
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "games": games,
     }
