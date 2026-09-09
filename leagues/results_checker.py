@@ -814,7 +814,7 @@ def check_all_pending() -> Dict[str, int]:
                                 f"{home} vs {away}; voiding this leg only")
                             pick_results.append("void")
                         else:
-                            logger.info(f"Day {row.day_number}: no score yet for {home} vs {away} (composite={composite})")
+                            logger.info(f"Day {row.day_number}: no score yet for {home} vs {away} (date={match_date})")
                             pick_results.append("pending")
                         continue
                     r = _evaluate_pick(pick, match_data["home_score"], match_data["away_score"])
