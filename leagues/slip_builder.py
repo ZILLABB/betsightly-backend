@@ -904,6 +904,7 @@ def generate(
 ) -> dict:
     """Build a slip for `target` and book it. The endpoint's whole job."""
     from leagues.picks import to_game
+    from utils.runtime_metrics import log_runtime_memory
 
     try:
         target = float(target)
@@ -945,6 +946,10 @@ def generate(
             ),
         }
     timings["candidate_retrieval"] = elapsed_ms(stage_started)
+    log_runtime_memory(
+        "builder_after_candidate_pipeline", target=target, horizon=horizon,
+        candidate_count=len(qualified_pool),
+    )
     try:
         from leagues import sportybet
 
@@ -999,6 +1004,11 @@ def generate(
         target, pool=bookable_pool, horizon=horizon, require_bookable=True
     )
     timings["combination_search"] = elapsed_ms(stage_started)
+    log_runtime_memory(
+        "builder_after_optimization", target=target, horizon=horizon,
+        result_status=built.get("result_status"),
+        selected_legs=built.get("legs", 0),
+    )
     # Target-odds scoring is the final, sub-millisecond portion of the bounded
     # combination search. Keep it explicit in operational output so a future
     # search change cannot hide an optimization regression.
@@ -1081,6 +1091,11 @@ def generate(
             "reason": f"Booking unavailable: {str(e)[:120]}",
         }
     timings["booking_total"] = elapsed_ms(stage_started)
+    log_runtime_memory(
+        "builder_after_booking", target=target, horizon=horizon,
+        booking_status=(out.get("booking") or {}).get("booking_status")
+        or (out.get("booking") or {}).get("status"),
+    )
     booking_timings = (out.get("booking") or {}).get("timing_ms") or {}
     timings["booking_code_generation"] = booking_timings.get("code_generation", 0)
     timings["validation_readback"] = booking_timings.get("validation_readback", 0)

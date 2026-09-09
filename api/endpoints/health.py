@@ -300,6 +300,14 @@ def ml_status():
         "errors": [],
     }
 
+    legacy_enabled = os.getenv(
+        "ENABLE_LEGACY_ML_API", "false"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if not legacy_enabled:
+        info["status"] = "disabled"
+        info["message"] = "Legacy ML compatibility API is disabled"
+        return info
+
     try:
         import numpy as _np
         info["numpy_version"] = _np.__version__
@@ -355,6 +363,14 @@ def ml_test(home: str = "Real Madrid", away: str = "Barcelona"):
         "raw_predictions": {},
         "errors": [],
     }
+
+    legacy_enabled = os.getenv(
+        "ENABLE_LEGACY_ML_API", "false"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if not legacy_enabled:
+        result["status"] = "disabled"
+        result["errors"].append("Legacy ML compatibility API is disabled")
+        return result
 
     try:
         from pathlib import Path

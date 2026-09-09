@@ -2,6 +2,7 @@
 API router.
 """
 
+import importlib
 import os
 
 from fastapi import APIRouter
@@ -12,12 +13,27 @@ from api.endpoints import (
     daily_predictions, accumulators, subscriptions,
 )
 
-# Importing the ML routes loads every model and the full historical dataset.
-# That is appropriate for the production API, but makes unrelated unit tests
-# pay tens of seconds and hundreds of MB merely to import the health route.
-_lightweight_startup = os.getenv("ENVIRONMENT", "").strip().lower() == "test"
-if not _lightweight_startup:
-    from api.endpoints import ml_predictions
+def _env_enabled(name: str, default: bool = False) -> bool:
+    fallback = "true" if default else "false"
+    return os.getenv(name, fallback).strip().lower() in {"1", "true", "yes", "on"}
+
+
+# This compatibility router imports pandas/joblib, loads every legacy model,
+# reads the full historical CSV, and builds ELO/Dixon-Coles indexes.  The
+# authoritative public product lives under /api/leagues, so production only
+# pays that cost when an operator explicitly opts back into the retired API.
+LEGACY_ML_API_ENABLED = _env_enabled("ENABLE_LEGACY_ML_API", default=False)
+
+
+def _mount_legacy_ml_router(router: APIRouter, enabled: bool) -> bool:
+    """Mount the retired ML API without importing it when disabled."""
+    if not enabled:
+        return False
+    ml_predictions = importlib.import_module("api.endpoints.ml_predictions")
+    router.include_router(
+        ml_predictions.router, prefix="/ml-predictions", tags=["ml-predictions"]
+    )
+    return True
 
 # Basketball re-enable when NBA data fetcher is production-ready:
 # from api.endpoints import basketball_predictions
@@ -33,8 +49,9 @@ api_router.include_router(health.router, prefix="/health", tags=["health"])
 # Depends(require_api_key); GET endpoints remain usable by the public SPA.
 api_router.include_router(betting_codes.router, prefix="/betting-codes", tags=["betting-codes"])
 api_router.include_router(predictions.router, prefix="/predictions", tags=["predictions"])
-if not _lightweight_startup:
-    api_router.include_router(ml_predictions.router, prefix="/ml-predictions", tags=["ml-predictions"])
+# Keep this import inside the flag. Importing it at module scope defeats the
+# memory guard even when the router is never mounted.
+_mount_legacy_ml_router(api_router, LEGACY_ML_API_ENABLED)
 api_router.include_router(daily_predictions.router, prefix="/daily-predictions", tags=["daily-predictions"])
 api_router.include_router(accumulators.router, prefix="/accumulators", tags=["accumulators"])
 api_router.include_router(fixtures.router, prefix="/fixtures", tags=["fixtures"])

@@ -345,8 +345,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     """Build a slip to a requested multiplier and book it."""
     import time as _t
     from database import log_pool_exception, log_pool_status
-    from leagues.daily_feed import _publish_date
-    from leagues.slip_builder import generate
+    from utils.runtime_metrics import log_runtime_memory
 
     log_pool_status(
         "builder_start",
@@ -354,6 +353,13 @@ async def slip_builder_generate(target: float, horizon: str = "week",
         horizon=horizon,
         refresh=bool(refresh),
     )
+    log_runtime_memory(
+        "builder_start", target=round(float(target), 2), horizon=horizon,
+        refresh=bool(refresh),
+    )
+    from leagues.daily_feed import _publish_date
+    from leagues.slip_builder import generate
+
     key = (round(float(target), 2), horizon, _publish_date())
     hit = _SLIP_CACHE.get(key)
     if (hit and not refresh and (_t.time() - hit["ts"]) < _SLIP_TTL
@@ -365,6 +371,10 @@ async def slip_builder_generate(target: float, horizon: str = "week",
         except Exception as exc:
             logger.warning(f"Builder run audit failed: {exc}")
         log_pool_status(
+            "builder_end", target=key[0], horizon=horizon,
+            status=response.get("status"), cached=True,
+        )
+        log_runtime_memory(
             "builder_end", target=key[0], horizon=horizon,
             status=response.get("status"), cached=True,
         )
@@ -389,6 +399,10 @@ async def slip_builder_generate(target: float, horizon: str = "week",
                     "builder_end", target=key[0], horizon=horizon,
                     status=result.get("status"), cached=True,
                 )
+                log_runtime_memory(
+                    "builder_end", target=key[0], horizon=horizon,
+                    status=result.get("status"), cached=True,
+                )
                 return result
             result = await asyncio.to_thread(generate, target, horizon=horizon, force=refresh)
             if result.get("status") == "success":
@@ -399,6 +413,10 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             "builder_pool_timeout", e, target=key[0], horizon=horizon,
         )
         log_pool_status(
+            "builder_error", level=logging.ERROR, target=key[0],
+            horizon=horizon, error_type=type(e).__name__,
+        )
+        log_runtime_memory(
             "builder_error", level=logging.ERROR, target=key[0],
             horizon=horizon, error_type=type(e).__name__,
         )
@@ -417,6 +435,10 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     except Exception as exc:
         logger.warning(f"Builder run audit failed: {exc}")
     log_pool_status(
+        "builder_end", target=key[0], horizon=horizon,
+        status=response.get("status"), cached=False,
+    )
+    log_runtime_memory(
         "builder_end", target=key[0], horizon=horizon,
         status=response.get("status"), cached=False,
     )

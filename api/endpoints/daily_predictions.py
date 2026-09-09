@@ -19,8 +19,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Initialize service
-daily_service = DailyPredictionsService()
+_daily_service = None
+
+
+def _get_daily_service() -> DailyPredictionsService:
+    """Create the retired compatibility service only for an explicit call."""
+    global _daily_service
+    if _daily_service is None:
+        _daily_service = DailyPredictionsService()
+    return _daily_service
 
 @router.get("/today")
 def get_todays_predictions_from_db(db: Session = Depends(get_db)):
@@ -51,7 +58,7 @@ def get_todays_predictions_from_db(db: Session = Depends(get_db)):
                 "status": "pending",
                 "date": today.isoformat(),
                 "message": f"Predictions are {summary.generation_status}",
-                "summary": daily_service._summary_to_dict(summary),
+                "summary": DailyPredictionsService._summary_to_dict(summary),
                 "predictions": []
             }
         
@@ -91,7 +98,7 @@ def get_todays_predictions_from_db(db: Session = Depends(get_db)):
             "date": today.isoformat(),
             "source": "database",
             "cached": True,
-            "summary": daily_service._summary_to_dict(summary),
+            "summary": DailyPredictionsService._summary_to_dict(summary),
             "predictions": formatted_predictions
         }
         
@@ -218,11 +225,11 @@ def generate_daily_predictions(
                     "status": "already_exists",
                     "date": target_date,
                     "message": "Predictions already exist. Use force=true to regenerate.",
-                    "summary": daily_service._summary_to_dict(existing)
+                    "summary": DailyPredictionsService._summary_to_dict(existing)
                 }
         
         # Generate predictions (can be slow, so run in background for production)
-        result = daily_service.generate_daily_predictions(target_date)
+        result = _get_daily_service().generate_daily_predictions(target_date)
         
         return {
             "status": "completed",
@@ -272,7 +279,7 @@ def get_prediction_status(
         return {
             "status": summary.generation_status,
             "date": target_date,
-            "summary": daily_service._summary_to_dict(summary)
+            "summary": DailyPredictionsService._summary_to_dict(summary)
         }
         
     except ValueError:
@@ -303,7 +310,7 @@ def get_prediction_history(
         
         history = []
         for summary in summaries:
-            history.append(daily_service._summary_to_dict(summary))
+            history.append(DailyPredictionsService._summary_to_dict(summary))
         
         return {
             "status": "success",

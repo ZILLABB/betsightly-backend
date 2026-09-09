@@ -13,7 +13,6 @@ from sqlalchemy.ext.declarative import declarative_base
 
 from database import Base, SessionLocal, engine, log_pool_exception, log_pool_status
 from services.fixture_service import FixtureService
-from api.endpoints.ml_predictions import RealMLPredictionService
 from services.accumulator_builder import AccumulatorBuilder
 # OddsService no longer needed — odds come embedded in fixture data
 
@@ -80,6 +79,11 @@ class DailyPredictionsService:
     
     def __init__(self):
         """Initialize the service."""
+        # This service is retired and only retained for explicit compatibility
+        # calls. Import its old ML implementation lazily so merely mounting the
+        # legacy read/manual routes cannot load gigabytes of artifacts.
+        from api.endpoints.ml_predictions import RealMLPredictionService
+
         self.fixture_service = FixtureService()
         self.ml_service = RealMLPredictionService()
         self.accumulator_builder = AccumulatorBuilder()
@@ -388,7 +392,8 @@ class DailyPredictionsService:
             highest_confidence=highest_confidence
         )
     
-    def _summary_to_dict(self, summary: DailyPredictionSummary) -> Dict:
+    @staticmethod
+    def _summary_to_dict(summary: DailyPredictionSummary) -> Dict:
         """Convert summary to dictionary."""
         return {
             "prediction_date": summary.prediction_date.isoformat(),

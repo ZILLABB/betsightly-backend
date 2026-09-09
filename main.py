@@ -5,7 +5,7 @@ Main application.
 import logging
 import os
 from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -18,6 +18,7 @@ from database import get_db, init_db, log_pool_exception, log_pool_status
 from utils.config import settings
 from utils.error_handling import setup_exception_handlers
 from utils.security import SecurityMiddleware, RateLimitMiddleware
+from utils.runtime_metrics import log_runtime_memory
 
 # ---------------------------------------------------------------------------
 # Sentry — error tracking (no-op when SENTRY_DSN is not set)
@@ -57,6 +58,9 @@ _background_default = "true" if _environment == "production" else "false"
 BACKGROUND_JOBS_ENABLED = os.getenv(
     "ENABLE_BACKGROUND_JOBS", _background_default
 ).strip().lower() in {"1", "true", "yes", "on"}
+LEGACY_PREDICTION_SETTLEMENT_ENABLED = os.getenv(
+    "ENABLE_LEGACY_PREDICTION_SETTLEMENT", "false"
+).strip().lower() in {"1", "true", "yes", "on"}
 
 # httpx logs full request URLs at INFO — the Telegram bot token is part of the
 # URL, so it would leak into production logs. Keep these loggers at WARNING.
@@ -87,6 +91,25 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
     openapi_url="/openapi.json" if settings.DEBUG else None
 )
+
+
+@app.middleware("http")
+async def trace_important_requests(request: Request, call_next):
+    """Log arrival of expensive public requests without request credentials."""
+    if request.url.path == "/api/leagues/slip-builder/generate":
+        raw_cf_ray = request.headers.get("cf-ray", "")
+        cf_ray = "".join(
+            char for char in raw_cf_ray[:128]
+            if char.isalnum() or char in {"-", "_", ".", ":"}
+        ) or "absent"
+        logger.info(
+            "request_start method=%s path=%s cf_ray=%s timestamp=%s",
+            request.method,
+            request.url.path,
+            cf_ray,
+            datetime.now().astimezone().isoformat(),
+        )
+    return await call_next(request)
 
 # Phase 5: Re-enable production middleware
 app.add_middleware(
@@ -177,11 +200,18 @@ try:
 except Exception as e:
     logger.warning(f"Could not ensure rollover_days table: {e}")
 
-# Start background results checker (every 6h) — World Cup rollover chains
+def _start_current_results_checker(start=None):
+    """Start the authoritative leagues settlement loop."""
+    if start is None:
+        from leagues.results_checker import start_background_loop
+        start = start_background_loop
+    start()
+
+
+# Start background results checker (every 6h) — authoritative leagues records.
 if BACKGROUND_JOBS_ENABLED:
     try:
-        from leagues.results_checker import start_background_loop as _start_results_loop
-        _start_results_loop()
+        _start_current_results_checker()
     except Exception as e:
         logger.warning(f"Could not start results checker: {e}")
 
@@ -214,7 +244,11 @@ def _start_prediction_settlement_loop():
     logger.info("Prediction settlement loop started (12h interval)")
 
 
-if BACKGROUND_JOBS_ENABLED:
+def _legacy_prediction_settlement_should_start() -> bool:
+    return BACKGROUND_JOBS_ENABLED and LEGACY_PREDICTION_SETTLEMENT_ENABLED
+
+
+if _legacy_prediction_settlement_should_start():
     try:
         _start_prediction_settlement_loop()
     except Exception as e:
@@ -411,6 +445,12 @@ if BACKGROUND_JOBS_ENABLED:
     _start_daily_generation_loop()
 else:
     logger.info("Background jobs disabled for this process")
+
+log_runtime_memory(
+    "startup_complete",
+    background_jobs=BACKGROUND_JOBS_ENABLED,
+    legacy_prediction_settlement=LEGACY_PREDICTION_SETTLEMENT_ENABLED,
+)
 
 
 @app.get("/")
