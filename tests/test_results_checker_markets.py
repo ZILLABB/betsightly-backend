@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from leagues.results_checker import (
-    _evaluate_pick, _missing_result_expired, _rollover_day_status,
+    _evaluate_pick, _lookup_score, _missing_result_expired, _rollover_day_status,
 )
 
 
@@ -38,6 +38,18 @@ from leagues.results_checker import (
 def test_specific_market_keys_settle_correctly(market, score, expected):
     pick = {"market": market, "home_team": "Home", "away_team": "Away"}
     assert _evaluate_pick(pick, *score) == expected
+
+
+def test_score_lookup_prefers_the_exact_fixture_date():
+    scores = {
+        "home|away|2026-09-01": {"home_score": 1, "away_score": 0},
+        "home|away|2026-09-08": {"home_score": 0, "away_score": 2},
+        "home|away": {"home_score": 1, "away_score": 0},
+    }
+    assert _lookup_score(scores, "Home", "Away", "2026-09-08") == {
+        "home_score": 0,
+        "away_score": 2,
+    }
 
 
 def test_rollover_market_key_takes_precedence_over_diversity_group():

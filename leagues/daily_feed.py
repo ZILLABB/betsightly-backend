@@ -53,8 +53,9 @@ def _trusted_rollover_picks(picks: list) -> list:
     return [p for p in picks if p.get("safe_tier_eligible")]
 
 
-def _wat_now() -> datetime:
-    return datetime.now(timezone.utc) + WAT_OFFSET
+def _wat_now(now: datetime | None = None) -> datetime:
+    # Return WAT wall-clock time for `now`, or for the current instant.
+    return (now or datetime.now(timezone.utc)) + WAT_OFFSET
 
 
 def _publish_date() -> str:
@@ -537,7 +538,10 @@ def build_bookable_now() -> dict | None:
         return None
 
     bookable_from = (now + BOOKING_BUFFER).isoformat().replace("+00:00", "Z")
-    today = now.strftime("%Y-%m-%d")
+    # "Today" is an audience-facing calendar day. Around midnight WAT the
+    # UTC date is still yesterday, which used to make the available-now card
+    # search the wrong fixtures for the first hour of the Nigerian day.
+    today = _wat_now(now).strftime("%Y-%m-%d")
     live = [p for p in all_picks
             if p["_fixture"]["commence_time"] >= bookable_from
             and p["_fixture"]["commence_time"][:10] == today

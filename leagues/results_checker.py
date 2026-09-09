@@ -528,6 +528,32 @@ def _normalize_name(name: str) -> str:
     return name.lower().strip()
 
 
+def _lookup_score(scores: Dict[str, Dict[str, Any]], home: str, away: str,
+                  date: str = "") -> Optional[Dict[str, Any]]:
+    # Prefer an exact fixture date before the loose home|away fallback.
+    home_key = _normalize_name(home)
+    away_key = _normalize_name(away)
+    home_alias = TEAM_ALIASES.get(home_key, home_key)
+    away_alias = TEAM_ALIASES.get(away_key, away_key)
+
+    candidates = []
+    if date:
+        candidates.extend([
+            f"{home_key}|{away_key}|{date}",
+            f"{home_alias}|{away_alias}|{date}",
+        ])
+    candidates.extend([
+        f"{home_key}|{away_key}",
+        f"{home_alias}|{away_alias}",
+    ])
+
+    for key in candidates:
+        hit = scores.get(key)
+        if hit:
+            return hit
+    return None
+
+
 # ── Smart scheduling helpers ─────────────────────────────────
 
 def _get_checkable_rows(pending_rows) -> list:
@@ -918,7 +944,13 @@ def settle_published_slips() -> Dict[str, int]:
             if pick.get("status") in ("won", "lost", "void"):
                 outcomes.append(pick["status"])
                 continue
-            match = _lookup(pick.get("home_team", ""), pick.get("away_team", ""))
+            match_date = (pick.get("commence_time") or slip.date or "")[:10]
+            match = _lookup_score(
+                scores,
+                pick.get("home_team", ""),
+                pick.get("away_team", ""),
+                match_date,
+            )
             if not match:
                 outcomes.append("pending")
                 continue
@@ -997,8 +1029,12 @@ def backfill_leg_status(limit_days: int = 120) -> Dict[str, int]:
                 for pick in picks:
                     if pick.get("status") in ("won", "lost", "void"):
                         continue
-                    match = _find(pick.get("home_team", ""), pick.get("away_team", ""),
-                                  (pick.get("commence_time") or "")[:10])
+                    match = _lookup_score(
+                        scores,
+                        pick.get("home_team", ""),
+                        pick.get("away_team", ""),
+                        (pick.get("commence_time") or row.date or "")[:10],
+                    )
                     if not match:
                         continue
                     pick["status"] = _evaluate_pick(pick, match["home_score"], match["away_score"])
