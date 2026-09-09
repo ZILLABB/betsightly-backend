@@ -132,9 +132,10 @@ def build_features(fixture: dict, index) -> list[float] | None:
 
     home = fixture["home"]["name"]
     away = fixture["away"]["name"]
-    hf = index.team_form(home, "home")
-    af = index.team_form(away, "away")
-    h2h = index.head_to_head(home, away, meta.get("h2h_window", 10))
+    team_type = fixture.get("team_type") or "CLUB"
+    hf = index.team_form(home, "home", team_type)
+    af = index.team_form(away, "away", team_type)
+    h2h = index.head_to_head(home, away, meta.get("h2h_window", 10), team_type)
 
     odds = fixture.get("odds") or {}
     implied = odds.get("implied") or {}
@@ -214,6 +215,13 @@ def predict_fixture(fixture: dict, index) -> dict | None:
     """Ensemble probabilities for one fixture, or None when unavailable."""
     state = _load()
     if not state.get("models"):
+        return None
+
+    # The current 64k training corpus does not declare national-team coverage.
+    # Returning no shadow opinion is honest; feeding national teams through a
+    # club-trained feature distribution would manufacture ML agreement.
+    supported_team_types = set((state.get("meta") or {}).get("supported_team_types") or ["CLUB"])
+    if (fixture.get("team_type") or "CLUB") not in supported_team_types:
         return None
 
     if REQUIRE_MARKET and not ((fixture.get("odds") or {}).get("implied")):

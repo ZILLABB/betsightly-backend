@@ -837,6 +837,70 @@ async def get_fixtures_list(days_ahead: int = 3):
         raise HTTPException(500, str(e))
 
 
+@router.get("/competition-coverage", dependencies=[Depends(require_api_key)])
+async def competition_coverage(days_ahead: int = 7, refresh: bool = False):
+    """Internal health report for every configured or explicitly rejected feed."""
+    try:
+        from collections import Counter
+        from leagues.base_rates import get_base_rates, rates_for
+        from leagues.competition_registry import (
+            UNAVAILABLE_COMPETITIONS, enabled_competitions,
+        )
+        from leagues.engine import run_pipeline
+        from leagues.espn_source import fetch_health
+        from leagues.elo_engine import get_ratings
+
+        _, fixtures = run_pipeline(days_ahead=max(1, min(days_ahead, 14)), force=refresh)
+        base_rates = get_base_rates()
+        ratings = get_ratings()
+        provider_health = fetch_health()
+        by_slug: dict[str, list[dict]] = {}
+        for fixture in fixtures:
+            by_slug.setdefault(fixture.get("league_slug", ""), []).append(fixture)
+
+        rows = []
+        for slug, meta in enabled_competitions().items():
+            current = by_slug.get(slug, [])
+            rate = rates_for(slug, base_rates)
+            rating_pool = ("__international__" if meta.team_type == "NATIONAL"
+                           else "__continental_club__" if meta.competition_type == "CONTINENTAL_CLUB"
+                           else slug)
+            market_counts = Counter(
+                "priced" if (fixture.get("odds") or {}).get("implied") else "unpriced"
+                for fixture in current
+            )
+            health = provider_health.get(slug) or {}
+            rows.append({
+                **meta.public_dict(),
+                "configured": True,
+                "provider_active": health.get("provider_active"),
+                "scheduled_fixture_count": len(current),
+                "priced_fixture_count": market_counts["priced"],
+                "sportybet_matched_count": sum(
+                    1 for fixture in current
+                    if (fixture.get("odds") or {}).get("sportybet_event_id")
+                ),
+                "historical_sample": int((base_rates.get(slug) or {}).get("matches") or 0),
+                "base_rate_source": rate.get("base_rate_source", "global_default"),
+                "rating_coverage": len(ratings.get(rating_pool) or {}),
+                "last_successful_fetch": health.get("last_successful_fetch"),
+                "error": health.get("error"),
+            })
+        for slug, reason in UNAVAILABLE_COMPETITIONS.items():
+            rows.append({
+                "slug": slug, "display_name": slug, "configured": False,
+                "enabled": False, "provider_active": False,
+                "scheduled_fixture_count": 0, "priced_fixture_count": 0,
+                "sportybet_matched_count": 0, "historical_sample": 0,
+                "base_rate_source": None, "rating_coverage": 0,
+                "last_successful_fetch": None, "error": reason,
+            })
+        return {"status": "success", "competitions": rows}
+    except Exception as e:
+        logger.error(f"competition coverage failed: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 @router.get("/debug-rollover")
 async def debug_rollover():
     """Dump rollover DB state + scores matching debug info."""

@@ -19,6 +19,7 @@ import logging
 import time
 import threading
 import requests
+from leagues.competition_registry import regulation_score
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 
@@ -113,7 +114,7 @@ def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, D
             for event in _fetch_espn_scores(espn_slug, espn_date):
                 comp = (event.get("competitions") or [{}])[0]
                 status = comp.get("status", {}).get("type", {}).get("name", "")
-                if status != "STATUS_FULL_TIME":
+                if not comp.get("status", {}).get("type", {}).get("completed"):
                     continue
                 teams = comp.get("competitors", [])
                 if len(teams) < 2:
@@ -122,11 +123,10 @@ def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, D
                 away_data = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
                 home = home_data.get("team", {}).get("displayName", "")
                 away = away_data.get("team", {}).get("displayName", "")
-                try:
-                    home_score = int(home_data.get("score", 0))
-                    away_score = int(away_data.get("score", 0))
-                except (ValueError, TypeError):
+                score = regulation_score(comp)
+                if not score:
                     continue
+                home_score, away_score = score["home_score"], score["away_score"]
 
                 payload = {
                     "home": home,
@@ -134,6 +134,10 @@ def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, D
                     "home_score": home_score,
                     "away_score": away_score,
                     "completed": True,
+                    **{key: score.get(key) for key in (
+                        "score_90", "score_extra_time", "penalty_score",
+                        "qualified_team", "match_status",
+                    )},
                 }
                 # Index under BOTH the ESPN date and the original requested dates
                 # so matching works regardless of timezone shift
@@ -187,14 +191,20 @@ def _collect_apifootball_scores(sport_keys: List[str], date_from: str, date_to: 
         for fx in _fetch_apifootball_scores(league_id, date_from, date_to):
             teams = fx.get("teams", {})
             goals = fx.get("goals", {})
+            scores = fx.get("score", {})
+            regulation = scores.get("fulltime") or goals
             fixture_info = fx.get("fixture", {})
             home = teams.get("home", {}).get("name", "")
             away = teams.get("away", {}).get("name", "")
-            home_score = goals.get("home")
-            away_score = goals.get("away")
+            home_score = regulation.get("home")
+            away_score = regulation.get("away")
             if home_score is None or away_score is None:
                 continue
-            payload = {"home": home, "away": away, "home_score": int(home_score), "away_score": int(away_score), "completed": True}
+            payload = {"home": home, "away": away, "home_score": int(home_score), "away_score": int(away_score), "completed": True,
+                       "score_90": {"home": int(home_score), "away": int(away_score)},
+                       "score_extra_time": scores.get("extratime"),
+                       "penalty_score": scores.get("penalty"),
+                       "match_status": (fixture_info.get("status") or {}).get("short")}
             fixture_date = (fixture_info.get("date") or "")[:10]
             ck = f"{_normalize_name(home)}|{_normalize_name(away)}|{fixture_date}"
             finished[ck] = payload
@@ -289,7 +299,7 @@ def _collect_espn_scores_ranged(start_date: str, end_date: str) -> Dict[str, Dic
         return {}
     rng = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
 
-    slugs = list(ESPN_LEAGUE_SLUGS.values()) + ["fifa.world"]
+    slugs = sorted(set(ESPN_LEAGUE_SLUGS.values()))
 
     def fetch(slug: str) -> List[dict]:
         try:
@@ -308,7 +318,7 @@ def _collect_espn_scores_ranged(start_date: str, end_date: str) -> Dict[str, Dic
         for events in pool.map(fetch, slugs):
             for event in events:
                 comp = (event.get("competitions") or [{}])[0]
-                if comp.get("status", {}).get("type", {}).get("name") != "STATUS_FULL_TIME":
+                if not comp.get("status", {}).get("type", {}).get("completed"):
                     continue
                 teams = comp.get("competitors", [])
                 if len(teams) < 2:
@@ -317,12 +327,16 @@ def _collect_espn_scores_ranged(start_date: str, end_date: str) -> Dict[str, Dic
                 ad = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
                 home = hd.get("team", {}).get("displayName", "")
                 away = ad.get("team", {}).get("displayName", "")
-                try:
-                    hs, as_ = int(hd.get("score", 0)), int(ad.get("score", 0))
-                except (TypeError, ValueError):
+                score = regulation_score(comp)
+                if not score:
                     continue
+                hs, as_ = score["home_score"], score["away_score"]
                 payload = {"home": home, "away": away, "home_score": hs,
-                           "away_score": as_, "completed": True}
+                           "away_score": as_, "completed": True,
+                           **{key: score.get(key) for key in (
+                               "score_90", "score_extra_time", "penalty_score",
+                               "qualified_team", "match_status",
+                           )}}
                 date = (event.get("date") or "")[:10]
                 finished[f"{_normalize_name(home)}|{_normalize_name(away)}|{date}"] = payload
                 finished.setdefault(f"{_normalize_name(home)}|{_normalize_name(away)}", payload)

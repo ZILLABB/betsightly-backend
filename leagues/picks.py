@@ -309,6 +309,15 @@ MIN_CONFIDENCE_BY_GROUP = {
 MIN_EVIDENCE_LEGS = 25
 
 
+def competition_evidence_allows_safe_tier(fixture: dict) -> bool:
+    """Thin tournament samples may learn in long tiers, never Banker/2 Odds."""
+    return (
+        not fixture.get("competition_type")
+        or fixture.get("competition_type") == "LEAGUE"
+        or int(fixture.get("competition_historical_sample") or 0) >= 20
+    )
+
+
 # The lowest per-market floor. The pipeline builds candidates down to this so
 # each tier can choose how far to reach; the blanket minimum must not sit above
 # it or the per-market floors never apply.
@@ -510,7 +519,10 @@ def build_picks(
                 # Banker and 2 Odds only admit markets with enough *published,
                 # settled* evidence of their own. Longer tiers may still collect
                 # that evidence, clearly labelled as developing markets.
-                "safe_tier_eligible": calibration_sample >= MIN_EVIDENCE_LEGS,
+                "safe_tier_eligible": (
+                    calibration_sample >= MIN_EVIDENCE_LEGS
+                    and competition_evidence_allows_safe_tier(fixture)
+                ),
                 "odds": round(price, 2),
                 "odds_are_real": is_real,
                 "odds_provider": odds.get("provider") if is_real else None,
@@ -580,6 +592,18 @@ def to_game(pick: dict) -> dict:
         "away_team_logo": f["away"].get("logo"),
         "league": f["league"],
         "league_slug": f["league_slug"],
+        "competition": f.get("competition"),
+        "competition_type": f.get("competition_type"),
+        "competition_region": f.get("region"),
+        "team_type": f.get("team_type"),
+        "competition_stage": f.get("stage"),
+        "competition_round": f.get("round"),
+        "competition_context_label": f.get("context_label"),
+        "neutral_venue": bool(f.get("neutral_venue")),
+        "knockout": bool(f.get("knockout")),
+        "leg_number": f.get("leg_number"),
+        "base_rate_source": f.get("base_rate_source"),
+        "competition_historical_sample": f.get("competition_historical_sample", 0),
         "date": f["commence_time"],
         "kickoff": f["commence_time"],
         "venue": f.get("venue", {}).get("name"),
@@ -600,6 +624,7 @@ def to_game(pick: dict) -> dict:
             "away_form": f["away"].get("form"),
             "home_record": f["home"].get("record"),
             "away_record": f["away"].get("record"),
+            "competition_context": f.get("competition"),
         },
         "prediction": pick["prediction"],
         "prediction_type": pick["market_group"],

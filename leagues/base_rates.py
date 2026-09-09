@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
+from leagues.competition_registry import regulation_score
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ CACHE_PATH = Path(__file__).parent / "data" / "league_base_rates.json"
 CACHE_TTL = 7 * 24 * 3600          # recompute weekly
 LOOKBACK_DAYS = 45                 # sample window
 MIN_SAMPLE = 10                    # below this, use global defaults
+MIN_PRIOR_SAMPLE = 20
 
 # Measured across all tracked leagues (see module docstring).
 GLOBAL_DEFAULTS = {
@@ -53,6 +55,29 @@ def _empty():
     return {
         "n": 0, "goals": 0, "home_goals": 0, "away_goals": 0,
         "o15": 0, "o25": 0, "home": 0, "draw": 0, "away": 0, "btts": 0,
+    }
+
+
+def _merge(target: dict, source: dict) -> None:
+    for key in target:
+        target[key] += int(source.get(key) or 0)
+
+
+def _as_rates(sample: dict) -> dict:
+    n = int(sample.get("n") or 0)
+    if not n:
+        return {**GLOBAL_DEFAULTS, "matches": 0}
+    return {
+        "matches": n,
+        "avg_goals": round(sample["goals"] / n, 3),
+        "over_1_5": round(sample["o15"] / n, 4),
+        "over_2_5": round(sample["o25"] / n, 4),
+        "home_win": round(sample["home"] / n, 4),
+        "draw": round(sample["draw"] / n, 4),
+        "away_win": round(sample["away"] / n, 4),
+        "btts": round(sample["btts"] / n, 4),
+        "home_goals": round(sample["home_goals"] / n, 3),
+        "away_goals": round(sample["away_goals"] / n, 3),
     }
 
 
@@ -77,17 +102,17 @@ def _fetch_finished_range(slug: str, start: str, end: str) -> list[tuple[int, in
     out = []
     for ev in events:
         comp = (ev.get("competitions") or [{}])[0]
-        if comp.get("status", {}).get("type", {}).get("name") != "STATUS_FULL_TIME":
+        if not comp.get("status", {}).get("type", {}).get("completed"):
             continue
         teams = comp.get("competitors", [])
         home = next((t for t in teams if t.get("homeAway") == "home"), None)
         away = next((t for t in teams if t.get("homeAway") == "away"), None)
         if not home or not away:
             continue
-        try:
-            out.append((int(home.get("score", 0)), int(away.get("score", 0))))
-        except (TypeError, ValueError):
+        score = regulation_score(comp)
+        if not score:
             continue
+        out.append((score["home_score"], score["away_score"]))
     return out
 
 
@@ -129,21 +154,27 @@ def compute_base_rates(slugs: dict[str, str]) -> dict:
 
     rates = {}
     for slug, s in raw.items():
-        n = s["n"]
-        if n < MIN_SAMPLE:
+        if s["n"]:
+            rates[slug] = _as_rates(s)
+
+    # Hierarchical priors prevent a six-match knockout sample from masquerading
+    # as a stable competition rate. These are real pooled results, not invented
+    # samples: region/type -> type -> club/national -> global.
+    from leagues.competition_registry import competition_for
+    prior_samples: dict[str, dict] = defaultdict(_empty)
+    for slug, sample in raw.items():
+        meta = competition_for(slug)
+        if not meta or not sample["n"]:
             continue
-        rates[slug] = {
-            "matches": n,
-            "avg_goals": round(s["goals"] / n, 3),
-            "over_1_5": round(s["o15"] / n, 4),
-            "over_2_5": round(s["o25"] / n, 4),
-            "home_win": round(s["home"] / n, 4),
-            "draw": round(s["draw"] / n, 4),
-            "away_win": round(s["away"] / n, 4),
-            "btts": round(s["btts"] / n, 4),
-            "home_goals": round(s["home_goals"] / n, 3),
-            "away_goals": round(s["away_goals"] / n, 3),
-        }
+        keys = (
+            f"region_type:{meta.region}|{meta.competition_type}",
+            f"competition_type:{meta.competition_type}",
+            f"team_type:{meta.team_type}",
+            "global",
+        )
+        for key in keys:
+            _merge(prior_samples[key], sample)
+    rates["_priors"] = {key: _as_rates(sample) for key, sample in prior_samples.items()}
     return rates
 
 
@@ -197,14 +228,27 @@ def rates_for(slug: str, cached: dict | None = None) -> dict:
     """
     if cached is None:
         cached = get_base_rates()
-    r = cached.get(slug)
-    if not r or r.get("matches", 0) < MIN_SAMPLE:
-        return dict(GLOBAL_DEFAULTS)
+    from leagues.competition_registry import prior_keys
+    r = cached.get(slug) or {}
+    priors = cached.get("_priors") or {}
+    prior = None
+    source = "global_default"
+    for key in prior_keys(slug):
+        candidate = priors.get(key)
+        if candidate and int(candidate.get("matches") or 0) >= MIN_PRIOR_SAMPLE:
+            prior = candidate
+            source = key
+            break
+    if prior is None:
+        prior = GLOBAL_DEFAULTS
 
-    n = r.get("matches", 0)
+    n = int(r.get("matches") or 0)
+    if n <= 0:
+        return {**dict(prior), "matches": 0, "base_rate_source": source}
+
     w = n / (n + SHRINKAGE_K)
-    out = {"matches": n}
-    for key, global_val in GLOBAL_DEFAULTS.items():
+    out = {"matches": n, "base_rate_source": f"competition+{source}"}
+    for key, global_val in prior.items():
         if key == "matches":
             continue
         league_val = r.get(key, global_val)

@@ -88,6 +88,16 @@ def evaluate_leg_trust(pick: dict, *, minimum_samples: int | None = None) -> dic
     score -= 4 if model_delta is None else (15 if model_delta > .10 else 0)
     score -= min(20, round(cal_error * 100)) if cal_error is not None else 0
     score -= min(20, round(uncertainty_gap * 50))
+    context = fixture.get("competition") or {}
+    # Two-leg/knockout incentives and inferred neutral venues are recorded as
+    # uncertainty, not as invented probability adjustments. Real bookmaker
+    # agreement can still support the leg; thin unpriced evidence cannot look A-grade.
+    if context.get("second_leg"):
+        score -= 6
+    elif context.get("knockout"):
+        score -= 3
+    if context.get("neutral_venue") and implied is None:
+        score -= 5
     score -= 40 if not bookable else 0
     score -= 25 if not complete else 0
     score = max(0, min(100, int(score)))

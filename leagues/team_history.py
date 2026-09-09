@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
+from leagues.competition_registry import competition_for, regulation_score
 
 logger = logging.getLogger(__name__)
 
@@ -61,22 +62,24 @@ def _fetch_finished(slug: str, start: str, end: str) -> list[dict]:
     out = []
     for ev in events:
         comp = (ev.get("competitions") or [{}])[0]
-        if comp.get("status", {}).get("type", {}).get("name") != "STATUS_FULL_TIME":
+        if not comp.get("status", {}).get("type", {}).get("completed"):
             continue
         teams = comp.get("competitors", []) or []
         home = next((t for t in teams if t.get("homeAway") == "home"), None)
         away = next((t for t in teams if t.get("homeAway") == "away"), None)
         if not home or not away:
             continue
-        try:
-            hs, as_ = int(home.get("score", 0)), int(away.get("score", 0))
-        except (TypeError, ValueError):
+        score = regulation_score(comp)
+        if not score:
             continue
+        hs, as_ = score["home_score"], score["away_score"]
+        meta = competition_for(slug)
         out.append({
             "date": ev.get("date", "")[:10],
             "home": (home.get("team") or {}).get("displayName", ""),
             "away": (away.get("team") or {}).get("displayName", ""),
             "hs": hs, "as": as_,
+            "team_type": meta.team_type if meta else "CLUB",
         })
     return out
 
@@ -139,22 +142,23 @@ class HistoryIndex:
 
         for m in data.get("matches", []):
             h, a = m["home"], m["away"]
+            team_type = m.get("team_type") or "CLUB"
             # Each match is recorded from both sides, so "last five" means the
             # team's own last five whether they were home or away.
-            self.by_team[h].append({"venue": "home", "gf": m["hs"], "ga": m["as"],
+            self.by_team[(team_type, h)].append({"venue": "home", "gf": m["hs"], "ga": m["as"],
                                     "date": m["date"]})
-            self.by_team[a].append({"venue": "away", "gf": m["as"], "ga": m["hs"],
+            self.by_team[(team_type, a)].append({"venue": "away", "gf": m["as"], "ga": m["hs"],
                                     "date": m["date"]})
-            self.h2h[tuple(sorted((h, a)))].append(m)
+            self.h2h[(team_type, *sorted((h, a)))].append(m)
 
         for rows in self.by_team.values():
             rows.sort(key=lambda r: r["date"], reverse=True)
 
     # ── team form ──────────────────────────────────────────
 
-    def team_form(self, team: str, venue: str) -> dict:
+    def team_form(self, team: str, venue: str, team_type: str = "CLUB") -> dict:
         """Form features for one team. Neutral values when unseen."""
-        rows = self.by_team.get(team) or []
+        rows = self.by_team.get((team_type, team)) or []
         if not rows:
             return dict(NEUTRAL)
 
@@ -181,9 +185,10 @@ class HistoryIndex:
 
     # ── head to head ───────────────────────────────────────
 
-    def head_to_head(self, home: str, away: str, window: int = 10) -> dict:
+    def head_to_head(self, home: str, away: str, window: int = 10,
+                     team_type: str = "CLUB") -> dict:
         """Previous meetings, oriented so `home` is the reference team."""
-        meetings = (self.h2h.get(tuple(sorted((home, away)))) or [])[-window:]
+        meetings = (self.h2h.get((team_type, *sorted((home, away)))) or [])[-window:]
         if not meetings:
             # No meetings is a real, common state and the models saw it in
             # training as zero meetings with neutral rates.

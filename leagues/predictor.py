@@ -127,6 +127,11 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
         p_away = implied.get("away_win", base["away_win"])
     else:
         p_home, p_draw, p_away = base["home_win"], base["draw"], base["away_win"]
+        # A neutral-site designation makes ESPN's home/away ordering
+        # administrative. Do not inject the ordinary competition home prior.
+        if fixture.get("neutral_venue"):
+            decisive = (p_home + p_away) / 2
+            p_home = p_away = decisive
 
     # ELO as a light second opinion — never decisive, and only when the
     # market is absent or ELO disagrees sharply.
@@ -159,7 +164,10 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
     # produce an implausible total.
     total_goals = 0.85 * total_goals + 0.15 * base["avg_goals"]
 
-    home_lam, away_lam = _split_total(total_goals, p_home, p_away)
+    if fixture.get("neutral_venue") and not has_market and not elo_probs:
+        home_lam = away_lam = total_goals / 2
+    else:
+        home_lam, away_lam = _split_total(total_goals, p_home, p_away)
 
     # Recompute 1X2 from the fitted grid so every market is internally
     # consistent, then pull back toward the market probabilities.
@@ -191,7 +199,9 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
     p_ha = min(0.97, p_home + p_away)
 
     # Confidence ceiling when nothing is priced — we are extrapolating
-    cap = 0.97 if has_market else 0.80
+    context = fixture.get("competition") or {}
+    context_uncertainty = bool(context.get("second_leg") or context.get("knockout"))
+    cap = 0.97 if has_market else (0.76 if context_uncertainty else 0.80)
 
     # Per-team goal lines. The Poisson already carries each side's expected
     # goals separately — these were always computable and simply never
@@ -251,4 +261,10 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
         "has_market": has_market,
         "elo_agreement": elo_agreement,
         "confidence_cap": cap,
+        "competition_context": context,
+        "base_rate_source": base.get("base_rate_source"),
+        "competition_historical_sample": int(base.get("matches") or 0),
+        "rating_pool": elo_probs.get("rating_pool") if elo_probs else None,
+        "rating_evidence": elo_probs.get("rating_evidence") if elo_probs else 0,
+        "home_advantage_applied": elo_probs.get("home_advantage_applied") if elo_probs else None,
     }

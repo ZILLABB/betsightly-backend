@@ -238,6 +238,8 @@ def _squad(raw_name: str) -> str:
     """Which side of a club this is: senior, a youth age group, or reserves."""
     n = (raw_name or "").lower()
     compact = n.replace("-", "").replace(" ", "")
+    if any(marker in n for marker in (" women", "women's", " ladies", " femenino", " feminina")) or n.endswith(" w") or "(w)" in n:
+        return "women"
     for m in _AGE_MARKERS:
         if m in compact:
             return m
@@ -283,9 +285,21 @@ def _same_team(a: str, b: str) -> bool:
     """
     if a == b:
         return True
+    # Country names need one extra collision guard that club aliases do not:
+    # Guinea/Equatorial Guinea, Korea/South Korea, and Congo/DR Congo are
+    # distinct senior national sides, not long-form spellings of one side.
+    geographic_qualifiers = {
+        "equatorial", "north", "south", "central", "democratic", "republic",
+        "papua", "new", "bissau", "dr",
+    }
+    raw_a, raw_b = set(a.split()), set(b.split())
+    if (raw_a ^ raw_b) & geographic_qualifiers:
+        return False
     ta, tb = _tokens(a), _tokens(b)
     if not ta or not tb:
         return False
+    # National teams such as Guinea and Equatorial Guinea are not aliases.
+    # A one-token subset is too weak to establish identity.
     short, long_ = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
     return all(any(_token_match(s, l) for l in long_) for s in short)
 
@@ -596,6 +610,22 @@ _COMPETITION_ALIASES = {
     "division profesional bolivia": "division profesional",
     "división profesional bolivia": "division profesional",
     "efl championship": "championship",
+    "africa cup of nations": "afcon",
+    "africa cup nations": "afcon",
+    "africa cup of nations qualifying": "afcon qualifiers",
+    "afcon qualification": "afcon qualifiers",
+    "fifa world cup qualifying caf": "world cup qualifiers caf",
+    "world cup qualifying caf": "world cup qualifiers caf",
+    "fifa world cup qualifying uefa": "world cup qualifiers europe",
+    "world cup qualifying uefa": "world cup qualifiers europe",
+    "fifa world cup qualifying afc": "world cup qualifiers asia",
+    "world cup qualifying afc": "world cup qualifiers asia",
+    "fifa world cup qualifying concacaf": "world cup qualifiers concacaf",
+    "fifa world cup qualifying conmebol": "world cup qualifiers conmebol",
+    "uefa european championship": "euro championship",
+    "copa america": "copa america",
+    "concacaf champions cup": "concacaf champions league",
+    "afc champions league elite": "afc champions league",
 }
 
 
@@ -616,6 +646,14 @@ def _league_score(provider_league: str, sporty_competition: str) -> float:
     ta = {x for x in a.split() if len(x) > 2}
     tb = {x for x in b.split() if len(x) > 2}
     return len(ta & tb) / max(1, len(ta | tb))
+
+
+def _tournament_name(value: str) -> bool:
+    n = _norm_competition(value)
+    return any(word in n for word in (
+        "cup", "uefa", "champions", "europa", "nations", "world",
+        "qualifier", "afcon", "libertadores", "sudamericana",
+    ))
 
 
 def match_fixture(board: dict, home: str, away: str, commence: str = "",
@@ -705,6 +743,10 @@ def match_fixture(board: dict, home: str, away: str, commence: str = "",
 
     league_score = _league_score(league, best[1].get("competition") or "")
     league_diag = "LEAGUE_MISMATCH" if league and league_score == 0 else None
+    if league_diag and _tournament_name(league):
+        return {**base, "status": "FIXTURE_MAPPING_FAILED",
+                "failure_reason": "tournament competition does not match SportyBet",
+                "league_diagnostic": league_diag}
     confidence = 1.0 if best[2] == "exact" else 0.9
     if best[3] > 5:
         confidence -= 0.05

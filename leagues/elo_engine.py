@@ -29,6 +29,8 @@ from pathlib import Path
 
 import requests
 
+from leagues.competition_registry import competition_for, regulation_score, tournament_context
+
 logger = logging.getLogger(__name__)
 
 CACHE_PATH = Path(__file__).parent / "data" / "espn_elo.json"
@@ -67,7 +69,7 @@ def _fetch_results(slug: str, start: str, end: str) -> list[dict]:
     out = []
     for ev in events:
         comp = (ev.get("competitions") or [{}])[0]
-        if comp.get("status", {}).get("type", {}).get("name") != "STATUS_FULL_TIME":
+        if not comp.get("status", {}).get("type", {}).get("completed"):
             continue
         teams = comp.get("competitors", [])
         home = next((t for t in teams if t.get("homeAway") == "home"), None)
@@ -78,12 +80,13 @@ def _fetch_results(slug: str, start: str, end: str) -> list[dict]:
         an = (away.get("team") or {}).get("displayName", "")
         if not hn or not an:
             continue
-        try:
-            hs, as_ = int(home.get("score", 0)), int(away.get("score", 0))
-        except (TypeError, ValueError):
+        score = regulation_score(comp)
+        if not score:
             continue
+        hs, as_ = score["home_score"], score["away_score"]
+        context = tournament_context(slug, ev, comp)
         out.append({"date": ev.get("date", ""), "home": hn, "away": an,
-                    "hs": hs, "as": as_})
+                    "hs": hs, "as": as_, "neutral": context["neutral_venue"]})
     out.sort(key=lambda m: m["date"])
     return out
 
@@ -96,7 +99,8 @@ def _run_elo(matches: list[dict]) -> tuple[dict, dict]:
     for m in matches:
         h, a = m["home"], m["away"]
         rh, ra = ratings[h], ratings[a]
-        exp_h = 1.0 / (1.0 + 10 ** (-((rh + HOME_ADVANTAGE) - ra) / 400.0))
+        home_advantage = 0.0 if m.get("neutral") else HOME_ADVANTAGE
+        exp_h = 1.0 / (1.0 + 10 ** (-((rh + home_advantage) - ra) / 400.0))
 
         hs, as_ = m["hs"], m["as"]
         score_h = 1.0 if hs > as_ else (0.5 if hs == as_ else 0.0)
@@ -124,8 +128,15 @@ def build_ratings(slugs: dict[str, str]) -> dict:
         return slug, _fetch_results(slug, start, end)
 
     out = {}
+    national_matches: list[dict] = []
+    continental_matches: list[dict] = []
     with ThreadPoolExecutor(max_workers=12) as pool:
         for slug, matches in pool.map(work, slugs):
+            meta = competition_for(slug)
+            if meta and meta.team_type == "NATIONAL":
+                national_matches.extend(matches)
+            if meta and meta.competition_type == "CONTINENTAL_CLUB":
+                continental_matches.extend(matches)
             if len(matches) < 10:
                 continue
             ratings, counts = _run_elo(matches)
@@ -133,6 +144,16 @@ def build_ratings(slugs: dict[str, str]) -> dict:
                 team: {"rating": round(r, 1), "matches": counts.get(team, 0)}
                 for team, r in ratings.items()
             }
+    for pool_name, matches in (("__international__", national_matches),
+                               ("__continental_club__", continental_matches)):
+        if len(matches) < 10:
+            continue
+        matches.sort(key=lambda match: match.get("date", ""))
+        ratings, counts = _run_elo(matches)
+        out[pool_name] = {
+            team: {"rating": round(rating, 1), "matches": counts.get(team, 0)}
+            for team, rating in ratings.items()
+        }
     return out
 
 
@@ -174,3 +195,40 @@ def rating_for(slug: str, team: str, all_ratings: dict) -> float | None:
     if not entry or entry.get("matches", 0) < MIN_MATCHES:
         return None
     return entry.get("rating")
+
+
+def probabilities_for_fixture(fixture: dict, all_ratings: dict) -> dict | None:
+    """Context-safe Elo opinion with no club/national rating contamination."""
+    meta = competition_for(fixture.get("league_slug", ""))
+    if not meta:
+        return None
+    if meta.team_type == "NATIONAL":
+        pool = "__international__"
+    elif meta.competition_type == "CONTINENTAL_CLUB":
+        pool = "__continental_club__"
+    else:
+        pool = meta.slug
+    home_name = (fixture.get("home") or {}).get("name", "")
+    away_name = (fixture.get("away") or {}).get("name", "")
+    home = (all_ratings.get(pool) or {}).get(home_name)
+    away = (all_ratings.get(pool) or {}).get(away_name)
+    if not home or not away:
+        return None
+    home_n, away_n = int(home.get("matches") or 0), int(away.get("matches") or 0)
+    if min(home_n, away_n) < MIN_MATCHES:
+        return None
+    advantage = 0.0 if fixture.get("neutral_venue") else HOME_ADVANTAGE
+    diff = float(home["rating"]) + advantage - float(away["rating"])
+    expected = 1.0 / (1.0 + 10 ** (-diff / 400.0))
+    draw = max(.10, min(.30, .30 - abs(diff) / 1500.0))
+    p_home = max(.05, expected - .5 * draw)
+    p_away = max(.05, 1 - p_home - draw)
+    total = p_home + draw + p_away
+    return {
+        "home_win": round(p_home / total, 4),
+        "draw": round(draw / total, 4),
+        "away_win": round(p_away / total, 4),
+        "rating_pool": pool,
+        "rating_evidence": min(home_n, away_n),
+        "home_advantage_applied": advantage,
+    }

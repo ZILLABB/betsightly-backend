@@ -25,11 +25,11 @@ _CACHE: dict = {"picks": None, "fixtures": None, "ts": 0.0}
 _TTL = 3600
 
 
-def _elo_for(home: str, away: str):
-    """ELO second opinion, or None when either team is unrated."""
+def _elo_for(fixture: dict, ratings: dict | None = None):
+    """Competition-aware ELO opinion, isolated by club/national team type."""
     try:
-        from leagues.ml_overlay import elo_probabilities
-        return elo_probabilities(home, away)
+        from leagues.elo_engine import probabilities_for_fixture
+        return probabilities_for_fixture(fixture, ratings or {})
     except Exception:
         return None
 
@@ -61,6 +61,12 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
         logger.warning(f"SportyBet pricing unavailable: {e}")
 
     cached_rates = get_base_rates(ESPN_CLUB_LEAGUES)
+    try:
+        from leagues.elo_engine import get_ratings
+        ratings = get_ratings(ESPN_CLUB_LEAGUES)
+    except Exception as e:
+        logger.warning(f"competition-aware ELO unavailable: {e}")
+        ratings = {}
     # Fitted once per pipeline run; every pick is corrected against the same
     # snapshot so a mid-run refit cannot make two picks incomparable.
     fit = fit_calibration()
@@ -79,7 +85,9 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
 
     for fx in fixtures:
         base = rates_for(fx["league_slug"], cached_rates)
-        elo = _elo_for(fx["home"]["name"], fx["away"]["name"])
+        fx["competition_historical_sample"] = int(base.get("matches") or 0)
+        fx["base_rate_source"] = base.get("base_rate_source", "competition")
+        elo = _elo_for(fx, ratings)
         if elo:
             with_elo += 1
         model = predict(fx, base, elo)

@@ -28,6 +28,8 @@ from pathlib import Path
 
 import requests
 
+from leagues.competition_registry import provider_slugs, tournament_context
+
 logger = logging.getLogger(__name__)
 
 CACHE_PATH = Path(__file__).parent.parent / "cache" / "espn_fixtures.json"
@@ -35,56 +37,11 @@ CACHE_TTL = 3 * 3600  # 3 hours — odds drift, but not minute to minute
 
 SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard"
 
-# Every league we track. Out-of-season leagues simply return no fixtures, so
-# listing them costs one cheap request and means European leagues light up
-# automatically when their seasons start.
-ESPN_CLUB_LEAGUES = {
-    # Europe — top flights
-    "eng.1": "Premier League", "eng.2": "EFL Championship", "eng.3": "EFL League One",
-    "eng.4": "EFL League Two", "eng.fa": "FA Cup", "eng.league_cup": "Carabao Cup",
-    "esp.1": "LaLiga", "esp.2": "LaLiga 2", "esp.copa_del_rey": "Copa del Rey",
-    "ger.1": "Bundesliga", "ger.2": "2. Bundesliga", "ger.dfb_pokal": "DFB Pokal",
-    "ita.1": "Serie A", "ita.2": "Serie B", "ita.coppa_italia": "Coppa Italia",
-    "fra.1": "Ligue 1", "fra.2": "Ligue 2",
-    "por.1": "Primeira Liga", "ned.1": "Eredivisie", "bel.1": "Belgian Pro League",
-    "tur.1": "Süper Lig", "sui.1": "Swiss Super League", "aut.1": "Austrian Bundesliga",
-    "gre.1": "Greek Super League", "sco.1": "Scottish Premiership",
-    "sco.2": "Scottish Championship", "den.1": "Danish Superliga",
-    "nor.1": "Eliteserien", "swe.1": "Allsvenskan", "fin.1": "Veikkausliiga",
-    "irl.1": "League of Ireland", "pol.1": "Ekstraklasa", "cze.1": "Czech First League",
-    "rou.1": "Liga I", "rus.1": "Russian Premier League", "ukr.1": "Ukrainian Premier League",
-    "cro.1": "HNL", "srb.1": "Serbian SuperLiga", "hun.1": "NB I", "isr.1": "Ligat ha'Al",
-    # UEFA clubs
-    "uefa.champions": "UEFA Champions League", "uefa.europa": "UEFA Europa League",
-    "uefa.europa.conf": "UEFA Conference League",
-    # North & Central America
-    "usa.1": "MLS", "usa.nwsl": "NWSL", "usa.usl.1": "USL Championship",
-    "mex.1": "Liga MX", "mex.2": "Liga de Expansión MX", "can.1": "Canadian Premier League",
-    "crc.1": "Liga Promerica", "gua.1": "Liga Nacional Guatemala",
-    "hon.1": "Liga Nacional Honduras", "slv.1": "Primera División El Salvador",
-    "pan.1": "LPF Panamá", "jam.1": "Jamaica Premier League",
-    "concacaf.champions": "CONCACAF Champions Cup",
-    # South America
-    "bra.1": "Brasileirão Série A", "bra.2": "Brasileirão Série B",
-    "arg.1": "Liga Profesional Argentina", "arg.2": "Primera Nacional",
-    "chi.1": "Primera División Chile", "col.1": "Categoría Primera A",
-    "per.1": "Liga 1 Perú", "uru.1": "Primera División Uruguay",
-    "ecu.1": "LigaPro Ecuador", "par.1": "División Profesional Paraguay",
-    "bol.1": "División Profesional Bolivia", "ven.1": "Primera División Venezuela",
-    "conmebol.libertadores": "Copa Libertadores", "conmebol.sudamericana": "Copa Sudamericana",
-    # Asia & Oceania
-    "jpn.1": "J1 League", "jpn.2": "J2 League", "kor.1": "K League 1",
-    "chn.1": "Chinese Super League", "aus.1": "A-League", "idn.1": "Liga 1 Indonesia",
-    "tha.1": "Thai League 1", "ind.1": "Indian Super League", "mys.1": "Malaysia Super League",
-    "qat.1": "Qatar Stars League", "sau.1": "Saudi Pro League", "uae.1": "UAE Pro League",
-    "irn.1": "Persian Gulf Pro League",
-    # Africa
-    "rsa.1": "South African Premiership", "egy.1": "Egyptian Premier League",
-    "mar.1": "Botola Pro", "tun.1": "Tunisian Ligue 1", "alg.1": "Algerian Ligue 1",
-    "nga.1": "Nigeria Premier League", "gha.1": "Ghana Premier League",
-    # Misc
-    "club.friendly": "Club Friendly",
-}
+# Compatibility name retained for existing callers. The registry is now the
+# only source of truth and includes club and international competitions.
+ESPN_CLUB_LEAGUES = provider_slugs()
+ESPN_COMPETITIONS = ESPN_CLUB_LEAGUES
+_FETCH_HEALTH: dict[str, dict] = {}
 
 
 # ── Odds helpers ───────────────────────────────────────────
@@ -198,9 +155,11 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
             params={"dates": date_range, "limit": 500}, timeout=25,
         )
         if resp.status_code != 200:
+            _FETCH_HEALTH[slug] = {"provider_active": False, "error": f"HTTP {resp.status_code}"}
             return []
         payload = resp.json()
     except Exception as e:
+        _FETCH_HEALTH[slug] = {"provider_active": False, "error": str(e)[:180]}
         logger.debug(f"ESPN fetch failed {slug}: {e}")
         return []
 
@@ -230,6 +189,8 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
                     rec = r.get("summary", "")
                     break
             return {
+                "id": t.get("id"),
+                "uid": t.get("uid"),
                 "name": t.get("displayName", ""),
                 "short": t.get("shortDisplayName", ""),
                 "abbrev": t.get("abbreviation", ""),
@@ -245,6 +206,7 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
             broadcasts.extend(b.get("names") or [])
 
         h, a = team_info(home), team_info(away)
+        context = tournament_context(slug, ev, comp)
         out.append({
             "event_id": ev.get("id"),
             "league_slug": slug,
@@ -259,8 +221,24 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
             },
             "broadcast": broadcasts,
             "odds": _parse_odds(comp),
+            "competition": context,
+            **{key: context.get(key) for key in (
+                "competition_type", "region", "team_type", "stage", "round",
+                "leg_number", "knockout", "neutral_venue", "context_label",
+            )},
         })
+    _FETCH_HEALTH[slug] = {
+        "provider_active": bool(payload.get("leagues")),
+        "scheduled_fixture_count": len(out),
+        "last_successful_fetch": datetime.now(timezone.utc).isoformat(),
+        "error": None,
+    }
     return out
+
+
+def fetch_health() -> dict[str, dict]:
+    """Last in-process provider health, keyed by competition slug."""
+    return {slug: dict(value) for slug, value in _FETCH_HEALTH.items()}
 
 
 def get_fixtures(days_ahead: int = 3, force: bool = False) -> list[dict]:
