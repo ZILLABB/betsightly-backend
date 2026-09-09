@@ -22,6 +22,9 @@ from typing import Any, Optional
 from sqlalchemy import Column, DateTime, Float, Integer, String, Text
 
 from database import Base, SessionLocal
+from leagues.fixture_ranker import (
+    RANKING_POLICY_VERSION as PUBLISHED_POLICY_VERSION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,9 @@ class PublishedSlip(Base):
     # bet). They settle and score by completely different rules, so the slip
     # has to remember which it was published as.
     presentation = Column(String(16), default="accumulator")
+    # Historical rows pre-date versioned publishing and remain NULL. New rows
+    # identify the policy generation that produced the public record.
+    policy_version = Column(String(40), nullable=True)
     status = Column(String(20), default="pending")             # pending|won|lost|void
     settled_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -75,6 +81,7 @@ def _add_missing_columns(engine) -> None:
 
     wanted = {
         "presentation": "VARCHAR(16) DEFAULT 'accumulator'",
+        "policy_version": "VARCHAR(40)",
     }
     try:
         existing = {c["name"] for c in sa.inspect(engine).get_columns("published_slips")}
@@ -163,7 +170,9 @@ def archive_slip(date: str, category: str, games: list[dict],
                 db.add(PublishedSlip(
                     date=date, category=category, picks=payload,
                     total_odds=total_odds, hit_probability=hit_probability,
-                    presentation=presentation, status="pending",
+                    presentation=presentation,
+                    policy_version=PUBLISHED_POLICY_VERSION,
+                    status="pending",
                 ))
             db.commit()
             return True
@@ -189,6 +198,7 @@ def get_history(limit_days: int = 30, category: Optional[str] = None) -> list[di
                     "category": r.category,
                     "status": r.status,
                     "presentation": r.presentation or "accumulator",
+                    "policy_version": r.policy_version,
                     "total_odds": r.total_odds,
                     "hit_probability": r.hit_probability,
                     "picks": json.loads(r.picks or "[]"),
@@ -320,7 +330,15 @@ def performance_summary(limit_days: int = 90) -> dict:
 
         c["unit"] = "slip"
 
-        if slip.get("presentation") == "singles":
+        # Over 1.5 has always been a singles product. Some legacy rows were
+        # written before `presentation` existed (or retained its accumulator
+        # default), so read-time accounting must not depend on a repair job.
+        # This interprets the record defensively without mutating history.
+        is_singles = (
+            slip.get("presentation") == "singles"
+            or slip.get("category") == "over_1_5"
+        )
+        if is_singles:
             # Counted in picks, not slips — the caller has to be able to tell,
             # or a page adding these to the accumulator counts reports ten
             # separate bets as ten slips.
