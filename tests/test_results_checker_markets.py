@@ -52,6 +52,37 @@ def test_score_lookup_prefers_the_exact_fixture_date():
     }
 
 
+def test_score_lookup_with_date_never_uses_a_different_fixture_date():
+    scores = {
+        "home|away|2026-09-01": {"home_score": 1, "away_score": 0},
+        "home|away": {"home_score": 1, "away_score": 0},
+    }
+    assert _lookup_score(scores, "Home", "Away", "2026-09-08") is None
+
+
+def test_score_lookup_without_date_can_use_legacy_pair_key():
+    scores = {
+        "home|away": {"home_score": 2, "away_score": 1},
+    }
+    assert _lookup_score(scores, "Home", "Away") == {
+        "home_score": 2,
+        "away_score": 1,
+    }
+
+
+def test_score_lookup_uses_known_alias_on_the_same_date():
+    scores = {
+        "united states|canada|2026-09-08": {
+            "home_score": 2,
+            "away_score": 0,
+        },
+    }
+    assert _lookup_score(scores, "USA", "Canada", "2026-09-08") == {
+        "home_score": 2,
+        "away_score": 0,
+    }
+
+
 def test_rollover_market_key_takes_precedence_over_diversity_group():
     pick = {
         "market": "goals",

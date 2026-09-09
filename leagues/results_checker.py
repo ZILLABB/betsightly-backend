@@ -536,16 +536,22 @@ def _lookup_score(scores: Dict[str, Dict[str, Any]], home: str, away: str,
     home_alias = TEAM_ALIASES.get(home_key, home_key)
     away_alias = TEAM_ALIASES.get(away_key, away_key)
 
-    candidates = []
+    # If the caller knows the fixture date, keep the lookup date-scoped.
+    # Falling back to a loose home|away key can grade a rematch against the
+    # wrong game when the same teams occur more than once in the score window.
+    # A missing exact-date score is safer left pending (and later voided) than
+    # turned into a false win or loss.
     if date:
-        candidates.extend([
+        candidates = [
             f"{home_key}|{away_key}|{date}",
             f"{home_alias}|{away_alias}|{date}",
-        ])
-    candidates.extend([
-        f"{home_key}|{away_key}",
-        f"{home_alias}|{away_alias}",
-    ])
+        ]
+    else:
+        # Legacy callers without a date may still use the old pair key.
+        candidates = [
+            f"{home_key}|{away_key}",
+            f"{home_alias}|{away_alias}",
+        ]
 
     for key in candidates:
         hit = scores.get(key)
@@ -784,34 +790,22 @@ def check_all_pending() -> Dict[str, int]:
                     home = pick.get("home_team", "")
                     away = pick.get("away_team", "")
                     ct = (pick.get("commence_time") or "")[:10]
-                    composite = f"{_normalize_name(home)}|{_normalize_name(away)}|{ct}"
+                    match_date = ct or (getattr(row, "date", "") or "")[:10]
 
-                    # Try exact match first
-                    match_data = finished.get(mid) or finished.get(composite)
-
-                    # Try with aliased team names (ESPN vs Odds API naming)
+                    # Use the same conservative fixture matcher as published
+                    # slips. A one-team fuzzy match can pick the wrong fixture
+                    # on a busy date (or even reverse home/away), corrupting the
+                    # public rollover record. Exact provider IDs remain valid
+                    # when a score source supplies them; otherwise both teams
+                    # and the fixture date must agree, including known aliases.
+                    match_data = finished.get(mid) if mid else None
                     if not match_data:
-                        home_alias = TEAM_ALIASES.get(_normalize_name(home), "")
-                        away_alias = TEAM_ALIASES.get(_normalize_name(away), "")
-                        for h in [_normalize_name(home), home_alias]:
-                            for a in [_normalize_name(away), away_alias]:
-                                if not h or not a:
-                                    continue
-                                alias_key = f"{h}|{a}|{ct}"
-                                match_data = finished.get(alias_key)
-                                if match_data:
-                                    logger.info(f"Day {row.day_number}: alias matched '{home} vs {away}' → '{alias_key}'")
-                                    break
-                            if match_data:
-                                break
-
-                    # Fuzzy word-match if alias also fails
-                    if not match_data:
-                        fuzzy_key = _fuzzy_match_team(home, [k for k in score_keys if ct in k])
-                        if fuzzy_key:
-                            match_data = finished.get(fuzzy_key)
-                            if match_data:
-                                logger.info(f"Day {row.day_number}: fuzzy matched '{home} vs {away}' → '{fuzzy_key}'")
+                        match_data = _lookup_score(
+                            finished,
+                            home,
+                            away,
+                            match_date,
+                        )
 
                     if not match_data:
                         if _missing_result_expired(pick):
