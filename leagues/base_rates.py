@@ -184,7 +184,10 @@ def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False) -> 
         try:
             age = time.time() - CACHE_PATH.stat().st_mtime
             if age < CACHE_TTL:
-                return json.loads(CACHE_PATH.read_text())
+                cached = json.loads(CACHE_PATH.read_text())
+                if cached.get("_priors"):
+                    return cached
+                logger.info("Base-rate cache predates competition priors; rebuilding")
         except Exception:
             pass
 

@@ -162,7 +162,10 @@ def get_ratings(slugs: dict[str, str] | None = None, force: bool = False) -> dic
     if not force and CACHE_PATH.exists():
         try:
             if time.time() - CACHE_PATH.stat().st_mtime < CACHE_TTL:
-                return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+                cached = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+                if "__international__" in cached and "__continental_club__" in cached:
+                    return cached
+                logger.info("ELO cache predates competition rating pools; rebuilding")
         except Exception:
             pass
 
