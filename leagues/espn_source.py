@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 CACHE_PATH = Path(__file__).parent.parent / "cache" / "espn_fixtures.json"
 CACHE_TTL = 3 * 3600  # 3 hours — odds drift, but not minute to minute
+CACHE_SCHEMA_VERSION = 2
 
 SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard"
 
@@ -42,6 +43,54 @@ SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreb
 ESPN_CLUB_LEAGUES = provider_slugs()
 ESPN_COMPETITIONS = ESPN_CLUB_LEAGUES
 _FETCH_HEALTH: dict[str, dict] = {}
+_LAST_CACHE_METADATA: dict = {}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _registry_version(leagues: dict | None = None) -> str:
+    names = sorted((leagues or ESPN_CLUB_LEAGUES).keys())
+    return hashlib.sha256("|".join(names).encode()).hexdigest()[:12]
+
+
+def cache_metadata() -> dict:
+    """Metadata for the fixture snapshot returned by the latest call."""
+    return dict(_LAST_CACHE_METADATA)
+
+
+def _parse_time(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _filter_window(fixtures: list[dict], start: datetime,
+                   end: datetime) -> list[dict]:
+    filtered = []
+    for fixture in fixtures:
+        kickoff = _parse_time(fixture.get("commence_time"))
+        if kickoff is not None and start <= kickoff <= end:
+            filtered.append(fixture)
+    return sorted(filtered, key=lambda fixture: fixture["commence_time"])
+
+
+def _cache_covers(payload: dict, start: datetime, end: datetime) -> bool:
+    metadata = payload.get("metadata") or {}
+    cached_start = _parse_time(metadata.get("coverage_start"))
+    cached_end = _parse_time(metadata.get("coverage_end"))
+    return bool(
+        payload.get("schema_version") == CACHE_SCHEMA_VERSION
+        and metadata.get("complete") is True
+        and cached_start is not None and cached_end is not None
+        and cached_start <= start and cached_end >= end
+        and metadata.get("registry_version") == _registry_version()
+        and set(metadata.get("leagues_requested") or [])
+        == set(ESPN_CLUB_LEAGUES)
+    )
 
 
 # ── Odds helpers ───────────────────────────────────────────
@@ -155,11 +204,19 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
             params={"dates": date_range, "limit": 500}, timeout=25,
         )
         if resp.status_code != 200:
-            _FETCH_HEALTH[slug] = {"provider_active": False, "error": f"HTTP {resp.status_code}"}
+            _FETCH_HEALTH[slug] = {
+                "provider_active": False,
+                "request_succeeded": False,
+                "error": f"HTTP {resp.status_code}",
+            }
             return []
         payload = resp.json()
     except Exception as e:
-        _FETCH_HEALTH[slug] = {"provider_active": False, "error": str(e)[:180]}
+        _FETCH_HEALTH[slug] = {
+            "provider_active": False,
+            "request_succeeded": False,
+            "error": str(e)[:180],
+        }
         logger.debug(f"ESPN fetch failed {slug}: {e}")
         return []
 
@@ -229,6 +286,10 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
         })
     _FETCH_HEALTH[slug] = {
         "provider_active": bool(payload.get("leagues")),
+        # A valid empty scoreboard is still a complete provider response. It
+        # must not poison the wide cache merely because this league has no
+        # scheduled fixture inside the requested window.
+        "request_succeeded": True,
         "scheduled_fixture_count": len(out),
         "last_successful_fetch": datetime.now(timezone.utc).isoformat(),
         "error": None,
@@ -241,41 +302,83 @@ def fetch_health() -> dict[str, dict]:
     return {slug: dict(value) for slug, value in _FETCH_HEALTH.items()}
 
 
-def get_fixtures(days_ahead: int = 3, force: bool = False) -> list[dict]:
+def get_fixtures(days_ahead: int = 3, force: bool = False,
+                 now: datetime | None = None) -> list[dict]:
     """All scheduled fixtures with odds across every tracked league. Cached."""
+    global _LAST_CACHE_METADATA
+    days_ahead = max(1, min(14, int(days_ahead)))
+    now = now or _utcnow()
+    requested_end = now + timedelta(days=days_ahead)
     if not force and CACHE_PATH.exists():
         try:
             if time.time() - CACHE_PATH.stat().st_mtime < CACHE_TTL:
                 cached = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-                if cached:
-                    return cached
+                if isinstance(cached, dict) and _cache_covers(
+                        cached, now, requested_end):
+                    fixtures = _filter_window(
+                        cached.get("fixtures") or [], now, requested_end
+                    )
+                    _LAST_CACHE_METADATA = {
+                        **(cached.get("metadata") or {}),
+                        "cache_hit": True,
+                        "requested_days": days_ahead,
+                        "returned_fixture_count": len(fixtures),
+                    }
+                    return fixtures
         except Exception:
             pass
 
-    now = datetime.now(timezone.utc)
     date_range = f"{now.strftime('%Y%m%d')}-{(now + timedelta(days=days_ahead)).strftime('%Y%m%d')}"
 
+    for slug in ESPN_CLUB_LEAGUES:
+        _FETCH_HEALTH.pop(slug, None)
     fixtures: list[dict] = []
     with ThreadPoolExecutor(max_workers=16) as pool:
         for chunk in pool.map(lambda s: _fetch_league(s, date_range), ESPN_CLUB_LEAGUES):
             fixtures.extend(chunk)
 
     # Drop fixtures that already kicked off
-    cutoff = now.isoformat().replace("+00:00", "Z")
-    fixtures = [f for f in fixtures if f["commence_time"] >= cutoff]
-    fixtures.sort(key=lambda f: f["commence_time"])
+    fixtures = _filter_window(fixtures, now, requested_end)
 
     for f in fixtures:
         f["match_id"] = hashlib.md5(
             f"{f['home']['name']}{f['away']['name']}{f['commence_time']}".encode()
         ).hexdigest()
 
+    successful = sorted(
+        slug for slug in ESPN_CLUB_LEAGUES
+        if (_FETCH_HEALTH.get(slug) or {}).get("request_succeeded")
+    )
+    failed = sorted(slug for slug in ESPN_CLUB_LEAGUES if slug not in successful)
+    metadata = {
+        "generated_at": _utcnow().isoformat(),
+        "requested_days": days_ahead,
+        "coverage_start": now.isoformat(),
+        "coverage_end": requested_end.isoformat(),
+        "leagues_requested": sorted(ESPN_CLUB_LEAGUES),
+        "successful_leagues": successful,
+        "failed_leagues": failed,
+        "fixture_count": len(fixtures),
+        "complete": not failed,
+        "registry_version": _registry_version(),
+        "cache_hit": False,
+        "returned_fixture_count": len(fixtures),
+    }
+    _LAST_CACHE_METADATA = metadata
     try:
         CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CACHE_PATH.write_text(json.dumps(fixtures, ensure_ascii=False), encoding="utf-8")
+        CACHE_PATH.write_text(json.dumps({
+            "schema_version": CACHE_SCHEMA_VERSION,
+            "metadata": metadata,
+            "fixtures": fixtures,
+        }, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass
 
     with_odds = sum(1 for f in fixtures if f["odds"].get("implied"))
-    logger.info(f"ESPN: {len(fixtures)} fixtures across {len(ESPN_CLUB_LEAGUES)} leagues ({with_odds} priced)")
+    logger.info(
+        "ESPN: %s fixtures across %s/%s leagues (%s priced, complete=%s)",
+        len(fixtures), len(successful), len(ESPN_CLUB_LEAGUES), with_odds,
+        metadata["complete"],
+    )
     return fixtures

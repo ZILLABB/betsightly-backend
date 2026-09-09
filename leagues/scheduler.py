@@ -214,6 +214,20 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
 
     _step(report, "calibrate", _recalibrate, run_date)
 
+    def _prepare_weekly_board():
+        from leagues.engine import prepared_board_status, run_pipeline
+        run_pipeline(days_ahead=7, force=force)
+        status = prepared_board_status(days_ahead=7)
+        if not status.get("ready"):
+            raise RuntimeError(
+                "weekly board incomplete: "
+                f"{len((status.get('provider') or {}).get('failed_leagues') or [])} "
+                "provider fetches failed"
+            )
+        return status
+
+    _step(report, "weekly_board", _prepare_weekly_board, run_date)
+
     # 2. Build and lock the card. First write wins, so calling this again
     #    later in the day returns the same card rather than replacing it.
     def _publish_card():

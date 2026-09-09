@@ -17,12 +17,106 @@ league is fetched in one ranged request.
 """
 
 import logging
+import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
-_CACHE: dict = {"picks": None, "fixtures": None, "ts": 0.0}
+_CACHE: dict = {"entries": {}}
 _TTL = 3600
+_PIPELINE_LOCK = threading.Lock()
+_PREWARM_LOCK = threading.Lock()
+_PREWARMING = False
+
+
+def _parse_kickoff(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _filter_cached(entry: dict, days_ahead: int,
+                   now: datetime) -> tuple[list[dict], list[dict]]:
+    end = now + timedelta(days=days_ahead)
+    fixtures = [fixture for fixture in entry["fixtures"]
+                if (kickoff := _parse_kickoff(fixture.get("commence_time")))
+                and now <= kickoff <= end]
+    fixture_ids = {str(fixture.get("match_id")) for fixture in fixtures}
+    picks = [pick for pick in entry["picks"]
+             if str(pick.get("match_id")) in fixture_ids]
+    return picks, fixtures
+
+
+def _covering_entry(days_ahead: int, now_ts: float,
+                    require_complete: bool = False) -> dict | None:
+    valid = [entry for entry in _CACHE["entries"].values()
+             if now_ts - entry["ts"] < _TTL
+             and entry["metadata"]["requested_days"] >= days_ahead
+             and (not require_complete
+                  or (entry["metadata"].get("provider") or {}).get(
+                      "complete", True))]
+    return (min(valid, key=lambda item: item["metadata"]["requested_days"])
+            if valid else None)
+
+
+def _store_cache_entry(days_ahead: int, picks: list[dict],
+                       fixtures: list[dict], now: float,
+                       now_dt: datetime, provider: dict) -> None:
+    """Store one evaluated horizon; kept small so coverage rules are testable."""
+    _CACHE["entries"][days_ahead] = {
+        "picks": picks,
+        "fixtures": fixtures,
+        "ts": now,
+        "metadata": {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "requested_days": days_ahead,
+            "coverage_start": now_dt.isoformat(),
+            "coverage_end": (now_dt + timedelta(days=days_ahead)).isoformat(),
+            "fixture_count": len(fixtures),
+            "provider": provider,
+        },
+    }
+
+
+def prepared_board_status(days_ahead: int = 7) -> dict:
+    """Describe whether a complete evaluated board is ready for interaction."""
+    entry = _covering_entry(days_ahead, time.time())
+    if not entry:
+        return {"ready": False, "requested_days": days_ahead}
+    provider = entry["metadata"].get("provider") or {}
+    return {
+        **entry["metadata"],
+        "ready": bool(provider.get("complete", True)),
+        "age_seconds": round(time.time() - entry["ts"], 1),
+    }
+
+
+def start_prepared_board_refresh(days_ahead: int = 7,
+                                 force: bool = True) -> bool:
+    """Singleflight background preparation for an interactive Builder board."""
+    global _PREWARMING
+    with _PREWARM_LOCK:
+        if _PREWARMING:
+            return False
+        _PREWARMING = True
+
+    def _work():
+        global _PREWARMING
+        try:
+            run_pipeline(days_ahead=days_ahead, force=force)
+        except Exception as exc:
+            logger.error("prepared board refresh failed: %s", exc, exc_info=True)
+        finally:
+            with _PREWARM_LOCK:
+                _PREWARMING = False
+
+    threading.Thread(
+        target=_work, daemon=True, name="weekly-board-prewarm"
+    ).start()
+    return True
 
 
 def _elo_for(fixture: dict, ratings: dict | None = None):
@@ -36,11 +130,29 @@ def _elo_for(fixture: dict, ratings: dict | None = None):
 
 def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], list[dict]]:
     """Return (all_picks, fixtures). Every fixture passes through the model."""
+    days_ahead = max(1, min(14, int(days_ahead)))
     now = time.time()
-    if not force and _CACHE["picks"] is not None and (now - _CACHE["ts"]) < _TTL:
-        return _CACHE["picks"], _CACHE["fixtures"]
+    now_dt = datetime.now(timezone.utc)
+    if not force and (cached := _covering_entry(
+            days_ahead, now, require_complete=True)):
+        return _filter_cached(cached, days_ahead, now_dt)
 
-    from leagues.espn_source import get_fixtures, ESPN_CLUB_LEAGUES
+    with _PIPELINE_LOCK:
+        now = time.time()
+        now_dt = datetime.now(timezone.utc)
+        if not force and (cached := _covering_entry(
+                days_ahead, now, require_complete=True)):
+            return _filter_cached(cached, days_ahead, now_dt)
+
+        return _build_pipeline(days_ahead, force, now, now_dt)
+
+
+def _build_pipeline(days_ahead: int, force: bool, now: float,
+                    now_dt: datetime) -> tuple[list[dict], list[dict]]:
+    from leagues.espn_source import (
+        ESPN_CLUB_LEAGUES, cache_metadata as espn_cache_metadata,
+        get_fixtures,
+    )
     from leagues.base_rates import get_base_rates, rates_for
     from leagues.predictor import predict
     from leagues.picks import MIN_CANDIDATE_CONFIDENCE, build_picks
@@ -112,7 +224,10 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
         f"(calibrated on {fit.get('n', 0)} settled legs)"
     )
 
-    _CACHE.update({"picks": all_picks, "fixtures": fixtures, "ts": now})
+    provider = espn_cache_metadata()
+    _store_cache_entry(
+        days_ahead, all_picks, fixtures, now, now_dt, provider
+    )
     return all_picks, fixtures
 
 

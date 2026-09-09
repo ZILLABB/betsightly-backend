@@ -10,7 +10,11 @@ from sqlalchemy.orm import sessionmaker
 
 # Use SQLite in-memory for tests — no PostgreSQL required
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
-os.environ.setdefault("ENVIRONMENT", "test")
+# Test imports must never inherit a production shell's background-job flags.
+# A prepared-board prewarm performs real provider I/O, while settlement and
+# publishing mutate state, so make the suite's process ownership explicit.
+os.environ["ENVIRONMENT"] = "test"
+os.environ["ENABLE_BACKGROUND_JOBS"] = "false"
 os.environ.setdefault("API_KEY", "")  # disable auth in tests
 
 from database import Base, get_db

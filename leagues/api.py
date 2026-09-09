@@ -358,7 +358,21 @@ async def slip_builder_generate(target: float, horizon: str = "week",
         refresh=bool(refresh),
     )
     from leagues.daily_feed import _publish_date
-    from leagues.slip_builder import generate
+    from leagues.engine import prepared_board_status, start_prepared_board_refresh
+    from leagues.slip_builder import HORIZONS, MAX_TARGET, MIN_TARGET, generate
+
+    if not (MIN_TARGET <= float(target) <= MAX_TARGET):
+        return {
+            "status": "error",
+            "reason": (
+                f"Choose a target between {MIN_TARGET:g} and {MAX_TARGET:g}."
+            ),
+        }
+    if horizon not in HORIZONS:
+        return {
+            "status": "error",
+            "reason": f"Horizon must be one of {sorted(HORIZONS)}.",
+        }
 
     key = (round(float(target), 2), horizon, _publish_date())
     hit = _SLIP_CACHE.get(key)
@@ -377,6 +391,30 @@ async def slip_builder_generate(target: float, horizon: str = "week",
         log_runtime_memory(
             "builder_end", target=key[0], horizon=horizon,
             status=response.get("status"), cached=True,
+        )
+        return response
+
+    board = prepared_board_status(days_ahead=7)
+    if not board.get("ready"):
+        refresh_started = start_prepared_board_refresh(
+            days_ahead=7, force=True
+        )
+        response = {
+            "status": "unavailable",
+            "reason": "board_refreshing",
+            "retryable": True,
+            "refresh_started": refresh_started,
+            "board": board,
+            "requested_target": round(float(target), 2),
+            "horizon": horizon,
+        }
+        log_pool_status(
+            "builder_end", target=key[0], horizon=horizon,
+            status="board_refreshing", cached=False,
+        )
+        log_runtime_memory(
+            "builder_end", target=key[0], horizon=horizon,
+            status="board_refreshing", cached=False,
         )
         return response
 
@@ -404,7 +442,12 @@ async def slip_builder_generate(target: float, horizon: str = "week",
                     status=result.get("status"), cached=True,
                 )
                 return result
-            result = await asyncio.to_thread(generate, target, horizon=horizon, force=refresh)
+            # `refresh` bypasses only the finished-slip cache. Public clicks
+            # consume the already prepared board and never force a full
+            # provider/model/SportyBet refresh in the request path.
+            result = await asyncio.to_thread(
+                generate, target, horizon=horizon, force=False
+            )
             if result.get("status") == "success":
                 _SLIP_CACHE[key] = {"result": result, "ts": _t.time()}
     except Exception as e:
