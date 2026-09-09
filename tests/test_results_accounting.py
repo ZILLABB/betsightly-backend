@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
 from leagues import api, picks_db
+from leagues.booking import leg_fingerprint
 
 
 def _leg(status, odds=1.5):
@@ -120,5 +121,110 @@ def test_published_slips_migration_and_new_rows_include_policy_version(monkeypat
     )
     assert row.policy_version == picks_db.PUBLISHED_POLICY_VERSION
     history = picks_db.get_history(limit_days=2)
-    assert history[0]["policy_version"] == "fixture-ranked-v1.1"
+    assert history[0]["policy_version"] == "selection-policy-v1.1"
     assert history[1]["policy_version"] is None
+
+
+def test_settled_accumulator_return_uses_winning_odds_and_voids_at_one():
+    cases = [
+        ({"status": "won", "total_odds": 9.0,
+          "picks": [_leg("won", 1.5), _leg("won", 2.0)]}, 3.0),
+        ({"status": "won", "total_odds": 9.0,
+          "picks": [_leg("won", 1.5), _leg("void", 1.8)]}, 1.5),
+        ({"status": "won", "total_odds": 8.02,
+          "picks": [_leg("won", 1.65), _leg("void", 1.27),
+                    _leg("void", 1.29), _leg("won", 1.77)]}, 2.9205),
+        ({"status": "lost", "total_odds": 8.02,
+          "picks": [_leg("won", 1.65), _leg("lost", 1.77)]}, 0.0),
+        ({"status": "void", "total_odds": 2.0,
+          "picks": [_leg("void", 2.0)]}, 1.0),
+        ({"status": "won", "total_odds": 2.4,
+          "picks": [{"status": "void", "market": "dnb_home", "odds": 1.7},
+                    _leg("won", 1.4)]}, 1.4),
+    ]
+    for slip, expected in cases:
+        returned, source = picks_db.settled_accumulator_return(slip)
+        assert returned == expected
+        assert source == "settled_leg_odds" or slip["status"] != "won"
+
+
+def test_settled_accumulator_return_has_explicit_legacy_fallback():
+    returned, source = picks_db.settled_accumulator_return({
+        "status": "won", "total_odds": 4.2,
+        "picks": [{"status": None, "odds": 1.5}],
+    })
+    assert returned == 4.2
+    assert source == "legacy_total_odds"
+
+
+def test_performance_uses_void_adjusted_return_and_labels_bookable_coverage(monkeypatch):
+    picks = [_leg("won", 1.65), _leg("void", 1.27), _leg("won", 1.77)]
+    for index, pick in enumerate(picks):
+        pick.update({"match_id": f"m{index}", "market": "over_1_5",
+                     "home_team": f"H{index}", "away_team": f"A{index}",
+                     "odds_are_real": True})
+    history = [_slip("10_odds", "won", picks, odds=8.02)]
+    monkeypatch.setattr(picks_db, "get_history", lambda limit_days: history)
+    monkeypatch.setattr(picks_db, "_booking_records", lambda cutoff: {})
+    result = picks_db.performance_summary(90)["10_odds"]
+    assert result["returned"] == 2.9205
+    assert result["profit"] == 1.92
+    assert result["published_odds_roi"] == 1.9205
+    assert result["published_record"]["return_sources"] == {
+        "settled_leg_odds": 1
+    }
+    assert result["bookable_record"]["settled"] == 0
+    assert result["bookable_record"]["coverage"] == 0.0
+
+
+def test_bookable_roi_requires_validated_exact_selection(monkeypatch):
+    picks = []
+    for index, odds in enumerate((1.5, 1.4)):
+        picks.append({"match_id": f"m{index}", "market": "over_1_5",
+                      "home_team": f"H{index}", "away_team": f"A{index}",
+                      "status": "won", "odds": odds, "odds_are_real": True})
+    slip = _slip("2_odds", "won", picks, odds=2.1)
+    fingerprint = leg_fingerprint(picks)
+    monkeypatch.setattr(picks_db, "get_history", lambda limit_days: [slip])
+    monkeypatch.setattr(picks_db, "_booking_records", lambda cutoff: {
+        (slip["date"], slip["category"]): {
+            "status": "active", "readback_validation": "PASSED",
+            "actual_sportybet_odds": 2.2, "leg_fingerprint": fingerprint,
+            "booking_variant_fingerprint": fingerprint, "booked_leg_count": 2,
+        }
+    })
+    result = picks_db.performance_summary(90)["2_odds"]
+    assert result["bookable_record"] == {
+        "settled": 1, "won": 1, "lost": 0, "staked": 1.0,
+        "returned": 2.2, "profit": 1.2, "roi": 1.2, "coverage": 1.0,
+    }
+
+
+def test_get_history_uses_true_calendar_window_without_per_day_row_cap(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    picks_db.PublishedSlip.__table__.create(engine)
+    session = sessionmaker(bind=engine)
+    db = session()
+    for index in range(8):
+        db.add(picks_db.PublishedSlip(
+            date="2026-09-09", category=f"tier_{index}", picks="[]",
+            total_odds=2.0, hit_probability=0.5, status="lost",
+        ))
+    db.add(picks_db.PublishedSlip(
+        date="2026-08-11", category="boundary", picks="[]",
+        total_odds=2.0, hit_probability=0.5, status="lost",
+    ))
+    db.add(picks_db.PublishedSlip(
+        date="2026-08-10", category="too_old", picks="[]",
+        total_odds=2.0, hit_probability=0.5, status="lost",
+    ))
+    db.commit()
+    db.close()
+    monkeypatch.setattr(picks_db, "SessionLocal", session)
+
+    rows = picks_db.get_history(limit_days=30, as_of="2026-09-09")
+    assert len(rows) == 9
+    assert {row["category"] for row in rows} >= {"tier_7", "boundary"}
+    assert "too_old" not in {row["category"] for row in rows}
+    assert picks_db.history_cutoff(60, "2026-09-09") == "2026-07-12"
+    assert picks_db.history_cutoff(90, "2026-09-09") == "2026-06-12"

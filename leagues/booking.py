@@ -163,6 +163,35 @@ def bookings_for(publish_date: str) -> dict:
     return out
 
 
+def booking_history(start_date: str) -> dict[tuple[str, str], dict]:
+    """Stored booking facts from a date onward, keyed by exact card/tier.
+
+    Results accounting uses this only when readback validation and immutable
+    selection fingerprints prove that the booking represents the published
+    set. Missing or malformed historical rows are simply absent from the
+    SportyBet sample and remain in the published-odds record.
+    """
+    from sqlalchemy import text
+    from database import engine
+    out: dict[tuple[str, str], dict] = {}
+    try:
+        with engine.begin() as conn:
+            _ensure_table(conn)
+            rows = conn.execute(text(
+                "SELECT publish_date, tier, detail FROM tier_bookings "
+                "WHERE publish_date >= :start_date"
+            ), {"start_date": start_date}).fetchall()
+    except Exception as exc:
+        logger.warning(f"booking history lookup failed: {exc}")
+        return out
+    for publish_date, tier, detail in rows:
+        try:
+            out[(publish_date, tier)] = json.loads(detail) if detail else {}
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def generated_booking_for(fingerprint: str) -> dict | None:
     """A previously validated generated code for this exact normalized slip."""
     from sqlalchemy import text
@@ -262,6 +291,50 @@ def leg_fingerprint(games: list) -> str:
         ]))
     parts.sort()
     return hashlib.md5("~".join(parts).encode()).hexdigest()[:16]
+
+
+def validated_public_booking(record: dict | None, games: list) -> dict | None:
+    """Return a stored booking only when it is safe to advertise.
+
+    This is a read-only gate over facts already produced by booking readback.
+    A rebuilt full ticket is allowed because its original fingerprint still
+    proves which locked card it came from. Partial and stale tickets are not.
+    """
+    if not record or record.get("status") != "active":
+        return None
+    if not record.get("share_code"):
+        return None
+    if str(record.get("readback_validation") or "").upper() != "PASSED":
+        return None
+    booking_status = str(record.get("booking_status") or "").upper()
+    if booking_status not in {"FULL", "REBUILT_FULL"}:
+        return None
+    if record.get("partial") or int(record.get("excluded_leg_count") or 0):
+        return None
+
+    expected = leg_fingerprint(games)
+    if not expected or record.get("leg_fingerprint") != expected:
+        return None
+    original_count = int(record.get("original_leg_count") or 0)
+    booked_count = int(
+        record.get("booked_leg_count") or record.get("legs") or 0
+    )
+    if original_count != len(games) or booked_count != len(games):
+        return None
+
+    expires_at = record.get("expires_at")
+    if expires_at:
+        try:
+            expires = datetime.fromisoformat(
+                str(expires_at).replace("Z", "+00:00")
+            )
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if expires <= datetime.now(timezone.utc):
+                return None
+        except (TypeError, ValueError):
+            return None
+    return record
 
 
 def selection_fingerprint(selections: list) -> str:

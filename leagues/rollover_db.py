@@ -15,9 +15,10 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float
+from sqlalchemy import Column, Integer, String, Text, DateTime, Float, inspect, text
 
 from database import Base, SessionLocal
+from leagues.policy_version import PUBLISHED_SELECTION_POLICY_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class RolloverDay(Base):
     combined_odds = Column(Float, nullable=False)
     avg_confidence = Column(Float, nullable=False)
     status = Column(String(20), default="pending")  # pending | won | lost | void
+    policy_version = Column(String(40), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -60,6 +62,7 @@ def _day_dict(r) -> Dict[str, Any]:
 
     hit = round(joint, 4) if have else r.avg_confidence
     return {
+        "archive_id": r.id,
         "day_number": r.day_number,
         "date": r.date,
         "picks": picks,
@@ -69,6 +72,8 @@ def _day_dict(r) -> Dict[str, Any]:
         # expect it, and it is the same quantity.
         "avg_confidence": hit,
         "status": r.status,
+        "policy_version": r.policy_version,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
     }
 
 
@@ -112,7 +117,9 @@ def load_chain(default_start_date: str) -> Dict[str, Any]:
 
 def history(limit_days: int = 90) -> List[Dict[str, Any]]:
     """Every rollover day in the window, across current and older chains."""
-    cutoff = (datetime.utcnow() - timedelta(days=max(1, limit_days))).strftime("%Y-%m-%d")
+    cutoff = (
+        datetime.utcnow() - timedelta(days=max(1, limit_days) - 1)
+    ).strftime("%Y-%m-%d")
     try:
         db = SessionLocal()
         try:
@@ -165,6 +172,7 @@ def append_day(chain_start_date: str, day: Dict[str, Any]) -> bool:
                     day.get("hit_probability", day.get("avg_confidence", 0.5))
                 ),
                 status=day.get("status", "pending"),
+                policy_version=PUBLISHED_SELECTION_POLICY_VERSION,
             )
             db.add(row)
             db.commit()
@@ -251,6 +259,15 @@ def ensure_table():
     try:
         from database import engine
         RolloverDay.__table__.create(bind=engine, checkfirst=True)
+        existing = {column["name"] for column in inspect(engine).get_columns(
+            RolloverDay.__tablename__
+        )}
+        if "policy_version" not in existing:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE wc_rollover_days "
+                    "ADD COLUMN policy_version VARCHAR(40)"
+                ))
         logger.info("wc_rollover_days table ready")
     except Exception as e:
         logger.warning(f"Could not create wc_rollover_days table: {e}")

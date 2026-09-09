@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import Column, Integer, String, Text, DateTime, Float, Boolean, Date
 from sqlalchemy.ext.declarative import declarative_base
 
-from database import get_db, Base, engine
+from database import Base, SessionLocal, engine, log_pool_exception, log_pool_status
 from services.fixture_service import FixtureService
 from api.endpoints.ml_predictions import RealMLPredictionService
 from services.accumulator_builder import AccumulatorBuilder
@@ -99,6 +99,7 @@ class DailyPredictionsService:
         Returns:
             Generation result summary
         """
+        db: Optional[Session] = None
         try:
             if target_date is None:
                 target_date = datetime.now().strftime("%Y-%m-%d")
@@ -107,8 +108,11 @@ class DailyPredictionsService:
             
             logger.info(f"🎯 Generating daily predictions for {target_date}")
             
-            # Get database session
-            db = next(get_db())
+            # This retired pipeline is retained only for explicit compatibility
+            # calls. It owns this session, so every return and error path must
+            # release it rather than advancing the FastAPI dependency generator.
+            db = SessionLocal()
+            log_pool_status("legacy_generation_start", target_date=target_date)
             
             # Check if predictions already exist for this date
             existing_summary = db.query(DailyPredictionSummary).filter(
@@ -152,11 +156,6 @@ class DailyPredictionsService:
             predictions_count = 0
             all_predictions = []
 
-            # Clear existing predictions for this date
-            db.query(DailyPrediction).filter(
-                DailyPrediction.prediction_date == prediction_date
-            ).delete()
-
             # Generate ML predictions for all fixtures
             for fixture in upcoming_fixtures:
                 try:
@@ -197,6 +196,13 @@ class DailyPredictionsService:
                 odds_map=odds_map if odds_map else None,
             )
             accumulators = accumulator_result.get('accumulators', {})
+
+            # Do not hold an open write transaction while remote fixtures and
+            # model predictions are being computed. Start the replacement only
+            # once all non-database work above has completed.
+            db.query(DailyPrediction).filter(
+                DailyPrediction.prediction_date == prediction_date
+            ).delete()
 
             # Count successful accumulators
             category_counts = {"2_odds": 0, "5_odds": 0, "10_odds": 0, "over_1_5": 0, "rollover": 0}
@@ -264,11 +270,15 @@ class DailyPredictionsService:
                 "message": f"Generated {predictions_count} predictions",
                 "summary": self._summary_to_dict(summary)
             }
-            db.close()
             return result
             
         except Exception as e:
             logger.error(f"Error generating daily predictions: {str(e)}")
+            log_pool_exception(
+                "legacy_generation_pool_timeout",
+                e,
+                target_date=target_date,
+            )
             
             # Update summary with error
             try:
@@ -276,7 +286,6 @@ class DailyPredictionsService:
                     summary.generation_status = "failed"
                     summary.error_message = str(e)
                     db.commit()
-                    db.close()
             except:
                 pass
             
@@ -285,6 +294,10 @@ class DailyPredictionsService:
                 "date": target_date,
                 "message": f"Error: {str(e)}"
             }
+        finally:
+            if db is not None:
+                db.close()
+            log_pool_status("legacy_generation_end", target_date=target_date)
     
     def _filter_upcoming_fixtures(self, fixtures: List[Dict]) -> List[Dict]:
         """Filter for upcoming (not-started) fixtures only.

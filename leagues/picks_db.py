@@ -16,14 +16,16 @@ Falls back to no-ops when the database is unreachable so local dev still runs.
 
 import json
 import logging
-from datetime import datetime
+from datetime import date as date_type
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import Column, DateTime, Float, Integer, String, Text
 
 from database import Base, SessionLocal
-from leagues.fixture_ranker import (
-    RANKING_POLICY_VERSION as PUBLISHED_POLICY_VERSION,
+from leagues.policy_version import (
+    PUBLISHED_SELECTION_POLICY_VERSION as PUBLISHED_POLICY_VERSION,
+    sample_readiness,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,7 @@ class PublishedSlip(Base):
     # Historical rows pre-date versioned publishing and remain NULL. New rows
     # identify the policy generation that produced the public record.
     policy_version = Column(String(40), nullable=True)
+    selection_fingerprint = Column(String(64), nullable=True)
     status = Column(String(20), default="pending")             # pending|won|lost|void
     settled_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -82,6 +85,7 @@ def _add_missing_columns(engine) -> None:
     wanted = {
         "presentation": "VARCHAR(16) DEFAULT 'accumulator'",
         "policy_version": "VARCHAR(40)",
+        "selection_fingerprint": "VARCHAR(64)",
     }
     try:
         existing = {c["name"] for c in sa.inspect(engine).get_columns("published_slips")}
@@ -167,11 +171,13 @@ def archive_slip(date: str, category: str, games: list[dict],
                 # tipped quietly changed underneath us.
                 return True
             else:
+                from leagues.booking import leg_fingerprint
                 db.add(PublishedSlip(
                     date=date, category=category, picks=payload,
                     total_odds=total_odds, hit_probability=hit_probability,
                     presentation=presentation,
                     policy_version=PUBLISHED_POLICY_VERSION,
+                    selection_fingerprint=leg_fingerprint(games),
                     status="pending",
                 ))
             db.commit()
@@ -183,26 +189,43 @@ def archive_slip(date: str, category: str, games: list[dict],
         return False
 
 
-def get_history(limit_days: int = 30, category: Optional[str] = None) -> list[dict]:
-    """Published slips, newest first."""
+def history_cutoff(limit_days: int, as_of: date_type | str | None = None) -> str:
+    """Inclusive calendar cutoff for an N-day window (today counts as day 1)."""
+    if isinstance(as_of, str):
+        anchor = datetime.strptime(as_of[:10], "%Y-%m-%d").date()
+    else:
+        anchor = as_of or datetime.now(timezone.utc).date()
+    return (anchor - timedelta(days=max(1, int(limit_days)) - 1)).isoformat()
+
+
+def get_history(limit_days: int = 30, category: Optional[str] = None,
+                as_of: date_type | str | None = None) -> list[dict]:
+    """Published slips inside a true rolling calendar window, newest first."""
     try:
         db = SessionLocal()
         try:
-            q = db.query(PublishedSlip)
+            q = db.query(PublishedSlip).filter(
+                PublishedSlip.date >= history_cutoff(limit_days, as_of)
+            )
             if category:
                 q = q.filter(PublishedSlip.category == category)
-            rows = q.order_by(PublishedSlip.date.desc(), PublishedSlip.id.desc()).limit(limit_days * 6).all()
+            rows = q.order_by(
+                PublishedSlip.date.desc(), PublishedSlip.id.desc()
+            ).all()
             return [
                 {
+                    "archive_id": r.id,
                     "date": r.date,
                     "category": r.category,
                     "status": r.status,
                     "presentation": r.presentation or "accumulator",
                     "policy_version": r.policy_version,
+                    "selection_fingerprint": r.selection_fingerprint,
                     "total_odds": r.total_odds,
                     "hit_probability": r.hit_probability,
                     "picks": json.loads(r.picks or "[]"),
                     "settled_at": r.settled_at.isoformat() if r.settled_at else None,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
                 }
                 for r in rows
             ]
@@ -319,14 +342,103 @@ def settle_slip(slip_id: int, pick_results: list[str]) -> Optional[str]:
         return None
 
 
-def performance_summary(limit_days: int = 90) -> dict:
+def settled_accumulator_return(slip: dict) -> tuple[float, str]:
+    """One-unit settled return and its evidence source.
+
+    Settled leg outcomes are authoritative: wins retain their quoted price and
+    void/DNB-push legs contribute 1.00. A legacy winning row without usable
+    leg outcomes falls back to its published total rather than being silently
+    turned into a zero return.
+    """
+    status = slip.get("status")
+    if status == "lost":
+        return 0.0, "settled_legs"
+    if status == "void":
+        return 1.0, "settled_legs"
+    picks = slip.get("picks") or []
+    states = [pick.get("status") for pick in picks]
+    usable = bool(states) and all(state in ("won", "void") for state in states)
+    if status == "won" and usable:
+        returned = 1.0
+        for pick in picks:
+            if pick.get("status") == "won":
+                try:
+                    odds = float(pick.get("odds"))
+                except (TypeError, ValueError):
+                    usable = False
+                    break
+                if odds <= 1.0:
+                    usable = False
+                    break
+                returned *= odds
+        if usable:
+            return round(returned, 6), "settled_leg_odds"
+    try:
+        return float(slip.get("total_odds") or 0), "legacy_total_odds"
+    except (TypeError, ValueError):
+        return 0.0, "legacy_total_odds"
+
+
+def _booking_records(cutoff: str) -> dict[tuple[str, str], dict]:
+    try:
+        from leagues.booking import booking_history
+        return booking_history(cutoff)
+    except Exception as exc:
+        logger.debug(f"booking performance unavailable: {exc}")
+        return {}
+
+
+def _exact_validated_booking(slip: dict, booking: dict | None) -> float | None:
+    if not booking or booking.get("status") != "active":
+        return None
+    if str(booking.get("readback_validation") or "").upper() != "PASSED":
+        return None
+    actual = booking.get("actual_sportybet_odds")
+    if actual is None:
+        return None
+    from leagues.booking import leg_fingerprint
+    fingerprint = slip.get("selection_fingerprint") or leg_fingerprint(
+        slip.get("picks") or []
+    )
+    original = booking.get("leg_fingerprint")
+    variant = booking.get("booking_variant_fingerprint") or original
+    if not fingerprint or fingerprint != original or variant != original:
+        return None
+    if int(booking.get("booked_leg_count") or booking.get("legs") or 0) != len(
+        slip.get("picks") or []
+    ):
+        return None
+    # An aggregate readback price cannot tell us the price of a leg removed by
+    # a later void. Exclude that slip from the SportyBet ROI sample rather than
+    # falsely preserving the original aggregate price.
+    if any(pick.get("status") == "void" for pick in slip.get("picks") or []):
+        return None
+    try:
+        value = float(actual)
+        return value if value > 1.0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def performance_summary(limit_days: int = 90,
+                        policy_version: str | None = None) -> dict:
     """Aggregate win rate per category, plus profit on level 1-unit stakes."""
     history = get_history(limit_days=limit_days)
+    if policy_version is not None:
+        history = [row for row in history
+                   if row.get("policy_version") == policy_version]
+    bookings = _booking_records(history_cutoff(limit_days))
     by_cat: dict[str, dict] = {}
     for slip in history:
         if slip["status"] not in ("won", "lost"):
             continue
-        c = by_cat.setdefault(slip["category"], {"won": 0, "lost": 0, "staked": 0.0, "returned": 0.0})
+        c = by_cat.setdefault(slip["category"], {
+            "won": 0, "lost": 0, "staked": 0.0, "returned": 0.0,
+            "return_sources": {}, "real_odds_records": 0,
+            "estimated_odds_records": 0,
+            "_bookable_won": 0, "_bookable_lost": 0,
+            "_bookable_staked": 0.0, "_bookable_returned": 0.0,
+        })
 
         c["unit"] = "slip"
 
@@ -358,10 +470,26 @@ def performance_summary(limit_days: int = 90) -> dict:
 
         if slip["status"] == "won":
             c["won"] += 1
-            c["returned"] += slip["total_odds"]
         else:
             c["lost"] += 1
+        returned, source = settled_accumulator_return(slip)
+        c["returned"] += returned
+        c["return_sources"][source] = c["return_sources"].get(source, 0) + 1
         c["staked"] += 1.0
+        if all(bool(pick.get("odds_are_real")) for pick in slip.get("picks") or []):
+            c["real_odds_records"] += 1
+        else:
+            c["estimated_odds_records"] += 1
+
+        booking = bookings.get((slip["date"], slip["category"]))
+        actual_odds = _exact_validated_booking(slip, booking)
+        if actual_odds is not None:
+            c["_bookable_staked"] += 1.0
+            if slip["status"] == "won":
+                c["_bookable_won"] += 1
+                c["_bookable_returned"] += actual_odds
+            else:
+                c["_bookable_lost"] += 1
 
     for c in by_cat.values():
         settled = c["won"] + c["lost"]
@@ -370,6 +498,32 @@ def performance_summary(limit_days: int = 90) -> dict:
         c["win_rate"] = round(c["won"] / settled, 4) if settled else 0.0
         c["profit"] = round(c["returned"] - c["staked"], 2)
         c["roi"] = round((c["returned"] - c["staked"]) / c["staked"], 4) if c["staked"] else 0.0
+        c["published_odds_roi"] = c["roi"]
+        c["published_record"] = {
+            "settled": settled, "staked": c["staked"],
+            "returned": round(c["returned"], 4), "profit": c["profit"],
+            "roi": c["roi"], "return_sources": c["return_sources"],
+            "real_odds_records": c["real_odds_records"],
+            "estimated_odds_records": c["estimated_odds_records"],
+        }
+        bookable_staked = c.pop("_bookable_staked")
+        bookable_returned = c.pop("_bookable_returned")
+        bookable_won = c.pop("_bookable_won")
+        bookable_lost = c.pop("_bookable_lost")
+        bookable_profit = bookable_returned - bookable_staked
+        c["bookable_sportybet_roi"] = (
+            round(bookable_profit / bookable_staked, 4)
+            if bookable_staked else None
+        )
+        c["bookable_record"] = {
+            "settled": int(bookable_staked), "won": bookable_won,
+            "lost": bookable_lost, "staked": bookable_staked,
+            "returned": round(bookable_returned, 4),
+            "profit": round(bookable_profit, 2),
+            "roi": c["bookable_sportybet_roi"],
+            "coverage": round(bookable_staked / c["staked"], 4)
+            if c["staked"] else 0.0,
+        }
     return by_cat
 
 
@@ -390,30 +544,9 @@ def calibration(limit_days: int = 180) -> dict:
 
     Legs still pending or voided are excluded — only settled outcomes count.
     """
-    legs: list[tuple[float, bool]] = []
-
-    for slip in get_history(limit_days=limit_days):
-        for leg in slip.get("picks", []):
-            conf, status = leg.get("confidence"), leg.get("status")
-            if conf is None or status not in ("won", "lost"):
-                continue
-            legs.append((float(conf), status == "won"))
-
-    # Rollover legs carry the same confidences and are settled the same way
-    try:
-        from leagues.rollover_db import RolloverDay
-        db = SessionLocal()
-        try:
-            for row in db.query(RolloverDay).all():
-                for leg in json.loads(row.picks or "[]"):
-                    conf, status = leg.get("confidence"), leg.get("status")
-                    if conf is None or status not in ("won", "lost"):
-                        continue
-                    legs.append((float(conf), status == "won"))
-        finally:
-            db.close()
-    except Exception:
-        pass
+    from leagues.forecast_observations import collect_forecast_observations
+    observations = collect_forecast_observations(limit_days=limit_days)
+    legs = [(row["probability"], row["won"]) for row in observations]
 
     buckets = []
     for lo, hi in CALIBRATION_BUCKETS:
@@ -439,6 +572,72 @@ def calibration(limit_days: int = 180) -> dict:
         "avg_predicted": avg_pred,
         # Positive means we are over-confident: we promised more than we hit.
         "bias": round(avg_pred - (hit / total), 4) if total else None,
+        "raw_observations": sum(row["duplicate_count"] for row in observations),
+        "duplicates_removed": (
+            sum(row["duplicate_count"] for row in observations) - total
+        ),
+        "current_policy": PUBLISHED_POLICY_VERSION,
+        "current_policy_unique_forecasts": sum(
+            row.get("policy_version") == PUBLISHED_POLICY_VERSION
+            for row in observations
+        ),
+    }
+
+
+def current_policy_performance(limit_days: int = 90) -> dict:
+    """Reporting-only performance for the active public policy generation."""
+    history = [row for row in get_history(limit_days=limit_days)
+               if row.get("policy_version") == PUBLISHED_POLICY_VERSION]
+    summary = performance_summary(
+        limit_days=limit_days, policy_version=PUBLISHED_POLICY_VERSION
+    )
+    from leagues.forecast_observations import collect_forecast_observations
+    observations = [row for row in collect_forecast_observations(limit_days)
+                    if row.get("policy_version") == PUBLISHED_POLICY_VERSION]
+    readiness = sample_readiness(len(observations))
+    categories: dict[str, int] = {}
+    for row in observations:
+        for category in row.get("categories") or []:
+            categories[category] = categories.get(category, 0) + 1
+    slip_rows = [value for value in summary.values()
+                 if value.get("unit") == "slip"]
+    settled_slips = sum(value.get("settled", 0) for value in slip_rows)
+    staked = sum(value.get("staked", 0.0) for value in slip_rows)
+    returned = sum(value.get("returned", 0.0) for value in slip_rows)
+    message = {
+        "VERY_THIN": "Very thin current-policy sample; use as monitoring only.",
+        "EARLY": "Early current-policy sample; not yet a stable estimate.",
+        "PROVISIONAL": "Provisional current-policy sample; uncertainty remains high.",
+        "USABLE": "Usable current-policy sample; keep sample size visible.",
+        "STRONG": "Strong current-policy sample.",
+        "MATURE": "Mature current-policy sample.",
+    }[readiness["readiness"]]
+    try:
+        from leagues.calibrator import fit_calibration
+        calibration_policy = fit_calibration().get("policy", {})
+    except Exception as exc:
+        logger.debug(f"current-policy calibration unavailable: {exc}")
+        calibration_policy = {}
+    return {
+        "policy_version": PUBLISHED_POLICY_VERSION,
+        "first_archived_date": min((row["date"] for row in history), default=None),
+        "settled_unique_forecasts": len(observations),
+        **readiness,
+        "message": message,
+        "category_forecast_samples": categories,
+        "settled_slips": settled_slips,
+        "staked": staked,
+        "returned": round(returned, 4),
+        "profit": round(returned - staked, 2),
+        "roi": round((returned - staked) / staked, 4) if staked else None,
+        "win_rate": round(
+            sum(value.get("won", 0) for value in slip_rows) / settled_slips, 4
+        ) if settled_slips else None,
+        "average_predicted_probability": round(
+            sum(row["probability"] for row in observations) / len(observations), 4
+        ) if observations else None,
+        "calibration": calibration_policy,
+        "categories": summary,
     }
 
 

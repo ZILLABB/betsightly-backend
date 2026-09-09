@@ -294,15 +294,26 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     },
     # Times are UTC. WAT is UTC+1, so 07:00 UTC is the 08:00 WAT card publish.
     "schedule": {
+        "codes": "07:15",
         "daily_5": "07:30",
         "rollover": "07:35",
-        "two_odds": "14:00",
         "results": "21:00",
     },
     "default_landing": "predictions",
     "max_retries": 3,
     "retry_base_seconds": 60,
 }
+
+
+def _effective_schedule(value: Any) -> dict:
+    """Layer stored times over defaults and retire obsolete auto-posts."""
+    stored = value if isinstance(value, dict) else {}
+    schedule = {**DEFAULT_SETTINGS["schedule"], **stored}
+    schedule.pop("value", None)
+    # The actionable 2 Odds code is now delivered on the verified morning
+    # board. Existing databases may still carry this old afternoon slot.
+    schedule.pop("two_odds", None)
+    return schedule
 
 
 def get_setting(key: str, default: Any = None) -> Any:
@@ -313,12 +324,11 @@ def get_setting(key: str, default: Any = None) -> Any:
             if not row or row.value is None:
                 return DEFAULT_SETTINGS.get(key, default)
             value = json.loads(row.value)
-            if key == "schedule" and isinstance(value, dict):
+            if key == "schedule":
                 # Existing installations keep their saved schedule row across
-                # deploys. Merge in newly supported templates and remove the
-                # retired Value post instead of requiring a manual DB edit.
-                value = {**DEFAULT_SETTINGS["schedule"], **value}
-                value.pop("value", None)
+                # deploys. Merge newly supported templates and retire old
+                # auto-posts without requiring a destructive settings edit.
+                value = _effective_schedule(value)
             return value
         finally:
             db.close()
@@ -362,6 +372,7 @@ def all_settings() -> dict:
             db.close()
     except Exception:
         pass
+    out["schedule"] = _effective_schedule(out.get("schedule"))
     return out
 
 

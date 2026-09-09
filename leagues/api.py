@@ -179,9 +179,13 @@ async def get_bookable_now():
 async def trigger_results_check():
     """Manually trigger a results check (also runs hourly in the background)."""
     try:
-        from leagues.results_checker import check_all_pending, settle_published_slips
+        from leagues.results_checker import (
+            check_all_pending, settle_builder_predictions,
+            settle_published_slips,
+        )
         summary = check_all_pending()
         slips = settle_published_slips()
+        builders = settle_builder_predictions()
         # Newly settled legs are exactly what the calibration is fitted on, so
         # refit now rather than serving a stale correction for up to six hours.
         try:
@@ -190,7 +194,8 @@ async def trigger_results_check():
             summary["calibration_legs"] = fit.get("n", 0)
         except Exception as e:
             logger.warning(f"calibration refit after settlement failed: {e}")
-        return {"status": "success", **summary, "slips": slips}
+        return {"status": "success", **summary, "slips": slips,
+                "builders": builders}
     except Exception as e:
         logger.error(f"Results check trigger failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
@@ -339,9 +344,16 @@ async def slip_builder_generate(target: float, horizon: str = "week",
                                 refresh: bool = False):
     """Build a slip to a requested multiplier and book it."""
     import time as _t
+    from database import log_pool_exception, log_pool_status
     from leagues.daily_feed import _publish_date
     from leagues.slip_builder import generate
 
+    log_pool_status(
+        "builder_start",
+        target=round(float(target), 2),
+        horizon=horizon,
+        refresh=bool(refresh),
+    )
     key = (round(float(target), 2), horizon, _publish_date())
     hit = _SLIP_CACHE.get(key)
     if (hit and not refresh and (_t.time() - hit["ts"]) < _SLIP_TTL
@@ -352,6 +364,10 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             record_run(target, horizon, refresh, response, cached=True)
         except Exception as exc:
             logger.warning(f"Builder run audit failed: {exc}")
+        log_pool_status(
+            "builder_end", target=key[0], horizon=horizon,
+            status=response.get("status"), cached=True,
+        )
         return response
 
     # Coalesce identical work. The model/board/booking functions are blocking,
@@ -369,12 +385,23 @@ async def slip_builder_generate(target: float, horizon: str = "week",
                     record_run(target, horizon, refresh, result, cached=True)
                 except Exception as exc:
                     logger.warning(f"Builder run audit failed: {exc}")
+                log_pool_status(
+                    "builder_end", target=key[0], horizon=horizon,
+                    status=result.get("status"), cached=True,
+                )
                 return result
             result = await asyncio.to_thread(generate, target, horizon=horizon, force=refresh)
             if result.get("status") == "success":
                 _SLIP_CACHE[key] = {"result": result, "ts": _t.time()}
     except Exception as e:
         logger.error(f"Slip build failed: {e}", exc_info=True)
+        log_pool_exception(
+            "builder_pool_timeout", e, target=key[0], horizon=horizon,
+        )
+        log_pool_status(
+            "builder_error", level=logging.ERROR, target=key[0],
+            horizon=horizon, error_type=type(e).__name__,
+        )
         try:
             from leagues.builder_runs import record_run
             record_run(target, horizon, refresh,
@@ -389,6 +416,10 @@ async def slip_builder_generate(target: float, horizon: str = "week",
         record_run(target, horizon, refresh, response)
     except Exception as exc:
         logger.warning(f"Builder run audit failed: {exc}")
+    log_pool_status(
+        "builder_end", target=key[0], horizon=horizon,
+        status=response.get("status"), cached=False,
+    )
     return response
 
 
@@ -450,6 +481,29 @@ async def get_results(days: int = 30, category: str | None = None):
             bucket["profit"] = round(bucket["returned"] - bucket["staked"], 2)
             bucket["roi"] = (round(bucket["profit"] / bucket["staked"], 4)
                              if bucket["staked"] else None)
+        bookable = {"settled": 0, "won": 0, "lost": 0,
+                    "staked": 0.0, "returned": 0.0}
+        for cat in summary.values():
+            if cat.get("unit") != "slip":
+                continue
+            record = cat.get("bookable_record") or {}
+            for key in bookable:
+                bookable[key] += record.get(key, 0)
+        bookable["profit"] = round(bookable["returned"] - bookable["staked"], 2)
+        bookable["roi"] = (
+            round(bookable["profit"] / bookable["staked"], 4)
+            if bookable["staked"] else None
+        )
+        bookable["coverage"] = (
+            round(bookable["settled"] / totals["slips"]["settled"], 4)
+            if totals["slips"]["settled"] else 0.0
+        )
+        totals["slips"]["published_record"] = {
+            key: totals["slips"][key]
+            for key in ("settled", "won", "lost", "staked", "returned",
+                        "profit", "roi")
+        }
+        totals["slips"]["bookable_record"] = bookable
         totals["combined_profit"] = round(
             totals["slips"]["profit"] + totals["picks"]["profit"], 2)
 
@@ -471,11 +525,28 @@ async def get_results(days: int = 30, category: str | None = None):
 async def get_performance(days: int = 90):
     """Win rate, profit and ROI per category over the requested window."""
     try:
-        from leagues.picks_db import performance_summary
-        return {"status": "success", "days": days, "summary": performance_summary(limit_days=days)}
+        from leagues.picks_db import (
+            current_policy_performance, performance_summary,
+        )
+        return {
+            "status": "success", "days": days,
+            "summary": performance_summary(limit_days=days),
+            "current_policy": current_policy_performance(limit_days=days),
+        }
     except Exception as e:
         logger.error(f"Performance fetch failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
+
+
+@router.get("/builder-performance")
+async def get_builder_performance(days: int = 90):
+    """Settlement, calibration and ROI for unique immutable Builder sets."""
+    try:
+        from leagues.builder_runs import performance
+        return {"status": "success", "days": days, **performance(days)}
+    except Exception as exc:
+        logger.error(f"Builder performance fetch failed: {exc}", exc_info=True)
+        raise HTTPException(500, str(exc))
 
 
 @router.post("/backfill-legs", dependencies=[Depends(require_api_key)])

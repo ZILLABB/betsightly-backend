@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 import threading
 
 from api.api import api_router
-from database import init_db, get_db
+from database import get_db, init_db, log_pool_exception, log_pool_status
 from utils.config import settings
 from utils.error_handling import setup_exception_handlers
 from utils.security import SecurityMiddleware, RateLimitMiddleware
@@ -283,43 +283,16 @@ if BACKGROUND_JOBS_ENABLED:
 
 
 def _ensure_today_generated():
-    """Generate today's predictions + accumulator feed if missing.
+    """Keep the authoritative leagues feed and growth queue current.
 
-    Idempotent: skips ML generation when the day's summary is completed,
-    and the accumulator feed reads odds through a 6h disk cache, so calling
-    this repeatedly is cheap.
+    The old DailyPredictionsService pipeline is intentionally absent. It is
+    retired, produces no useful public card, and must not consume a database
+    connection every fifteen minutes. Compatibility endpoints remain mounted
+    for read/manual access while consumers are retired separately.
     """
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    today_date = datetime.now().date()
+    log_pool_status("daily_refresh_start")
 
-    # 1) Daily ML predictions
-    try:
-        from services.daily_predictions_service import (
-            DailyPredictionsService, DailyPredictionSummary,
-        )
-        from database import SessionLocal
-
-        db = SessionLocal()
-        try:
-            existing = db.query(DailyPredictionSummary).filter(
-                DailyPredictionSummary.prediction_date == today_date
-            ).first()
-            already_done = existing is not None and existing.generation_status == "completed"
-        finally:
-            db.close()
-
-        if already_done:
-            logger.debug(f"Predictions for {today_str} already exist")
-        else:
-            logger.info(f"Daily loop: generating predictions for {today_str}...")
-            result = DailyPredictionsService().generate_daily_predictions(today_str)
-            status = result.get("status", "unknown")
-            count = result.get("summary", {}).get("predictions_generated", 0)
-            logger.info(f"Daily loop: generation complete: status={status}, predictions={count}")
-    except Exception as e:
-        logger.error(f"Daily loop: prediction generation failed: {e}")
-
-    # 2) Accumulator feed + rollover chain extension. Without this, the
+    # 1) Accumulator feed + rollover chain extension. Without this, the
     # chain only grows when a user happens to hit /accumulators/today —
     # the 09:00 Telegram post would find no picks on quiet mornings.
     try:
@@ -327,6 +300,11 @@ def _ensure_today_generated():
         build_daily_accumulators()
     except Exception as e:
         logger.error(f"Daily loop: accumulator feed build failed: {e}")
+        log_pool_exception("daily_refresh_pool_timeout", e, step="accumulator_feed")
+        log_pool_status(
+            "daily_refresh_error", level=logging.ERROR,
+            step="accumulator_feed", error_type=type(e).__name__,
+        )
 
     # Subscriber alerts used to fire from here, guarded by a dict held in
     # process memory. That dict is empty in a new process, so every deploy and
@@ -338,7 +316,7 @@ def _ensure_today_generated():
     # the run claim and behind a delivery row of its own, so it goes out once
     # per publishing day however often this process starts.
 
-    # 3) Growth Engine. Runs last and swallows its own errors, so marketing
+    # 2) Growth Engine. Runs last and swallows its own errors, so marketing
     # can never be the reason predictions fail to generate. run_daily is
     # idempotent — publication rows are claimed under a unique constraint —
     # so calling it on every 15-minute tick posts each item exactly once.
@@ -348,6 +326,12 @@ def _ensure_today_generated():
         retry_failed()
     except Exception as e:
         logger.error(f"Daily loop: growth engine failed: {e}")
+        log_pool_exception("daily_refresh_pool_timeout", e, step="growth")
+        log_pool_status(
+            "daily_refresh_error", level=logging.ERROR,
+            step="growth", error_type=type(e).__name__,
+        )
+    log_pool_status("daily_refresh_end")
 
 
 def _start_daily_generation_loop():
@@ -375,8 +359,7 @@ def _start_daily_generation_loop():
                 now = datetime.now(_tz.utc)
                 wat = now + _td(hours=1)
                 wat_day = wat.strftime("%Y-%m-%d")
-
-                _ensure_today_generated()
+                allow_general_refresh = True
 
                 # Past 08:00 WAT, run the full day: settle, refit, publish,
                 # distribute. This used to build the card and nothing else, so
@@ -391,16 +374,31 @@ def _start_daily_generation_loop():
                 # unavailable. `last_published` stays as an in-process short
                 # circuit only; the database is what actually decides.
                 if wat.hour >= 8 and last_published != wat_day:
+                    allow_general_refresh = False
                     try:
                         from leagues.scheduler import run_daily_job
                         report = run_daily_job()
+                        skipped_in_flight = (
+                            report.get("status") == "skipped"
+                            and report.get("reason") != "already completed today"
+                        )
+                        allow_general_refresh = not skipped_in_flight
                         if report.get("status") != "skipped":
                             logger.info(
                                 f"Daily run for {wat_day}: {report.get('status')} "
                                 f"(failed: {report.get('failed') or 'none'})")
-                        last_published = wat_day
+                        if not skipped_in_flight:
+                            last_published = wat_day
                     except Exception as e:
                         logger.error(f"Daily run failed: {e}")
+
+                # Run the general refresh only after the claimed daily job.
+                # Otherwise a restart after the code-board time could render
+                # and publish content before today's booking step completed.
+                # When another worker owns the daily claim, wait for its next
+                # tick rather than racing its in-flight booking/distribution.
+                if allow_general_refresh:
+                    _ensure_today_generated()
             except Exception as e:
                 logger.error(f"Daily generation loop iteration failed: {e}")
             _time.sleep(900)

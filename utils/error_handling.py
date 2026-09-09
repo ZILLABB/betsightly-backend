@@ -12,7 +12,7 @@ from fastapi import HTTPException, Request, FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, TimeoutError as SQLAlchemyTimeoutError
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -257,6 +257,28 @@ def setup_exception_handlers(app: FastAPI) -> None:
                 "timestamp": datetime.now().isoformat(),
                 "path": str(request.url)
             }
+        )
+
+    @app.exception_handler(SQLAlchemyTimeoutError)
+    async def database_pool_timeout_handler(request: Request, exc: SQLAlchemyTimeoutError):
+        """Expose a retryable response and safe pool counters for checkout timeouts."""
+        from database import log_pool_status
+
+        log_pool_status(
+            "pool_timeout",
+            level=logging.ERROR,
+            path=request.url.path,
+            error_type=type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "message": "Database is temporarily busy. Please retry shortly.",
+                "error_code": "DATABASE_POOL_TIMEOUT",
+                "timestamp": datetime.now().isoformat(),
+                "path": request.url.path,
+            },
         )
 
     @app.exception_handler(Exception)

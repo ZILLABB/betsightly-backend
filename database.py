@@ -2,8 +2,10 @@
 Database configuration for the application.
 """
 
+import json
 import logging
 from sqlalchemy import create_engine
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
@@ -46,6 +48,51 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Create base class for models
 Base = declarative_base()
+
+
+def pool_status() -> dict:
+    """Return safe connection-pool counters without exposing the database URL."""
+    pool = engine.pool
+    state = {"pool_class": type(pool).__name__}
+    for key, attribute in (
+        ("size", "size"),
+        ("checked_in", "checkedin"),
+        ("checked_out", "checkedout"),
+        ("overflow", "overflow"),
+    ):
+        value = getattr(pool, attribute, None)
+        if value is None:
+            continue
+        try:
+            state[key] = value() if callable(value) else value
+        except Exception:
+            continue
+    try:
+        state["status"] = pool.status()
+    except Exception:
+        pass
+    return state
+
+
+def log_pool_status(event: str, level: int = logging.INFO, **context) -> dict:
+    """Emit one structured, credential-free snapshot of pool occupancy."""
+    state = pool_status()
+    payload = {"event": event, **context, "pool": state}
+    logger.log(level, "db_pool %s", json.dumps(payload, sort_keys=True, default=str))
+    return state
+
+
+def log_pool_exception(event: str, exc: Exception, **context) -> bool:
+    """Log pool counters when SQLAlchemy reports a checkout timeout."""
+    if not isinstance(exc, SQLAlchemyTimeoutError):
+        return False
+    log_pool_status(
+        event,
+        level=logging.ERROR,
+        error_type=type(exc).__name__,
+        **context,
+    )
+    return True
 
 def get_db():
     """Get database session."""

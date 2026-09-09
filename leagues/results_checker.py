@@ -880,6 +880,10 @@ def run_loop():
             settle_published_slips()
         except Exception as e:
             logger.error(f"Slip settlement failed: {e}")
+        try:
+            settle_builder_predictions()
+        except Exception as e:
+            logger.error(f"Builder settlement failed: {e}")
         time.sleep(3600)
 
         if iteration % 168 == 0:
@@ -973,6 +977,60 @@ def settle_published_slips() -> Dict[str, int]:
     if won or lost:
         logger.info(f"Slip settlement: {won} won, {lost} lost, {still} pending")
     return {"slips_checked": len(slips), "won": won, "lost": lost, "still_pending": still}
+
+
+def settle_builder_predictions(scores: dict | None = None,
+                               now: datetime | None = None) -> Dict[str, int]:
+    """Settle unique Builder prediction sets with the canonical evaluator."""
+    from leagues.builder_runs import pending_predictions, settle_prediction
+
+    current = now or datetime.now(timezone.utc)
+    rows = pending_predictions()
+    summary = {"builds_checked": len(rows), "won": 0, "lost": 0,
+               "void": 0, "still_pending": 0}
+    if not rows:
+        return summary
+
+    if scores is None:
+        dates = sorted({
+            str(pick.get("kickoff") or pick.get("date") or "")[:10]
+            for row in rows
+            for pick in json.loads(row.get("picks") or "[]")
+            if str(pick.get("kickoff") or pick.get("date") or "")[:10]
+            <= current.strftime("%Y-%m-%d")
+        })
+        scores = (_collect_espn_scores_ranged(dates[0], dates[-1])
+                  if dates else {})
+
+    for row in rows:
+        picks = json.loads(row.get("picks") or "[]")
+        outcomes = []
+        for pick in picks:
+            if pick.get("status") in ("won", "lost", "void"):
+                outcomes.append(pick["status"])
+                continue
+            match_date = str(pick.get("kickoff") or pick.get("date") or "")[:10]
+            match = _lookup_score(
+                scores,
+                pick.get("home_team", ""),
+                pick.get("away_team", ""),
+                match_date,
+            )
+            if match:
+                outcomes.append(_evaluate_pick(
+                    pick, match["home_score"], match["away_score"]
+                ))
+            elif _missing_result_expired(
+                {**pick, "commence_time": pick.get("kickoff") or pick.get("date")},
+                current,
+            ):
+                outcomes.append("void")
+            else:
+                outcomes.append("pending")
+        status = settle_prediction(row["selection_fingerprint"], outcomes)
+        key = status if status in ("won", "lost", "void") else "still_pending"
+        summary[key] += 1
+    return summary
 
 def backfill_leg_status(limit_days: int = 120) -> Dict[str, int]:
     """Fill in per-leg outcomes on chain days that were settled before we

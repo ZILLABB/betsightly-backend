@@ -1,11 +1,13 @@
 """Settlement coverage for every market the prediction engine publishes."""
 
+import json
 from datetime import datetime, timezone
 
 import pytest
 
 from leagues.results_checker import (
     _evaluate_pick, _lookup_score, _missing_result_expired, _rollover_day_status,
+    settle_builder_predictions,
 )
 
 
@@ -118,3 +120,32 @@ def test_missing_result_only_voids_after_the_reporting_grace():
 )
 def test_rollover_day_settlement_handles_void_legs(legs, expected):
     assert _rollover_day_status(legs) == expected
+
+
+def test_builder_settlement_routes_through_canonical_market_evaluator(monkeypatch):
+    picks = [
+        {"home_team": "Alpha", "away_team": "Beta", "market": "dnb_home",
+         "kickoff": "2026-09-08T18:00:00Z"},
+        {"home_team": "Gamma", "away_team": "Delta", "market": "under_2_5",
+         "kickoff": "2026-09-08T19:00:00Z"},
+    ]
+    monkeypatch.setattr(
+        "leagues.builder_runs.pending_predictions",
+        lambda: [{"selection_fingerprint": "build-1", "picks": json.dumps(picks)}],
+    )
+    settled = {}
+
+    def capture(fingerprint, outcomes):
+        settled.update(fingerprint=fingerprint, outcomes=outcomes)
+        return "won"
+
+    monkeypatch.setattr("leagues.builder_runs.settle_prediction", capture)
+    scores = {
+        "alpha|beta|2026-09-08": {"home_score": 1, "away_score": 1},
+        "gamma|delta|2026-09-08": {"home_score": 1, "away_score": 1},
+    }
+    result = settle_builder_predictions(
+        scores=scores, now=datetime(2026, 9, 9, tzinfo=timezone.utc)
+    )
+    assert settled == {"fingerprint": "build-1", "outcomes": ["void", "won"]}
+    assert result["won"] == 1

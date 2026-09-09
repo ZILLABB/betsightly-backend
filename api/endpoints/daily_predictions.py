@@ -182,7 +182,8 @@ def get_betting_categories_from_db(db: Session = Depends(get_db)):
 def generate_daily_predictions(
     background_tasks: BackgroundTasks,
     target_date: str = Query(None, description="Date in YYYY-MM-DD format (default: today)"),
-    force: bool = Query(False, description="Force regeneration even if predictions exist")
+    force: bool = Query(False, description="Force regeneration even if predictions exist"),
+    db: Session = Depends(get_db),
 ):
     """
     Generate predictions for a specific date (admin/manual trigger).
@@ -208,7 +209,6 @@ def generate_daily_predictions(
         
         # Check if predictions already exist (unless force)
         if not force:
-            db = next(get_db())
             existing = db.query(DailyPredictionSummary).filter(
                 DailyPredictionSummary.prediction_date == datetime.strptime(target_date, "%Y-%m-%d").date()
             ).first()

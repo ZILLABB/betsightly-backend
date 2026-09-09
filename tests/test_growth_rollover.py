@@ -6,6 +6,8 @@ def _data():
         "date": "2026-09-02",
         "rollover": {
             "selected": True,
+            "actionable": True,
+            "booking_verified": True,
             "day_number": 2,
             "target_days": 3,
             "total_odds": 2.14,
@@ -21,6 +23,8 @@ def _data():
             }],
             "booking": {
                 "status": "active",
+                "booking_status": "FULL",
+                "readback_validation": "PASSED",
                 "share_code": "ROLL23",
                 "priced_at": "2026-09-02T07:05:00Z",
             },

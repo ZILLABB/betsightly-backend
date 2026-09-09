@@ -145,6 +145,12 @@ def _step(report: dict, name: str, fn, run_date: str | None = None):
         return result
     except Exception as e:
         logger.error(f"daily run step '{name}' failed: {e}", exc_info=True)
+        from database import log_pool_exception, log_pool_status
+        log_pool_exception("daily_job_pool_timeout", e, step=name)
+        log_pool_status(
+            "daily_job_error", level=logging.ERROR,
+            step=name, error_type=type(e).__name__,
+        )
         report["steps"][name] = {"status": "failed", "ok": False,
                                  "started_at": report["steps"][name]["started_at"],
                                  "finished_at": _now(), "error": str(e)[:300]}
@@ -156,6 +162,7 @@ def _step(report: dict, name: str, fn, run_date: str | None = None):
 
 def run_daily_job(force: bool = False, publish: bool = True) -> dict:
     """The whole day, once. Safe to call repeatedly."""
+    from database import log_pool_exception, log_pool_status
     from leagues.daily_feed import _publish_date
 
     run_date = _publish_date()
@@ -164,19 +171,39 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
         "steps": {}, "failed": [], "started_at": _now(),
     }
 
-    claimed, why = _claim(run_date, force)
+    log_pool_status(
+        "daily_job_start", run_date=run_date,
+        force=bool(force), publish=bool(publish),
+    )
+    try:
+        claimed, why = _claim(run_date, force)
+    except Exception as exc:
+        log_pool_exception("daily_job_pool_timeout", exc, step="claim")
+        log_pool_status(
+            "daily_job_error", level=logging.ERROR, run_date=run_date,
+            step="claim", error_type=type(exc).__name__,
+        )
+        raise
     if not claimed:
         logger.info(f"daily run {run_date}: skipped — {why}")
+        log_pool_status(
+            "daily_job_end", run_date=run_date,
+            status="skipped", reason=why,
+        )
         return {**report, "status": "skipped", "reason": why}
 
     logger.info(f"daily run {run_date}: starting")
 
     # 1. Settle what finished, then refit on the new evidence.
     def _settle():
-        from leagues.results_checker import check_all_pending, settle_published_slips
+        from leagues.results_checker import (
+            check_all_pending, settle_builder_predictions,
+            settle_published_slips,
+        )
         summary = check_all_pending()
         slips = settle_published_slips()
-        return {"scores": summary, "slips": slips}
+        builders = settle_builder_predictions()
+        return {"scores": summary, "slips": slips, "builders": builders}
 
     _step(report, "settle", _settle, run_date)
 
@@ -265,6 +292,10 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
     logger.info(
         f"daily run {run_date}: {report['status']} "
         f"(failed: {report['failed'] or 'none'})")
+    log_pool_status(
+        "daily_job_end", run_date=run_date,
+        status=report["status"], failed=report["failed"],
+    )
     return report
 
 

@@ -721,10 +721,6 @@ _predictions_cache: Dict[str, Any] = {"date": None, "data": None, "timestamp": N
 # API endpoints
 # ------------------------------------------------------------------
 
-# Guards duplicate background generation kicks from concurrent requests
-_generation_in_flight = {"date": None}
-
-
 def _read_predictions_from_db(today: str) -> Optional[Dict[str, Any]]:
     """Reconstruct the /today response from stored DailyPrediction rows.
 
@@ -785,38 +781,13 @@ def _read_predictions_from_db(today: str) -> Optional[Dict[str, Any]]:
         db.close()
 
 
-def _kick_background_generation(today: str) -> None:
-    """Start prediction generation in a background thread (deduped per date).
-
-    The request path must never run ML inference inline: with a single
-    uvicorn worker, computing features for a full match day pins the worker
-    for a minute+ and every other request queues behind it.
-    """
-    import threading
-
-    if _generation_in_flight["date"] == today:
-        return
-    _generation_in_flight["date"] = today
-
-    def _run():
-        try:
-            from services.daily_predictions_service import DailyPredictionsService
-            DailyPredictionsService().generate_daily_predictions(today)
-        except Exception as e:
-            logger.error(f"Background generation failed: {e}")
-        finally:
-            _generation_in_flight["date"] = None
-
-    threading.Thread(target=_run, daemon=True, name=f"predict-gen-{today}").start()
-
-
 @router.get("/today")
 def get_todays_predictions(force_refresh: bool = Query(False)):
     """Get today's ML predictions.
 
-    Serves from the in-process cache, then PostgreSQL. If nothing has been
-    generated yet, kicks off generation in the background and tells the
-    client to retry — it never computes predictions in the request path.
+    Serves compatibility data from the in-process cache, then PostgreSQL.
+    This retired endpoint is read-only: an empty legacy table must not start
+    a second prediction engine beside the authoritative leagues pipeline.
     """
     try:
         today = datetime.now().strftime("%Y-%m-%d")
@@ -833,18 +804,17 @@ def get_todays_predictions(force_refresh: bool = Query(False)):
             _predictions_cache.update(date=today, data=db_result, timestamp=now)
             return db_result
 
-        # Nothing in the DB yet — generate in the background, respond now
-        _kick_background_generation(today)
+        # Nothing in the legacy DB. Keep the GET endpoint compatible without
+        # automatically running the retired generator.
         return {
-            "status": "generating",
+            "status": "no_predictions",
             "date": today,
             "total_fixtures": 0,
             "upcoming_fixtures": 0,
             "predictions_generated": 0,
             "models_used": len(ml_service.api_models) if ml_service else 0,
             "predictions": [],
-            "message": "Predictions are being generated — retry in ~60 seconds.",
-            "retry_after_seconds": 60,
+            "message": "Legacy ML predictions are not generated automatically; use /api/leagues/daily-accumulators.",
         }
 
     except Exception as e:

@@ -204,6 +204,71 @@ def _positive_payout_distribution(
     return states
 
 
+def _aggregate_credibility(legs: list[dict], odds: float,
+                           expected_return: float,
+                           model_hit_probability: float) -> dict:
+    """Conservative diagnostic for accumulator edge claims.
+
+    Each leg is recomputed at its evidence-derived lower reliability bound.
+    Those lower bounds already incorporate sample uncertainty/shrinkage. The
+    diagnostic also exposes concentration where an independence assumption is
+    most fragile; it reports uncertainty but does not mutate selection policy.
+    """
+    from leagues.selection import exposure_group
+
+    conservative_legs = []
+    missing_bounds = 0
+    for leg in legs:
+        trust = leg.get("trust") or {}
+        lower = trust.get("lower_reliability_bound")
+        if lower is None:
+            missing_bounds += 1
+            lower = leg.get("evidence_adjusted_probability", leg.get("confidence", 0))
+        conservative_legs.append({
+            **leg,
+            "evidence_adjusted_probability": max(0.0, min(1.0, float(lower))),
+        })
+    distribution = _positive_payout_distribution(conservative_legs)
+    conservative_return = sum(payout * probability
+                              for payout, probability in distribution.items())
+    market_counts = collections.Counter(
+        exposure_group(leg.get("market_group")) for leg in legs
+    )
+    league_counts = collections.Counter(
+        str((leg.get("_fixture") or {}).get("league") or leg.get("league") or "unknown")
+        for leg in legs
+    )
+    concentrated = bool(legs) and (
+        max(market_counts.values(), default=0) > max(2, len(legs) // 2)
+        or max(league_counts.values(), default=0) > max(2, len(legs) // 2)
+    )
+    break_even = 1.0 / max(1.0, float(odds))
+    conservative_hit = 1.0
+    for leg in conservative_legs:
+        settlement = _leg_settlement_probabilities(leg)
+        conservative_hit *= settlement[0] if settlement else 0.0
+    if missing_bounds:
+        status = "INSUFFICIENT_LOWER_BOUND_EVIDENCE"
+    elif expected_return > 1.0 and conservative_return < 1.0:
+        status = "EDGE_NOT_SUPPORTED_BY_LOWER_BOUNDS"
+    else:
+        status = "LOWER_BOUND_SUPPORTED"
+    return {
+        "status": status,
+        "model_expected_return": round(expected_return, 4),
+        "conservative_expected_return": round(conservative_return, 4),
+        "model_hit_probability": round(model_hit_probability, 6),
+        "conservative_hit_probability": round(conservative_hit, 6),
+        "bookmaker_break_even_probability": round(break_even, 6),
+        "missing_lower_bounds": missing_bounds,
+        "extraordinary_claim": expected_return >= 2.0,
+        "dependence_warning": concentrated,
+        "market_concentration": dict(market_counts),
+        "league_concentration": dict(league_counts),
+        "action": "REPORT_ONLY_NO_POLICY_MUTATION",
+    }
+
+
 def _cost(pick: dict) -> float:
     settlement = _leg_settlement_probabilities(pick)
 
@@ -774,6 +839,10 @@ def build_slip(
         no_loss_probability - joint,
     )
 
+    aggregate_credibility = _aggregate_credibility(
+        legs, odds, expected_return, joint
+    )
+
     return {
         "ok": True,
         "result_status": "TARGET_REACHED",
@@ -784,6 +853,7 @@ def build_slip(
         "hit_probability": round(joint, 5),
         "expected_return": round(expected_return, 4),
         "expected_return_basis": "model_estimate",
+        "aggregate_credibility": aggregate_credibility,
         "target_hit_probability": round(
             target_hit_probability,
             5,
@@ -975,6 +1045,7 @@ def generate(
             "expected_return_basis",
             "model_estimate",
         ),
+        "aggregate_credibility": built.get("aggregate_credibility"),
         "avg_confidence": built["avg_confidence"],
         "avg_evidence_probability": built.get(
             "avg_evidence_probability", built["avg_confidence"]

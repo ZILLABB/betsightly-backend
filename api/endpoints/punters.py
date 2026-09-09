@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from database import get_db
-from services.punter_service import punter_service
+from services.punter_service import PunterService
 from punter import Punter
 from punter_prediction import PunterPrediction
 from schemas.punter import PunterCreate, PunterUpdate, PunterResponse, PunterListResponse
@@ -39,8 +39,9 @@ def get_punters(
         skip: Number of punters to skip
         limit: Maximum number of punters to return
     """
+    service = PunterService(db)
     try:
-        punters = punter_service.get_all_punters()
+        punters = service.get_all_punters()
 
         return {
             "status": "success",
@@ -64,8 +65,9 @@ def get_top_punters(
     Args:
         limit: Maximum number of punters to return
     """
+    service = PunterService(db)
     try:
-        punters = punter_service.get_top_punters(limit)
+        punters = service.get_top_punters(limit)
 
         return {
             "status": "success",
@@ -89,8 +91,9 @@ def get_punter(
     Args:
         punter_id: Punter ID
     """
+    service = PunterService(db)
     try:
-        punter = punter_service.get_punter_by_id(punter_id)
+        punter = service.get_punter_by_id(punter_id)
 
         if not punter:
             raise HTTPException(status_code=404, detail=f"Punter with ID {punter_id} not found")
@@ -116,8 +119,9 @@ def create_punter(
     Args:
         punter: Punter data
     """
+    service = PunterService(db)
     try:
-        created_punter = punter_service.create_punter(punter.dict())
+        created_punter = service.create_punter(punter.dict())
 
         if not created_punter:
             raise HTTPException(status_code=500, detail="Failed to create punter")
@@ -143,8 +147,9 @@ def update_punter(
         punter_id: Punter ID
         punter: Updated punter data
     """
+    service = PunterService(db)
     try:
-        updated_punter = punter_service.update_punter(punter_id, punter.dict(exclude_unset=True))
+        updated_punter = service.update_punter(punter_id, punter.dict(exclude_unset=True))
 
         if not updated_punter:
             raise HTTPException(status_code=404, detail=f"Punter with ID {punter_id} not found")
@@ -170,8 +175,9 @@ def delete_punter(
     Args:
         punter_id: Punter ID
     """
+    service = PunterService(db)
     try:
-        success = punter_service.delete_punter(punter_id)
+        success = service.delete_punter(punter_id)
 
         if not success:
             raise HTTPException(status_code=404, detail=f"Punter with ID {punter_id} not found")
@@ -199,15 +205,16 @@ def get_punter_predictions(
         punter_id: Punter ID
         limit: Maximum number of predictions to return
     """
+    service = PunterService(db)
     try:
         # Check if punter exists
-        punter = punter_service.get_punter_by_id(punter_id)
+        punter = service.get_punter_by_id(punter_id)
 
         if not punter:
             raise HTTPException(status_code=404, detail=f"Punter with ID {punter_id} not found")
 
         # Get predictions
-        predictions = punter_service.get_punter_predictions(punter_id, limit)
+        predictions = service.get_punter_predictions(punter_id, limit)
 
         return {
             "status": "success",
@@ -232,15 +239,16 @@ def get_punter_performance(
     Args:
         punter_id: Punter ID
     """
+    service = PunterService(db)
     try:
         # Check if punter exists
-        punter = punter_service.get_punter_by_id(punter_id)
+        punter = service.get_punter_by_id(punter_id)
 
         if not punter:
             raise HTTPException(status_code=404, detail=f"Punter with ID {punter_id} not found")
 
         # Get performance metrics
-        performance = punter_service.get_punter_performance(punter_id)
+        performance = service.get_punter_performance(punter_id)
 
         return {
             "status": "success",
@@ -269,9 +277,10 @@ def update_prediction_status(
         prediction_id: Prediction ID
         status: New status (won, lost, pending, void)
     """
+    service = PunterService(db)
     try:
         # Check if punter exists
-        punter = punter_service.get_punter_by_id(punter_id)
+        punter = service.get_punter_by_id(punter_id)
 
         if not punter:
             raise HTTPException(status_code=404, detail=f"Punter with ID {punter_id} not found")
@@ -283,7 +292,7 @@ def update_prediction_status(
             raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
 
         # Update prediction status
-        updated_prediction = punter_service.update_prediction_status(prediction_id, status)
+        updated_prediction = service.update_prediction_status(prediction_id, status)
 
         if not updated_prediction:
             raise HTTPException(status_code=404, detail=f"Prediction with ID {prediction_id} not found")

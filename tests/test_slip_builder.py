@@ -6,7 +6,7 @@ from leagues import slip_builder
 from leagues.api import _cached_slip_is_placeable
 from leagues.daily_feed import _trusted_rollover_picks
 from leagues.selection import select_accumulator
-from leagues.slip_builder import _horizon_end, build_slip
+from leagues.slip_builder import _aggregate_credibility, _horizon_end, build_slip
 
 
 def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True,
@@ -40,6 +40,35 @@ def _accept_trust(pick):
         "evidence_strength": .9, "evidence_state": "SUPPORTED",
         "trust_score": 90, "trust_grade": "A", "rejection_reasons": [],
     }
+
+
+def test_aggregate_credibility_challenges_edge_not_supported_by_lower_bounds():
+    legs = [_pick("m1", odds=2.0, confidence=.80),
+            _pick("m2", odds=2.0, confidence=.80)]
+    for leg in legs:
+        leg["evidence_adjusted_probability"] = .80
+        leg["trust"] = {"lower_reliability_bound": .45}
+        leg["_fixture"]["league"] = "Shared league"
+    result = _aggregate_credibility(
+        legs, odds=4.0, expected_return=2.56,
+        model_hit_probability=.64,
+    )
+    assert result["status"] == "EDGE_NOT_SUPPORTED_BY_LOWER_BOUNDS"
+    assert result["extraordinary_claim"] is True
+    assert result["conservative_expected_return"] < 1
+    assert result["action"] == "REPORT_ONLY_NO_POLICY_MUTATION"
+
+
+def test_aggregate_credibility_reports_missing_lower_bounds():
+    leg = _pick("m1", odds=1.5, confidence=.75)
+    leg["evidence_adjusted_probability"] = .75
+    leg["trust"] = {}
+    result = _aggregate_credibility(
+        [leg], odds=1.5, expected_return=1.125,
+        model_hit_probability=.75,
+    )
+    assert result["status"] == "INSUFFICIENT_LOWER_BOUND_EVIDENCE"
+    assert result["missing_lower_bounds"] == 1
 
 
 def test_today_horizon_ends_today_in_wat_not_tomorrow():

@@ -40,10 +40,26 @@ TIER_LABELS = {
 }
 
 
+def _is_actionable(kickoff: str | None, started: bool = False) -> bool:
+    """Whether a code can still be acted on at render time."""
+    if not kickoff or started:
+        return False
+    try:
+        parsed = datetime.fromisoformat(str(kickoff).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed > datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        return False
+
+
 def _leg(game: dict, tier: str | None = None) -> dict:
     """One pick, flattened to the fields any channel might render."""
     conf = game.get("confidence") or 0.0
     odds = game.get("odds") or game.get("estimated_odds") or 0.0
+    kickoff = game.get("kickoff") or game.get("date")
+    started = bool(game.get("started"))
+    actionable = _is_actionable(kickoff, started)
     return {
         "match_id": game.get("match_id"),
         "home_team": game.get("home_team"),
@@ -52,14 +68,15 @@ def _leg(game: dict, tier: str | None = None) -> dict:
         "away_team_logo": game.get("away_team_logo"),
         "league": game.get("league"),
         "league_slug": game.get("league_slug"),
-        "kickoff": game.get("kickoff") or game.get("date"),
+        "kickoff": kickoff,
         "prediction": game.get("prediction") or game.get("readable_prediction"),
         "market": game.get("market"),
         "market_group": game.get("prediction_type"),
         "confidence": round(float(conf), 4),
         "odds": round(float(odds), 2),
         "odds_are_real": bool(game.get("odds_are_real")),
-        "started": bool(game.get("started")),
+        "started": started,
+        "actionable": actionable,
         "venue": game.get("venue"),
         "home_form": game.get("home_form"),
         "away_form": game.get("away_form"),
@@ -97,6 +114,13 @@ def _tier_block(key: str, cat: dict) -> dict:
     games = cat.get("games") or []
     total = float(cat.get("total_odds") or 0.0)
     hit = float(cat.get("hit_probability") or 0.0)
+    legs = [_leg(g, key) for g in games]
+    try:
+        from leagues.booking import validated_public_booking
+        booking = validated_public_booking(cat.get("booking"), games)
+    except Exception as exc:
+        logger.warning(f"growth: booking validation failed for {key} ({exc})")
+        booking = None
     return {
         "key": key,
         "label": TIER_LABELS.get(key, key),
@@ -107,16 +131,12 @@ def _tier_block(key: str, cat: dict) -> dict:
         # Payout times the chance it lands. Published so no channel has to
         # imply a slip is better than it is.
         "expected_value": round(total * hit, 4) if total and hit else None,
-        "legs": [_leg(g, key) for g in games],
+        "legs": legs,
         "leg_count": len(games),
         "all_started": bool(cat.get("all_started")),
-        # The SportyBet code for this exact slip, when one exists. Carried
-        # through so a post can offer six characters instead of asking a
-        # reader to retype five fixtures into another app. Only ever an
-        # `active` record: a tier that failed to book advertises nothing.
-        "booking": ((cat.get("booking") or {})
-                    if (cat.get("booking") or {}).get("status") == "active"
-                    else None),
+        "actionable": bool(legs) and all(leg["actionable"] for leg in legs),
+        "booking": booking,
+        "booking_verified": bool(booking),
     }
 
 
@@ -125,7 +145,7 @@ def _rollover_block(cat: dict, today: str) -> dict:
     chain = cat.get("chain") or []
     today_day = next(
         (d for d in chain
-         if (d.get("date") or "") >= today and d.get("status") == "pending"),
+         if (d.get("date") or "") == today and d.get("status") == "pending"),
         None,
     )
     legs = []
@@ -141,12 +161,21 @@ def _rollover_block(cat: dict, today: str) -> dict:
                 "confidence": round(float(p.get("confidence") or 0.0), 4),
                 "odds": round(float(p.get("odds") or 0.0), 2),
                 "odds_are_real": bool(p.get("odds_are_real")),
+                "started": not _is_actionable(p.get("commence_time")),
+                "actionable": _is_actionable(p.get("commence_time")),
                 "slug": match_slug(p.get("home_team"), p.get("away_team")),
                 "tier": "rollover",
             })
 
     won = sum(1 for d in chain if d.get("status") == "won")
     lost = sum(1 for d in chain if d.get("status") == "lost")
+    raw_games = cat.get("games") or []
+    try:
+        from leagues.booking import validated_public_booking
+        booking = validated_public_booking(cat.get("booking"), raw_games)
+    except Exception as exc:
+        logger.warning(f"growth: rollover booking validation failed ({exc})")
+        booking = None
     return {
         "key": "rollover",
         "label": "Rollover",
@@ -164,9 +193,9 @@ def _rollover_block(cat: dict, today: str) -> dict:
         ),
         "legs": legs,
         "leg_count": len(legs),
-        "booking": ((cat.get("booking") or {})
-                    if (cat.get("booking") or {}).get("status") == "active"
-                    else None),
+        "actionable": bool(legs) and all(leg["actionable"] for leg in legs),
+        "booking": booking,
+        "booking_verified": bool(booking),
     }
 
 
