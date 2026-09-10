@@ -117,10 +117,26 @@ BUILDER_MARKET_FLOORS = {
 
 
 def _market_cap_for_target(target: float) -> int:
-    """Use the public market cap at every target; quality never relaxes."""
+    """Scale Builder-only market concentration with the requested target.
+
+    Daily products keep the public MARKET_CAP unchanged. A fixed cap of three
+    broad market groups can become a structural ceiling on high-target weekly
+    builds even when additional selections have already passed trust and exact
+    bookability. Keep the original cap through 20x, then widen conservatively.
+
+    At 200x the broad-group cap is six of the sixteen allowed legs, so exposure
+    is still bounded while a large approved board is not forced into artificial
+    scarcity.
+    """
     from leagues.selection import MARKET_CAP
 
-    return MARKET_CAP
+    if target <= 20:
+        return MARKET_CAP
+    if target <= 50:
+        return max(MARKET_CAP, 4)
+    if target <= 100:
+        return max(MARKET_CAP, 5)
+    return max(MARKET_CAP, 6)
 
 
 def _team_to_score_cap_for_target(target: float) -> int:
@@ -655,6 +671,7 @@ def build_slip(
         "market_cap": cap, "team_to_score_cap": team_to_score_cap,
         "under_cap": UNDER_CAP, "team_fixture_cap": 1,
         "max_legs": max_legs,
+        "market_cap_policy": "builder_target_aware_v1",
     }
     if not candidates:
         return {
@@ -885,6 +902,23 @@ def build_slip(
         verified = optimization_status in {"OPTIMAL", "BOUNDED_OPTIMAL"}
         description = ("The strongest verified combination" if verified
                        else "The current search found a qualifying combination")
+        if result_status == "EXPOSURE_CAPPED":
+            capped_reason = (
+                f"{description} reaches {odds:.2f}x under the current "
+                "diversification limits. Approved selections remain on the "
+                "board; this is an exposure cap, not a quality rejection."
+            )
+        elif result_status == "MAX_LEGS_CAPPED":
+            capped_reason = (
+                f"{description} reaches {odds:.2f}x within the current "
+                f"{max_legs}-leg ceiling. Approved selections may remain on the "
+                "board; this is a leg-count cap, not proof that they are weak."
+            )
+        else:
+            capped_reason = (
+                f"{description} reaches {odds:.2f}x. Lowering standards to reach "
+                f"{target:g}x would not make it a better bet."
+            )
         return {
             "ok": False,
             "result_status": result_status,
@@ -907,10 +941,7 @@ def build_slip(
             "max_legs": max_legs,
             "trust_rejection_reasons": dict(trust_rejections),
             "selection_diagnostics": diagnostics,
-            "reason": (
-                f"{description} reaches {odds:.2f}x. Lowering standards to reach "
-                f"{target:g}x would not make it a better bet."
-            ),
+            "reason": capped_reason,
         }
 
     if odds > target * BAND_HIGH:

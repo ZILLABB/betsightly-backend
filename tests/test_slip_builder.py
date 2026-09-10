@@ -232,13 +232,15 @@ def test_target_reaching_builder_ticket_is_refused_when_conservative_ev_is_poor(
     assert built["expected_return"] < built["minimum_expected_return"]
 
 
-def test_builder_market_cap_never_relaxes_for_high_targets():
+def test_builder_market_cap_scales_for_high_targets():
     assert slip_builder._market_cap_for_target(10) == 3
     assert slip_builder._market_cap_for_target(20) == 3
-    assert slip_builder._market_cap_for_target(30) == 3
-    assert slip_builder._market_cap_for_target(50) == 3
-    assert slip_builder._market_cap_for_target(70) == 3
-    assert slip_builder._market_cap_for_target(100) == 3
+    assert slip_builder._market_cap_for_target(30) == 4
+    assert slip_builder._market_cap_for_target(50) == 4
+    assert slip_builder._market_cap_for_target(70) == 5
+    assert slip_builder._market_cap_for_target(100) == 5
+    assert slip_builder._market_cap_for_target(200) == 6
+
 
 def test_builder_locally_replaces_a_weaker_selected_fixture(
     monkeypatch,
@@ -314,7 +316,7 @@ def test_builder_locally_replaces_a_weaker_selected_fixture(
         "anchor",
     }
 
-def test_high_target_builder_quality_caps_instead_of_using_four_of_one_group(monkeypatch):
+def test_high_target_builder_can_use_four_quality_approved_picks_same_group(monkeypatch):
     monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
     picks = [
         _pick(
@@ -332,9 +334,11 @@ def test_high_target_builder_quality_caps_instead_of_using_four_of_one_group(mon
         max_legs=4,
     )
 
-    assert not built["ok"]
-    assert built["result_status"] == "EXPOSURE_CAPPED"
+    assert built["ok"]
+    assert built["result_status"] == "TARGET_REACHED"
     assert built["optimization_status"] == "OPTIMAL"
+    assert built["legs"] == 4
+    assert built["odds"] == pytest.approx(81.0)
 
 
 def test_builder_cannot_use_deeper_public_alternative_to_manufacture_target(monkeypatch):
