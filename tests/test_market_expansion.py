@@ -205,6 +205,13 @@ def test_pick_reports_its_own_evidence_and_real_model_count():
     assert not pick["safe_tier_eligible"]
     assert game["models_agreed"] == 1
     assert game["model_sources"] == ["league base + Poisson"]
+    for key in (
+        "selection_probability", "lower_reliability_bound",
+        "evidence_strength", "bookmaker_probability",
+        "bookmaker_disagreement", "ml_disagreement", "market_rank",
+        "fixture_alternatives", "rejected_fixture_alternatives",
+    ):
+        assert key in game
 
 
 def test_ml_can_veto_a_severe_disagreement(monkeypatch):

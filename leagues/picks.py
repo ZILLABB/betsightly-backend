@@ -647,6 +647,21 @@ def to_game(pick: dict) -> dict:
         "evidence_adjusted_probability": pick.get("evidence_adjusted_probability"),
         "selection_probability": pick.get("selection_probability"),
         "risk_adjusted_return": pick.get("risk_adjusted_return"),
+        "lower_reliability_bound": pick.get("lower_reliability_bound") or
+        (pick.get("trust") or {}).get("lower_reliability_bound"),
+        "evidence_strength": pick.get("evidence_strength") or
+        (pick.get("trust") or {}).get("evidence_strength"),
+        "evidence_sample_size": (pick.get("trust") or {}).get(
+            "calibration_sample_size", pick.get("calibration_sample", 0)
+        ),
+        "trust_grade": (pick.get("trust") or {}).get("trust_grade"),
+        "bookmaker_probability": pick.get("market_implied_probability"),
+        "bookmaker_disagreement": (pick.get("trust") or {}).get(
+            "model_market_disagreement"
+        ),
+        "ml_disagreement": (pick.get("trust") or {}).get(
+            "internal_model_agreement"
+        ),
         "model_sources": sources,
         "models_used": len(sources),
         "odds": pick["odds"],
@@ -663,6 +678,7 @@ def to_game(pick: dict) -> dict:
         "fixture_rank": pick.get("fixture_rank"),
         "model_rank": pick.get("model_rank"),
         "public_rank": pick.get("public_rank"),
+        "market_rank": pick.get("public_rank"),
         "quality_score": pick.get("quality_score"),
         "market_trust_state": pick.get("market_trust_state"),
         "best_market": pick.get("best_market"),

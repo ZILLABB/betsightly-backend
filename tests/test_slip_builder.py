@@ -482,6 +482,30 @@ def test_builder_does_not_accept_odds_below_requested_target():
     assert built["best_reachable"] == pytest.approx(3.38)
 
 
+def test_capped_generate_exposes_safe_game_diagnostics_not_internal_picks(
+        monkeypatch):
+    pick = _pick("capped", odds=1.5, confidence=.8)
+    monkeypatch.setattr(slip_builder, "_pool", lambda *a, **k: [pick])
+    monkeypatch.setattr("leagues.sportybet.fetch_board", lambda **k: {})
+    monkeypatch.setattr(slip_builder, "build_slip", lambda *a, **k: {
+        "ok": False, "result_status": "QUALITY_CAPPED", "target": 10,
+        "best_reachable": 1.5, "picks": [pick], "reason": "quality capped",
+    })
+    monkeypatch.setattr("leagues.picks.to_game", lambda p: {
+        "match_id": p["match_id"], "fixture_rank": 1,
+        "selection_reason_codes": ["PUBLIC_RANK_1"],
+    })
+
+    result = slip_builder.generate(10, horizon="week")
+
+    assert result["status"] == "unavailable"
+    assert "picks" not in result
+    assert result["games"] == [{
+        "match_id": "capped", "fixture_rank": 1,
+        "selection_reason_codes": ["PUBLIC_RANK_1"],
+    }]
+
+
 def test_dnb_settlement_math_models_draw_as_push():
     pick = {
         "market": "dnb_home",

@@ -307,7 +307,7 @@ def _order_key(pick: dict):
 def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
     """Every Builder-qualified pick within the requested horizon."""
     from leagues.calibrator import fit_calibration
-    from leagues.engine import run_pipeline
+    from leagues.engine import prepared_pipeline, run_pipeline
     from leagues.picks import (
         MIN_CANDIDATE_CONFIDENCE,
         MIN_PUBLISHABLE_CONFIDENCE,
@@ -321,10 +321,14 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
     # Its returned picks have already passed the normal publication floors,
     # though, so rebuild picks from the already-evaluated fixtures using the
     # Builder-only market overrides. This is NOT a second prediction run.
-    _, fixtures = run_pipeline(
-        days_ahead=POOL_DAYS,
-        force=force,
-    )
+    if force:
+        _, fixtures = run_pipeline(days_ahead=POOL_DAYS, force=True)
+    else:
+        _, fixtures = prepared_pipeline(days_ahead=POOL_DAYS)
+        if not fixtures:
+            # Direct/admin callers retain a safe fallback. The public API
+            # checks board readiness first and never reaches this cold path.
+            _, fixtures = run_pipeline(days_ahead=POOL_DAYS, force=False)
 
     fit = fit_calibration()
     picks = []
@@ -1082,11 +1086,17 @@ def generate(
     timings["target_odds_optimization"] = 0
     if not built.get("ok"):
         timings["total"] = elapsed_ms(timing_started)
+        payload = dict(built)
+        capped_picks = payload.pop("picks", [])
         return {
             "status": "unavailable",
             "horizon": horizon,
             "timing_ms": timings,
-            **built,
+            **payload,
+            # A capped combination is still useful audit evidence. Return the
+            # same safe public game shape as a successful slip, rather than
+            # leaking internal fixture/model dictionaries under `picks`.
+            "games": [to_game(pick) for pick in capped_picks],
         }
 
     games = [to_game(p) for p in built["picks"]]

@@ -183,6 +183,25 @@ def test_partial_provider_failure_never_masquerades_as_complete(monkeypatch, tmp
     assert espn_source.cache_metadata()["complete"] is True
 
 
+def test_partial_evaluated_board_is_ready_but_explicitly_degraded(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(engine, "_CACHE", {"entries": {}})
+    fixture = _fixture(now, 2, "partial")
+    engine._store_cache_entry(
+        7, [{"match_id": "partial"}], [fixture], time.time(), now,
+        {"complete": False, "failed_leagues": ["temporarily.down"]},
+    )
+
+    status = engine.prepared_board_status(7)
+    picks, fixtures = engine.prepared_pipeline(7)
+
+    assert status["ready"] is True
+    assert status["complete"] is False
+    assert status["degraded"] is True
+    assert [pick["match_id"] for pick in picks] == ["partial"]
+    assert [item["match_id"] for item in fixtures] == ["partial"]
+
+
 def test_cold_builder_click_returns_controlled_refresh_state(monkeypatch):
     from leagues import api, slip_builder
 

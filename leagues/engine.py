@@ -82,16 +82,39 @@ def _store_cache_entry(days_ahead: int, picks: list[dict],
 
 
 def prepared_board_status(days_ahead: int = 7) -> dict:
-    """Describe whether a complete evaluated board is ready for interaction."""
+    """Describe whether an evaluated board is ready for interaction.
+
+    Provider completeness is reported separately. A board with useful fixtures
+    from 99/116 leagues is degraded, not absent; treating it as perpetually
+    cold made every public Builder request return ``board_refreshing`` while
+    repeatedly refetching the same failing competitions.
+    """
     entry = _covering_entry(days_ahead, time.time())
     if not entry:
         return {"ready": False, "requested_days": days_ahead}
     provider = entry["metadata"].get("provider") or {}
     return {
         **entry["metadata"],
-        "ready": bool(provider.get("complete", True)),
+        "ready": bool(entry.get("fixtures")),
+        "complete": bool(provider.get("complete", True)),
+        "degraded": not bool(provider.get("complete", True)),
         "age_seconds": round(time.time() - entry["ts"], 1),
     }
+
+
+def prepared_pipeline(days_ahead: int = 7) -> tuple[list[dict], list[dict]]:
+    """Read the most recent evaluated board without provider fan-out.
+
+    Only the interactive Builder uses this path after ``prepared_board_status``
+    says it is ready. Normal pipeline calls still require complete provider
+    coverage and therefore retry partial ESPN caches on scheduled refreshes.
+    """
+    now = time.time()
+    now_dt = datetime.now(timezone.utc)
+    entry = _covering_entry(days_ahead, now, require_complete=False)
+    if not entry:
+        return [], []
+    return _filter_cached(entry, days_ahead, now_dt)
 
 
 def start_prepared_board_refresh(days_ahead: int = 7,
