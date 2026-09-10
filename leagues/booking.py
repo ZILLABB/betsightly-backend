@@ -1138,6 +1138,64 @@ def book_card(publish_date: str, accumulators: dict,
     return report
 
 
+def finalize_prepublication_card(publish_date: str,
+                                 accumulators: dict) -> dict:
+    """Book first, then promote an exact rebuilt variant before card lock.
+
+    A replacement made after publication is only a booking convenience and
+    must never rewrite the official prediction.  Before first write, however,
+    a fully validated quality-equivalent replacement can become the official
+    product itself.  Normal FULL tiers are unchanged; PARTIAL/failed bookings
+    never mutate prediction truth.
+    """
+    from math import prod
+    from leagues.selection_quality import selection_probability
+
+    report = book_card(publish_date, accumulators)
+    stored = bookings_for(publish_date)
+    promoted = []
+    for tier, data in (accumulators or {}).items():
+        if (tier.startswith("_") or tier in {"over_1_5", "rollover"}
+                or not isinstance(data, dict)):
+            continue
+        record = stored.get(tier) or {}
+        if (record.get("status") != "active"
+                or record.get("booking_status") != "REBUILT_FULL"):
+            continue
+        final_games = record.get("final_booked_legs") or []
+        if not final_games or len(final_games) != len(data.get("games") or []):
+            continue
+
+        replacements = list(record.get("replacements") or [])
+        data["games"] = final_games
+        data["total_odds"] = round(prod(
+            float(game.get("odds") or 1) for game in final_games
+        ), 2)
+        data["hit_probability"] = round(prod(
+            selection_probability(game) for game in final_games
+        ), 4)
+        data["prepublication_replacements"] = replacements
+        data["prepublication_booking_status"] = "REBUILT_FULL"
+
+        # The promoted set is now the official card.  Normalize the stored
+        # booking identity so the scheduled booking step reuses this exact
+        # validated code instead of treating it as a post-lock variant.
+        fingerprint = leg_fingerprint(final_games)
+        normalized = {
+            **record,
+            "booking_status": "FULL",
+            "leg_fingerprint": fingerprint,
+            "booking_variant_fingerprint": fingerprint,
+            "original_legs": final_games,
+            "original_leg_count": len(final_games),
+            "predicted_tier_odds": data["total_odds"],
+            "prepublication_replacements": replacements,
+        }
+        _store(publish_date, tier, normalized)
+        promoted.append(tier)
+    return {**report, "promoted_before_lock": promoted}
+
+
 def attach_bookings(publish_date: str, accumulators: dict,
                     now: datetime | None = None) -> dict:
     """Hang stored codes on the card. Read-only — never books.
