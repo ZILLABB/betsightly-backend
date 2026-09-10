@@ -199,6 +199,8 @@ try:
     _cards_ensure_table()
     from leagues.builder_revisions import ensure_tables as _builder_revision_tables
     _builder_revision_tables()
+    from leagues.decision_archive import ensure_tables as _decision_archive_tables
+    _decision_archive_tables()
 except Exception as e:
     logger.warning(f"Could not ensure rollover_days table: {e}")
 

@@ -701,6 +701,7 @@ def to_game(pick: dict) -> dict:
         "selector_version": pick.get("selector_version"),
         "market_policy_version": pick.get("market_policy_version"),
         "quality_classification": pick.get("quality_classification"),
+        "board_snapshot_id": pick.get("_board_snapshot_id"),
         "premium_eligible": pick.get("premium_eligible"),
         "fixture_alternatives": pick.get("fixture_alternatives", []),
         "rejected_fixture_alternatives": pick.get("rejected_fixture_alternatives", []),

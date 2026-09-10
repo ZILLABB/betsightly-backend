@@ -159,6 +159,17 @@ def create_initial_run(target: float, horizon: str, result: dict) -> dict:
             status=_booking_status(result),
             booking_detail=_dump(result.get("booking") or {}), created_at=now,
         ))
+    from leagues import decision_archive
+    if decision_archive.engine is engine:
+        snapshot_id = next((g.get("board_snapshot_id") for g in result.get("games", [])
+                            if g.get("board_snapshot_id")), None)
+        decision_archive.record_builder_event(
+            run_id=run_id, snapshot_id=snapshot_id,
+            request_id=f"initial:{run_id}", revision_before=None,
+            revision_after=1, action="generate", action_target=None,
+            requested_target=float(target), achieved_before=None,
+            achieved_after=result.get("odds"),
+        )
     return _decorate(
         result, run_id=run_id, revision=1, parent_revision=None,
         edit_token=token, locked=set(), excluded_fixtures=set(),
@@ -225,6 +236,7 @@ def persist_revision(
         locked=locked_selection_ids, excluded_fixtures=excluded_fixture_ids,
         excluded_selections=excluded_selection_ids,
     )
+    prior_result = None
     with engine.begin() as conn:
         run = conn.execute(select(builder_revision_runs).where(
             builder_revision_runs.c.run_id == run_id
@@ -236,6 +248,11 @@ def persist_revision(
         latest = int(run["latest_revision"])
         if latest != expected_revision:
             raise StaleBuilderRevision(latest)
+        prior_row = conn.execute(select(builder_revisions).where(
+            builder_revisions.c.run_id == run_id,
+            builder_revisions.c.revision == expected_revision,
+        )).mappings().first()
+        prior_result = _loads((prior_row or {}).get("result_payload"), {})
         conn.execute(builder_revisions.insert().values(
             run_id=run_id, revision=new_revision,
             parent_revision=expected_revision, request_id=request_id,
@@ -272,6 +289,18 @@ def persist_revision(
         ).values(latest_revision=new_revision, updated_at=now))
         if updated.rowcount != 1:
             raise StaleBuilderRevision(latest)
+    from leagues import decision_archive
+    if decision_archive.engine is engine:
+        snapshot_id = next((g.get("board_snapshot_id") for g in result.get("games", [])
+                            if g.get("board_snapshot_id")), None)
+        decision_archive.record_builder_event(
+            run_id=run_id, snapshot_id=snapshot_id, request_id=request_id,
+            revision_before=expected_revision, revision_after=new_revision,
+            action=action, action_target=action_target,
+            requested_target=float(run["requested_target"]),
+            achieved_before=(prior_result or {}).get("odds"),
+            achieved_after=result.get("odds"),
+        )
     return _decorate(
         result, run_id=run_id, revision=new_revision,
         parent_revision=expected_revision, edit_token=edit_token,

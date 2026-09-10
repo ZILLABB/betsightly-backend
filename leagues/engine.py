@@ -256,6 +256,17 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     )
 
     provider = espn_cache_metadata()
+    # Preserve the evaluated environment before any product optimizer narrows
+    # it. Archiving is observability: failure is logged and never blocks picks.
+    try:
+        from leagues.decision_archive import archive_board
+        archive_board(
+            all_picks, fixtures, horizon=days_ahead, provider=provider,
+            calibration=fit, generated_at=now_dt,
+        )
+    except Exception as exc:
+        logger.error("decision board archive unavailable: %s", exc,
+                     exc_info=True)
     _store_cache_entry(
         days_ahead, all_picks, fixtures, now, now_dt, provider
     )

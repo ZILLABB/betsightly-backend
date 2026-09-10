@@ -528,6 +528,23 @@ def build_daily_accumulators(force: bool = False) -> dict:
             logger.warning("prepublication booking skipped: %s", exc,
                            exc_info=True)
 
+    # Preserve both the independent counterfactual and the actual version
+    # that will be locked, including any validated pre-publication replacement.
+    try:
+        from leagues.decision_archive import record_daily
+        snapshot_id = next((p.get("_board_snapshot_id") for p in day_picks
+                            if p.get("_board_snapshot_id")), None)
+        record_daily(
+            snapshot_id, publish_date,
+            {"banker": independent_banker, "2_odds": independent_two,
+             "5_odds": independent_five, "10_odds": independent_ten},
+            result["accumulators"], portfolio_diagnostics,
+        )
+        result["decision_snapshot_id"] = snapshot_id
+    except Exception as exc:
+        logger.warning("daily decision archive skipped: %s", exc,
+                       exc_info=True)
+
     # Archive and lock by the audience-facing publication day even when a
     # thin late board deliberately draws from the next fixture day. Kickoff
     # remains on every leg; the card's immutable identity must not drift.

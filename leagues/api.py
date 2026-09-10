@@ -28,6 +28,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Leagues"])
 
 
+@router.get("/decision-quality", dependencies=[Depends(require_api_key)])
+async def decision_quality_report(days: int = 30):
+    """Admin-gated, read-only readiness and decision-memory report."""
+    from leagues.decision_archive import quality_report
+    return quality_report(days)
+
+
+@router.post("/decision-replay/{snapshot_id}",
+             dependencies=[Depends(require_api_key)])
+async def replay_decision_snapshot(snapshot_id: str,
+                                   policy: str = "CURRENT_POLICY"):
+    """Provider-isolated replay. It cannot publish, book, or settle."""
+    from leagues.decision_archive import replay
+    try:
+        return replay(snapshot_id, policy)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.get("/daily-accumulators")
 async def get_daily_accumulators():
     """Daily accumulator picks (2 odds / 5 odds / 10 odds / over 1.5 / rollover)."""
