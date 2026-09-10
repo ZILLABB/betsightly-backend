@@ -316,16 +316,30 @@ def test_readback_can_prove_odds_from_exact_selection_prices(monkeypatch):
     assert odds == pytest.approx(1.22)
 
 
-def test_readback_without_any_returned_odds_is_rejected(monkeypatch):
+def test_readback_without_odds_still_proves_exact_selection_identity(monkeypatch):
     sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",
              "specifier": "total=1.5"}]
     payload = _share_response(sels)
     payload["data"]["ticket"].pop("displayTotalOdds")
     monkeypatch.setattr(B, "_read_share", lambda _: payload)
     ok, why, odds = B.validate_code_details("ABC123", sels)
-    assert not ok
-    assert "odds" in why
+    assert ok, why
     assert odds is None
+
+
+def test_create_uses_exact_live_board_odds_when_readback_omits_them(monkeypatch):
+    sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",
+             "specifier": "total=1.5"}]
+    payload = _share_response(sels)
+    payload["data"]["ticket"].pop("displayTotalOdds")
+    monkeypatch.setattr(B, "_post_share", lambda _: payload)
+    monkeypatch.setattr(B, "_read_share", lambda _: payload)
+    record = B.create_booking(
+        [_game("Fulham", "Chelsea", "over_1_5")], _board()
+    )
+    assert record["status"] == "active"
+    assert record["actual_sportybet_odds"] == pytest.approx(1.22)
+    assert record["actual_sportybet_odds_source"] == "live_board_snapshot"
 
 
 def test_validation_survives_an_unreadable_code(monkeypatch):

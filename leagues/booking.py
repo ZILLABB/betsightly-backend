@@ -543,7 +543,11 @@ def validate_code_details(code: str, expected: list) -> tuple[bool, str, float |
     try:
         actual_odds = round(float(raw_odds), 3)
     except (TypeError, ValueError):
-        return False, "code readback carried no valid odds", None
+        # SportyBet's current create/readback schema proves the exact events,
+        # markets and outcomes but omits prices entirely. The caller may use
+        # the exact same live board snapshot for odds; it must still fail if
+        # neither source contains a valid price.
+        actual_odds = None
     return True, "ok", actual_odds
 
 
@@ -713,14 +717,33 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
                 "priced_at": priced_at, "failure_category": "CODE_EXPIRED",
                 "reason": "SportyBet returned an already-expired code"})
 
+    odds_source = "readback" if actual_odds is not None else None
     if actual_odds is None:
         actual_odds = 1.0
         for game in games:
             availability = game.get("sportybet_availability") or {}
+            if not availability.get("sportybet_available"):
+                from leagues.sportybet import availability_for
+                availability = availability_for(
+                    board, game.get("home_team", ""), game.get("away_team", ""),
+                    game.get("kickoff") or game.get("date") or "",
+                    game.get("league") or "", game.get("market") or "",
+                )
             price = availability.get("sportybet_odds")
             if price and availability.get("sportybet_available"):
                 actual_odds *= float(price)
+            else:
+                actual_odds = 1.0
+                break
         actual_odds = round(actual_odds, 3) if actual_odds > 1.0 else None
+        if actual_odds is not None:
+            odds_source = "live_board_snapshot"
+    if actual_odds is None:
+        return finished({**base, "status": "invalid",
+                "booking_status": "VALIDATION_FAILED", "share_code": None,
+                "legs": len(selections), "unmapped": [],
+                "priced_at": priced_at, "failure_category": "ODDS_UNAVAILABLE",
+                "reason": "validated code has no verifiable SportyBet odds"})
 
     final_status = booking_status or ("PARTIAL" if unmapped else "FULL")
     return finished({**base,
@@ -732,6 +755,7 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
         "booked_leg_count": len(selections),
         "excluded_leg_count": len(unmapped),
         "actual_sportybet_odds": actual_odds,
+        "actual_sportybet_odds_source": odds_source,
         "readback_validation": "PASSED",
         "unmapped": [],
         # Attachment follows the immutable published prediction. The booking
