@@ -4,8 +4,8 @@ from __future__ import annotations
 import math
 import os
 
-RANKING_POLICY_VERSION = "fixture-ranked-v1.1"
-SELECTOR_VERSION = "canonical-recommendations-v1.1"
+RANKING_POLICY_VERSION = "fixture-ranked-v1.2"
+SELECTOR_VERSION = "canonical-recommendations-v1.2"
 MARKET_POLICY_VERSION = "market-trust-v1.1"
 
 TRUSTED_MARKETS = {"over_1_5", "under_3_5", "under_4_5", "home_or_draw",
@@ -79,18 +79,19 @@ def _policy_state(pick: dict, evidence: dict) -> str:
 
 def _base_quality(pick: dict, evidence: dict) -> tuple[float, list[str]]:
     """Comparable wager quality; probability matters but is not the whole score."""
-    probability = float(evidence.get("evidence_adjusted_probability")
-                        or pick.get("evidence_adjusted_probability")
-                        or pick.get("confidence") or 0)
+    from leagues.selection_quality import selection_probability
+    probability = selection_probability(pick)
     # A 70% probability weight prevents naturally high-base-rate safety markets
     # from automatically dominating useful, well-priced straight outcomes.
     score = probability * 70
-    reasons = ["CALIBRATED"]
+    reasons = ["CALIBRATED", "CONSERVATIVE_SELECTION_PROBABILITY"]
+    if pick.get("lower_reliability_bound") is not None:
+        reasons.append("LOWER_BOUND_SHRINKAGE")
     strength = float(evidence.get("evidence_strength") or 0)
     score += min(8.0, strength * 8)
     odds = max(1.0001, float(pick.get("odds") or 1.0001))
     score += min(5.0, math.log(odds) * 10)
-    ev = max(-.15, min(.15, float(pick.get("expected_value") or 0)))
+    ev = max(-.15, min(.15, probability * float(pick.get("odds") or 1) - 1))
     score += ev * 20
     if pick.get("odds_are_real"):
         reasons.append("REAL_ODDS")
@@ -108,6 +109,52 @@ def _base_quality(pick: dict, evidence: dict) -> tuple[float, list[str]]:
         score -= min(8, gap * 30)  # ML has limited held-out skill: corroboration, not command.
         reasons.append("ML_AGREEMENT" if gap <= .08 else "ML_DISAGREEMENT")
     return round(score, 3), reasons
+
+
+def _remove_dominated(eligible: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Remove a riskier expression only when another is no worse on every fact.
+
+    This is Pareto dominance, not a confidence-gap threshold: the safer market
+    must have at least the same conservative probability, risk-adjusted return,
+    quality and trust. A genuinely better-priced riskier opinion therefore
+    remains eligible, while odds convenience alone cannot rescue it.
+    """
+    trust_order = {"DISABLED": 0, "RESTRICTED": 1, "PROVISIONAL": 2,
+                   "DEVELOPING": 3, "TRUSTED": 4}
+    survivors = []
+    rejected = []
+    for candidate in eligible:
+        dominator = None
+        for other in eligible:
+            if other is candidate:
+                continue
+            facts = (
+                other["selection_probability"] >= candidate["selection_probability"],
+                other["risk_adjusted_return"] >= candidate["risk_adjusted_return"],
+                other["quality_score"] >= candidate["quality_score"],
+                trust_order.get(other["market_trust_state"], 0)
+                >= trust_order.get(candidate["market_trust_state"], 0),
+            )
+            strictly_better = (
+                other["selection_probability"] > candidate["selection_probability"]
+                or other["risk_adjusted_return"] > candidate["risk_adjusted_return"]
+                or other["quality_score"] > candidate["quality_score"]
+            )
+            if all(facts) and strictly_better:
+                dominator = other
+                break
+        if dominator is None:
+            survivors.append(candidate)
+        else:
+            candidate["dominated_by_market"] = dominator.get("market")
+            rejected.append({
+                "market": candidate.get("market"),
+                "model_rank": candidate["model_rank"],
+                "quality_score": candidate["quality_score"],
+                "reason": "DOMINATED_FIXTURE_EXPRESSION",
+                "dominated_by": dominator.get("market"),
+            })
+    return survivors, rejected
 
 
 def _public_eligible(pick: dict, *, safe_only: bool) -> tuple[bool, str | None]:
@@ -135,6 +182,19 @@ def canonical_fixture_recommendations(
         for original in fixture_picks:
             pick = dict(original)
             evidence = _evidence(pick)
+            pick.update(
+                evidence_strength=evidence.get("evidence_strength"),
+                evidence_adjusted_probability=(
+                    evidence.get("evidence_adjusted_probability")
+                    or pick.get("evidence_adjusted_probability")
+                ),
+                lower_reliability_bound=(
+                    evidence.get("lower_reliability_bound")
+                    or pick.get("lower_reliability_bound")
+                ),
+            )
+            from leagues.selection_quality import attach_selection_quality
+            attach_selection_quality(pick)
             score, reasons = _base_quality(pick, evidence)
             state = _policy_state(pick, evidence)
             policy_penalty = {
@@ -144,15 +204,7 @@ def canonical_fixture_recommendations(
             pick.update(model_quality_score=score,
                         quality_score=round(score - policy_penalty, 3),
                         market_trust_state=state, selection_reason_codes=reasons,
-                        evidence_strength=evidence.get("evidence_strength"),
-                        evidence_adjusted_probability=(
-                            evidence.get("evidence_adjusted_probability")
-                            or pick.get("evidence_adjusted_probability")
-                        ),
-                        lower_reliability_bound=(
-                            evidence.get("lower_reliability_bound")
-                            or pick.get("lower_reliability_bound")
-                        ))
+                        )
             modeled.append(pick)
         modeled.sort(key=lambda p: (-p["model_quality_score"], -float(p.get("confidence") or 0)))
         best_model = modeled[0]
@@ -169,12 +221,14 @@ def canonical_fixture_recommendations(
             else:
                 rejected.append({"market": pick.get("market"), "model_rank": pick["model_rank"],
                                  "quality_score": pick["quality_score"], "reason": reason})
+        eligible, dominated = _remove_dominated(eligible)
+        rejected.extend(dominated)
         eligible.sort(key=lambda p: (-round(p["quality_score"] * 2) / 2,
                                      not bool(p.get("bookable")), -p["quality_score"]))
         if not eligible:
             continue
         best_public = eligible[0]
-        lower = float((best_public.get("trust") or {}).get("lower_reliability_bound")
+        lower = float(best_public.get("lower_reliability_bound")
                       or best_public.get("confidence") or 0)
         allowed_gap = min(10.0, max(4.0, (float(best_public.get("confidence") or 0) - lower) * 100))
         alternatives = [{"market": p.get("market"), "model_rank": p["model_rank"],
@@ -200,12 +254,5 @@ def canonical_fixture_recommendations(
 
 
 def builder_fixture_candidates(picks: list[dict]) -> list[dict]:
-    """All independently approved alternatives for Builder optimization.
-
-    Daily products intentionally remain rank-1/close-rank-2. Builder may
-    inspect deeper public ranks, but restricted/disabled markets still never
-    cross the policy boundary and the final optimizer keeps one leg/fixture.
-    """
-    return canonical_fixture_recommendations(
-        picks, include_all_eligible=True,
-    )
+    """The same rank-1/close-rank-2 canonical pool used by daily products."""
+    return canonical_fixture_recommendations(picks)

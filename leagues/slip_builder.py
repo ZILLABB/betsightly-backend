@@ -77,6 +77,12 @@ WAT = timezone(timedelta(hours=1))
 BAND_LOW = 0.90
 BAND_HIGH = 1.45
 
+# A target-reaching ticket that expects to return less than 40% of stake is a
+# lottery ticket. This is a product loss-budget, not a confidence threshold:
+# the optimizer still finds the strongest valid combination before the final
+# gate decides whether BetSightly should recommend it.
+MIN_BUILDER_EXPECTED_RETURN = .40
+
 
 # How close two picks must be on cost before the bookmaker's cut decides
 # between them. Sorting on cost alone drifted into the dearest markets on the
@@ -128,18 +134,8 @@ def _leg_settlement_probabilities(
     that leg. Convert the conditional DNB probability back into unconditional
     win / push / loss probabilities before accumulator maths.
     """
-    probability = max(
-        0.0,
-        min(
-            1.0,
-            float(
-                pick.get(
-                    "evidence_adjusted_probability",
-                    pick.get("confidence", 0.0),
-                )
-            ),
-        ),
-    )
+    from leagues.selection_quality import selection_probability
+    probability = selection_probability(pick)
 
     if pick.get("market") not in DNB_MARKETS:
         return probability, 0.0, 1.0 - probability
@@ -227,6 +223,17 @@ def _aggregate_credibility(legs: list[dict], odds: float,
         conservative_legs.append({
             **leg,
             "evidence_adjusted_probability": max(0.0, min(1.0, float(lower))),
+            "lower_reliability_bound": max(0.0, min(1.0, float(lower))),
+            "trust": {
+                **trust,
+                "evidence_adjusted_probability": max(
+                    0.0, min(1.0, float(lower))
+                ),
+                "lower_reliability_bound": max(
+                    0.0, min(1.0, float(lower))
+                ),
+                "trust_grade": "B",
+            },
         })
     distribution = _positive_payout_distribution(conservative_legs)
     conservative_return = sum(payout * probability
@@ -265,7 +272,7 @@ def _aggregate_credibility(legs: list[dict], odds: float,
         "dependence_warning": concentrated,
         "market_concentration": dict(market_counts),
         "league_concentration": dict(league_counts),
-        "action": "REPORT_ONLY_NO_POLICY_MUTATION",
+        "action": "LOWER_BOUND_APPLIED_TO_SELECTION",
     }
 
 
@@ -396,7 +403,8 @@ def _best_per_fixture_group(pool: list) -> list:
 
 def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
                        market_cap: int, team_to_score_cap: int,
-                       under_cap: int = 2) -> tuple[float, float, list[dict], str]:
+                       under_cap: int | None = None,
+                       ) -> tuple[float, float, list[dict], str]:
     """Solve the Builder's binary selection problem with HiGHS MILP.
 
     The first solve maximizes evidence-adjusted joint probability subject to
@@ -436,18 +444,30 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
     limited(range(size), max_legs)
     fixtures: dict[str, list[int]] = collections.defaultdict(list)
     groups: dict[str, list[int]] = collections.defaultdict(list)
+    teams: dict[str, list[int]] = collections.defaultdict(list)
     for index, pick in enumerate(valid):
         fixtures[str(pick.get("match_id"))].append(index)
         groups[str(pick.get("market_group") or "other")].append(index)
+        fixture = pick.get("_fixture") or {}
+        for side in ("home", "away"):
+            team = str((fixture.get(side) or {}).get("name") or "").strip().casefold()
+            if team:
+                teams[team].append(index)
     for indices in fixtures.values():
         limited(indices, 1)
     for indices in groups.values():
         limited(indices, market_cap)
+    # A seven-day board can contain the same club more than once. Treating
+    # those legs as independent doubles exposure to injuries, rotation and
+    # team-specific model error, so only one fixture per team may enter.
+    for indices in teams.values():
+        limited(indices, 1)
     limited((i for i, p in enumerate(valid)
              if exposure_group(p.get("market_group")) == "team_to_score"),
             team_to_score_cap)
-    limited((i for i, p in enumerate(valid)
-             if str(p.get("market", "")).startswith("under_")), under_cap)
+    if under_cap is not None:
+        limited((i for i, p in enumerate(valid)
+                 if str(p.get("market", "")).startswith("under_")), under_cap)
 
     log_odds = np.array([math.log(float(p["odds"])) for p in valid])
     risk = np.array([-math.log(max(1e-9, min(.999999, p)))
@@ -492,7 +512,7 @@ def build_slip(
     require_bookable: bool = True,
 ) -> dict:
     """The slip most likely to land at `target`, or an honest refusal."""
-    from leagues.selection import exposure_group
+    from leagues.selection import MIN_USEFUL_ODDS, UNDER_CAP, exposure_group
 
     cap = _market_cap_for_target(target) if market_cap is None else market_cap
     team_to_score_cap = _team_to_score_cap_for_target(target)
@@ -542,6 +562,8 @@ def build_slip(
         pick["evidence_adjusted_probability"] = decision[
             "evidence_adjusted_probability"
         ]
+        from leagues.selection_quality import attach_selection_quality
+        attach_selection_quality(pick)
 
         if (
             pick.get("market") in DNB_MARKETS
@@ -573,16 +595,22 @@ def build_slip(
         }
 
     from leagues.fixture_ranker import builder_fixture_candidates
-    candidates = builder_fixture_candidates(pool)
-    diagnostics["after_policy_and_canonical_ranking"] = len(candidates)
-    diagnostics["after_min_useful_odds"] = sum(1 for p in candidates if p.get("odds", 0) >= 1.12)
+    canonical_candidates = builder_fixture_candidates(pool)
+    diagnostics["after_policy_and_canonical_ranking"] = len(canonical_candidates)
+    candidates = [p for p in canonical_candidates
+                  if float(p.get("odds") or 0) >= MIN_USEFUL_ODDS]
+    diagnostics["after_min_useful_odds"] = len(candidates)
     diagnostics["after_policy"] = len(candidates)
     diagnostics["optimizer_candidate_count"] = len(candidates)
     diagnostics["fixture_count"] = len({p.get("match_id") for p in candidates})
     diagnostics["market_distribution_after_canonical_ranking"] = _market_distribution(candidates)
     diagnostics["public_rank_distribution"] = dict(collections.Counter(str(p.get("public_rank")) for p in candidates))
     diagnostics["trust_distribution"] = dict(collections.Counter(str((p.get("trust") or {}).get("evidence_state")) for p in candidates))
-    diagnostics["quality_constraints"] = {"market_cap": cap, "team_to_score_cap": team_to_score_cap, "under_cap": 2, "max_legs": max_legs}
+    diagnostics["quality_constraints"] = {
+        "market_cap": cap, "team_to_score_cap": team_to_score_cap,
+        "under_cap": UNDER_CAP, "team_fixture_cap": 1,
+        "max_legs": max_legs,
+    }
     if not candidates:
         return {
             "ok": False, "result_status": "NO_SAFE_COMBINATION",
@@ -603,6 +631,7 @@ def build_slip(
         )
 
         seen_fixtures: set = set()
+        seen_teams: set = set()
         groups: collections.Counter = collections.Counter()
         exposures: collections.Counter = collections.Counter()
         under_count = 0
@@ -619,9 +648,15 @@ def build_slip(
 
             group = p["market_group"]
             exposure = exposure_group(group)
+            fixture = p.get("_fixture") or {}
+            pick_teams = {
+                str((fixture.get(side) or {}).get("name") or "").strip().casefold()
+                for side in ("home", "away")
+            } - {""}
 
             if (
                 p["match_id"] in seen_fixtures
+                or pick_teams & seen_teams
                 or groups[group] >= cap
             ):
                 continue
@@ -633,7 +668,9 @@ def build_slip(
             ):
                 continue
 
-            if str(p.get("market", "")).startswith("under_") and under_count >= 2:
+            if (UNDER_CAP is not None
+                    and str(p.get("market", "")).startswith("under_")
+                    and under_count >= UNDER_CAP):
                 continue
 
             settlement = _leg_settlement_probabilities(p)
@@ -644,6 +681,7 @@ def build_slip(
             win_probability, _, _ = settlement
 
             seen_fixtures.add(p["match_id"])
+            seen_teams.update(pick_teams)
             groups[group] += 1
             exposures[exposure] += 1
             if str(p.get("market", "")).startswith("under_"):
@@ -769,7 +807,8 @@ def build_slip(
         *[f"market_group:{group}" for group, count in selected_groups.items()
           if count >= cap],
         *(["team_to_score"] if selected_exposures["team_to_score"] >= team_to_score_cap else []),
-        *(["under"] if selected_under_count >= 2 else []),
+        *(["under"] if UNDER_CAP is not None
+          and selected_under_count >= UNDER_CAP else []),
         *(["max_legs"] if len(legs) >= max_legs else []),
     ]
 
@@ -826,6 +865,29 @@ def build_slip(
         payout * probability for payout, probability in payout_distribution.items()
     )
 
+    if expected_return < MIN_BUILDER_EXPECTED_RETURN:
+        return {
+            "ok": False,
+            "result_status": "QUALITY_CAPPED",
+            "optimization_status": optimization_status,
+            "target": target,
+            "best_reachable": round(odds, 2),
+            "achieved_odds": round(odds, 2),
+            "legs": len(legs),
+            "picks": legs,
+            "hit_probability": round(joint, 5),
+            "expected_return": round(expected_return, 4),
+            "expected_return_basis": "conservative_selection_probability",
+            "minimum_expected_return": MIN_BUILDER_EXPECTED_RETURN,
+            "selection_diagnostics": diagnostics,
+            "reason": (
+                "The target is mathematically reachable, but the strongest "
+                f"combination returns only about {expected_return:.2f} per 1 "
+                "staked on conservative evidence. BetSightly will not "
+                "publish that risk as a recommended slip."
+            ),
+        }
+
     no_loss_probability = sum(payout_distribution.values())
 
     target_hit_probability = sum(
@@ -852,7 +914,7 @@ def build_slip(
         "legs": len(legs),
         "hit_probability": round(joint, 5),
         "expected_return": round(expected_return, 4),
-        "expected_return_basis": "model_estimate",
+        "expected_return_basis": "conservative_selection_probability",
         "aggregate_credibility": aggregate_credibility,
         "target_hit_probability": round(
             target_hit_probability,
@@ -869,12 +931,16 @@ def build_slip(
         "dnb_leg_count": sum(1 for p in legs if p.get("market") in DNB_MARKETS),
         "team_to_score_leg_count": sum(1 for p in legs if p.get("market") in {"home_over_0_5", "away_over_0_5"}),
         "under_leg_count": sum(1 for p in legs if str(p.get("market", "")).startswith("under_")),
+        "unique_team_count": len({
+            str(((p.get("_fixture") or {}).get(side) or {}).get("name") or "")
+            for p in legs for side in ("home", "away")
+        } - {""}),
         "fixture_rank_1_count": sum(1 for p in legs if p.get("fixture_rank") == 1),
         "fixture_rank_2_count": sum(1 for p in legs if p.get("fixture_rank") == 2),
         "fixture_rank_3_plus_count": sum(1 for p in legs if int(p.get("fixture_rank") or 99) >= 3),
         "avg_confidence": round(sum(p["confidence"] for p in legs) / len(legs), 4),
         "avg_evidence_probability": round(
-            sum(p.get("evidence_adjusted_probability", p["confidence"]) for p in legs)
+            sum(p["selection_probability"] for p in legs)
             / len(legs),
             4,
         ),

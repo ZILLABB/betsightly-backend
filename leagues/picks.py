@@ -645,6 +645,8 @@ def to_game(pick: dict) -> dict:
         "safe_tier_eligible": pick.get("safe_tier_eligible", False),
         "trust": pick.get("trust"),
         "evidence_adjusted_probability": pick.get("evidence_adjusted_probability"),
+        "selection_probability": pick.get("selection_probability"),
+        "risk_adjusted_return": pick.get("risk_adjusted_return"),
         "model_sources": sources,
         "models_used": len(sources),
         "odds": pick["odds"],

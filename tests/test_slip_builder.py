@@ -56,7 +56,7 @@ def test_aggregate_credibility_challenges_edge_not_supported_by_lower_bounds():
     assert result["status"] == "EDGE_NOT_SUPPORTED_BY_LOWER_BOUNDS"
     assert result["extraordinary_claim"] is True
     assert result["conservative_expected_return"] < 1
-    assert result["action"] == "REPORT_ONLY_NO_POLICY_MUTATION"
+    assert result["action"] == "LOWER_BOUND_APPLIED_TO_SELECTION"
 
 
 def test_aggregate_credibility_reports_missing_lower_bounds():
@@ -89,7 +89,7 @@ def test_expected_return_matches_this_slips_probability_and_odds():
     built = build_slip(2.0, pool=[_pick()], market_cap=10)
     assert built["ok"]
     assert built["hit_probability"] == pytest.approx(
-        built["picks"][0]["evidence_adjusted_probability"]
+        built["picks"][0]["selection_probability"]
     )
     assert built["odds"] == pytest.approx(2.0)
     assert built["expected_return"] == pytest.approx(built["hit_probability"] * 2.0)
@@ -129,6 +129,31 @@ def test_builder_caps_actual_home_and_away_team_goal_picks_together(monkeypatch)
     assert len(selected_team_goals) <= 2
 
 
+def test_week_builder_does_not_repeat_a_team_across_fixtures(monkeypatch):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    first = _pick("first", odds=2, confidence=.82, market_group="goals_over_1_5")
+    second = _pick("second", odds=2, confidence=.82, market="under_4_5",
+                   market_group="goals_under_4_5")
+    independent = _pick("third", odds=2, confidence=.80,
+                        market="home_or_draw", market_group="double_chance")
+    first["_fixture"].update(home={"name": "Shared FC"}, away={"name": "One FC"})
+    second["_fixture"].update(home={"name": "Two FC"}, away={"name": "Shared FC"})
+    independent["_fixture"].update(
+        home={"name": "Three FC"}, away={"name": "Four FC"}
+    )
+
+    built = build_slip(
+        4, pool=[first, second, independent], max_legs=2, market_cap=3
+    )
+
+    assert built["ok"], built
+    teams = []
+    for pick in built["picks"]:
+        fixture = pick["_fixture"]
+        teams.extend([fixture["home"]["name"], fixture["away"]["name"]])
+    assert teams.count("Shared FC") <= 1
+
+
 @pytest.mark.parametrize("target", [5, 10, 20, 50, 70, 100])
 def test_actual_team_to_score_cap_holds_for_every_builder_target(monkeypatch, target):
     monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
@@ -150,7 +175,7 @@ def test_actual_team_to_score_cap_holds_for_every_builder_target(monkeypatch, ta
     assert built["team_to_score_leg_count"] <= 2
 
 
-def test_under_exposure_cap_uses_actual_under_markets(monkeypatch):
+def test_strong_under_is_not_replaced_only_for_cosmetic_diversity(monkeypatch):
     monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
     unders = [
         _pick(f"under-{i}", 2.0, .82,
@@ -162,7 +187,11 @@ def test_under_exposure_cap_uses_actual_under_markets(monkeypatch):
              for i in range(3)]
     built = build_slip(20, pool=unders + overs, max_legs=10, market_cap=3)
     assert built["ok"], built
-    assert built["under_leg_count"] <= 2
+    assert built["under_leg_count"] >= 3
+    selected = [pick["market"] for pick in built["picks"]
+                if pick["market"].startswith("under_")]
+    assert selected.count("under_3_5") <= 3
+    assert selected.count("under_4_5") <= 3
 
 
 @pytest.mark.parametrize("target", [10, 70])
@@ -179,6 +208,28 @@ def test_high_quality_synthetic_board_can_reach_large_targets(monkeypatch, targe
     assert built["ok"], built
     assert built["result_status"] == "TARGET_REACHED"
     assert built["odds"] >= target
+
+
+def test_target_reaching_builder_ticket_is_refused_when_conservative_ev_is_poor(
+    monkeypatch,
+):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    markets = [
+        ("over_1_5", "goals_over_1_5"),
+        ("under_4_5", "goals_under_4_5"),
+        ("home_or_draw", "double_chance"),
+    ]
+    board = [
+        _pick(f"poor-{i}", odds=1.3, confidence=.65,
+              market=markets[i % 3][0], market_group=markets[i % 3][1])
+        for i in range(9)
+    ]
+
+    built = build_slip(10, pool=board, max_legs=9, market_cap=3)
+
+    assert not built["ok"]
+    assert built["result_status"] == "QUALITY_CAPPED"
+    assert built["expected_return"] < built["minimum_expected_return"]
 
 
 def test_builder_market_cap_never_relaxes_for_high_targets():
@@ -250,7 +301,9 @@ def test_builder_locally_replaces_a_weaker_selected_fixture(
     assert built["ok"]
     assert built["odds"] == pytest.approx(4.0)
     assert built["hit_probability"] == pytest.approx(
-        0.81,
+        built["picks"][0]["selection_probability"]
+        * built["picks"][1]["selection_probability"],
+        abs=1.1e-5,
     )
 
     assert {
@@ -284,7 +337,7 @@ def test_high_target_builder_quality_caps_instead_of_using_four_of_one_group(mon
     assert built["optimization_status"] == "OPTIMAL"
 
 
-def test_builder_can_use_deeper_public_alternative_without_repeating_fixture(monkeypatch):
+def test_builder_cannot_use_deeper_public_alternative_to_manufacture_target(monkeypatch):
     monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
     fixture_alternatives = [
         _pick("shared", 1.10, .90, market="over_1_5", market_group="goals"),
@@ -294,11 +347,11 @@ def test_builder_can_use_deeper_public_alternative_without_repeating_fixture(mon
     anchor = _pick("anchor-deep", 2.00, .82, market_group="other")
     built = build_slip(4, pool=fixture_alternatives + [anchor], max_legs=2,
                        market_cap=3)
-    assert built["ok"], built
+    assert not built["ok"], built
     assert built["optimization_status"] == "OPTIMAL"
-    assert len({pick["match_id"] for pick in built["picks"]}) == len(built["picks"])
-    assert any(p["match_id"] == "shared" and p["public_rank"] >= 3
-               for p in built["picks"])
+    assert built["result_status"] in {"QUALITY_CAPPED", "MAX_LEGS_CAPPED"}
+    assert all(int(p.get("public_rank") or 99) <= 2
+               for p in built.get("picks", []))
 
 
 def test_builder_restricted_alternative_never_enters_optimizer(monkeypatch):

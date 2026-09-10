@@ -18,6 +18,8 @@ from math import prod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from leagues.selection_quality import selection_probability
+
 logger = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -51,6 +53,14 @@ BOOKING_BUFFER = timedelta(minutes=20)
 def _trusted_rollover_picks(picks: list) -> list:
     """Markets with enough settled evidence for the site's safest challenge."""
     return [p for p in picks if p.get("safe_tier_eligible")]
+
+
+def _pick_teams(pick: dict) -> set[str]:
+    fixture = pick.get("_fixture") or {}
+    return {
+        str((fixture.get(side) or {}).get("name") or "").strip().casefold()
+        for side in ("home", "away")
+    } - {""}
 
 
 def _wat_now(now: datetime | None = None) -> datetime:
@@ -237,24 +247,34 @@ def build_daily_accumulators(force: bool = False) -> dict:
         for game in rollover.get("games", [])
         if game.get("match_id")
     }
+    team_uses = {
+        str(game.get(field) or "").strip().casefold()
+        for game in rollover.get("games", [])
+        for field in ("home_team", "away_team")
+    } - {""}
 
     def _tier(target, max_picks, floor, min_ev, band_low=0.80,
               safe_only=False):
         tier_picks = ([p for p in day_picks if p.get("safe_tier_eligible")]
                       if safe_only else day_picks)
-        pool = [p for p in tier_picks if p["match_id"] not in fixture_uses]
+        pool = [p for p in tier_picks
+                if p["match_id"] not in fixture_uses
+                and not (_pick_teams(p) & team_uses)]
         sel, why = _select_tier(pool, target, max_picks, floor, min_ev,
                                 band_low=band_low)
         for pick in sel[0]:
             fixture_uses[pick["match_id"]] = fixture_uses.get(pick["match_id"], 0) + 1
+            team_uses.update(_pick_teams(pick))
         return sel, why
 
     safe_picks = [p for p in day_picks
                   if p.get("safe_tier_eligible")
-                  and p["match_id"] not in fixture_uses]
+                  and p["match_id"] not in fixture_uses
+                  and not (_pick_teams(p) & team_uses)]
     banker = select_banker(safe_picks)
     for _p in banker[0]:
         fixture_uses[_p["match_id"]] = fixture_uses.get(_p["match_id"], 0) + 1
+        team_uses.update(_pick_teams(_p))
 
     # Chance-to-land, not expected value: these are bought to come in. On
     # 22 August that is 2 odds landing 57.5% instead of 49.2%, and 5 odds
@@ -318,7 +338,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
         margin = p.get("market_margin")
         if margin is None:
             margin = ESTIMATE_MARGIN - 1.0
-        return (-round(p["confidence"] / _MARGIN_TIE_BAND),
+        return (-round(selection_probability(p) / _MARGIN_TIE_BAND),
                 not p.get("bookable"),
                 margin,
                 not (p.get("_model") or {}).get("has_market"))
@@ -327,7 +347,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
     for p in sorted(day_picks, key=_over_rank):
         if p["market"] != "over_1_5" or p["match_id"] in seen:
             continue
-        if p["confidence"] < OVER_MIN_CONFIDENCE:
+        if selection_probability(p) < OVER_MIN_CONFIDENCE:
             continue
         over_picks.append(p)
         seen.add(p["match_id"])
@@ -336,7 +356,8 @@ def build_daily_accumulators(force: bool = False) -> dict:
 
     # For singles the meaningful headline is the typical chance of any one
     # landing, not the product of all of them.
-    over_avg = (sum(p["confidence"] for p in over_picks) / len(over_picks)
+    over_avg = (sum(selection_probability(p) for p in over_picks)
+                / len(over_picks)
                 if over_picks else 0.0)
     over_total = 1.0
     for p in over_picks:
@@ -465,7 +486,9 @@ def _booking_candidate_snapshot(picks: list, limit: int = 160) -> list[dict]:
         band = "short" if price < 1.35 else ("mid" if price < 1.7 else "long")
         buckets.setdefault((pick.get("market_group"), band), []).append(pick)
     for bucket in buckets.values():
-        bucket.sort(key=lambda p: (-p["confidence"], p["match_id"], p["market"]))
+        bucket.sort(key=lambda p: (
+            -selection_probability(p), p["match_id"], p["market"]
+        ))
     ordered, index = [], 0
     keys = sorted(buckets)
     while len(ordered) < limit:
@@ -555,27 +578,42 @@ def build_bookable_now() -> dict | None:
         game.get("match_id") for game in rollover.get("games", [])
         if game.get("match_id")
     }
+    team_uses = {
+        str(game.get(field) or "").strip().casefold()
+        for game in rollover.get("games", [])
+        for field in ("home_team", "away_team")
+    } - {""}
 
     def available() -> list:
-        return [p for p in live if p["match_id"] not in fixture_uses]
+        return [p for p in live
+                if p["match_id"] not in fixture_uses
+                and not (_pick_teams(p) & team_uses)]
 
     banker = select_banker(available())
     fixture_uses.update(p["match_id"] for p in banker[0])
+    for pick in banker[0]:
+        team_uses.update(_pick_teams(pick))
     two, _ = _select_tier(available(), 2.0, 4, F, 0.82, band_low=0.92)
     fixture_uses.update(p["match_id"] for p in two[0])
+    for pick in two[0]:
+        team_uses.update(_pick_teams(pick))
     five, _ = _select_tier(available(), 5.0, 8, F, 0.72)
     fixture_uses.update(p["match_id"] for p in five[0])
+    for pick in five[0]:
+        team_uses.update(_pick_teams(pick))
     ten, _ = _select_tier(available(), 10.0, 10, F, 0.63)
 
     over, seen = [], set()
-    for p in sorted(live, key=lambda x: -x["confidence"]):
-        if p["market"] != "over_1_5" or p["match_id"] in seen or p["confidence"] < 0.65:
+    for p in sorted(live, key=lambda x: -selection_probability(x)):
+        if (p["market"] != "over_1_5" or p["match_id"] in seen
+                or selection_probability(p) < 0.65):
             continue
         over.append(p)
         seen.add(p["match_id"])
         if len(over) >= 10:
             break
-    over_avg = sum(p["confidence"] for p in over) / len(over) if over else 0.0
+    over_avg = (sum(selection_probability(p) for p in over) / len(over)
+                if over else 0.0)
     over_total = 1.0
     for p in over:
         over_total *= p["odds"]

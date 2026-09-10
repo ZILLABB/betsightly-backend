@@ -26,6 +26,13 @@ def _pick(match_id, confidence, odds, margin=None, group="goals_over",
         "odds_provider": "SportyBet" if margin is not None else None,
         "market_margin": margin,
         "expected_value": round(confidence * odds - 1.0, 4),
+        # These tests isolate price/margin selection. Evidence uncertainty has
+        # its own suite, so use a supported point estimate with no lower bound.
+        "trust": {
+            "evidence_state": "SUPPORTED",
+            "evidence_strength": 1.0,
+            "evidence_adjusted_probability": confidence,
+        },
     }
 
 

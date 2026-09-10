@@ -60,7 +60,11 @@ MARKET_CAP = 3
 # two groups separately allowed as many as six of those legs on one ticket.
 TEAM_TO_SCORE_GROUPS = {"team_goals_home", "team_goals_away"}
 TEAM_TO_SCORE_CAP = 2
-UNDER_CAP = 2
+# Replay validates Under 3.5 and Under 4.5 independently but contains no
+# evidence that a third Grade-A Under is worse than a weaker market inserted
+# for cosmetic variety. Per-line MARKET_CAP and canonical quality ranking are
+# therefore the exposure control; Under 2.5 remains policy-restricted.
+UNDER_CAP = None
 
 
 def exposure_group(market_group: str) -> str:
@@ -92,7 +96,8 @@ def _mean_margin(combo) -> float:
 
 def _cost(pick: dict) -> float:
     """Risk paid per unit of multiplier gained. Lower is better."""
-    p = max(1e-6, min(0.999, pick["confidence"]))
+    from leagues.selection_quality import selection_probability
+    p = max(1e-6, min(0.999, selection_probability(pick)))
     o = max(1.0001, pick["odds"])
     return -math.log(p) / math.log(o)
 
@@ -209,11 +214,13 @@ def select_accumulator(
     cannot support the target honestly.
     """
     from leagues.fixture_ranker import canonical_fixture_recommendations
+    from leagues.selection_quality import selection_probability
     if canonicalize:
         picks = canonical_fixture_recommendations(picks, safe_only=target_odds <= 2.0)
     pool = [
         p for p in picks
-        if p["confidence"] >= min_confidence and p["odds"] >= MIN_USEFUL_ODDS
+        if selection_probability(p) >= min_confidence
+        and p["odds"] >= MIN_USEFUL_ODDS
     ]
     if not pool:
         return [], 0.0, 0.0
@@ -287,7 +294,8 @@ def select_accumulator(
                         and exposures[exposure] > TEAM_TO_SCORE_CAP):
                     ok = False
                     break
-                if str(p.get("market", "")).startswith("under_"):
+                if (UNDER_CAP is not None
+                        and str(p.get("market", "")).startswith("under_")):
                     under_count += 1
                     if under_count > UNDER_CAP:
                         ok = False
@@ -299,7 +307,7 @@ def select_accumulator(
             joint = 1.0
             for p in combo:
                 combined *= p["odds"]
-                joint *= p["confidence"]
+                joint *= selection_probability(p)
 
             ev = combined * joint
             if ev < min_ev:
@@ -357,9 +365,11 @@ def select_accumulator(
     chosen, combined, joint = result
 
     if prefer_real_odds:
-        chosen.sort(key=lambda p: (not p["odds_are_real"], -p["confidence"]))
+        chosen.sort(key=lambda p: (
+            not p["odds_are_real"], -selection_probability(p)
+        ))
     else:
-        chosen.sort(key=lambda p: -p["confidence"])
+        chosen.sort(key=lambda p: -selection_probability(p))
 
     return chosen, round(combined, 2), round(joint, 4)
 
@@ -400,22 +410,23 @@ def select_banker(picks: list[dict], max_picks: int = 1,
     can be genuinely mispriced in our favour.
     """
     from leagues.fixture_ranker import canonical_fixture_recommendations
+    from leagues.selection_quality import selection_probability
     if canonicalize:
         picks = canonical_fixture_recommendations(picks, safe_only=True)
     pool = [
         p for p in picks
-        if p["confidence"] >= min_confidence and p["odds"] >= min_price
+        if selection_probability(p) >= min_confidence and p["odds"] >= min_price
     ]
     if not pool:
         # Nothing clears the bar at full strength — widen a little rather than
         # publishing nothing, but never below a stakeable price.
         pool = [p for p in picks
-                if p["confidence"] >= 0.68 and p["odds"] >= min_price]
+                if selection_probability(p) >= 0.68 and p["odds"] >= min_price]
     if not pool:
         return [], 0.0, 0.0
 
     best_per_fixture: dict[str, dict] = {}
-    for p in sorted(pool, key=lambda x: -x["confidence"]):
+    for p in sorted(pool, key=lambda x: -selection_probability(x)):
         best_per_fixture.setdefault(p["match_id"], p)
 
     # Safest first — this tier is about landing, not edge. A real quote wins a
@@ -426,7 +437,7 @@ def select_banker(picks: list[dict], max_picks: int = 1,
         # value. Banding matters here for the same reason it does on Over 1.5:
         # this tier stakes a single pick, so it pays the margin exactly once
         # and a point saved is a point kept.
-        key=lambda p: (-round(p["confidence"] / _SCORE_TIE_BAND / 2),
+        key=lambda p: (-round(selection_probability(p) / _SCORE_TIE_BAND / 2),
                        _mean_margin([p]),
                        not p["odds_are_real"],
                        -p["expected_value"]),
@@ -450,7 +461,7 @@ def select_banker(picks: list[dict], max_picks: int = 1,
     joint = 1.0
     for p in chosen:
         combined *= p["odds"]
-        joint *= p["confidence"]
+        joint *= selection_probability(p)
     return chosen, round(combined, 2), round(joint, 4)
 
 

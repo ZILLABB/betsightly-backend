@@ -67,7 +67,7 @@ def test_close_quality_secondary_can_survive_but_rank_three_cannot():
         _pick("under_3_5", .81, 1.25),
     ])
     assert [p["fixture_rank"] for p in ranked] == [1, 2]
-    assert ranked[0]["selector_version"] == "canonical-recommendations-v1.1"
+    assert ranked[0]["selector_version"] == "canonical-recommendations-v1.2"
 
 
 def test_team_to_score_requires_real_odds_xg_and_confidence_support():
@@ -84,6 +84,17 @@ def test_under_lines_are_independent_and_restricted_line_cannot_block_public_ran
     assert ranked[0]["market"] == "under_3_5"
     assert ranked[0]["public_rank"] == 1
     assert ranked[0]["model_rank"] > 1
+
+
+def test_dominated_riskier_fixture_expression_is_removed_structurally():
+    ranked = canonical_fixture_recommendations([
+        _pick("over_1_5", .82, 1.35),
+        _pick("under_4_5", .76, 1.20),
+    ])
+    assert [pick["market"] for pick in ranked] == ["over_1_5"]
+    assert ranked[0]["rejected_fixture_alternatives"][0]["reason"] == (
+        "DOMINATED_FIXTURE_EXPRESSION"
+    )
 
 
 def test_feature_flag_preserves_old_selector(monkeypatch):

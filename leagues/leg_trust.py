@@ -33,6 +33,7 @@ class LegTrust:
     accepted: bool
     rejection_reasons: tuple[str, ...]
     evidence_state: str
+    evidence_strength: float
     historical_reliability_estimate: float | None
     live_reliability_estimate: float | None
     evidence_adjusted_probability: float
@@ -107,6 +108,7 @@ def evaluate_leg_trust(pick: dict, *, minimum_samples: int | None = None) -> dic
                     "current_board" if availability.get("board_snapshot_id") else "unknown",
                     bookable, "complete" if complete else "incomplete", score, grade,
                     not reasons and grade in ("A", "B"), tuple(reasons), fused["state"],
+                    float(fused.get("evidence_strength") or 0),
                     fused["historical_reliability_estimate"],fused["live_reliability_estimate"],
                     fused["evidence_adjusted_probability"],fused["lower_reliability_bound"],
                     fused["hierarchy_level"]).to_dict()
