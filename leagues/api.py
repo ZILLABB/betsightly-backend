@@ -19,6 +19,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from utils.security import require_api_key
 
@@ -303,6 +304,35 @@ async def get_bookings(date: str | None = None):
 _SLIP_CACHE: dict = {}
 _SLIP_TTL = 1800
 _SLIP_LOCKS: dict = {}
+_BUILDER_REVISION_LOCKS: dict = {}
+
+
+class BuilderRevisionRequest(BaseModel):
+    revision: int = Field(ge=1)
+    request_id: str = Field(min_length=8, max_length=64)
+    edit_token: str = Field(min_length=24, max_length=128)
+    action: str
+    selection_id: str | None = None
+    fixture_id: str | None = None
+    target: float | None = None
+
+
+def _start_builder_revision(target: float, horizon: str, result: dict) -> dict:
+    try:
+        from leagues.engine import prepared_board_status
+        state = prepared_board_status(days_ahead=7)
+        result = {**result, "board": {
+            "ready": bool(state.get("ready")),
+            "degraded": bool(state.get("degraded")),
+            "complete": bool(state.get("complete")),
+        }}
+    except Exception:
+        result = dict(result)
+    if result.get("status") != "success" or not result.get("games"):
+        return result
+    from leagues.builder_revisions import create_initial_run
+
+    return create_initial_run(target, horizon, result)
 
 
 def _cached_slip_is_placeable(result: dict, now: datetime | None = None) -> bool:
@@ -369,7 +399,9 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     hit = _SLIP_CACHE.get(key)
     if (hit and not refresh and (_t.time() - hit["ts"]) < _SLIP_TTL
             and _cached_slip_is_placeable(hit["result"])):
-        response = {**hit["result"], "cached": True}
+        response = _start_builder_revision(
+            target, horizon, {**hit["result"], "cached": True}
+        )
         try:
             from leagues.builder_runs import record_run
             record_run(target, horizon, refresh, response, cached=True)
@@ -418,7 +450,9 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             hit = _SLIP_CACHE.get(key)
             if (hit and not refresh and (_t.time() - hit["ts"]) < _SLIP_TTL
                     and _cached_slip_is_placeable(hit["result"])):
-                result = {**hit["result"], "cached": True}
+                result = _start_builder_revision(
+                    target, horizon, {**hit["result"], "cached": True}
+                )
                 try:
                     from leagues.builder_runs import record_run
                     record_run(target, horizon, refresh, result, cached=True)
@@ -462,7 +496,9 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             logger.warning(f"Builder run audit failed: {exc}")
         raise HTTPException(500, str(e))
 
-    response = {**result, "cached": False}
+    response = _start_builder_revision(
+        target, horizon, {**result, "cached": False}
+    )
     try:
         from leagues.builder_runs import record_run
         record_run(target, horizon, refresh, response)
@@ -477,6 +513,58 @@ async def slip_builder_generate(target: float, horizon: str = "week",
         status=response.get("status"), cached=False,
     )
     return response
+
+
+@router.post("/slip-builder/{run_id}/revise")
+async def slip_builder_revise(run_id: str, request: BuilderRevisionRequest):
+    """Apply one intent-only edit to the latest immutable Builder revision."""
+    import asyncio
+    from database import log_pool_exception, log_pool_status
+    from leagues import builder_revisions
+    from leagues.builder_editor import revise
+
+    lock = _BUILDER_REVISION_LOCKS.setdefault(run_id, asyncio.Lock())
+    log_pool_status(
+        "builder_revision_start", run_id=run_id[:8],
+        revision=request.revision, action=request.action,
+    )
+    try:
+        async with lock:
+            return await asyncio.to_thread(
+                revise,
+                run_id=run_id,
+                edit_token=request.edit_token,
+                revision=request.revision,
+                request_id=request.request_id,
+                action=request.action,
+                selection_id=request.selection_id,
+                fixture_id=request.fixture_id,
+                target=request.target,
+            )
+    except builder_revisions.StaleBuilderRevision as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "stale_revision",
+                    "latest_revision": exc.latest_revision},
+        )
+    except builder_revisions.BuilderRunNotFound:
+        raise HTTPException(status_code=404, detail="builder_run_not_found")
+    except builder_revisions.BuilderRunForbidden:
+        raise HTTPException(status_code=403, detail="builder_run_forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        log_pool_exception(
+            "builder_revision_pool_timeout", exc,
+            run_id=run_id[:8], action=request.action,
+        )
+        logger.error("Builder revision failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="builder_revision_failed")
+    finally:
+        log_pool_status(
+            "builder_revision_end", run_id=run_id[:8],
+            revision=request.revision, action=request.action,
+        )
 
 
 @router.get("/notification-log")

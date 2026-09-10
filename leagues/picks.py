@@ -18,10 +18,17 @@ previous version did. Real books charge roughly 5-7% on these markets, so the
 estimate reflects what is actually obtainable.
 """
 
+import hashlib
 import logging
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+
+def selection_id(match_id: object, market: object) -> str:
+    """Stable public identity for one authoritative fixture/market choice."""
+    raw = f"{str(match_id).strip()}|{str(market).strip()}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:24]
 
 # Typical bookmaker margin on markets DraftKings does not price for us
 ESTIMATE_MARGIN = 1.06
@@ -584,6 +591,7 @@ def to_game(pick: dict) -> dict:
         sources.append("Elo")
 
     return {
+        "selection_id": selection_id(pick["match_id"], pick["market"]),
         "fixture_id": abs(hash(pick["match_id"])) % 1_000_000,
         "match_id": pick["match_id"],
         "home_team": f["home"]["name"],

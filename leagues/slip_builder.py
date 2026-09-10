@@ -41,12 +41,11 @@ from datetime import datetime, time, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
-# Targets the UI offers. Capped at 100 deliberately: past that the leg count
-# climbs fast and every leg is another slice of the bookmaker's margin, so the
-# product stops being a bet and becomes a lottery ticket. 100 already needs
-# roughly fifteen legs on a typical board.
+# Quick targets remain intentionally conservative. A custom request may go to
+# 200x, but it receives exactly the same quality gates and may be capped far
+# below that number when the approved board cannot support it.
 TARGETS = [10, 20, 30, 50, 70, 100]
-MAX_TARGET = 100
+MAX_TARGET = 200
 MIN_TARGET = 2
 
 # Thirteen to fifteen legs is what these targets actually need, so the ceiling
@@ -92,6 +91,14 @@ _COST_TIE_BAND = 0.02
 
 
 DNB_MARKETS = {"dnb_home", "dnb_away"}
+
+
+def _selection_id(pick: dict) -> str:
+    from leagues.picks import selection_id
+
+    return str(pick.get("selection_id") or selection_id(
+        pick.get("match_id"), pick.get("market")
+    ))
 
 
 def _market_distribution(picks: list[dict]) -> dict[str, int]:
@@ -409,6 +416,7 @@ def _best_per_fixture_group(pool: list) -> list:
 def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
                        market_cap: int, team_to_score_cap: int,
                        under_cap: int | None = None,
+                       required_selection_ids: set[str] | None = None,
                        ) -> tuple[float, float, list[dict], str]:
     """Solve the Builder's binary selection problem with HiGHS MILP.
 
@@ -473,6 +481,16 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
     if under_cap is not None:
         limited((i for i, p in enumerate(valid)
                  if str(p.get("market", "")).startswith("under_")), under_cap)
+    required_selection_ids = set(required_selection_ids or ())
+    for selection in required_selection_ids:
+        indices = [i for i, pick in enumerate(valid)
+                   if _selection_id(pick) == selection]
+        if not indices:
+            return 1.0, 1.0, [], "INVALID_LOCK"
+        row = [0.0] * size
+        row[indices[0]] = -1.0
+        rows.append(row)
+        upper.append(-1.0)
 
     log_odds = np.array([math.log(float(p["odds"])) for p in valid])
     risk = np.array([-math.log(max(1e-9, min(.999999, p)))
@@ -508,6 +526,40 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
     return odds, joint, selected, status
 
 
+def approved_builder_candidates(
+    pool: list[dict], *, require_bookable: bool = True,
+) -> tuple[list[dict], collections.Counter]:
+    """Apply the shared trust and canonical-ranking policy exactly once."""
+    from leagues.fixture_ranker import builder_fixture_candidates
+    from leagues.leg_trust import evaluate_leg_trust
+    from leagues.selection_quality import attach_selection_quality
+
+    rejections: collections.Counter = collections.Counter()
+    trusted = []
+    for source in pool:
+        if require_bookable and not source.get("bookable"):
+            rejections.update(["sportybet_selection_not_exactly_bookable"])
+            continue
+        pick = dict(source)
+        pick["selection_id"] = _selection_id(pick)
+        decision = evaluate_leg_trust(pick)
+        pick["trust"] = decision
+        pick["evidence_adjusted_probability"] = decision[
+            "evidence_adjusted_probability"
+        ]
+        attach_selection_quality(pick)
+        if (pick.get("market") in DNB_MARKETS
+                and _leg_settlement_probabilities(pick) is None):
+            rejections.update(["dnb_missing_draw_probability"])
+        elif decision["accepted"]:
+            trusted.append(pick)
+        else:
+            rejections.update(
+                decision["rejection_reasons"] or ["trust_grade_below_b"]
+            )
+    return builder_fixture_candidates(trusted), rejections
+
+
 def build_slip(
     target: float,
     pool: list | None = None,
@@ -515,15 +567,27 @@ def build_slip(
     market_cap: int | None = None,
     horizon: str = DEFAULT_HORIZON,
     require_bookable: bool = True,
+    locked_selection_ids: set[str] | None = None,
+    excluded_fixture_ids: set[str] | None = None,
+    excluded_selection_ids: set[str] | None = None,
+    forced_selection_ids: set[str] | None = None,
 ) -> dict:
     """The slip most likely to land at `target`, or an honest refusal."""
     from leagues.selection import MIN_USEFUL_ODDS, UNDER_CAP, exposure_group
 
     cap = _market_cap_for_target(target) if market_cap is None else market_cap
     team_to_score_cap = _team_to_score_cap_for_target(target)
+    locked_selection_ids = set(locked_selection_ids or ())
+    forced_selection_ids = set(forced_selection_ids or ())
+    required_selection_ids = locked_selection_ids | forced_selection_ids
+    excluded_fixture_ids = {str(value) for value in (excluded_fixture_ids or ())}
+    excluded_selection_ids = set(excluded_selection_ids or ())
 
     if pool is None:
         pool = _pool(horizon)
+    pool = [pick for pick in pool
+            if str(pick.get("match_id")) not in excluded_fixture_ids
+            and _selection_id(pick) not in excluded_selection_ids]
     if not pool:
         return {"ok": False, "result_status": "NO_SAFE_COMBINATION",
                 "target": target, "best_reachable": 1.0,
@@ -557,37 +621,14 @@ def build_slip(
     diagnostics["after_bookability"] = len(pool)
     diagnostics["market_distribution_after_bookability"] = _market_distribution(pool)
 
-    from leagues.leg_trust import evaluate_leg_trust
-
-    trust_rejections: collections.Counter = collections.Counter()
-    trusted_pool = []
-    for pick in pool:
-        decision = evaluate_leg_trust(pick)
-        pick["trust"] = decision
-        pick["evidence_adjusted_probability"] = decision[
-            "evidence_adjusted_probability"
-        ]
-        from leagues.selection_quality import attach_selection_quality
-        attach_selection_quality(pick)
-
-        if (
-            pick.get("market") in DNB_MARKETS
-            and _leg_settlement_probabilities(pick) is None
-        ):
-            trust_rejections.update(["dnb_missing_draw_probability"])
-            continue
-
-        if decision["accepted"]:
-            trusted_pool.append(pick)
-        else:
-            trust_rejections.update(
-                decision["rejection_reasons"] or ["trust_grade_below_b"]
-            )
-
-    pool = trusted_pool
-    diagnostics["after_trust"] = len(pool)
-    diagnostics["market_distribution_after_trust"] = _market_distribution(pool)
-    if not pool:
+    canonical_candidates, trust_rejections = approved_builder_candidates(
+        pool, require_bookable=require_bookable
+    )
+    diagnostics["after_trust"] = len(canonical_candidates)
+    diagnostics["market_distribution_after_trust"] = _market_distribution(
+        canonical_candidates
+    )
+    if not canonical_candidates:
         return {
             "ok": False,
             "result_status": "NO_SAFE_COMBINATION",
@@ -599,11 +640,10 @@ def build_slip(
             "reason": "No selections meet the Builder's evidence and bookability standard right now.",
         }
 
-    from leagues.fixture_ranker import builder_fixture_candidates
-    canonical_candidates = builder_fixture_candidates(pool)
     diagnostics["after_policy_and_canonical_ranking"] = len(canonical_candidates)
     candidates = [p for p in canonical_candidates
-                  if float(p.get("odds") or 0) >= MIN_USEFUL_ODDS]
+                  if (float(p.get("odds") or 0) >= MIN_USEFUL_ODDS
+                      or _selection_id(p) in required_selection_ids)]
     diagnostics["after_min_useful_odds"] = len(candidates)
     diagnostics["after_policy"] = len(candidates)
     diagnostics["optimizer_candidate_count"] = len(candidates)
@@ -624,6 +664,21 @@ def build_slip(
             "selection_diagnostics": diagnostics,
             "reason": "No fixture has a top-ranked market that meets the Builder quality policy.",
         }
+    available_ids = {_selection_id(pick) for pick in candidates}
+    missing_required = sorted(required_selection_ids - available_ids)
+    if missing_required:
+        return {
+            "ok": False,
+            "result_status": "INVALID_LOCKED_SELECTION",
+            "target": target,
+            "best_reachable": 1.0,
+            "invalid_selection_ids": missing_required,
+            "selection_diagnostics": diagnostics,
+            "reason": (
+                "A locked or requested selection is no longer an approved, "
+                "bookable option on the current board."
+            ),
+        }
 
     def _candidate(
         seed: dict | None = None,
@@ -642,10 +697,9 @@ def build_slip(
         under_count = 0
         odds, joint, legs = 1.0, 1.0, []
 
-        ordered = (
-            ([seed] if seed is not None else [])
-            + search_pool
-        )
+        required = [pick for pick in search_pool
+                    if _selection_id(pick) in required_selection_ids]
+        ordered = required + ([seed] if seed is not None else []) + search_pool
 
         for p in ordered:
             if p in legs or len(legs) >= max_legs:
@@ -752,6 +806,7 @@ def build_slip(
     try:
         odds, joint, legs, optimization_status = _verified_optimize(
             candidates, target, max_legs, cap, team_to_score_cap,
+            required_selection_ids=required_selection_ids,
         )
     except Exception as exc:
         logger.warning("verified Builder optimization unavailable: %s", exc)
@@ -970,11 +1025,153 @@ def build_slip(
     }
 
 
+def prepared_bookable_pool(
+    horizon: str = DEFAULT_HORIZON, force: bool = False,
+    refresh_sportybet: bool = False,
+) -> tuple[dict, list[dict], dict[str, int]]:
+    """Return the current approved-input board without refreshing ESPN.
+
+    Revision actions call this with ``force=False``. It reuses the prepared
+    evaluated fixture universe and the current SportyBet snapshot, so an edit
+    never fans out through every upstream competition.
+    """
+    from leagues import sportybet
+
+    started = monotonic_time.perf_counter()
+
+    def elapsed_ms(stage: float) -> int:
+        return round((monotonic_time.perf_counter() - stage) * 1000)
+
+    stage = monotonic_time.perf_counter()
+    qualified_pool = _pool(horizon, force=force)
+    timings = {"candidate_retrieval": elapsed_ms(stage)}
+
+    stage = monotonic_time.perf_counter()
+    try:
+        board = sportybet.fetch_board(force=force or refresh_sportybet)
+    except Exception:
+        if not force:
+            raise
+        logger.warning("Live SportyBet refresh failed; trying cached board")
+        board = sportybet.fetch_board(force=False)
+    timings["sportybet_catalogue_lookup"] = elapsed_ms(stage)
+
+    snapshot_id = sportybet.board_metadata(board).get("snapshot_id")
+    bookable_pool = []
+    stage = monotonic_time.perf_counter()
+    for pick in qualified_pool:
+        try:
+            availability = pick.get("sportybet_availability") or {}
+            if not snapshot_id or availability.get("board_snapshot_id") != snapshot_id:
+                fixture = pick["_fixture"]
+                availability = sportybet.availability_for(
+                    board,
+                    fixture["home"]["name"],
+                    fixture["away"]["name"],
+                    fixture.get("commence_time", ""),
+                    fixture.get("league", ""),
+                    pick["market"],
+                )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not availability.get("sportybet_available"):
+            continue
+        candidate = dict(pick)
+        candidate["selection_id"] = _selection_id(candidate)
+        candidate["bookable"] = True
+        candidate["sportybet_availability"] = availability
+        candidate["odds"] = availability["sportybet_odds"]
+        candidate["odds_are_real"] = True
+        bookable_pool.append(candidate)
+    timings["fixture_matching"] = elapsed_ms(stage)
+    timings["board_lookup"] = round(
+        (monotonic_time.perf_counter() - started) * 1000
+    )
+    return board, bookable_pool, timings
+
+
+def _public_result_from_build(
+    target: float, horizon: str, built: dict, board: dict,
+    timings: dict[str, int] | None = None, *, force_booking: bool = False,
+) -> dict:
+    """Convert an internal optimized result and create only an exact FULL code."""
+    from leagues.picks import to_game
+
+    timings = timings if timings is not None else {}
+    if not built.get("ok"):
+        payload = dict(built)
+        capped_picks = payload.pop("picks", [])
+        return {
+            "status": "unavailable",
+            "horizon": horizon,
+            "timing_ms": timings,
+            **payload,
+            "games": [to_game(pick) for pick in capped_picks],
+        }
+
+    games = [to_game(p) for p in built["picks"]]
+    kickoffs = sorted(g.get("kickoff") or "" for g in games if g.get("kickoff"))
+    out = {
+        "status": "success",
+        "result_status": built.get("result_status", "TARGET_REACHED"),
+        "optimization_status": built.get("optimization_status", "HEURISTIC"),
+        "target": target,
+        "horizon": horizon,
+        "first_kickoff": kickoffs[0] if kickoffs else None,
+        "last_kickoff": kickoffs[-1] if kickoffs else None,
+        "odds": built["odds"],
+        "legs": built["legs"],
+        "hit_probability": built["hit_probability"],
+        "target_hit_probability": built.get("target_hit_probability", built["hit_probability"]),
+        "no_loss_probability": built.get("no_loss_probability", built["hit_probability"]),
+        "push_survival_probability": built.get("push_survival_probability", 0.0),
+        "dnb_leg_count": built.get("dnb_leg_count", 0),
+        "expected_return": built["expected_return"],
+        "expected_return_basis": built.get("expected_return_basis", "model_estimate"),
+        "aggregate_credibility": built.get("aggregate_credibility"),
+        "avg_confidence": built["avg_confidence"],
+        "avg_evidence_probability": built.get("avg_evidence_probability", built["avg_confidence"]),
+        "minimum_trust_score": built.get("minimum_trust_score"),
+        "average_trust_score": built.get("average_trust_score"),
+        "lowest_trust_grade": built.get("lowest_trust_grade"),
+        "trust_rejection_reasons": built.get("trust_rejection_reasons", {}),
+        "selection_diagnostics": built.get("selection_diagnostics", {}),
+        **{key: built.get(key) for key in (
+            "candidate_count_initial", "after_bookability", "after_trust",
+            "after_policy", "optimizer_candidate_count", "fixture_count",
+            "market_distribution", "binding_constraints", "max_legs",
+        )},
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "games": games,
+    }
+    stage = monotonic_time.perf_counter()
+    try:
+        from leagues.booking import create_or_reuse_generated_booking
+
+        out["booking"] = create_or_reuse_generated_booking(
+            games, board, predicted_odds=built["odds"], force=force_booking
+        )
+    except Exception as exc:
+        logger.warning("slip booking failed: %s", exc)
+        out["booking"] = {
+            "status": "failed", "share_code": None,
+            "reason": f"Booking unavailable: {str(exc)[:120]}",
+        }
+    timings["booking_total"] = round(
+        (monotonic_time.perf_counter() - stage) * 1000
+    )
+    booking_timings = (out.get("booking") or {}).get("timing_ms") or {}
+    timings["booking_code_generation"] = booking_timings.get("code_generation", 0)
+    timings["validation_readback"] = booking_timings.get("validation_readback", 0)
+    timings["database_persistence"] = booking_timings.get("database_persistence", 0)
+    out["timing_ms"] = timings
+    return out
+
+
 def generate(
     target: float, horizon: str = DEFAULT_HORIZON, force: bool = False
 ) -> dict:
     """Build a slip for `target` and book it. The endpoint's whole job."""
-    from leagues.picks import to_game
     from utils.runtime_metrics import log_runtime_memory
 
     try:
@@ -999,16 +1196,18 @@ def generate(
     def elapsed_ms(started: float) -> int:
         return round((monotonic_time.perf_counter() - started) * 1000)
 
-    stage_started = monotonic_time.perf_counter()
     try:
-        qualified_pool = _pool(horizon, force=force)
+        board, bookable_pool, pool_timings = prepared_bookable_pool(
+            horizon, force=force
+        )
+        timings.update(pool_timings)
     except Exception as exc:
         logger.warning(f"slip candidate refresh failed: {exc}")
         return {
             "status": "unavailable",
             "horizon": horizon,
             "timing_ms": {
-                "candidate_retrieval": elapsed_ms(stage_started),
+                "candidate_retrieval": elapsed_ms(timing_started),
                 "total": elapsed_ms(timing_started),
             },
             "reason": (
@@ -1016,59 +1215,10 @@ def generate(
                 "now. Please try the build again shortly."
             ),
         }
-    timings["candidate_retrieval"] = elapsed_ms(stage_started)
     log_runtime_memory(
         "builder_after_candidate_pipeline", target=target, horizon=horizon,
-        candidate_count=len(qualified_pool),
+        candidate_count=len(bookable_pool),
     )
-    try:
-        from leagues import sportybet
-
-        # A normal build should use the healthy cached live board. Forcing a
-        # network refresh on every click made valid builds fail on temporary
-        # SportyBet errors. Explicit regeneration still requests a refresh.
-        stage_started = monotonic_time.perf_counter()
-        try:
-            board = sportybet.fetch_board(force=force)
-        except Exception:
-            if not force:
-                raise
-            logger.warning("Live SportyBet refresh failed; trying cached board")
-            board = sportybet.fetch_board(force=False)
-        timings["sportybet_catalogue_lookup"] = elapsed_ms(stage_started)
-        snapshot_id = sportybet.board_metadata(board).get("snapshot_id")
-        bookable_pool = []
-        stage_started = monotonic_time.perf_counter()
-        for pick in qualified_pool:
-            # The prediction pipeline has already matched each fixture once
-            # and attached exact market availability from that board. Reuse
-            # it when the snapshot is unchanged instead of scanning the full
-            # catalogue again for every qualifying pick (2,120 scans on the
-            # measured week board). A refreshed/different snapshot still gets
-            # a full revalidation, preserving booking correctness.
-            availability = pick.get("sportybet_availability") or {}
-            if not snapshot_id or availability.get("board_snapshot_id") != snapshot_id:
-                fixture = pick["_fixture"]
-                availability = sportybet.availability_for(
-                    board,
-                    fixture["home"]["name"],
-                    fixture["away"]["name"],
-                    fixture.get("commence_time", ""),
-                    fixture.get("league", ""),
-                    pick["market"],
-                )
-            if not availability.get("sportybet_available"):
-                continue
-            candidate = dict(pick)
-            candidate["bookable"] = True
-            candidate["sportybet_availability"] = availability
-            candidate["odds"] = availability["sportybet_odds"]
-            candidate["odds_are_real"] = True
-            bookable_pool.append(candidate)
-        timings["fixture_matching"] = elapsed_ms(stage_started)
-    except Exception as exc:
-        logger.warning(f"SportyBet pool revalidation failed: {exc}")
-        board, bookable_pool = {}, []
 
     stage_started = monotonic_time.perf_counter()
     built = build_slip(
@@ -1084,99 +1234,14 @@ def generate(
     # combination search. Keep it explicit in operational output so a future
     # search change cannot hide an optimization regression.
     timings["target_odds_optimization"] = 0
-    if not built.get("ok"):
-        timings["total"] = elapsed_ms(timing_started)
-        payload = dict(built)
-        capped_picks = payload.pop("picks", [])
-        return {
-            "status": "unavailable",
-            "horizon": horizon,
-            "timing_ms": timings,
-            **payload,
-            # A capped combination is still useful audit evidence. Return the
-            # same safe public game shape as a successful slip, rather than
-            # leaking internal fixture/model dictionaries under `picks`.
-            "games": [to_game(pick) for pick in capped_picks],
-        }
-
-    games = [to_game(p) for p in built["picks"]]
-    kickoffs = sorted(g.get("kickoff") or "" for g in games if g.get("kickoff"))
-    out = {
-        "status": "success",
-        "result_status": built.get("result_status", "TARGET_REACHED"),
-        "optimization_status": built.get("optimization_status", "HEURISTIC"),
-        "target": target,
-        "horizon": horizon,
-        # When the slip actually resolves, so a "today" pick is visibly today
-        # and a week-long one is visibly not.
-        "first_kickoff": kickoffs[0] if kickoffs else None,
-        "last_kickoff": kickoffs[-1] if kickoffs else None,
-        "odds": built["odds"],
-        "legs": built["legs"],
-        "hit_probability": built["hit_probability"],
-        "target_hit_probability": built.get(
-            "target_hit_probability",
-            built["hit_probability"],
-        ),
-        "no_loss_probability": built.get(
-            "no_loss_probability",
-            built["hit_probability"],
-        ),
-        "push_survival_probability": built.get(
-            "push_survival_probability",
-            0.0,
-        ),
-        "dnb_leg_count": built.get("dnb_leg_count", 0),
-        "expected_return": built["expected_return"],
-        "expected_return_basis": built.get(
-            "expected_return_basis",
-            "model_estimate",
-        ),
-        "aggregate_credibility": built.get("aggregate_credibility"),
-        "avg_confidence": built["avg_confidence"],
-        "avg_evidence_probability": built.get(
-            "avg_evidence_probability", built["avg_confidence"]
-        ),
-        "minimum_trust_score": built.get("minimum_trust_score"),
-        "average_trust_score": built.get("average_trust_score"),
-        "lowest_trust_grade": built.get("lowest_trust_grade"),
-        "trust_rejection_reasons": built.get("trust_rejection_reasons", {}),
-        "selection_diagnostics": built.get("selection_diagnostics", {}),
-        **{key: built.get(key) for key in (
-            "candidate_count_initial", "after_bookability", "after_trust",
-            "after_policy", "optimizer_candidate_count", "fixture_count",
-            "market_distribution", "binding_constraints", "max_legs",
-        )},
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "games": games,
-    }
-
-    # Book it. A slip nobody can place is only half the feature — but a failed
-    # booking must not lose the slip, so this reports rather than raises.
-    stage_started = monotonic_time.perf_counter()
-    try:
-        from leagues.booking import create_or_reuse_generated_booking
-
-        out["booking"] = create_or_reuse_generated_booking(
-            games, board, predicted_odds=built["odds"], force=force
-        )
-    except Exception as e:
-        logger.warning(f"slip booking failed: {e}")
-        out["booking"] = {
-            "status": "failed",
-            "share_code": None,
-            "reason": f"Booking unavailable: {str(e)[:120]}",
-        }
-    timings["booking_total"] = elapsed_ms(stage_started)
+    out = _public_result_from_build(
+        target, horizon, built, board, timings, force_booking=force
+    )
     log_runtime_memory(
         "builder_after_booking", target=target, horizon=horizon,
         booking_status=(out.get("booking") or {}).get("booking_status")
         or (out.get("booking") or {}).get("status"),
     )
-    booking_timings = (out.get("booking") or {}).get("timing_ms") or {}
-    timings["booking_code_generation"] = booking_timings.get("code_generation", 0)
-    timings["validation_readback"] = booking_timings.get("validation_readback", 0)
-    timings["database_persistence"] = booking_timings.get("database_persistence", 0)
     timings["total"] = elapsed_ms(timing_started)
     out["timing_ms"] = timings
     logger.info("Builder timing target=%sx horizon=%s %s", target, horizon, timings)
