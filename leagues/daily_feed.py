@@ -86,7 +86,8 @@ def _save(filename: str, data):
 
 def _select_tier(picks: list, target: float, max_picks: int,
                  min_confidence: float, min_ev: float,
-                 prefer: str = "joint", band_low: float = 0.80):
+                 prefer: str = "joint", band_low: float = 0.80,
+                 canonicalize: bool = True):
     """Select a tier, and say which of the two reasons left it empty.
 
     A blank tier has two quite different causes and they were reported with
@@ -98,12 +99,14 @@ def _select_tier(picks: list, target: float, max_picks: int,
     from leagues.selection import select_accumulator
 
     sel = select_accumulator(picks, target, max_picks, min_confidence,
-                             min_ev=min_ev, prefer=prefer, band_low=band_low)
+                             min_ev=min_ev, prefer=prefer, band_low=band_low,
+                             canonicalize=canonicalize)
     if sel[0]:
         return sel, None
 
     ungated = select_accumulator(picks, target, max_picks, min_confidence,
-                                 min_ev=0.0, prefer=prefer, band_low=band_low)
+                                 min_ev=0.0, prefer=prefer, band_low=band_low,
+                                 canonicalize=canonicalize)
     if ungated[0]:
         _, total, joint = ungated
         return sel, (
@@ -224,28 +227,35 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # ones, which costs hit rate honestly rather than by overstating each leg.
     FLOOR = MIN_PUBLISHABLE_CONFIDENCE
 
-    # Tiers are built one after another, each excluding the fixtures already
-    # used, so they are genuinely different bets.
-    #
-    # They were not. On 19 August Shanghai Port Win sat in 2 odds, 5 odds and
-    # 10 odds at once; it lost and killed all three. The next day Vancouver
-    # Whitecaps did exactly the same. Two days running, "almost every tier
-    # failed" was one bad pick counted three times — somebody staking the whole
-    # card was not making five bets, they were making one at triple stake, and
-    # nothing on the site said so.
-    #
-    # Give the rollover first refusal on the best qualified combination. It is
-    # a multi-day chain, so duplicating one of its fixtures in a public tier
-    # turns one loss into two products failing at once.
+    # Build the football products independently first.  The former sequential
+    # depletion made a later 5x/10x disappear merely because an earlier tier
+    # had already consumed its fixtures.  Portfolio diversity is a second
+    # decision and is only accepted when the alternative sits inside the
+    # independent slip's measured uncertainty interval.
     rollover = _build_rollover(all_picks, today)
 
-    # A fixture is allowed in one accumulator product only. Previous fallback
-    # logic relaxed this to two and then unlimited reuse on a thin board; one
-    # bad game consequently killed several tiers together. An unavailable
-    # tier is more honest than presenting the same bet as diversification.
-    fixture_uses: dict = {
-        game.get("match_id"): 1
-        for game in rollover.get("games", [])
+    safe_picks = [p for p in day_picks if p.get("safe_tier_eligible")]
+    independent_banker = select_banker(safe_picks, canonicalize=False)
+
+    # Chance-to-land, not expected value: these are bought to come in. On
+    # 22 August that is 2 odds landing 57.5% instead of 49.2%, and 5 odds
+    # 24.1% instead of 17.4%. The band floor keeps 2 Odds honest to its name —
+    # maximising landing alone drifts it down to 1.63x, which is not 2 odds.
+    independent_two, two_why = _select_tier(
+        safe_picks, 2.0, 4, FLOOR, 0.82, band_low=0.92,
+        canonicalize=False)
+    # Long tiers now keep the full 65% publication floor. They may use more
+    # shorter legs when that produces the highest joint chance, but they no
+    # longer buy the target by reaching down to a riskier 55% match-result
+    # leg. The selector already maximises the chance every leg lands and the
+    # EV gate still rejects combinations whose accumulated margin is too high.
+    independent_five, five_why = _select_tier(
+        day_picks, 5.0, 8, FLOOR, 0.72, canonicalize=False)
+    independent_ten, ten_why = _select_tier(
+        day_picks, 10.0, 10, FLOOR, 0.63, canonicalize=False)
+
+    fixture_uses = {
+        str(game.get("match_id")) for game in rollover.get("games", [])
         if game.get("match_id")
     }
     team_uses = {
@@ -253,43 +263,81 @@ def build_daily_accumulators(force: bool = False) -> dict:
         for game in rollover.get("games", [])
         for field in ("home_team", "away_team")
     } - {""}
+    portfolio_diagnostics = {
+        "policy": "INDEPENDENT_THEN_UNCERTAINTY_AWARE_DIVERSIFICATION",
+        "rollover_isolated_first": True,
+        "products": {},
+    }
 
-    def _tier(target, max_picks, floor, min_ev, band_low=0.80,
-              safe_only=False):
-        tier_picks = ([p for p in day_picks if p.get("safe_tier_eligible")]
-                      if safe_only else day_picks)
-        pool = [p for p in tier_picks
-                if p["match_id"] not in fixture_uses
-                and not (_pick_teams(p) & team_uses)]
-        sel, why = _select_tier(pool, target, max_picks, floor, min_ev,
-                                band_low=band_low)
-        for pick in sel[0]:
-            fixture_uses[pick["match_id"]] = fixture_uses.get(pick["match_id"], 0) + 1
+    def _lower_joint(selection) -> float:
+        floor = 1.0
+        for pick in selection[0]:
+            lower = (pick.get("lower_reliability_bound")
+                     or (pick.get("trust") or {}).get(
+                         "lower_reliability_bound")
+                     or selection_probability(pick))
+            floor *= min(selection_probability(pick), float(lower))
+        return round(floor, 6)
+
+    def _record_use(selection):
+        for pick in selection[0]:
+            fixture_uses.add(str(pick["match_id"]))
             team_uses.update(_pick_teams(pick))
-        return sel, why
 
-    safe_picks = [p for p in day_picks
-                  if p.get("safe_tier_eligible")
-                  and p["match_id"] not in fixture_uses
-                  and not (_pick_teams(p) & team_uses)]
-    banker = select_banker(safe_picks)
-    for _p in banker[0]:
-        fixture_uses[_p["match_id"]] = fixture_uses.get(_p["match_id"], 0) + 1
-        team_uses.update(_pick_teams(_p))
+    def _portfolio_product(name, independent, source, selector):
+        conflicts = [
+            pick for pick in independent[0]
+            if str(pick["match_id"]) in fixture_uses
+            or bool(_pick_teams(pick) & team_uses)
+        ]
+        adjusted = independent
+        decision = "INDEPENDENT_BEST"
+        quality_cost = 0.0
+        if conflicts:
+            diversified_pool = [
+                pick for pick in source
+                if str(pick["match_id"]) not in fixture_uses
+                and not (_pick_teams(pick) & team_uses)
+            ]
+            alternative = selector(diversified_pool)
+            uncertainty_floor = _lower_joint(independent)
+            if alternative[0] and alternative[2] >= uncertainty_floor:
+                adjusted = alternative
+                decision = "DIVERSIFIED_WITHIN_UNCERTAINTY"
+                quality_cost = max(0.0, independent[2] - alternative[2])
+            else:
+                # Keeping an exceptional overlap is more honest than deleting
+                # the product or quietly replacing it with a materially worse
+                # football opinion.
+                decision = "CONTROLLED_OVERLAP_QUALITY_PRESERVED"
+        _record_use(adjusted)
+        portfolio_diagnostics["products"][name] = {
+            "independent_odds": independent[1],
+            "final_odds": adjusted[1],
+            "independent_joint_probability": independent[2],
+            "final_joint_probability": adjusted[2],
+            "overlap_conflicts": len(conflicts),
+            "decision": decision,
+            "quality_cost": round(quality_cost, 6),
+        }
+        return adjusted
 
-    # Chance-to-land, not expected value: these are bought to come in. On
-    # 22 August that is 2 odds landing 57.5% instead of 49.2%, and 5 odds
-    # 24.1% instead of 17.4%. The band floor keeps 2 Odds honest to its name —
-    # maximising landing alone drifts it down to 1.63x, which is not 2 odds.
-    two, two_why = _tier(2.0, 4, FLOOR, 0.82, band_low=0.92,
-                         safe_only=True)
-    # Long tiers now keep the full 65% publication floor. They may use more
-    # shorter legs when that produces the highest joint chance, but they no
-    # longer buy the target by reaching down to a riskier 55% match-result
-    # leg. The selector already maximises the chance every leg lands and the
-    # EV gate still rejects combinations whose accumulated margin is too high.
-    five, five_why = _tier(5.0, 8, FLOOR, 0.72)
-    ten, ten_why = _tier(10.0, 10, FLOOR, 0.63)
+    banker = _portfolio_product(
+        "banker", independent_banker, safe_picks,
+        lambda pool: select_banker(pool, canonicalize=False))
+    two = _portfolio_product(
+        "2_odds", independent_two, safe_picks,
+        lambda pool: _select_tier(
+            pool, 2.0, 4, FLOOR, 0.82, band_low=0.92,
+            canonicalize=False)[0])
+    five = _portfolio_product(
+        "5_odds", independent_five, day_picks,
+        lambda pool: _select_tier(
+            pool, 5.0, 8, FLOOR, 0.72, canonicalize=False)[0])
+    ten = _portfolio_product(
+        "10_odds", independent_ten, day_picks,
+        lambda pool: _select_tier(
+            pool, 10.0, 10, FLOOR, 0.63, canonicalize=False)[0])
 
     # Over 1.5 — a list of singles, one per fixture, safest first.
     #
@@ -365,12 +413,13 @@ def build_daily_accumulators(force: bool = False) -> dict:
         over_total *= p["odds"]
 
     def mk_cat(sel, risk, reason_if_empty, presentation="accumulator",
-               booking_rule=None):
+               booking_rule=None, target=None):
         picks_, total, joint = sel
         if not picks_:
             return {"selected": False, "games": [], "total_odds": 0,
                     "risk_level": risk, "hit_probability": 0,
                     "presentation": presentation, "reason": reason_if_empty,
+                    "result_status": "NO_SAFE_COMBINATION",
                     "booking_rule": booking_rule}
         return {
             "selected": True,
@@ -392,6 +441,10 @@ def build_daily_accumulators(force: bool = False) -> dict:
             "sportybet_ticket_type": "accumulator",
             "booking_rule": booking_rule,
             "reason": None,
+            "result_status": (
+                "TARGET_REACHED" if target is None or total >= target
+                else "QUALITY_CAPPED"
+            ),
         }
 
     thin = "Not enough matches today to build this safely — check back tomorrow."
@@ -418,18 +471,21 @@ def build_daily_accumulators(force: bool = False) -> dict:
                 booking_rule={"selector": "banker", "safe_only": True}),
             "2_odds": mk_cat(
                 two, "Low", two_why,
+                target=2.0,
                 booking_rule={"selector": "accumulator", "target": 2.0,
                               "max_picks": 4, "min_confidence": FLOOR,
                               "min_ev": 0.82, "band_low": 0.92,
                               "safe_only": True}),
             "5_odds": mk_cat(
                 five, "Medium", five_why,
+                target=5.0,
                 booking_rule={"selector": "accumulator", "target": 5.0,
                               "max_picks": 8,
                               "min_confidence": FLOOR,
                               "min_ev": 0.72, "band_low": 0.80}),
             "10_odds": mk_cat(
                 ten, "High", ten_why,
+                target=10.0,
                 booking_rule={"selector": "accumulator", "target": 10.0,
                               "max_picks": 10,
                               "min_confidence": FLOOR,
@@ -451,10 +507,26 @@ def build_daily_accumulators(force: bool = False) -> dict:
                 "bounded": True,
                 "limit": 160,
             },
+            "_portfolio": portfolio_diagnostics,
             "_publication_date": publish_date,
             "_fixture_target_date": target_date,
         },
     }
+
+    # Exact booking belongs before first-write lock.  If a chosen leg has
+    # disappeared from SportyBet, the existing bounded qualified snapshot may
+    # supply a fully validated quality-equivalent replacement; only that FULL
+    # rebuilt set is promoted.  Force builds are simulations/repairs and never
+    # create booking side effects here.
+    if not existing_card and not force:
+        try:
+            from leagues.booking import finalize_prepublication_card
+            result["prepublication_booking"] = finalize_prepublication_card(
+                publish_date, result["accumulators"]
+            )
+        except Exception as exc:
+            logger.warning("prepublication booking skipped: %s", exc,
+                           exc_info=True)
 
     # Archive and lock by the audience-facing publication day even when a
     # thin late board deliberately draws from the next fixture day. Kickoff
@@ -563,7 +635,7 @@ def build_bookable_now() -> dict | None:
     fixed identity to score — counting it would let the record quietly reroll
     its losers, which is the exact failure the lock exists to prevent.
     """
-    from leagues.engine import run_pipeline
+    from leagues.engine import kickoff_wat_date, run_pipeline
     from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
     from leagues.selection import select_banker
 
@@ -579,7 +651,7 @@ def build_bookable_now() -> dict | None:
     today = _wat_now(now).strftime("%Y-%m-%d")
     live = [p for p in all_picks
             if p["_fixture"]["commence_time"] >= bookable_from
-            and p["_fixture"]["commence_time"][:10] == today
+            and kickoff_wat_date(p["_fixture"]["commence_time"]) == today
             and p.get("bookable")]
     if not live:
         return None
@@ -750,7 +822,7 @@ def _archive(date: str, accumulators: dict) -> None:
 
 def _build_rollover(all_picks: list, today: str) -> dict:
     """Short chain, one slot per match day, persisted to Postgres."""
-    from leagues.engine import picks_for_date
+    from leagues.engine import kickoff_wat_date, picks_for_date
     from leagues.selection import select_rollover_day
     from leagues.picks import to_game
 
@@ -807,7 +879,9 @@ def _build_rollover(all_picks: list, today: str) -> dict:
     for p in all_picks:
         if p["match_id"] in used_matches:
             continue
-        d = p["_fixture"]["commence_time"][:10]
+        d = kickoff_wat_date(p["_fixture"]["commence_time"])
+        if d is None:
+            continue
         if d >= today:
             by_date.setdefault(d, []).append(p)
 
