@@ -729,45 +729,10 @@ def fill_empty_card_tiers(publish_date: str, fresh: dict) -> list[str]:
                 old_cat = stored.get(key)
 
                 if isinstance(old_cat, dict) and old_cat.get("selected"):
-                    # A tier of independent singles can be *extended* without
-                    # rewriting it: the picks already published stay exactly as
-                    # they are and remain valid on their own, and a new one
-                    # neither changes nor depends on them. An accumulator is
-                    # the opposite — adding a leg changes the bet — so this
-                    # only ever applies to a singles tier, and only ever
-                    # appends.
-                    # Keyed on how the tier is defined *now*, not on what the
-                    # stored payload happens to record. Cards written before
-                    # `presentation` existed carry no such field, and requiring
-                    # it on both sides meant the tier this was written for was
-                    # the one case it skipped.
-                    if new_cat.get("presentation") == "singles":
-                        old_cat["presentation"] = "singles"
-                        have = {g.get("match_id") for g in old_cat.get("games", [])}
-                        extra = [g for g in new_cat.get("games", [])
-                                 if g.get("match_id") not in have]
-                        if extra:
-                            # The picks already on the card keep the stamp they
-                            # were published with; only the new ones carry the
-                            # later time. That difference is the whole point —
-                            # it is what lets a reader tell this morning's picks
-                            # from ones that appeared during the day.
-                            _now = datetime.utcnow().isoformat()
-                            for g in extra:
-                                g["added_at"] = _now
-                                g["added_later"] = True
-                            old_cat["games"] = list(old_cat.get("games", [])) + extra
-                            old_cat["revision"] = int(old_cat.get("revision", 1)) + 1
-                            old_cat["last_updated_at"] = _now
-                            confs = [g.get("confidence") or 0 for g in old_cat["games"]]
-                            old_cat["hit_probability"] = round(
-                                sum(confs) / len(confs), 3) if confs else 0
-                            total = 1.0
-                            for g in old_cat["games"]:
-                                total *= (g.get("odds") or 1.0)
-                            old_cat["total_odds"] = round(total, 2)
-                            stored[key] = old_cat
-                            filled.append(f"{key}(+{len(extra)})")
+                    # Published tiers are immutable. Appending Over 1.5 picks
+                    # without atomically extending its archive produced public
+                    # singles that Results could never settle. Until revisioned
+                    # archive rows exist, only an empty tier may be filled.
                     continue  # never replace a published tier wholesale
 
                 if new_cat.get("selected") and new_cat.get("games"):

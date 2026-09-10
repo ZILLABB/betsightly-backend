@@ -307,19 +307,10 @@ _SLIP_LOCKS: dict = {}
 
 def _cached_slip_is_placeable(result: dict, now: datetime | None = None) -> bool:
     """A cached code must still contain only matches a user can book."""
-    from leagues.daily_feed import BOOKING_BUFFER
+    from leagues.availability import all_games_actionable
 
     now = now or datetime.now(timezone.utc)
-    cutoff = now + BOOKING_BUFFER
-    kickoffs = [g.get("kickoff") or g.get("date")
-                for g in (result.get("games") or [])]
-    if not kickoffs or any(not k for k in kickoffs):
-        return False
-    try:
-        return all(datetime.fromisoformat(k.replace("Z", "+00:00")) > cutoff
-                   for k in kickoffs)
-    except (TypeError, ValueError):
-        return False
+    return all_games_actionable(result.get("games") or [], now)
 
 
 @router.get("/slip-builder/targets")

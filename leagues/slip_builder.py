@@ -344,8 +344,9 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
             )
         )
 
+    from leagues.availability import kickoff_lifecycle
+
     now_dt = datetime.now(timezone.utc)
-    now = now_dt.isoformat().replace("+00:00", "Z")
     until = _horizon_end(now_dt, horizon).isoformat().replace("+00:00", "Z")
 
     out = []
@@ -356,7 +357,7 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
         if commence_time > until:
             continue
 
-        if commence_time <= now:
+        if kickoff_lifecycle(commence_time, now_dt) != "actionable":
             continue
 
         normal_floor = max(

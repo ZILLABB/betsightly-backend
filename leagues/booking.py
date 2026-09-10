@@ -34,6 +34,7 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 
+from leagues.availability import game_kickoff_lifecycle
 from leagues.sportybet import MARKET_TO_SPORTYBET
 
 logger = logging.getLogger(__name__)
@@ -293,47 +294,101 @@ def leg_fingerprint(games: list) -> str:
     return hashlib.md5("~".join(parts).encode()).hexdigest()[:16]
 
 
-def validated_public_booking(record: dict | None, games: list) -> dict | None:
+def booking_lifecycle(record: dict | None, games: list,
+                      now: datetime | None = None) -> dict | None:
+    """Apply local, deterministic safety checks before a code is exposed.
+
+    This never contacts SportyBet. Network readback happens when the code is
+    created/reused; serving first checks immutable card identity, expiry and
+    the canonical 20-minute kickoff boundary.
+    """
+    if not record:
+        return None
+    checked = dict(record)
+
+    def invalid(status: str, category: str, reason: str) -> dict:
+        checked.update({
+            "status": status,
+            "lifecycle_status": status,
+            "failure_category": category,
+            "reason": reason,
+            "actionable": False,
+            "share_code": None,
+            "share_url": None,
+        })
+        return checked
+
+    if record.get("status") != "active" or not record.get("share_code"):
+        return invalid(
+            str(record.get("status") or "unavailable").lower(),
+            str(record.get("failure_category") or "CODE_GENERATION_FAILED"),
+            str(record.get("reason") or "No active SportyBet code is available."),
+        )
+    if str(record.get("readback_validation") or "").upper() != "PASSED":
+        return invalid("validation_failed", "READBACK_FAILED",
+                       "The SportyBet code did not pass readback validation.")
+    booking_status = str(record.get("booking_status") or "").upper()
+    if booking_status not in {"FULL", "REBUILT_FULL"}:
+        return invalid("unavailable", "READBACK_MISMATCH",
+                       "The code is not the complete displayed accumulator.")
+    if record.get("partial") or int(record.get("excluded_leg_count") or 0):
+        return invalid("unavailable", "READBACK_MISMATCH",
+                       "A partial code cannot represent the full displayed slip.")
+
+    expected = leg_fingerprint(games)
+    if not expected or record.get("leg_fingerprint") != expected:
+        return invalid("stale", "READBACK_MISMATCH",
+                       "This tier changed after the code was created.")
+    original_count = int(record.get("original_leg_count") or 0)
+    booked_count = int(record.get("booked_leg_count") or record.get("legs") or 0)
+    if original_count != len(games) or booked_count != len(games):
+        return invalid("stale", "READBACK_MISMATCH",
+                       "The code leg count no longer matches the displayed slip.")
+
+    current = now or datetime.now(timezone.utc)
+    expires_at = record.get("expires_at")
+    if not expires_at:
+        return invalid("expired", "CODE_EXPIRED",
+                       "The code has no verifiable expiry time.")
+    try:
+        expires = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return invalid("expired", "CODE_EXPIRED",
+                       "The code expiry time is invalid.")
+    if expires <= current:
+        return invalid("expired", "CODE_EXPIRED",
+                       "The SportyBet code has expired.")
+
+    states = [game_kickoff_lifecycle(game, current) for game in games]
+    if "invalid" in states:
+        return invalid("stale", "KICKOFF_MISMATCH",
+                       "A displayed fixture has no valid kickoff time.")
+    if "started" in states:
+        return invalid("started", "FIXTURE_STARTED",
+                       "At least one fixture in this code has started.")
+    if "kickoff_buffer" in states:
+        return invalid("kickoff_buffer", "KICKOFF_BUFFER",
+                       "A fixture starts within the 20-minute booking buffer.")
+
+    checked.update({"lifecycle_status": "active", "actionable": True,
+                    "failure_category": None})
+    return checked
+
+
+def validated_public_booking(record: dict | None, games: list,
+                             now: datetime | None = None) -> dict | None:
     """Return a stored booking only when it is safe to advertise.
 
     This is a read-only gate over facts already produced by booking readback.
     A rebuilt full ticket is allowed because its original fingerprint still
     proves which locked card it came from. Partial and stale tickets are not.
     """
-    if not record or record.get("status") != "active":
+    checked = booking_lifecycle(record, games, now)
+    if not checked or not checked.get("actionable"):
         return None
-    if not record.get("share_code"):
-        return None
-    if str(record.get("readback_validation") or "").upper() != "PASSED":
-        return None
-    booking_status = str(record.get("booking_status") or "").upper()
-    if booking_status not in {"FULL", "REBUILT_FULL"}:
-        return None
-    if record.get("partial") or int(record.get("excluded_leg_count") or 0):
-        return None
-
-    expected = leg_fingerprint(games)
-    if not expected or record.get("leg_fingerprint") != expected:
-        return None
-    original_count = int(record.get("original_leg_count") or 0)
-    booked_count = int(
-        record.get("booked_leg_count") or record.get("legs") or 0
-    )
-    if original_count != len(games) or booked_count != len(games):
-        return None
-
-    expires_at = record.get("expires_at")
-    if expires_at:
-        try:
-            expires = datetime.fromisoformat(
-                str(expires_at).replace("Z", "+00:00")
-            )
-            if expires.tzinfo is None:
-                expires = expires.replace(tzinfo=timezone.utc)
-            if expires <= datetime.now(timezone.utc):
-                return None
-        except (TypeError, ValueError):
-            return None
+    # Preserve identity for callers that use it as a zero-copy gate.
     return record
 
 
@@ -384,6 +439,27 @@ def selections_for(games: list, board: dict) -> tuple[list, list]:
             "specifier": specifier,
         })
     return selections, unmapped
+
+
+def _mapping_failure_category(unmapped: list) -> str:
+    if not unmapped:
+        return "FIXTURE_MAPPING_FAILED"
+    item = unmapped[0]
+    status = str(item.get("status") or "").upper()
+    reason = str(item.get("reason") or "").lower()
+    if status == "KICKOFF_MISMATCH":
+        return "KICKOFF_MISMATCH"
+    if status == "MARKET_NOT_FOUND":
+        return "MARKET_NOT_FOUND"
+    if status == "SELECTION_NOT_FOUND":
+        if "suspend" in reason:
+            return "OUTCOME_SUSPENDED"
+        return "SELECTION_NOT_FOUND"
+    if status == "ODDS_UNAVAILABLE":
+        return "ODDS_UNAVAILABLE"
+    if status == "SPORTYBET_DATA_ERROR":
+        return "SPORTYBET_DATA_ERROR"
+    return "FIXTURE_MAPPING_FAILED"
 
 
 def _post_share(selections: list) -> dict:
@@ -444,8 +520,19 @@ def validate_code_details(code: str, expected: list) -> tuple[bool, str, float |
     try:
         actual_odds = round(float(raw_odds), 3)
     except (TypeError, ValueError):
-        actual_odds = None
+        return False, "code readback carried no valid odds", None
     return True, "ok", actual_odds
+
+
+def _validation_failure_category(reason: str) -> str:
+    lowered = (reason or "").lower()
+    if "unavailable" in lowered:
+        return "OUTCOME_SUSPENDED"
+    if "odds" in lowered:
+        return "ODDS_UNAVAILABLE"
+    if "could not read" in lowered or "did not resolve" in lowered:
+        return "READBACK_FAILED"
+    return "READBACK_MISMATCH"
 
 
 def create_booking(games: list, board: dict, allow_partial: bool = False,
@@ -453,7 +540,8 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
                    original_games: list | None = None,
                    replacements: list | None = None,
                    predicted_odds: float | None = None,
-                   ticket_type: str = "accumulator") -> dict:
+                   ticket_type: str = "accumulator",
+                   now: datetime | None = None) -> dict:
     """Book one tier. Returns a record describing what happened, always.
 
     Failure is a first-class outcome here rather than an exception: a tier
@@ -471,9 +559,30 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
         payload["timing_ms"] = dict(timings)
         return payload
 
-    now = datetime.now(timezone.utc).isoformat()
+    current = now or datetime.now(timezone.utc)
+    priced_at = current.isoformat()
     original_games = original_games or games
     replacements = replacements or []
+    kickoff_states = [game_kickoff_lifecycle(game, current) for game in games]
+    if "invalid" in kickoff_states:
+        return finished({"status": "stale", "booking_status": "UNAVAILABLE",
+                         "share_code": None, "share_url": None,
+                         "failure_category": "KICKOFF_MISMATCH",
+                         "reason": "a fixture has no valid kickoff time",
+                         "priced_at": priced_at})
+    if "started" in kickoff_states:
+        return finished({"status": "started", "booking_status": "UNAVAILABLE",
+                         "share_code": None, "share_url": None,
+                         "failure_category": "FIXTURE_STARTED",
+                         "reason": "a fixture has already started",
+                         "priced_at": priced_at})
+    if "kickoff_buffer" in kickoff_states:
+        return finished({"status": "kickoff_buffer",
+                         "booking_status": "UNAVAILABLE",
+                         "share_code": None, "share_url": None,
+                         "failure_category": "KICKOFF_BUFFER",
+                         "reason": "a fixture starts within 20 minutes",
+                         "priced_at": priced_at})
     stage_started = time.perf_counter()
     selections, unmapped = selections_for(games, board)
     timings["selection_mapping"] = elapsed_ms(stage_started)
@@ -499,7 +608,8 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
 
     if not selections:
         return finished({**base, "status": "unavailable", "share_code": None, "legs": 0,
-                "unmapped": unmapped, "priced_at": now,
+                "unmapped": unmapped, "priced_at": priced_at,
+                "failure_category": _mapping_failure_category(unmapped),
                 "reason": "no leg could be matched to a SportyBet selection"})
 
     # Partial slips are refused for accumulators. A four-leg code under a
@@ -514,7 +624,8 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
     # nobody: the seven bookable picks were perfectly good.
     if unmapped and not allow_partial:
         return finished({**base, "status": "unavailable", "share_code": None,
-                "legs": len(selections), "unmapped": unmapped, "priced_at": now,
+                "legs": len(selections), "unmapped": unmapped, "priced_at": priced_at,
+                "failure_category": _mapping_failure_category(unmapped),
                 "reason": (f"{len(unmapped)} of {len(games)} legs could not be "
                            f"matched; a partial slip is not the published tier")})
 
@@ -526,14 +637,16 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
         logger.warning(f"booking request failed: {e}")
         return finished({**base, "status": "failed", "booking_status": "BOOKING_FAILED",
                 "share_code": None, "legs": len(selections),
-                "unmapped": [], "priced_at": now,
+                "unmapped": [], "priced_at": priced_at,
+                "failure_category": "SPORTYBET_DATA_ERROR",
                 "reason": f"booking request failed: {str(e)[:120]}"})
     timings["code_generation"] = elapsed_ms(stage_started)
 
     if payload.get("bizCode") != 10000:
         return finished({**base, "status": "failed", "booking_status": "BOOKING_FAILED",
                 "share_code": None, "legs": len(selections),
-                "unmapped": [], "priced_at": now,
+                "unmapped": [], "priced_at": priced_at,
+                "failure_category": "CODE_GENERATION_FAILED",
                 "reason": f"bookmaker refused: {payload.get('message')}"})
 
     data = payload.get("data") or {}
@@ -541,7 +654,8 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
     if not code:
         return finished({**base, "status": "failed", "booking_status": "BOOKING_FAILED",
                 "share_code": None, "legs": len(selections),
-                "unmapped": [], "priced_at": now,
+                "unmapped": [], "priced_at": priced_at,
+                "failure_category": "CODE_GENERATION_FAILED",
                 "reason": "response carried no share code"})
 
     stage_started = time.perf_counter()
@@ -550,7 +664,8 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
     if not ok:
         return finished({**base, "status": "invalid", "booking_status": "VALIDATION_FAILED",
                 "share_code": None, "legs": len(selections),
-                "unmapped": [], "priced_at": now,
+                "unmapped": [], "priced_at": priced_at,
+                "failure_category": _validation_failure_category(why),
                 "reason": f"validation failed: {why}"})
 
     expires = None
@@ -560,6 +675,20 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
                 data["deadline"] / 1000.0, tz=timezone.utc).isoformat()
         except (TypeError, ValueError, OSError):
             expires = None
+
+    if not expires:
+        return finished({**base, "status": "expired",
+                "booking_status": "VALIDATION_FAILED", "share_code": None,
+                "legs": len(selections), "unmapped": [],
+                "priced_at": priced_at, "failure_category": "CODE_EXPIRED",
+                "reason": "SportyBet returned no verifiable code expiry"})
+    parsed_expiry = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+    if parsed_expiry <= current:
+        return finished({**base, "status": "expired",
+                "booking_status": "VALIDATION_FAILED", "share_code": None,
+                "legs": len(selections), "unmapped": [],
+                "priced_at": priced_at, "failure_category": "CODE_EXPIRED",
+                "reason": "SportyBet returned an already-expired code"})
 
     if actual_odds is None:
         actual_odds = 1.0
@@ -591,7 +720,7 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
         # drift: a card locked at 08:00 and loaded at 19:00 will not quote the
         # same numbers, so the reader is told when this was priced rather than
         # being shown a figure presented as current.
-        "priced_at": now,
+        "priced_at": priced_at,
         "expires_at": expires,
         # Stated plainly when a singles tier booked only part of itself, so
         # the card can say "7 of 10 picks" rather than implying the code holds
@@ -640,14 +769,8 @@ def _create_or_reuse_generated_booking(games: list, board: dict,
         prior = generated_booking_for(fingerprint)
         persistence_ms = round((time.perf_counter() - stage_started) * 1000)
         code = (prior or {}).get("share_code")
-        expired = False
-        try:
-            expires = (prior or {}).get("expires_at")
-            expired = bool(expires and datetime.fromisoformat(
-                expires.replace("Z", "+00:00")) <= datetime.now(timezone.utc))
-        except (TypeError, ValueError):
-            expired = True
-        if (prior or {}).get("status") == "active" and code and not expired:
+        prior_checked = booking_lifecycle(prior, games)
+        if prior_checked and prior_checked.get("actionable") and code:
             stage_started = time.perf_counter()
             ok, _, actual_odds = validate_code_details(code, selections)
             validation_ms = round((time.perf_counter() - stage_started) * 1000)
@@ -880,8 +1003,8 @@ def book_card(publish_date: str, accumulators: dict,
         # A held code is reused only while it still describes this tier. If the
         # tier was extended or rebuilt since, the old code is for a different
         # slip and has to be replaced rather than skipped over.
-        unchanged = (prior.get("leg_fingerprint") == leg_fingerprint(games))
-        if prior.get("status") == "active" and unchanged and not force:
+        prior_checked = booking_lifecycle(prior, games)
+        if prior_checked and prior_checked.get("actionable") and not force:
             report["skipped"].append(f"{tier}: {prior.get('share_code')}")
             if tier != "over_1_5":
                 claimed_replacements.update(
@@ -968,7 +1091,8 @@ def book_card(publish_date: str, accumulators: dict,
     return report
 
 
-def attach_bookings(publish_date: str, accumulators: dict) -> dict:
+def attach_bookings(publish_date: str, accumulators: dict,
+                    now: datetime | None = None) -> dict:
     """Hang stored codes on the card. Read-only — never books.
 
     Serving the card must not create bookings: a page load would then POST to
@@ -983,14 +1107,7 @@ def attach_bookings(publish_date: str, accumulators: dict) -> dict:
         record = stored.get(tier)
         if not record:
             continue
-        # A code minted against different legs is not this tier's code. Rather
-        # than hiding it, say so — a reader who copied it earlier needs to
-        # know it no longer matches what they are looking at.
-        expected = record.get("leg_fingerprint")
-        if (record.get("status") == "active" and expected
-                and expected != leg_fingerprint(data.get("games") or [])):
-            record = dict(record, status="stale", share_code=None,
-                          reason=("this tier changed after the code was made; "
-                                  "regenerate before staking"))
-        data["booking"] = record
+        data["booking"] = booking_lifecycle(
+            record, data.get("games") or [], now
+        )
     return accumulators

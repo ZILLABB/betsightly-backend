@@ -37,6 +37,9 @@ def _booking(games, code, odds=2.0, booking_status="FULL", **overrides):
         "original_leg_count": len(games), "booked_leg_count": len(games),
         "excluded_leg_count": 0, "replacement_count": 0,
         "leg_fingerprint": leg_fingerprint(games),
+        "expires_at": (
+            datetime.now(timezone.utc) + timedelta(hours=12)
+        ).isoformat(),
     }
     record.update(overrides)
     return record

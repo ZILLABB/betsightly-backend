@@ -18,6 +18,7 @@ from math import prod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from leagues.availability import BOOKING_BUFFER, game_kickoff_lifecycle
 from leagues.selection_quality import selection_probability
 
 logger = logging.getLogger(__name__)
@@ -44,11 +45,6 @@ _MARGIN_TIE_BAND = 0.02
 # still ahead of the user rather than half-gone.
 WAT_OFFSET = timedelta(hours=1)
 PUBLISH_HOUR_WAT = 8
-
-# Fixtures kicking off sooner than this are left out at publish time — a pick
-# a user cannot realistically get on is not a pick.
-BOOKING_BUFFER = timedelta(minutes=20)
-
 
 def _trusted_rollover_picks(picks: list) -> list:
     """Markets with enough settled evidence for the site's safest challenge."""
@@ -136,12 +132,13 @@ def build_daily_accumulators(force: bool = False) -> dict:
 
     now = datetime.now(timezone.utc)
     publish_date = _publish_date()
+    existing_card = _load_locked(publish_date)
 
     # Serve the locked card if today's has already been published. Re-selecting
     # through the day would quietly swap picks out from under anyone who booked
     # off the morning card.
     if not force:
-        locked = _load_locked(publish_date)
+        locked = existing_card
         if locked:
             # Refresh statuses from the persisted chain without rerunning the
             # entire fixture/ML pipeline on a read. Extending the chain is a
@@ -155,9 +152,13 @@ def build_daily_accumulators(force: bool = False) -> dict:
             _rev = locked.pop("_card_revision", 1)
             _updated = locked.pop("_last_updated_at", None)
             _first = locked.pop("_first_published_at", None)
+            _fixture_target = locked.pop("_fixture_target_date", publish_date)
+            locked.pop("_publication_date", None)
             result = {
                 "status": "success",
                 "date": publish_date,
+                "publication_date": publish_date,
+                "fixture_target_date": _fixture_target,
                 "source": "leagues",
                 "published_at_wat": f"{PUBLISH_HOUR_WAT:02d}:00",
                 "locked": True,
@@ -166,7 +167,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
                 "last_updated_at": _updated,
                 "total_fixtures": sum(len(c.get("games", [])) for c in locked.values() if isinstance(c, dict)),
                 "accumulators": _attach_bookings(
-                    publish_date, _mark_started(locked, now)),
+                    publish_date, _mark_started(locked, now), now),
             }
             _accum_cache.update({"result": result, "ts": now_ts})
             return result
@@ -398,7 +399,9 @@ def build_daily_accumulators(force: bool = False) -> dict:
     _built_at = now.isoformat()
     result = {
         "status": "success",
-        "date": target_date,
+        "date": publish_date,
+        "publication_date": publish_date,
+        "fixture_target_date": target_date,
         # When this card was first put together, and how many times it has been
         # rebuilt. A rebuild used to replace the day's card leaving no trace, so
         # a reader refreshing a tier had no way to tell what had changed.
@@ -448,26 +451,35 @@ def build_daily_accumulators(force: bool = False) -> dict:
                 "bounded": True,
                 "limit": 160,
             },
+            "_publication_date": publish_date,
+            "_fixture_target_date": target_date,
         },
     }
 
-    _archive(target_date, result["accumulators"])
+    # Archive and lock by the audience-facing publication day even when a
+    # thin late board deliberately draws from the next fixture day. Kickoff
+    # remains on every leg; the card's immutable identity must not drift.
+    if not existing_card:
+        _archive(publish_date, result["accumulators"])
 
-    # Lock the card for the publishing day so it is served unchanged from here
-    if target_date == publish_date:
+    # Lock the publication exactly once. A force-build beside an existing
+    # card is an unpublished comparison and must never overwrite or relabel it.
+    if not existing_card:
         try:
             from leagues.picks_db import save_card
-            save_card(publish_date, result["accumulators"])
-            result["locked"] = True
+            result["locked"] = bool(
+                save_card(publish_date, result["accumulators"])
+            )
         except Exception as e:
             logger.debug(f"card lock skipped: {e}")
 
     result["accumulators"] = _mark_started(result["accumulators"], now)
-    if target_date == publish_date:
-        # Only the publishing day's card has bookings. A card that has fallen
-        # forward to tomorrow's fixtures must not wear today's codes.
+    if result["locked"]:
+        # A thin-day card keeps today's publication identity while its legs
+        # truthfully retain tomorrow's kickoffs, so today's stored booking is
+        # still the exact code that belongs beside this official card.
         result["accumulators"] = _attach_bookings(
-            publish_date, result["accumulators"])
+            publish_date, result["accumulators"], now)
     _accum_cache.update({"result": result, "ts": now_ts})
     return result
 
@@ -656,7 +668,8 @@ def build_bookable_now() -> dict | None:
     }
 
 
-def _attach_bookings(publish_date: str, accumulators: dict) -> dict:
+def _attach_bookings(publish_date: str, accumulators: dict,
+                     now: datetime | None = None) -> dict:
     """Hang stored booking codes on the card, never failing the card for it.
 
     A bookmaker being unreachable must not take the predictions down with it —
@@ -664,7 +677,7 @@ def _attach_bookings(publish_date: str, accumulators: dict) -> dict:
     """
     try:
         from leagues.booking import attach_bookings
-        out = attach_bookings(publish_date, accumulators)
+        out = attach_bookings(publish_date, accumulators, now)
         attached = sum(1 for v in out.values()
                        if isinstance(v, dict) and v.get("booking"))
         logger.info(f"booking attach {publish_date}: {attached} tier(s) carry a code")
@@ -692,15 +705,16 @@ def _mark_started(accumulators: dict, now: datetime) -> dict:
     arriving at midday still needs to see which legs are no longer bookable
     rather than being shown a slip that reads as if it were all still open.
     """
-    cutoff = now.isoformat().replace("+00:00", "Z")
     for cat in accumulators.values():
         if not isinstance(cat, dict):
             continue
         games = cat.get("games") or []
         started = 0
         for g in games:
-            ko = g.get("kickoff") or g.get("date") or ""
-            g["started"] = bool(ko and ko <= cutoff)
+            lifecycle = game_kickoff_lifecycle(g, now)
+            g["kickoff_status"] = lifecycle
+            g["started"] = lifecycle in {"started", "kickoff_buffer", "invalid"}
+            g["actionable"] = lifecycle == "actionable"
             if g["started"]:
                 started += 1
         if games:
