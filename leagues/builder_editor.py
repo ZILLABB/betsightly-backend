@@ -76,6 +76,8 @@ def _change_summary(before: dict, after: dict, action: str) -> dict:
            for game in after.get("games") or []}
     removed = [game for key, game in old.items() if key not in new]
     added = [game for key, game in new.items() if key not in old]
+    removed_fixture = str((removed[0] if removed else {}).get("match_id") or "")
+    added_fixture = str((added[0] if added else {}).get("match_id") or "")
     return {
         "action": action,
         "removed": removed,
@@ -83,11 +85,110 @@ def _change_summary(before: dict, after: dict, action: str) -> dict:
         "old_odds": before.get("odds") or before.get("achieved_odds"),
         "new_odds": after.get("odds") or after.get("achieved_odds")
         or after.get("best_reachable"),
+        "old_leg_count": len(before.get("games") or []),
+        "new_leg_count": len(after.get("games") or []),
+        "removed_fixture_id": removed_fixture or None,
+        "added_fixture_id": added_fixture or None,
+        "fixture_changed": bool(removed_fixture and added_fixture
+                                and removed_fixture != added_fixture),
         "reason": (
             "The revised slip was rebuilt from the same approved conservative "
             "candidate board while preserving your locks and exclusions."
         ),
     }
+
+
+def _no_replacement(before: dict, edit_token: str, timings: dict) -> dict:
+    return {
+        **before,
+        "revision_status": "no_change",
+        "action_error": (
+            "No different BetSightly-approved, currently bookable fixture can "
+            "replace this game without weakening the slip. Your original "
+            "game has been kept."
+        ),
+        "timing_ms": timings,
+    }
+
+
+def _replace_fixture_locally(
+    *, before: dict, current: dict, candidates: list[dict], target: float,
+    horizon: str, board: dict, locked: set[str],
+    excluded_fixtures: set[str], excluded_selections: set[str],
+    timings: dict,
+) -> tuple[dict | None, str | None]:
+    """Return one exact N-for-N fixture swap, without rerolling other legs."""
+    current_fixture = str(current.get("match_id") or current.get("fixture_id") or "")
+    current_id = str(current.get("selection_id") or "")
+    existing_games = list(before.get("games") or [])
+    existing_ids = {str(game.get("selection_id") or "") for game in existing_games}
+    existing_fixtures = {str(game.get("match_id") or game.get("fixture_id") or "")
+                         for game in existing_games}
+    by_id = {_selection_id(pick): pick for pick in candidates}
+    unaffected = [game for game in existing_games
+                  if str(game.get("selection_id") or "") != current_id]
+    preserved = [by_id.get(str(game.get("selection_id") or "")) for game in unaffected]
+    if any(pick is None for pick in preserved):
+        return None, None
+
+    alternatives = [
+        pick for pick in candidates
+        if str(pick.get("match_id")) != current_fixture
+        and str(pick.get("match_id")) not in excluded_fixtures
+        and str(pick.get("match_id")) not in existing_fixtures
+        and _selection_id(pick) not in excluded_selections
+        and _selection_id(pick) not in existing_ids
+    ]
+    alternatives.sort(key=lambda pick: (
+        -_survival(pick), -float(pick.get("quality_score") or 0),
+        abs(float(pick.get("odds") or 1) - float(current.get("odds") or 1)),
+    ))
+    search_started = time.perf_counter()
+    viable: list[tuple[tuple, dict, dict]] = []
+    for replacement in alternatives[:96]:
+        fixed = [*preserved, replacement]
+        required = {_selection_id(pick) for pick in fixed}
+        built = build_slip(
+            target, pool=fixed, max_legs=len(existing_games), horizon=horizon,
+            require_bookable=True, locked_selection_ids=locked,
+            excluded_fixture_ids=excluded_fixtures | {current_fixture},
+            excluded_selection_ids=excluded_selections | {current_id},
+            forced_selection_ids=required,
+        )
+        if not built.get("ok") or len(built.get("picks") or []) != len(existing_games):
+            continue
+        score = (
+            float(built.get("hit_probability") or 0),
+            float(built.get("expected_return") or 0),
+            -abs(float(built.get("odds") or 0) - target),
+            float(replacement.get("quality_score") or 0),
+        )
+        viable.append((score, built, replacement))
+    timings["replacement_search"] = round(
+        (time.perf_counter() - search_started) * 1000
+    )
+    if not viable:
+        return None, None
+    _, built, replacement = max(viable, key=lambda item: item[0])
+    result = _public_result_from_build(
+        target, horizon, built, board, timings, force_booking=True
+    )
+    booking = result.get("booking") or {}
+    if not (result.get("status") == "success"
+            and booking.get("status") == "active"
+            and booking.get("share_code")
+            and str(booking.get("readback_validation") or "").upper() == "PASSED"):
+        return None, None
+    # Preserve the user's visual leg order: only the requested slot changes.
+    games_by_id = {str(game.get("selection_id")): game
+                   for game in result.get("games") or []}
+    replacement_id = _selection_id(replacement)
+    result["games"] = [
+        games_by_id.get(replacement_id) if str(game.get("selection_id")) == current_id
+        else games_by_id.get(str(game.get("selection_id")), game)
+        for game in existing_games
+    ]
+    return result, replacement_id
 
 
 def revise(
@@ -127,7 +228,7 @@ def revise(
     elif action == "exclude_fixture":
         excluded_fixtures.add(current_fixture)
         locked = {value for value in locked if value != current_id}
-    elif action in {"replace_selection", "remove_selection"}:
+    elif action == "remove_selection":
         excluded_selections.add(current_id)
         locked.discard(current_id)
 
@@ -151,6 +252,45 @@ def revise(
         "degraded": bool(prepared_status.get("degraded")),
         "complete": bool(prepared_status.get("complete")),
     }
+
+    if action == "replace_selection":
+        canonical, _ = approved_builder_candidates(bookable_pool)
+        result, replacement_id = _replace_fixture_locally(
+            before=before, current=current or {}, candidates=canonical,
+            target=effective_target, horizon=state["horizon"], board=board,
+            locked=locked, excluded_fixtures=excluded_fixtures,
+            excluded_selections=excluded_selections, timings=timings,
+        )
+        if result is None:
+            unchanged = _no_replacement(before, edit_token, timings)
+            unchanged["board"] = board_state
+            return builder_revisions.persist_revision(
+                run_id=run_id, edit_token=edit_token,
+                expected_revision=revision, request_id=request_id,
+                action=action, action_target=action_target,
+                result=unchanged, locked_selection_ids=locked,
+                excluded_fixture_ids=excluded_fixtures,
+                excluded_selection_ids=excluded_selections,
+            )
+        excluded_fixtures.add(current_fixture)
+        excluded_selections.add(current_id)
+        locked.discard(current_id)
+        action_target["replacement_selection_id"] = replacement_id
+        action_target["replaced_fixture_id"] = current_fixture
+        action_target["replacement_fixture_id"] = next(
+            (str(game.get("match_id")) for game in result.get("games") or []
+             if str(game.get("selection_id")) == replacement_id), None)
+        result["timing_ms"] = timings
+        result["change_summary"] = _change_summary(before, result, action)
+        result["board"] = board_state
+        return builder_revisions.persist_revision(
+            run_id=run_id, edit_token=edit_token,
+            expected_revision=revision, request_id=request_id, action=action,
+            action_target=action_target, result=result,
+            locked_selection_ids=locked,
+            excluded_fixture_ids=excluded_fixtures,
+            excluded_selection_ids=excluded_selections,
+        )
 
     if action in {"lock_selection", "unlock_selection"}:
         if action == "lock_selection":

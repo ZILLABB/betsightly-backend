@@ -117,6 +117,7 @@ def test_daily_counterfactual_and_builder_edits_are_idempotent(monkeypatch):
             action_target={"fixture_id": "fx-1", "selection_id": "old",
                            "replacement_selection_id": "new"},
             requested_target=10, achieved_before=9.1, achieved_after=8.8,
+            detail={"result_status": "TARGET_REACHED"},
         )
     with db.begin() as conn:
         products = conn.execute(select(decision_archive.product_decisions)).mappings().all()
@@ -125,6 +126,7 @@ def test_daily_counterfactual_and_builder_edits_are_idempotent(monkeypatch):
     assert json.loads(products[0]["independent_payload"])["odds"] == 4.8
     assert len(edits) == 1
     assert edits[0]["replacement_selection_id"] == "new"
+    assert json.loads(edits[0]["detail_payload"])["result_status"] == "TARGET_REACHED"
 
 
 def test_quality_report_uses_readiness_guardrails(monkeypatch):

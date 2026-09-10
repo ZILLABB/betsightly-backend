@@ -228,7 +228,7 @@ def test_target_reaching_builder_ticket_is_refused_when_conservative_ev_is_poor(
     built = build_slip(10, pool=board, max_legs=9, market_cap=3)
 
     assert not built["ok"]
-    assert built["result_status"] == "QUALITY_CAPPED"
+    assert built["result_status"] == "EXPECTED_RETURN_CAPPED"
     assert built["expected_return"] < built["minimum_expected_return"]
 
 

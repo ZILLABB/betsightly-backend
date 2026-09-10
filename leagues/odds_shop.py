@@ -40,11 +40,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+from leagues.cache_paths import cache_path
 
 logger = logging.getLogger(__name__)
 
-CACHE_PATH = Path(__file__).parent / "data" / "shopped_odds.json"
-BUDGET_PATH = Path(__file__).parent / "data" / "odds_budget.json"
+CACHE_PATH = cache_path(Path(__file__).parent / "data" / "shopped_odds.json")
+BUDGET_PATH = cache_path(Path(__file__).parent / "data" / "odds_budget.json")
 CACHE_TTL = 6 * 3600           # prices move; 6h keeps them usable and cheap
 
 # Free tier is 500/month. Staying under a daily ceiling means a busy day

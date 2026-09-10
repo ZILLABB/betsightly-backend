@@ -78,6 +78,7 @@ builder_edit_events = Table(
     Column("requested_target", Float),
     Column("achieved_before", Float),
     Column("achieved_after", Float),
+    Column("detail_payload", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("run_id", "request_id", name="uq_builder_edit_request"),
 )
@@ -294,7 +295,8 @@ def record_builder_event(*, run_id: str, snapshot_id: str | None,
                          revision_after: int, action: str,
                          action_target: dict | None, requested_target: float,
                          achieved_before: float | None,
-                         achieved_after: float | None) -> None:
+                         achieved_after: float | None,
+                         detail: dict | None = None) -> None:
     try:
         ensure_tables()
         target = action_target or {}
@@ -312,6 +314,7 @@ def record_builder_event(*, run_id: str, snapshot_id: str | None,
                 replacement_selection_id=str(target.get("replacement_selection_id") or "")[:128] or None,
                 requested_target=float(requested_target), achieved_before=achieved_before,
                 achieved_after=achieved_after, created_at=datetime.now(timezone.utc),
+                detail_payload=_json(detail or {}),
             ))
     except Exception:
         logger.error("builder_edit_archive_failed", exc_info=True)

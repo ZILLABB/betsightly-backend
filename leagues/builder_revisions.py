@@ -169,6 +169,13 @@ def create_initial_run(target: float, horizon: str, result: dict) -> dict:
             revision_after=1, action="generate", action_target=None,
             requested_target=float(target), achieved_before=None,
             achieved_after=result.get("odds"),
+            detail={
+                "result_status": result.get("result_status"),
+                "binding_constraints": result.get("binding_constraints"),
+                "booking_validation": (result.get("booking") or {}).get(
+                    "readback_validation"),
+                "after_fingerprint": fingerprint,
+            },
         )
     return _decorate(
         result, run_id=run_id, revision=1, parent_revision=None,
@@ -300,6 +307,18 @@ def persist_revision(
             requested_target=float(run["requested_target"]),
             achieved_before=(prior_result or {}).get("odds"),
             achieved_after=result.get("odds"),
+            detail={
+                "action_target": action_target,
+                "before_fingerprint": (prior_row or {}).get(
+                    "selected_fingerprint"),
+                "after_fingerprint": fingerprint,
+                "result_status": result.get("result_status"),
+                "revision_status": result.get("revision_status"),
+                "action_error": result.get("action_error"),
+                "binding_constraints": result.get("binding_constraints"),
+                "booking_validation": (result.get("booking") or {}).get(
+                    "readback_validation"),
+            },
         )
     return _decorate(
         result, run_id=run_id, revision=new_revision,

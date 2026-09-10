@@ -27,10 +27,11 @@ from pathlib import Path
 
 import requests
 from leagues.competition_registry import regulation_score
+from leagues.cache_paths import cache_path
 
 logger = logging.getLogger(__name__)
 
-CACHE_PATH = Path(__file__).parent / "data" / "league_base_rates.json"
+CACHE_PATH = cache_path(Path(__file__).parent / "data" / "league_base_rates.json")
 CACHE_TTL = 7 * 24 * 3600          # recompute weekly
 LOOKBACK_DAYS = 45                 # sample window
 MIN_SAMPLE = 10                    # below this, use global defaults

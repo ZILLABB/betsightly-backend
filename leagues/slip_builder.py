@@ -888,6 +888,24 @@ def build_slip(
           and selected_under_count >= UNDER_CAP else []),
         *(["max_legs"] if len(legs) >= max_legs else []),
     ]
+    selected_ids = {_selection_id(pick) for pick in legs}
+    selected_teams = {
+        str(((pick.get("_fixture") or {}).get(side) or {}).get("name") or "")
+        .strip().casefold()
+        for pick in legs for side in ("home", "away")
+    } - {""}
+    if any(
+        _selection_id(pick) not in selected_ids
+        and selected_teams & {
+            str(((pick.get("_fixture") or {}).get(side) or {}).get("name") or "")
+            .strip().casefold()
+            for side in ("home", "away")
+        }
+        for pick in candidates
+    ):
+        diagnostics["binding_constraints"].append(
+            "same_team_fixture_diversity"
+        )
 
     if odds < target:
         # Say which limit bit, because "not available" hides two different
@@ -895,6 +913,10 @@ def build_slip(
         binding = diagnostics["binding_constraints"]
         if "max_legs" in binding:
             result_status = "MAX_LEGS_CAPPED"
+        elif "team_to_score" in binding:
+            result_status = "TEAM_TO_SCORE_CAPPED"
+        elif "same_team_fixture_diversity" in binding:
+            result_status = "FIXTURE_DIVERSITY_CAPPED"
         elif binding:
             result_status = "EXPOSURE_CAPPED"
         else:
@@ -902,7 +924,10 @@ def build_slip(
         verified = optimization_status in {"OPTIMAL", "BOUNDED_OPTIMAL"}
         description = ("The strongest verified combination" if verified
                        else "The current search found a qualifying combination")
-        if result_status == "EXPOSURE_CAPPED":
+        if result_status in {
+            "EXPOSURE_CAPPED", "TEAM_TO_SCORE_CAPPED",
+            "FIXTURE_DIVERSITY_CAPPED",
+        }:
             capped_reason = (
                 f"{description} reaches {odds:.2f}x under the current "
                 "diversification limits. Approved selections remain on the "
@@ -959,7 +984,7 @@ def build_slip(
     if expected_return < MIN_BUILDER_EXPECTED_RETURN:
         return {
             "ok": False,
-            "result_status": "QUALITY_CAPPED",
+            "result_status": "EXPECTED_RETURN_CAPPED",
             "optimization_status": optimization_status,
             "target": target,
             "best_reachable": round(odds, 2),

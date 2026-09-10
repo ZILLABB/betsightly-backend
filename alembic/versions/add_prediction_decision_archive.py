@@ -69,6 +69,7 @@ def upgrade():
         sa.Column("requested_target", sa.Float()),
         sa.Column("achieved_before", sa.Float()),
         sa.Column("achieved_after", sa.Float()),
+        sa.Column("detail_payload", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("run_id", "request_id",
                             name="uq_builder_edit_request"),

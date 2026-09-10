@@ -29,11 +29,12 @@ from pathlib import Path
 
 import requests
 
+from leagues.cache_paths import cache_path
 from leagues.competition_registry import competition_for, regulation_score, tournament_context
 
 logger = logging.getLogger(__name__)
 
-CACHE_PATH = Path(__file__).parent / "data" / "espn_elo.json"
+CACHE_PATH = cache_path(Path(__file__).parent / "data" / "espn_elo.json")
 CACHE_TTL = 3 * 24 * 3600      # rebuild every 3 days
 HISTORY_DAYS = 240             # ~a full season of results
 DEFAULT_RATING = 1500.0

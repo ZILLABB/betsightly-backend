@@ -263,3 +263,35 @@ def test_no_marginal_same_fixture_market_is_presented_as_safer():
         "evidence_adjusted_probability": .715, "quality_score": 90,
     }
     assert builder_editor._safer_candidate(current, [current, marginal]) is None
+
+
+def test_failed_replace_is_persisted_idempotently_without_excluding_fixture(
+        revision_db, monkeypatch):
+    initial = builder_revisions.create_initial_run(10, "week", _result("a"))
+    monkeypatch.setattr(
+        builder_editor, "prepared_bookable_pool",
+        lambda *args, **kwargs: ({}, [], {"board_lookup": 1}),
+    )
+    monkeypatch.setattr(
+        "leagues.engine.prepared_board_status",
+        lambda **kwargs: {"ready": True, "degraded": False, "complete": True},
+    )
+    monkeypatch.setattr(
+        builder_editor, "approved_builder_candidates",
+        lambda candidates: (candidates, {}),
+    )
+    monkeypatch.setattr(
+        builder_editor, "_replace_fixture_locally",
+        lambda **kwargs: (None, None),
+    )
+    kwargs = dict(
+        run_id=initial["builder_run_id"], edit_token=initial["edit_token"],
+        revision=1, request_id="replace-no-change",
+        action="replace_selection", selection_id="a", fixture_id="match-a",
+    )
+    first = builder_editor.revise(**kwargs)
+    replay = builder_editor.revise(**kwargs)
+    assert first["revision"] == replay["revision"] == 2
+    assert replay["idempotent_replay"] is True
+    assert first["revision_status"] == "no_change"
+    assert first["excluded_fixture_ids"] == []

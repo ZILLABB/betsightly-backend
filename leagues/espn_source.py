@@ -32,7 +32,11 @@ from leagues.competition_registry import provider_slugs, tournament_context
 
 logger = logging.getLogger(__name__)
 
-CACHE_PATH = Path(__file__).parent.parent / "cache" / "espn_fixtures.json"
+from leagues.cache_paths import cache_path
+
+CACHE_PATH = cache_path(
+    Path(__file__).parent.parent / "cache" / "espn_fixtures.json"
+)
 CACHE_TTL = 3 * 3600  # 3 hours — odds drift, but not minute to minute
 CACHE_SCHEMA_VERSION = 2
 

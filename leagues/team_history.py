@@ -28,11 +28,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
+from leagues.cache_paths import cache_path
 from leagues.competition_registry import competition_for, regulation_score
 
 logger = logging.getLogger(__name__)
 
-CACHE_PATH = Path(__file__).parent / "data" / "team_history.json"
+CACHE_PATH = cache_path(Path(__file__).parent / "data" / "team_history.json")
 CACHE_TTL = 12 * 3600
 LOOKBACK_DAYS = 120
 SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard"

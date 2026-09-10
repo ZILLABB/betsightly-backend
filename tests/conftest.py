@@ -1,21 +1,27 @@
-"""
-Shared pytest fixtures for the BetSightly test suite.
-"""
-
+"""Shared pytest fixtures with isolated runtime state and caches."""
 import os
+import shutil
+import tempfile
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-# Use SQLite in-memory for tests — no PostgreSQL required
+
+_ROOT = Path(tempfile.mkdtemp(prefix="betsightly-pytest-cache-"))
+os.environ.setdefault("BETSIGHTLY_CACHE_ROOT", str(_ROOT))
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
-# Test imports must never inherit a production shell's background-job flags.
-# A prepared-board prewarm performs real provider I/O, while settlement and
-# publishing mutate state, so make the suite's process ownership explicit.
 os.environ["ENVIRONMENT"] = "test"
 os.environ["ENABLE_BACKGROUND_JOBS"] = "false"
-os.environ.setdefault("API_KEY", "")  # disable auth in tests
+os.environ.setdefault("API_KEY", "")
+
+# Preserve seeded cache semantics while ensuring all writes land in temp.
+_REPO = Path(__file__).resolve().parents[1]
+for source in [*(_REPO / "leagues" / "data").glob("*.json"),
+               *(_REPO / "cache").glob("*.json")]:
+    shutil.copy2(source, _ROOT / source.name)
 
 from database import Base, get_db
 from main import app
@@ -23,18 +29,20 @@ from main import app
 
 @pytest.fixture(scope="session")
 def test_engine():
-    engine = create_engine(
+    test_db = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
     )
-    Base.metadata.create_all(bind=engine)
-    yield engine
-    engine.dispose()
+    Base.metadata.create_all(bind=test_db)
+    yield test_db
+    test_db.dispose()
 
 
 @pytest.fixture
 def db_session(test_engine):
-    TestingSession = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
+    TestingSession = sessionmaker(
+        bind=test_engine, autocommit=False, autoflush=False,
+    )
     session = TestingSession()
     try:
         yield session
@@ -52,6 +60,6 @@ def client(db_session):
             pass
 
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
-        yield c
+    with TestClient(app) as test_client:
+        yield test_client
     app.dependency_overrides.clear()

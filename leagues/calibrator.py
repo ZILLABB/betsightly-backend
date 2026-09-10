@@ -64,10 +64,11 @@ from leagues.policy_version import (
     policy_weight,
     sample_readiness,
 )
+from leagues.cache_paths import cache_path
 
 logger = logging.getLogger(__name__)
 
-CACHE_PATH = Path(__file__).parent / "data" / "calibration_fit.json"
+CACHE_PATH = cache_path(Path(__file__).parent / "data" / "calibration_fit.json")
 REFIT_TTL = 6 * 3600
 
 # A group with this many settled legs is weighted 50/50 against the global fit.
