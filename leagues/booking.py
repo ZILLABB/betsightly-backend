@@ -514,9 +514,32 @@ def validate_code_details(code: str, expected: list) -> tuple[bool, str, float |
     if unavailable:
         return False, f"{len(unavailable)} selection(s) already unavailable", None
 
-    raw_odds = (data.get("ticket") or {}).get("displayTotalOdds")
+    ticket = data.get("ticket") or {}
+    raw_odds = ticket.get("displayTotalOdds")
     if raw_odds is None:
-        raw_odds = (data.get("ticket") or {}).get("totalOdds")
+        raw_odds = ticket.get("totalOdds")
+    if raw_odds is None:
+        raw_odds = data.get("displayTotalOdds") or data.get("totalOdds")
+    if raw_odds is None:
+        # Some SportyBet readbacks omit an aggregate but return a current
+        # price on every exact selection. Their product is still bookmaker-
+        # returned odds; a board/model estimate is never substituted here.
+        prices = []
+        for selection in got:
+            raw_price = selection.get("odds") or selection.get("displayOdds")
+            try:
+                price = float(raw_price)
+            except (TypeError, ValueError):
+                prices = []
+                break
+            if price <= 1:
+                prices = []
+                break
+            prices.append(price)
+        if prices and len(prices) == len(got):
+            raw_odds = 1.0
+            for price in prices:
+                raw_odds *= price
     try:
         actual_odds = round(float(raw_odds), 3)
     except (TypeError, ValueError):

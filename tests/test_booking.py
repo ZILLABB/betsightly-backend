@@ -305,6 +305,29 @@ def test_an_already_unavailable_selection_fails_validation(monkeypatch):
     assert record["status"] == "invalid"
 
 
+def test_readback_can_prove_odds_from_exact_selection_prices(monkeypatch):
+    sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",
+             "specifier": "total=1.5", "odds": "1.22"}]
+    payload = _share_response(sels)
+    payload["data"]["ticket"].pop("displayTotalOdds")
+    monkeypatch.setattr(B, "_read_share", lambda _: payload)
+    ok, why, odds = B.validate_code_details("ABC123", sels)
+    assert ok, why
+    assert odds == pytest.approx(1.22)
+
+
+def test_readback_without_any_returned_odds_is_rejected(monkeypatch):
+    sels = [{"eventId": "sr:match:1", "marketId": "18", "outcomeId": "12",
+             "specifier": "total=1.5"}]
+    payload = _share_response(sels)
+    payload["data"]["ticket"].pop("displayTotalOdds")
+    monkeypatch.setattr(B, "_read_share", lambda _: payload)
+    ok, why, odds = B.validate_code_details("ABC123", sels)
+    assert not ok
+    assert "odds" in why
+    assert odds is None
+
+
 def test_validation_survives_an_unreadable_code(monkeypatch):
     def _boom(_):
         raise OSError("timeout")
