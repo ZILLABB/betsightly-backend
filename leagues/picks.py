@@ -368,9 +368,10 @@ def build_picks(
 ) -> list[dict]:
     """All viable picks for one fixture, best first.
 
-    A pick must clear `min_confidence` and carry odds of at least 1.05.
-    Double chance is additionally required to be genuinely strong, since it is
-    a low-price market that otherwise crowds out everything else.
+    A candidate must clear `min_confidence` and carry odds of at least 1.05.
+    The per-market publication floor is recorded separately: the broad match
+    board may retain a lower-confidence opinion as a labelled Lean, while
+    Daily/Builder canonical selection still rejects it before optimization.
 
     The model probability is passed through the empirical calibrator before
     anything else looks at it, so the confidence threshold, the estimated
@@ -405,11 +406,7 @@ def build_picks(
         if market_floor_overrides and market in market_floor_overrides:
             market_floor = market_floor_overrides[market]
 
-        if prob < max(market_floor, min_confidence):
-            continue
-        # Double chance only when it is genuinely safe — otherwise it wins
-        # every selection on price alone and adds no information.
-        if MARKET_GROUP[market] == "double_chance" and prob < 0.78:
+        if prob < min_confidence:
             continue
         # home_or_away is "no draw" — real, but almost never offered, and the
         # label reads as a double chance it is not. over_3_5 sits well below
@@ -518,6 +515,8 @@ def build_picks(
                 else None,
                 "calibration_group": calibration_group,
                 "calibration_sample": calibration_sample,
+                "market_publication_floor": market_floor,
+                "market_floor_eligible": prob >= market_floor,
                 "calibration_evidence": {
                     key: calibration_cell.get(key)
                     for key in ("n", "promised", "actual")
@@ -651,6 +650,8 @@ def to_game(pick: dict) -> dict:
         "calibration_group": pick.get("calibration_group"),
         "calibration_sample": pick.get("calibration_sample", 0),
         "safe_tier_eligible": pick.get("safe_tier_eligible", False),
+        "market_publication_floor": pick.get("market_publication_floor"),
+        "market_floor_eligible": pick.get("market_floor_eligible", True),
         "trust": pick.get("trust"),
         "evidence_adjusted_probability": pick.get("evidence_adjusted_probability"),
         "selection_probability": pick.get("selection_probability"),
@@ -699,6 +700,8 @@ def to_game(pick: dict) -> dict:
         "ranking_policy_version": pick.get("ranking_policy_version"),
         "selector_version": pick.get("selector_version"),
         "market_policy_version": pick.get("market_policy_version"),
+        "quality_classification": pick.get("quality_classification"),
+        "premium_eligible": pick.get("premium_eligible"),
         "fixture_alternatives": pick.get("fixture_alternatives", []),
         "rejected_fixture_alternatives": pick.get("rejected_fixture_alternatives", []),
         "expected_goals": eg["total"],

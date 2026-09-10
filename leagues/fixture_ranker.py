@@ -157,10 +157,13 @@ def _remove_dominated(eligible: list[dict]) -> tuple[list[dict], list[dict]]:
     return survivors, rejected
 
 
-def _public_eligible(pick: dict, *, safe_only: bool) -> tuple[bool, str | None]:
+def _public_eligible(pick: dict, *, safe_only: bool,
+                     include_subfloor: bool) -> tuple[bool, str | None]:
     state = pick["market_trust_state"]
     if state in {"RESTRICTED", "DISABLED"}:
         return False, f"MARKET_{state}"
+    if not include_subfloor and not pick.get("market_floor_eligible", True):
+        return False, "BELOW_MARKET_PUBLICATION_FLOOR"
     if safe_only and state != "TRUSTED":
         return False, "SAFE_TIER_REQUIRES_TRUSTED"
     return True, None
@@ -168,7 +171,7 @@ def _public_eligible(pick: dict, *, safe_only: bool) -> tuple[bool, str | None]:
 
 def canonical_fixture_recommendations(
     picks: list[dict], *, safe_only: bool = False,
-    include_all_eligible: bool = False,
+    include_all_eligible: bool = False, include_subfloor: bool = False,
 ) -> list[dict]:
     """Model-rank everything, then recompute public rank among eligible markets."""
     if os.getenv("FIXTURE_RANKED_SELECTOR", "1").lower() in {"0", "false", "off"}:
@@ -215,7 +218,10 @@ def canonical_fixture_recommendations(
         eligible = []
         rejected = []
         for pick in modeled:
-            ok, reason = _public_eligible(pick, safe_only=safe_only)
+            ok, reason = _public_eligible(
+                pick, safe_only=safe_only,
+                include_subfloor=include_subfloor,
+            )
             if ok:
                 eligible.append(pick)
             else:

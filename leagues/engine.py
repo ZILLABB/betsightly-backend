@@ -38,6 +38,14 @@ def _parse_kickoff(value: str) -> datetime | None:
         return None
 
 
+def kickoff_wat_date(value: str | None) -> str | None:
+    """Audience-facing fixture day in Nigeria (UTC+1, no DST)."""
+    parsed = _parse_kickoff(str(value or ""))
+    if parsed is None:
+        return None
+    return (parsed + timedelta(hours=1)).date().isoformat()
+
+
 def _filter_cached(entry: dict, days_ahead: int,
                    now: datetime) -> tuple[list[dict], list[dict]]:
     end = now + timedelta(days=days_ahead)
@@ -255,7 +263,8 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
 
 
 def picks_for_date(date_str: str, all_picks: list[dict] | None = None) -> list[dict]:
-    """Picks whose fixture kicks off on `date_str` (UTC, YYYY-MM-DD)."""
+    """Picks whose fixture kicks off on the WAT calendar `date_str`."""
     if all_picks is None:
         all_picks, _ = run_pipeline()
-    return [p for p in all_picks if p["_fixture"]["commence_time"][:10] == date_str]
+    return [p for p in all_picks
+            if kickoff_wat_date(p["_fixture"].get("commence_time")) == date_str]

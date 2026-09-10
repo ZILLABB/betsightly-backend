@@ -515,6 +515,62 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     return response
 
 
+@router.get("/recommendations")
+async def get_fixture_recommendations(date: str | None = None,
+                                      days_ahead: int = 3):
+    """One ranked football opinion per analysed fixture on a WAT date."""
+    try:
+        from leagues.engine import prepared_board_status, run_pipeline
+        from leagues.recommendation_board import build_recommendation_board
+
+        horizon = max(1, min(7, days_ahead))
+        picks, fixtures = run_pipeline(days_ahead=horizon)
+        result = build_recommendation_board(picks, fixtures, date=date)
+        result["board"] = prepared_board_status(horizon)
+        return result
+    except Exception as e:
+        logger.error("Fixture recommendation board failed: %s", e,
+                     exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.get("/recommendations/diagnostics",
+            dependencies=[Depends(require_api_key)])
+async def recommendation_diagnostics(date: str | None = None):
+    """Internal board and Daily portfolio explanation without raw model data."""
+    try:
+        from leagues.daily_feed import build_daily_accumulators
+        from leagues.engine import run_pipeline
+        from leagues.recommendation_board import build_recommendation_board
+
+        picks, fixtures = run_pipeline(days_ahead=4)
+        board = build_recommendation_board(picks, fixtures, date=date)
+        daily = build_daily_accumulators()
+        accumulators = (daily or {}).get("accumulators") or {}
+        tiers = {}
+        for name in ("banker", "2_odds", "5_odds", "10_odds", "rollover"):
+            tier = accumulators.get(name) or {}
+            tiers[name] = {
+                "selected": bool(tier.get("selected")),
+                "result_status": tier.get("result_status"),
+                "achieved_odds": tier.get("total_odds"),
+                "legs": len(tier.get("games") or []),
+                "joint_probability": tier.get("hit_probability"),
+                "reason": tier.get("reason"),
+            }
+        return {
+            "status": "success",
+            "date": board["date"],
+            "board_summary": board["summary"],
+            "market_distribution": board["market_distribution"],
+            "daily_tiers": tiers,
+            "portfolio": accumulators.get("_portfolio") or {},
+        }
+    except Exception as e:
+        logger.error("Recommendation diagnostics failed: %s", e,
+                     exc_info=True)
+        raise HTTPException(500, str(e))
+
 @router.post("/slip-builder/{run_id}/revise")
 async def slip_builder_revise(run_id: str, request: BuilderRevisionRequest):
     """Apply one intent-only edit to the latest immutable Builder revision."""
