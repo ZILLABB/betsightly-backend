@@ -179,7 +179,55 @@ def test_partial_provider_failure_never_masquerades_as_complete(monkeypatch, tmp
     attempt["failed"] = False
     espn_source.get_fixtures(days_ahead=7, now=now)
 
-    assert len(calls) == 4
+    # The failed league is retried twice on the first degraded fetch; the
+    # subsequent complete refresh requests both leagues once.
+    assert len(calls) == 6
+    assert espn_source.cache_metadata()["complete"] is True
+
+
+def test_provider_retries_only_failed_leagues_and_deduplicates(monkeypatch, tmp_path):
+    now = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(espn_source, "CACHE_PATH", tmp_path / "fixtures.json")
+    monkeypatch.setattr(espn_source, "ESPN_CLUB_LEAGUES", {"ok": "OK", "retry": "Retry"})
+    calls = []
+
+    def fetch(slug, date_range):
+        calls.append(slug)
+        succeeded = slug == "ok" or calls.count("retry") >= 2
+        espn_source._FETCH_HEALTH[slug] = {
+            "request_succeeded": succeeded,
+            "provider_active": succeeded,
+            "error": None if succeeded else "timeout",
+        }
+        return [_fixture(now, 6, "same")] if succeeded else []
+
+    monkeypatch.setattr(espn_source, "_fetch_league", fetch)
+    fixtures = espn_source.get_fixtures(days_ahead=7, now=now)
+    metadata = espn_source.cache_metadata()
+    assert calls == ["ok", "retry", "retry"]
+    assert len(fixtures) == 1
+    assert metadata["complete"] is True
+    assert metadata["successful_league_count"] == 2
+    assert metadata["requested_league_count"] == 2
+    assert metadata["failed_league_count"] == 0
+
+
+def test_valid_empty_league_is_success_and_is_not_retried(monkeypatch, tmp_path):
+    now = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(espn_source, "CACHE_PATH", tmp_path / "fixtures.json")
+    monkeypatch.setattr(espn_source, "ESPN_CLUB_LEAGUES", {"empty": "Empty"})
+    calls = []
+
+    def fetch(slug, date_range):
+        calls.append(slug)
+        espn_source._FETCH_HEALTH[slug] = {
+            "request_succeeded": True, "provider_active": True, "error": None,
+        }
+        return []
+
+    monkeypatch.setattr(espn_source, "_fetch_league", fetch)
+    assert espn_source.get_fixtures(days_ahead=7, now=now) == []
+    assert calls == ["empty"]
     assert espn_source.cache_metadata()["complete"] is True
 
 
@@ -189,7 +237,12 @@ def test_partial_evaluated_board_is_ready_but_explicitly_degraded(monkeypatch):
     fixture = _fixture(now, 2, "partial")
     engine._store_cache_entry(
         7, [{"match_id": "partial"}], [fixture], time.time(), now,
-        {"complete": False, "failed_leagues": ["temporarily.down"]},
+        {
+            "complete": False,
+            "successful_leagues": ["available"],
+            "leagues_requested": ["available", "temporarily.down"],
+            "failed_leagues": ["temporarily.down"],
+        },
     )
 
     status = engine.prepared_board_status(7)
@@ -198,6 +251,10 @@ def test_partial_evaluated_board_is_ready_but_explicitly_degraded(monkeypatch):
     assert status["ready"] is True
     assert status["complete"] is False
     assert status["degraded"] is True
+    assert status["fixture_count"] == 1
+    assert status["successful_league_count"] == 1
+    assert status["requested_league_count"] == 2
+    assert status["failed_league_count"] == 1
     assert [pick["match_id"] for pick in picks] == ["partial"]
     assert [item["match_id"] for item in fixtures] == ["partial"]
 

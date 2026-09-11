@@ -344,6 +344,17 @@ def _start_builder_revision(target: float, horizon: str, result: dict) -> dict:
             "ready": bool(state.get("ready")),
             "degraded": bool(state.get("degraded")),
             "complete": bool(state.get("complete")),
+            "fixture_count": int(state.get("fixture_count") or 0),
+            "generated_at": state.get("generated_at"),
+            "successful_league_count": int(
+                state.get("successful_league_count") or 0
+            ),
+            "requested_league_count": int(
+                state.get("requested_league_count") or 0
+            ),
+            "failed_league_count": int(
+                state.get("failed_league_count") or 0
+            ),
         }}
     except Exception:
         result = dict(result)

@@ -106,6 +106,18 @@ def prepared_board_status(days_ahead: int = 7) -> dict:
         "ready": bool(entry.get("fixtures")),
         "complete": bool(provider.get("complete", True)),
         "degraded": not bool(provider.get("complete", True)),
+        "successful_league_count": int(
+            provider.get("successful_league_count")
+            or len(provider.get("successful_leagues") or [])
+        ),
+        "requested_league_count": int(
+            provider.get("requested_league_count")
+            or len(provider.get("leagues_requested") or [])
+        ),
+        "failed_league_count": int(
+            provider.get("failed_league_count")
+            or len(provider.get("failed_leagues") or [])
+        ),
         "age_seconds": round(time.time() - entry["ts"], 1),
     }
 

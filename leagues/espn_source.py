@@ -337,9 +337,37 @@ def get_fixtures(days_ahead: int = 3, force: bool = False,
     for slug in ESPN_CLUB_LEAGUES:
         _FETCH_HEALTH.pop(slug, None)
     fixtures: list[dict] = []
-    with ThreadPoolExecutor(max_workers=16) as pool:
-        for chunk in pool.map(lambda s: _fetch_league(s, date_range), ESPN_CLUB_LEAGUES):
+    pending = list(ESPN_CLUB_LEAGUES)
+    for retry_round in range(3):
+        if not pending:
+            break
+        if retry_round:
+            time.sleep(.15 * retry_round)
+        attempted = list(pending)
+        with ThreadPoolExecutor(max_workers=min(16, len(attempted))) as pool:
+            chunks = list(pool.map(
+                lambda slug: _fetch_league(slug, date_range), attempted
+            ))
+        for chunk in chunks:
             fixtures.extend(chunk)
+        # `_fetch_league` marks a valid empty scoreboard successful, so only
+        # transport/provider failures enter the next bounded retry round.
+        pending = [
+            slug for slug in attempted
+            if not (_FETCH_HEALTH.get(slug) or {}).get("request_succeeded")
+        ]
+
+    # Provider registries occasionally overlap competitions. Preserve the
+    # first normalized fixture and never let retries or overlap duplicate it.
+    unique = {}
+    for fixture in fixtures:
+        key = (
+            str((fixture.get("home") or {}).get("name") or "").casefold(),
+            str((fixture.get("away") or {}).get("name") or "").casefold(),
+            str(fixture.get("commence_time") or ""),
+        )
+        unique.setdefault(key, fixture)
+    fixtures = list(unique.values())
 
     # Drop fixtures that already kicked off
     fixtures = _filter_window(fixtures, now, requested_end)
@@ -364,6 +392,9 @@ def get_fixtures(days_ahead: int = 3, force: bool = False,
         "failed_leagues": failed,
         "fixture_count": len(fixtures),
         "complete": not failed,
+        "successful_league_count": len(successful),
+        "requested_league_count": len(ESPN_CLUB_LEAGUES),
+        "failed_league_count": len(failed),
         "registry_version": _registry_version(),
         "cache_hit": False,
         "returned_fixture_count": len(fixtures),
