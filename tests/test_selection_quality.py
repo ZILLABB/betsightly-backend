@@ -1,7 +1,11 @@
 import pytest
 
 from leagues.selection import select_accumulator
-from leagues.selection_quality import risk_adjusted_return, selection_probability
+from leagues.selection_quality import (
+    price_quality,
+    risk_adjusted_return,
+    selection_probability,
+)
 
 
 def _pick(match_id="one", confidence=.80, odds=1.30, **changes):
@@ -68,6 +72,31 @@ def test_risk_adjusted_return_uses_conservative_probability():
     assert risk_adjusted_return(pick) == pytest.approx(
         selection_probability(pick) * 1.4
     )
+
+
+def test_price_quality_uses_conservative_probability_and_marks_negative_price():
+    pick = _pick(
+        confidence=.85, odds=1.32,
+        evidence_adjusted_probability=.73,
+        lower_reliability_bound=.69, evidence_strength=.5,
+    )
+    quality = price_quality(pick)
+    assert quality["selection_probability"] < pick["confidence"]
+    assert quality["selection_probability"] < quality["raw_break_even_probability"]
+    assert quality["price_quality_reason_codes"] == ["PRICE_NEGATIVE"]
+
+
+def test_dnb_price_quality_is_push_aware():
+    pick = _pick(
+        market="dnb_home", confidence=.75, odds=1.23,
+        _model={"probabilities": {"draw": .25}},
+    )
+    quality = price_quality(pick)
+    assert quality["raw_break_even_probability"] is None
+    assert quality["push_aware_expected_return"] == pytest.approx(
+        .75 * .75 * 1.23 + .25
+    )
+    assert "DNB_PUSH_AWARE" in quality["price_quality_reason_codes"]
 
 
 def test_accumulator_prefers_stronger_conservative_leg_over_hot_raw_confidence():

@@ -91,8 +91,54 @@ def risk_adjusted_return(pick: dict) -> float:
     return round(probability * odds, 6)
 
 
-def attach_selection_quality(pick: dict) -> dict:
-    pick["selection_probability"] = selection_probability(pick)
-    pick["risk_adjusted_return"] = risk_adjusted_return(pick)
-    return pick
+def price_quality(pick: dict) -> dict:
+    """Return stable, diagnostic-only price quality for one Builder leg.
 
+    The production admission threshold remains evidence/trust based until the
+    decision archive contains enough settled observations to validate an EV
+    cutoff.  This still makes contradictory pricing visible immediately.
+    """
+    probability = selection_probability(pick)
+    odds = _number(pick.get("odds"))
+    if odds is None or odds <= 1.0 or not pick.get("odds_are_real"):
+        return {
+            "selection_probability": probability,
+            "sportybet_odds": odds,
+            "raw_break_even_probability": None,
+            "price_edge_probability": None,
+            "risk_adjusted_return": risk_adjusted_return(pick),
+            "price_quality_reason_codes": ["INSUFFICIENT_PRICE_DATA"],
+        }
+    rar = risk_adjusted_return(pick)
+    if pick.get("market") in {"dnb_home", "dnb_away"}:
+        return {
+            "selection_probability": probability,
+            "sportybet_odds": odds,
+            "raw_break_even_probability": None,
+            "price_edge_probability": None,
+            "risk_adjusted_return": rar,
+            "push_aware_expected_return": rar,
+            "price_quality_reason_codes": [
+                "DNB_PUSH_AWARE",
+                "PRICE_POSITIVE" if rar > 1.005 else
+                "PRICE_NEGATIVE" if rar < .995 else "PRICE_NEUTRAL",
+            ],
+        }
+    break_even = 1.0 / odds
+    edge = probability - break_even
+    return {
+        "selection_probability": probability,
+        "sportybet_odds": odds,
+        "raw_break_even_probability": round(break_even, 6),
+        "price_edge_probability": round(edge, 6),
+        "risk_adjusted_return": rar,
+        "price_quality_reason_codes": [
+            "PRICE_POSITIVE" if edge > .005 else
+            "PRICE_NEGATIVE" if edge < -.005 else "PRICE_NEUTRAL"
+        ],
+    }
+
+
+def attach_selection_quality(pick: dict) -> dict:
+    pick.update(price_quality(pick))
+    return pick

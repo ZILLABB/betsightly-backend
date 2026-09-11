@@ -140,18 +140,39 @@ def _remove_dominated(eligible: list[dict]) -> tuple[list[dict], list[dict]]:
                 or other["risk_adjusted_return"] > candidate["risk_adjusted_return"]
                 or other["quality_score"] > candidate["quality_score"]
             )
-            if all(facts) and strictly_better:
+            price_dominates = (
+                other["risk_adjusted_return"] >= .995
+                and candidate["risk_adjusted_return"] < .995
+                and other["risk_adjusted_return"]
+                >= candidate["risk_adjusted_return"] + .02
+                and other["quality_score"] >= candidate["quality_score"]
+                and other["selection_probability"]
+                >= candidate["selection_probability"] - .05
+                and trust_order.get(other["market_trust_state"], 0)
+                >= trust_order.get(candidate["market_trust_state"], 0)
+            )
+            if (all(facts) and strictly_better) or price_dominates:
                 dominator = other
                 break
         if dominator is None:
+            candidate["selection_reason_codes"] = list(
+                candidate.get("selection_reason_codes") or []
+            ) + ["CANONICAL_MARKET_SELECTED"]
             survivors.append(candidate)
         else:
             candidate["dominated_by_market"] = dominator.get("market")
+            if dominator["selection_probability"] > candidate["selection_probability"]:
+                dominance_reason = "DOMINATED_BY_SAFER_MARKET"
+            elif dominator["risk_adjusted_return"] > candidate["risk_adjusted_return"]:
+                dominance_reason = "DOMINATED_BY_HIGHER_RAR"
+            else:
+                dominance_reason = "DOMINATED_BY_STRONGER_EVIDENCE"
             rejected.append({
                 "market": candidate.get("market"),
                 "model_rank": candidate["model_rank"],
                 "quality_score": candidate["quality_score"],
                 "reason": "DOMINATED_FIXTURE_EXPRESSION",
+                "reason_code": dominance_reason,
                 "dominated_by": dominator.get("market"),
             })
     return survivors, rejected

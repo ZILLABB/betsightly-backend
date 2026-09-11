@@ -97,6 +97,16 @@ def test_dominated_riskier_fixture_expression_is_removed_structurally():
     )
 
 
+def test_price_negative_team_score_is_dominated_by_supported_fixture_market():
+    team_score = _pick("home_over_0_5", .76, 1.26, home_xg=1.5)
+    team_score["trust"]["lower_reliability_bound"] = .75
+    safer = _pick("home_or_draw", .73, 1.42)
+    ranked = canonical_fixture_recommendations([team_score, safer])
+    assert [pick["market"] for pick in ranked] == ["home_or_draw"]
+    rejected = ranked[0]["rejected_fixture_alternatives"]
+    assert rejected[0]["reason_code"] == "DOMINATED_BY_HIGHER_RAR"
+
+
 def test_feature_flag_preserves_old_selector(monkeypatch):
     original = [_pick("under_2_5", .90, 1.3)]
     monkeypatch.setenv("FIXTURE_RANKED_SELECTOR", "0")
