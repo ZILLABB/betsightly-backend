@@ -172,6 +172,21 @@ def create_initial_run(target: float, horizon: str, result: dict) -> dict:
             detail={
                 "result_status": result.get("result_status"),
                 "binding_constraints": result.get("binding_constraints"),
+                "selection_diagnostics": result.get("selection_diagnostics"),
+                "constraint_counterfactuals": result.get(
+                    "constraint_counterfactuals"
+                ),
+                "price_quality_diagnostics": [
+                    {
+                        key: game.get(key) for key in (
+                            "selection_id", "selection_probability",
+                            "sportybet_odds", "raw_break_even_probability",
+                            "price_edge_probability", "risk_adjusted_return",
+                            "price_quality_reason_codes",
+                        )
+                    }
+                    for game in result.get("games", result.get("picks", []))
+                ],
                 "booking_validation": (result.get("booking") or {}).get(
                     "readback_validation"),
                 "after_fingerprint": fingerprint,
@@ -316,6 +331,10 @@ def persist_revision(
                 "revision_status": result.get("revision_status"),
                 "action_error": result.get("action_error"),
                 "binding_constraints": result.get("binding_constraints"),
+                "selection_diagnostics": result.get("selection_diagnostics"),
+                "constraint_counterfactuals": result.get(
+                    "constraint_counterfactuals"
+                ),
                 "booking_validation": (result.get("booking") or {}).get(
                     "readback_validation"),
             },

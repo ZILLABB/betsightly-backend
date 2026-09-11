@@ -6,7 +6,12 @@ from leagues import slip_builder
 from leagues.api import _cached_slip_is_placeable
 from leagues.daily_feed import _trusted_rollover_picks
 from leagues.selection import select_accumulator
-from leagues.slip_builder import _aggregate_credibility, _horizon_end, build_slip
+from leagues.slip_builder import (
+    _aggregate_credibility,
+    _constraint_counterfactuals,
+    _horizon_end,
+    build_slip,
+)
 
 
 def _pick(match_id="m1", odds=2.0, confidence=0.60, trusted=True,
@@ -127,6 +132,46 @@ def test_builder_caps_actual_home_and_away_team_goal_picks_together(monkeypatch)
         if pick["market_group"] in {"team_goals_home", "team_goals_away"}
     ]
     assert len(selected_team_goals) <= 2
+
+
+def test_counterfactual_primary_constraint_comes_from_effect_not_saturation(monkeypatch):
+    calls = []
+
+    def solve(candidates, target, max_legs, market_cap, team_cap,
+              under_cap=None, enforce_team_diversity=True,
+              required_selection_ids=None):
+        calls.append((id(candidates), max_legs, market_cap, team_cap,
+                      enforce_team_diversity))
+        odds = 80.0
+        if max_legs > 16:
+            odds = 210.0
+        return odds, .01, candidates[:1], "OPTIMAL"
+
+    monkeypatch.setattr(slip_builder, "_verified_optimize", solve)
+    pick = _pick(odds=2, confidence=.8)
+    pick.update(selection_probability=.8, risk_adjusted_return=1.6,
+                trust={"trust_grade": "A"})
+    result = _constraint_counterfactuals([pick], 200, 16, 6, 2, 2)
+    assert result["primary_binding_constraint"] == "MAX_LEGS_PLUS_1"
+    assert result["scenarios"]["team_to_score_plus_1"]["best_reachable"] == 80
+    assert len({call[0] for call in calls}) == 1
+
+
+def test_counterfactual_marks_mathematical_target_as_quality_rejected(monkeypatch):
+    def solve(candidates, target, max_legs, market_cap, team_cap,
+              under_cap=None, enforce_team_diversity=True,
+              required_selection_ids=None):
+        return (210.0 if team_cap > 2 else 100.0), .0001, candidates, "OPTIMAL"
+
+    monkeypatch.setattr(slip_builder, "_verified_optimize", solve)
+    pick = _pick(odds=210, confidence=.001)
+    pick.update(selection_probability=.001, risk_adjusted_return=.21,
+                trust={"trust_grade": "A"})
+    result = _constraint_counterfactuals([pick], 200, 16, 6, 2, 2)
+    relaxed = result["scenarios"]["team_to_score_plus_1"]
+    assert relaxed["target_reached"] is True
+    assert relaxed["passes_ev_policy"] is False
+    assert relaxed["production_quality_target_reached"] is False
 
 
 def test_week_builder_does_not_repeat_a_team_across_fixtures(monkeypatch):

@@ -122,7 +122,7 @@ def test_published_slips_migration_and_new_rows_include_policy_version(monkeypat
     assert row.policy_version == picks_db.PUBLISHED_POLICY_VERSION
     # Include both rows even when this suite runs after UTC midnight on the
     # West Coast (the repository's test dates straddle that boundary).
-    history = picks_db.get_history(limit_days=3)
+    history = picks_db.get_history(limit_days=4)
     assert history[0]["policy_version"] == "selection-policy-v1.1"
     assert history[1]["policy_version"] is None
 

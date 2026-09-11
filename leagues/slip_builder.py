@@ -432,6 +432,7 @@ def _best_per_fixture_group(pool: list) -> list:
 def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
                        market_cap: int, team_to_score_cap: int,
                        under_cap: int | None = None,
+                       enforce_team_diversity: bool = True,
                        required_selection_ids: set[str] | None = None,
                        ) -> tuple[float, float, list[dict], str]:
     """Solve the Builder's binary selection problem with HiGHS MILP.
@@ -489,8 +490,9 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
     # A seven-day board can contain the same club more than once. Treating
     # those legs as independent doubles exposure to injuries, rotation and
     # team-specific model error, so only one fixture per team may enter.
-    for indices in teams.values():
-        limited(indices, 1)
+    if enforce_team_diversity:
+        for indices in teams.values():
+            limited(indices, 1)
     limited((i for i, p in enumerate(valid)
              if exposure_group(p.get("market_group")) == "team_to_score"),
             team_to_score_cap)
@@ -542,6 +544,102 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
     return odds, joint, selected, status
 
 
+def _solution_quality(odds: float, joint: float, legs: list[dict],
+                      target: float) -> dict:
+    """Summarize one pure optimizer result without booking or persistence."""
+    from leagues.selection import exposure_group
+
+    payout = _positive_payout_distribution(legs)
+    expected = sum(value * probability for value, probability in payout.items())
+    probabilities = [float(p.get("selection_probability") or 0) for p in legs]
+    returns = [float(p.get("risk_adjusted_return") or 0) for p in legs]
+    groups = collections.Counter(str(p.get("market_group") or "other") for p in legs)
+    teams = {
+        str(((p.get("_fixture") or {}).get(side) or {}).get("name") or "")
+        .strip().casefold()
+        for p in legs for side in ("home", "away")
+    } - {""}
+    target_hit = sum(probability for value, probability in payout.items()
+                     if value >= target)
+    return {
+        "best_reachable": round(odds, 2),
+        "achieved_odds": round(odds, 2),
+        "leg_count": len(legs),
+        "joint_hit_probability": round(joint, 6),
+        "target_hit_probability": round(target_hit, 6),
+        "expected_return": round(expected, 6),
+        "conservative_expected_return": round(expected, 6),
+        "average_selection_probability": round(sum(probabilities) / len(probabilities), 6) if probabilities else 0,
+        "minimum_selection_probability": round(min(probabilities), 6) if probabilities else 0,
+        "average_risk_adjusted_return": round(sum(returns) / len(returns), 6) if returns else 0,
+        "minimum_risk_adjusted_return": round(min(returns), 6) if returns else 0,
+        "lowest_trust_grade": max((str((p.get("trust") or {}).get("trust_grade") or "?") for p in legs), default="?"),
+        "team_to_score_count": sum(
+            exposure_group(p.get("market_group")) == "team_to_score" for p in legs
+        ),
+        "market_group_distribution": dict(groups),
+        "unique_fixtures": len({str(p.get("match_id")) for p in legs}),
+        "unique_teams": len(teams),
+        "target_reached": odds >= target,
+        "passes_ev_policy": expected >= MIN_BUILDER_EXPECTED_RETURN,
+        "production_quality_target_reached": (
+            odds >= target and expected >= MIN_BUILDER_EXPECTED_RETURN
+        ),
+    }
+
+
+def _constraint_counterfactuals(candidates: list[dict], target: float,
+                                max_legs: int, market_cap: int,
+                                team_to_score_cap: int,
+                                under_cap: int | None) -> dict:
+    """Run a small fixed set of diagnostic-only solves on one candidate board."""
+    scenarios = {
+        "baseline": {},
+        "team_to_score_plus_1": {"team_to_score_cap": team_to_score_cap + 1},
+        "team_to_score_plus_2": {"team_to_score_cap": team_to_score_cap + 2},
+        "market_cap_plus_1": {"market_cap": market_cap + 1},
+        "max_legs_plus_1": {"max_legs": max_legs + 1},
+        "max_legs_plus_2": {"max_legs": max_legs + 2},
+        "same_team_diversity_relaxed": {"enforce_team_diversity": False},
+    }
+    outcomes = {}
+    for name, overrides in scenarios.items():
+        configured = {
+            "max_legs": overrides.get("max_legs", max_legs),
+            "market_cap": overrides.get("market_cap", market_cap),
+            "team_to_score_cap": overrides.get(
+                "team_to_score_cap", team_to_score_cap
+            ),
+            "enforce_team_diversity": overrides.get(
+                "enforce_team_diversity", True
+            ),
+        }
+        odds, joint, legs, status = _verified_optimize(
+            candidates, target, configured["max_legs"],
+            configured["market_cap"], configured["team_to_score_cap"],
+            under_cap=under_cap,
+            enforce_team_diversity=configured["enforce_team_diversity"],
+        )
+        outcomes[name] = {
+            **configured,
+            "optimization_status": status,
+            **_solution_quality(odds, joint, legs, target),
+        }
+    baseline = outcomes["baseline"]["best_reachable"]
+    effects = sorted(
+        ((name, result["best_reachable"] - baseline)
+         for name, result in outcomes.items() if name != "baseline"),
+        key=lambda item: item[1], reverse=True,
+    )
+    causal = [name for name, gain in effects if gain > max(.01, baseline * .005)]
+    primary = causal[0].upper() if causal else None
+    return {
+        "scenarios": outcomes,
+        "primary_binding_constraint": primary,
+        "secondary_binding_constraints": [name.upper() for name in causal[1:]],
+    }
+
+
 def approved_builder_candidates(
     pool: list[dict], *, require_bookable: bool = True,
 ) -> tuple[list[dict], collections.Counter]:
@@ -564,6 +662,9 @@ def approved_builder_candidates(
             "evidence_adjusted_probability"
         ]
         attach_selection_quality(pick)
+        pick["selection_reason_codes"] = list(
+            pick.get("selection_reason_codes") or []
+        ) + list(pick.get("price_quality_reason_codes") or [])
         if (pick.get("market") in DNB_MARKETS
                 and _leg_settlement_probabilities(pick) is None):
             rejections.update(["dnb_missing_draw_probability"])
@@ -823,6 +924,7 @@ def build_slip(
     try:
         odds, joint, legs, optimization_status = _verified_optimize(
             candidates, target, max_legs, cap, team_to_score_cap,
+            under_cap=UNDER_CAP,
             required_selection_ids=required_selection_ids,
         )
     except Exception as exc:
@@ -880,7 +982,7 @@ def build_slip(
     )
     diagnostics["after_exposure"] = len(legs)
     diagnostics["selected_market_distribution"] = _market_distribution(legs)
-    diagnostics["binding_constraints"] = [
+    diagnostics["saturated_constraints"] = [
         *[f"market_group:{group}" for group, count in selected_groups.items()
           if count >= cap],
         *(["team_to_score"] if selected_exposures["team_to_score"] >= team_to_score_cap else []),
@@ -903,25 +1005,48 @@ def build_slip(
         }
         for pick in candidates
     ):
-        diagnostics["binding_constraints"].append(
+        diagnostics["saturated_constraints"].append(
             "same_team_fixture_diversity"
         )
+    diagnostics["binding_constraints"] = list(
+        diagnostics["saturated_constraints"]
+    )
 
     if odds < target:
         # Say which limit bit, because "not available" hides two different
         # answers: the board was thin, or the rules would not allow it.
-        binding = diagnostics["binding_constraints"]
-        if "max_legs" in binding:
-            result_status = "MAX_LEGS_CAPPED"
-        elif "team_to_score" in binding:
-            result_status = "TEAM_TO_SCORE_CAPPED"
-        elif "same_team_fixture_diversity" in binding:
-            result_status = "FIXTURE_DIVERSITY_CAPPED"
-        elif binding:
-            result_status = "EXPOSURE_CAPPED"
-        else:
-            result_status = "QUALITY_CAPPED"
         verified = optimization_status in {"OPTIMAL", "BOUNDED_OPTIMAL"}
+        counterfactuals = None
+        if target >= 50 and verified:
+            started = monotonic_time.perf_counter()
+            counterfactuals = _constraint_counterfactuals(
+                candidates, target, max_legs, cap, team_to_score_cap, UNDER_CAP
+            )
+            counterfactuals["runtime_ms"] = round(
+                (monotonic_time.perf_counter() - started) * 1000
+            )
+            diagnostics["constraint_counterfactuals"] = counterfactuals["scenarios"]
+            diagnostics["primary_binding_constraint"] = counterfactuals[
+                "primary_binding_constraint"
+            ]
+            diagnostics["secondary_binding_constraints"] = counterfactuals[
+                "secondary_binding_constraints"
+            ]
+        primary = (counterfactuals or {}).get("primary_binding_constraint")
+        status_by_primary = {
+            "MAX_LEGS_PLUS_1": "MAX_LEGS_CAPPED",
+            "MAX_LEGS_PLUS_2": "MAX_LEGS_CAPPED",
+            "TEAM_TO_SCORE_PLUS_1": "TEAM_TO_SCORE_CAPPED",
+            "TEAM_TO_SCORE_PLUS_2": "TEAM_TO_SCORE_CAPPED",
+            "MARKET_CAP_PLUS_1": "EXPOSURE_CAPPED",
+            "SAME_TEAM_DIVERSITY_RELAXED": "FIXTURE_DIVERSITY_CAPPED",
+        }
+        result_status = status_by_primary.get(
+            primary,
+            "CURRENT_CONSTRAINTS_CAPPED" if diagnostics["saturated_constraints"]
+            else "QUALITY_CAPPED",
+        )
+        binding = diagnostics["saturated_constraints"]
         description = ("The strongest verified combination" if verified
                        else "The current search found a qualifying combination")
         if result_status in {
@@ -932,6 +1057,12 @@ def build_slip(
                 f"{description} reaches {odds:.2f}x under the current "
                 "diversification limits. Approved selections remain on the "
                 "board; this is an exposure cap, not a quality rejection."
+            )
+        elif result_status == "CURRENT_CONSTRAINTS_CAPPED":
+            capped_reason = (
+                f"{description} reaches {odds:.2f}x. Multiple current safety "
+                "constraints are saturated, but no single constraint was "
+                "proven to be the primary cause."
             )
         elif result_status == "MAX_LEGS_CAPPED":
             capped_reason = (
@@ -963,6 +1094,14 @@ def build_slip(
             "fixture_count": diagnostics.get("fixture_count", 0),
             "market_distribution": diagnostics.get("market_distribution_after_canonical_ranking", {}),
             "binding_constraints": binding,
+            "saturated_constraints": binding,
+            "primary_binding_constraint": primary,
+            "secondary_binding_constraints": (
+                (counterfactuals or {}).get("secondary_binding_constraints", [])
+            ),
+            "constraint_counterfactuals": (
+                (counterfactuals or {}).get("scenarios", {})
+            ),
             "max_legs": max_legs,
             "trust_rejection_reasons": dict(trust_rejections),
             "selection_diagnostics": diagnostics,
