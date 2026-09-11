@@ -656,6 +656,13 @@ def to_game(pick: dict) -> dict:
         "evidence_adjusted_probability": pick.get("evidence_adjusted_probability"),
         "selection_probability": pick.get("selection_probability"),
         "risk_adjusted_return": pick.get("risk_adjusted_return"),
+        "sportybet_odds": pick.get("sportybet_odds"),
+        "raw_break_even_probability": pick.get("raw_break_even_probability"),
+        "price_edge_probability": pick.get("price_edge_probability"),
+        "push_aware_expected_return": pick.get("push_aware_expected_return"),
+        "price_quality_reason_codes": pick.get(
+            "price_quality_reason_codes", []
+        ),
         "lower_reliability_bound": pick.get("lower_reliability_bound") or
         (pick.get("trust") or {}).get("lower_reliability_bound"),
         "evidence_strength": pick.get("evidence_strength") or
