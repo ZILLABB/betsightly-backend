@@ -124,7 +124,7 @@ def _market_cap_for_target(target: float) -> int:
     builds even when additional selections have already passed trust and exact
     bookability. Keep the original cap through 20x, then widen conservatively.
 
-    At 200x the broad-group cap is six of the sixteen allowed legs, so exposure
+    At 200x the broad-group cap is seven of the sixteen allowed legs, so exposure
     is still bounded while a large approved board is not forced into artificial
     scarcity.
     """
@@ -136,7 +136,9 @@ def _market_cap_for_target(target: float) -> int:
         return max(MARKET_CAP, 4)
     if target <= 100:
         return max(MARKET_CAP, 5)
-    return max(MARKET_CAP, 6)
+    if target <= 150:
+        return max(MARKET_CAP, 6)
+    return max(MARKET_CAP, 7)
 
 
 def _team_to_score_cap_for_target(target: float) -> int:

@@ -10,6 +10,7 @@ from leagues.slip_builder import (
     _aggregate_credibility,
     _constraint_counterfactuals,
     _horizon_end,
+    _market_cap_for_target,
     build_slip,
 )
 
@@ -88,6 +89,13 @@ def test_week_horizon_contains_exactly_seven_wat_dates():
     end = _horizon_end(now, "week")
     assert end.date().isoformat() == "2026-09-01"
     assert end.hour == 22 and end.minute == 59
+
+
+@pytest.mark.parametrize(("target", "cap"), [
+    (20, 3), (50, 4), (100, 5), (150, 6), (151, 7), (200, 7),
+])
+def test_builder_market_cap_schedule(target, cap):
+    assert _market_cap_for_target(target) == cap
 
 
 def test_expected_return_matches_this_slips_probability_and_odds():
@@ -172,6 +180,20 @@ def test_counterfactual_marks_mathematical_target_as_quality_rejected(monkeypatc
     assert relaxed["target_reached"] is True
     assert relaxed["passes_ev_policy"] is False
     assert relaxed["production_quality_target_reached"] is False
+
+
+def test_200x_counterfactual_uses_cap_seven_as_baseline(monkeypatch):
+    def solve(candidates, target, max_legs, market_cap, team_cap,
+              under_cap=None, enforce_team_diversity=True,
+              required_selection_ids=None):
+        return 100.0, .01, [], "OPTIMAL"
+
+    monkeypatch.setattr(slip_builder, "_verified_optimize", solve)
+    result = _constraint_counterfactuals(
+        [], 200, 16, _market_cap_for_target(200), 2, 2
+    )
+    assert result["scenarios"]["baseline"]["market_cap"] == 7
+    assert result["scenarios"]["market_cap_plus_1"]["market_cap"] == 8
 
 
 def test_week_builder_does_not_repeat_a_team_across_fixtures(monkeypatch):
@@ -284,7 +306,8 @@ def test_builder_market_cap_scales_for_high_targets():
     assert slip_builder._market_cap_for_target(50) == 4
     assert slip_builder._market_cap_for_target(70) == 5
     assert slip_builder._market_cap_for_target(100) == 5
-    assert slip_builder._market_cap_for_target(200) == 6
+    assert slip_builder._market_cap_for_target(150) == 6
+    assert slip_builder._market_cap_for_target(200) == 7
 
 
 def test_builder_locally_replaces_a_weaker_selected_fixture(
