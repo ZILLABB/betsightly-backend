@@ -24,6 +24,27 @@ from leagues import daily_feed as D
 DAY = "1999-02-02"
 
 
+def test_excluded_fixture_reasons_are_summarized_from_actual_statuses():
+    missing = [
+        {"status": "FIXTURE_NOT_FOUND"},
+        {"status": "FIXTURE_NOT_FOUND"},
+        {"status": "FIXTURE_NOT_FOUND"},
+    ]
+    assert B._excluded_leg_reason(missing) == (
+        "3 selections could not be matched on the current SportyBet board."
+    )
+    mixed = [
+        {"status": "KICKOFF_BUFFER"},
+        {"status": "FIXTURE_NOT_FOUND"},
+        {"status": "MARKET_NOT_FOUND"},
+        {"status": "SELECTION_NOT_FOUND"},
+    ]
+    assert B._excluded_leg_reason(mixed) == (
+        "Some selections are no longer placeable: 1 near kickoff, "
+        "3 unavailable."
+    )
+
+
 @pytest.fixture(autouse=True)
 def clean_bookings():
     def _clear():

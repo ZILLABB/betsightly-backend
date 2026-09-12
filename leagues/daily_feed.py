@@ -748,8 +748,32 @@ def build_bookable_now() -> dict | None:
     board = sportybet.fetch_board()
     _attach_live_bookings(accumulators, board)
 
+    active_tiers = 0
+    for category in accumulators.values():
+        booking = category.get("booking") or {}
+        exact = (
+            booking.get("status") == "active"
+            and booking.get("booking_status") in {"FULL", "REBUILT_FULL"}
+            and booking.get("readback_validation") == "PASSED"
+            and booking.get("share_code")
+        )
+        if exact:
+            active_tiers += 1
+            continue
+        # Available-now is an action surface, not the official record. Never
+        # show a rebuilt tier as usable unless its current code was read back
+        # and exactly matches every displayed selection.
+        category.update(
+            selected=False, games=[], total_odds=0, hit_probability=0,
+            reason=(booking.get("reason") or
+                    "No exact SportyBet-ready slip could be verified."),
+        )
+
     return {
         "status": "success",
+        "available": active_tiers > 0,
+        "reason": (None if active_tiers else
+                   "No future exact-bookable SportyBet slip could be verified."),
         "date": today,
         "generated_at": now.isoformat(),
         "kickoffs_remaining": len({p["match_id"] for p in live}),

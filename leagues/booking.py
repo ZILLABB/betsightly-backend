@@ -26,6 +26,7 @@ already stored, so a page load can never mint a new code — and two readers
 opening the card an hour apart get the same slip.
 """
 
+import collections
 import json
 import itertools
 import logging
@@ -462,6 +463,29 @@ def _mapping_failure_category(unmapped: list) -> str:
     return "FIXTURE_MAPPING_FAILED"
 
 
+def _excluded_leg_reason(unmapped: list) -> str:
+    """Summarize actual mapping failures without leaking provider enums."""
+    counts = collections.Counter(
+        str(item.get("status") or "FIXTURE_MAPPING_FAILED").upper()
+        for item in unmapped
+    )
+    total = len(unmapped)
+    near = counts["KICKOFF_BUFFER"]
+    started = counts["FIXTURE_STARTED"]
+    unavailable = total - near - started
+    if unavailable == total:
+        noun = "selection" if total == 1 else "selections"
+        return f"{total} {noun} could not be matched on the current SportyBet board."
+    details = []
+    if near:
+        details.append(f"{near} near kickoff")
+    if started:
+        details.append(f"{started} already started")
+    if unavailable:
+        details.append(f"{unavailable} unavailable")
+    return "Some selections are no longer placeable: " + ", ".join(details) + "."
+
+
 def _post_share(selections: list) -> dict:
     body = json.dumps({"selections": selections}).encode()
     req = urllib.request.Request(
@@ -637,7 +661,7 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
         return finished({**base, "status": "unavailable", "share_code": None, "legs": 0,
                 "unmapped": unmapped, "priced_at": priced_at,
                 "failure_category": _mapping_failure_category(unmapped),
-                "reason": "no leg could be matched to a SportyBet selection"})
+                "reason": _excluded_leg_reason(unmapped)})
 
     # Partial slips are refused for accumulators. A four-leg code under a
     # five-leg tier is a different bet from the one on the card, and the reader
@@ -653,8 +677,7 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
         return finished({**base, "status": "unavailable", "share_code": None,
                 "legs": len(selections), "unmapped": unmapped, "priced_at": priced_at,
                 "failure_category": _mapping_failure_category(unmapped),
-                "reason": (f"{len(unmapped)} of {len(games)} legs could not be "
-                           f"matched; a partial slip is not the published tier")})
+                "reason": _excluded_leg_reason(unmapped)})
 
     stage_started = time.perf_counter()
     try:
