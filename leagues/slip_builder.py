@@ -1037,7 +1037,6 @@ def build_slip(
         primary = (counterfactuals or {}).get("primary_binding_constraint")
         status_by_primary = {
             "MAX_LEGS_PLUS_1": "MAX_LEGS_CAPPED",
-            "MAX_LEGS_PLUS_2": "MAX_LEGS_CAPPED",
             "TEAM_TO_SCORE_PLUS_1": "TEAM_TO_SCORE_CAPPED",
             "TEAM_TO_SCORE_PLUS_2": "TEAM_TO_SCORE_CAPPED",
             "MARKET_CAP_PLUS_1": "EXPOSURE_CAPPED",
@@ -1062,9 +1061,8 @@ def build_slip(
             )
         elif result_status == "CURRENT_CONSTRAINTS_CAPPED":
             capped_reason = (
-                f"{description} reaches {odds:.2f}x. Multiple current safety "
-                "constraints are saturated, but no single constraint was "
-                "proven to be the primary cause."
+                f"{target:g}x is not reachable on the current board under "
+                "the current diversification limits."
             )
         elif result_status == "MAX_LEGS_CAPPED":
             capped_reason = (

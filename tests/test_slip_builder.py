@@ -436,6 +436,23 @@ def test_builder_restricted_alternative_never_enters_optimizer(monkeypatch):
     assert built["after_policy"] == 1
 
 
+def test_saturated_leg_ceiling_is_not_called_causal_without_counterfactual_gain(monkeypatch):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    picks = [
+        _pick(f"cap-{i}", 1.35, .80, market_group=f"group-{i}")
+        for i in range(16)
+    ]
+    built = build_slip(200, pool=picks, max_legs=16, market_cap=16)
+    assert not built["ok"]
+    assert "max_legs" in built["saturated_constraints"]
+    assert built["primary_binding_constraint"] is None
+    assert built["result_status"] == "CURRENT_CONSTRAINTS_CAPPED"
+    assert built["reason"] == (
+        "200x is not reachable on the current board under the current "
+        "diversification limits."
+    )
+
+
 def test_tier_selector_cannot_bypass_team_goal_cap_by_switching_sides():
     team_goals = [
         _pick(
