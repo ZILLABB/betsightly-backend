@@ -470,6 +470,12 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             status="board_refreshing", cached=False,
         )
         return response
+    if board.get("stale"):
+        # Keep serving the last safe evaluated board while a single background
+        # refresh replaces it. A provider refresh must not block this request.
+        board["refresh_started"] = start_prepared_board_refresh(
+            days_ahead=7, force=True
+        )
 
     # Coalesce identical work. The model/board/booking functions are blocking,
     # so move them off the event loop while one coroutine owns this key.
@@ -608,11 +614,19 @@ async def slip_builder_revise(run_id: str, request: BuilderRevisionRequest):
     from database import log_pool_exception, log_pool_status
     from leagues import builder_revisions
     from leagues.builder_editor import revise
+    import time as _t
 
     lock = _BUILDER_REVISION_LOCKS.setdefault(run_id, asyncio.Lock())
+    started_at = _t.perf_counter()
+    safe_request_id = request.request_id[:12]
     log_pool_status(
         "builder_revision_start", run_id=run_id[:8],
         revision=request.revision, action=request.action,
+        request_id=safe_request_id,
+    )
+    logger.info(
+        "builder_revision_start run_id=%s request_id=%s revision=%s action=%s",
+        run_id[:8], safe_request_id, request.revision, request.action,
     )
     try:
         async with lock:
@@ -647,9 +661,17 @@ async def slip_builder_revise(run_id: str, request: BuilderRevisionRequest):
         logger.error("Builder revision failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="builder_revision_failed")
     finally:
+        duration_ms = round((_t.perf_counter() - started_at) * 1000)
         log_pool_status(
             "builder_revision_end", run_id=run_id[:8],
             revision=request.revision, action=request.action,
+            request_id=safe_request_id, duration_ms=duration_ms,
+        )
+        logger.info(
+            "builder_revision_end run_id=%s request_id=%s revision=%s "
+            "action=%s duration_ms=%s",
+            run_id[:8], safe_request_id, request.revision, request.action,
+            duration_ms,
         )
 
 

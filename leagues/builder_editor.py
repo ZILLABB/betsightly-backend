@@ -240,6 +240,23 @@ def revise(
             raise ValueError("invalid_best_reachable_target")
         effective_target = requested
 
+    # Locking changes only revision constraints; it does not change a leg or
+    # mint a booking code. Re-running the full live-board/bookmaker pipeline
+    # here made this cheapest edit contend with unrelated Builder generation
+    # and could take minutes. The selected leg was already approved in the
+    # immutable revision being locked. Unlocking is equally local.
+    if action in {"lock_selection", "unlock_selection"}:
+        result = dict(before)
+        result["change_summary"] = _change_summary(before, result, action)
+        return builder_revisions.persist_revision(
+            run_id=run_id, edit_token=edit_token,
+            expected_revision=revision, request_id=request_id, action=action,
+            action_target=action_target, result=result,
+            locked_selection_ids=locked,
+            excluded_fixture_ids=excluded_fixtures,
+            excluded_selection_ids=excluded_selections,
+        )
+
     started = time.perf_counter()
     board, bookable_pool, timings = prepared_bookable_pool(
         state["horizon"], force=False
@@ -280,32 +297,6 @@ def revise(
         action_target["replacement_fixture_id"] = next(
             (str(game.get("match_id")) for game in result.get("games") or []
              if str(game.get("selection_id")) == replacement_id), None)
-        result["timing_ms"] = timings
-        result["change_summary"] = _change_summary(before, result, action)
-        result["board"] = board_state
-        return builder_revisions.persist_revision(
-            run_id=run_id, edit_token=edit_token,
-            expected_revision=revision, request_id=request_id, action=action,
-            action_target=action_target, result=result,
-            locked_selection_ids=locked,
-            excluded_fixture_ids=excluded_fixtures,
-            excluded_selection_ids=excluded_selections,
-        )
-
-    if action in {"lock_selection", "unlock_selection"}:
-        if action == "lock_selection":
-            canonical, _ = approved_builder_candidates(bookable_pool)
-            if current_id not in {_selection_id(pick) for pick in canonical}:
-                return {
-                    **before,
-                    "edit_token": edit_token,
-                    "revision_status": "no_change",
-                    "action_error": (
-                        "This selection can no longer be locked because it is "
-                        "not an approved, bookable option on the current board."
-                    ),
-                }
-        result = dict(before)
         result["timing_ms"] = timings
         result["change_summary"] = _change_summary(before, result, action)
         result["board"] = board_state

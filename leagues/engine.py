@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _CACHE: dict = {"entries": {}}
 _TTL = 3600
+_PREPARED_STALE_TTL = 6 * 3600
 _PIPELINE_LOCK = threading.Lock()
 _PREWARM_LOCK = threading.Lock()
 _PREWARMING = False
@@ -59,9 +60,12 @@ def _filter_cached(entry: dict, days_ahead: int,
 
 
 def _covering_entry(days_ahead: int, now_ts: float,
-                    require_complete: bool = False) -> dict | None:
+                    require_complete: bool = False,
+                    allow_stale: bool = False) -> dict | None:
     valid = [entry for entry in _CACHE["entries"].values()
-             if now_ts - entry["ts"] < _TTL
+             if (now_ts - entry["ts"] < (
+                 _PREPARED_STALE_TTL if allow_stale else _TTL
+             ))
              and entry["metadata"]["requested_days"] >= days_ahead
              and (not require_complete
                   or (entry["metadata"].get("provider") or {}).get(
@@ -97,7 +101,8 @@ def prepared_board_status(days_ahead: int = 7) -> dict:
     cold made every public Builder request return ``board_refreshing`` while
     repeatedly refetching the same failing competitions.
     """
-    entry = _covering_entry(days_ahead, time.time())
+    now = time.time()
+    entry = _covering_entry(days_ahead, now, allow_stale=True)
     if not entry:
         return {"ready": False, "requested_days": days_ahead}
     provider = entry["metadata"].get("provider") or {}
@@ -118,7 +123,9 @@ def prepared_board_status(days_ahead: int = 7) -> dict:
             provider.get("failed_league_count")
             or len(provider.get("failed_leagues") or [])
         ),
-        "age_seconds": round(time.time() - entry["ts"], 1),
+        "age_seconds": round(now - entry["ts"], 1),
+        "stale": bool(now - entry["ts"] >= _TTL),
+        "refreshing": bool(_PREWARMING),
     }
 
 
@@ -131,7 +138,12 @@ def prepared_pipeline(days_ahead: int = 7) -> tuple[list[dict], list[dict]]:
     """
     now = time.time()
     now_dt = datetime.now(timezone.utc)
-    entry = _covering_entry(days_ahead, now, require_complete=False)
+    # Interactive requests may safely keep using the last evaluated board
+    # while its replacement is prepared. Kickoff filtering below removes games
+    # that have since started; selection policy and bookability are re-applied.
+    entry = _covering_entry(
+        days_ahead, now, require_complete=False, allow_stale=True,
+    )
     if not entry:
         return [], []
     return _filter_cached(entry, days_ahead, now_dt)

@@ -259,6 +259,27 @@ def test_partial_evaluated_board_is_ready_but_explicitly_degraded(monkeypatch):
     assert [item["match_id"] for item in fixtures] == ["partial"]
 
 
+def test_interactive_builder_keeps_last_safe_board_during_refresh(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(engine, "_CACHE", {"entries": {}})
+    monkeypatch.setattr(engine, "_PREWARMING", True)
+    fixture = _fixture(now, 2, "stale-safe")
+    engine._store_cache_entry(
+        7, [{"match_id": "stale-safe"}], [fixture], time.time(), now,
+        {"complete": False, "successful_leagues": ["available"]},
+    )
+    engine._CACHE["entries"][7]["ts"] -= engine._TTL + 1
+
+    status = engine.prepared_board_status(7)
+    picks, fixtures = engine.prepared_pipeline(7)
+
+    assert status["ready"] is True
+    assert status["stale"] is True
+    assert status["refreshing"] is True
+    assert [pick["match_id"] for pick in picks] == ["stale-safe"]
+    assert [item["match_id"] for item in fixtures] == ["stale-safe"]
+
+
 def test_cold_builder_click_returns_controlled_refresh_state(monkeypatch):
     from leagues import api, slip_builder
 
@@ -313,3 +334,37 @@ def test_builder_refresh_reuses_ready_board(monkeypatch):
 
     assert result["status"] == "success"
     assert calls == [(20, "week", False)]
+
+
+def test_builder_serves_stale_board_while_starting_background_refresh(monkeypatch):
+    from leagues import api, builder_runs, slip_builder
+
+    async def run_inline(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(
+        engine, "prepared_board_status",
+        lambda days_ahead=7: {
+            "ready": True, "stale": True, "requested_days": days_ahead,
+        },
+    )
+    started = []
+    monkeypatch.setattr(
+        engine, "start_prepared_board_refresh",
+        lambda days_ahead=7, force=True: (
+            started.append((days_ahead, force)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        slip_builder, "generate",
+        lambda target, horizon="week", force=False: {
+            "status": "success", "games": [], "requested_target": target,
+        },
+    )
+    monkeypatch.setattr(builder_runs, "record_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(asyncio, "to_thread", run_inline)
+
+    result = asyncio.run(api.slip_builder_generate(100, horizon="week"))
+
+    assert result["status"] == "success"
+    assert started == [(7, True)]

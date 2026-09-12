@@ -226,6 +226,32 @@ def test_exclusion_and_lock_constraints_persist_across_editor_revisions(
     assert calls[0]["excluded_fixture_ids"] == {"match-b"}
 
 
+def test_lock_and_unlock_are_local_and_do_not_wait_for_live_board(
+        revision_db, monkeypatch):
+    initial = builder_revisions.create_initial_run(10, "week", _result("a"))
+    monkeypatch.setattr(
+        builder_editor, "prepared_bookable_pool",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("lock operations must not rebuild the board")
+        ),
+    )
+
+    locked = builder_editor.revise(
+        run_id=initial["builder_run_id"], edit_token=initial["edit_token"],
+        revision=1, request_id="local-lock-0001", action="lock_selection",
+        selection_id="a", fixture_id="match-a",
+    )
+    unlocked = builder_editor.revise(
+        run_id=initial["builder_run_id"], edit_token=initial["edit_token"],
+        revision=2, request_id="local-lock-0002", action="unlock_selection",
+        selection_id="a", fixture_id="match-a",
+    )
+
+    assert locked["locked_selection_ids"] == ["a"]
+    assert unlocked["locked_selection_ids"] == []
+    assert unlocked["booking"]["share_code"] == "CODE1"
+
+
 def test_safer_market_must_remain_on_fixture_and_improve_survival(monkeypatch):
     current = {
         "selection_id": "current", "match_id": "fixture-1",
