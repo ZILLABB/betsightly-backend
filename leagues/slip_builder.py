@@ -81,6 +81,7 @@ BAND_HIGH = 1.45
 # the optimizer still finds the strongest valid combination before the final
 # gate decides whether BetSightly should recommend it.
 MIN_BUILDER_EXPECTED_RETURN = .40
+MAX_BUILDER_MARKET_CAP = 7
 
 
 # How close two picks must be on cost before the bookmaker's cut decides
@@ -695,7 +696,15 @@ def build_slip(
     """The slip most likely to land at `target`, or an honest refusal."""
     from leagues.selection import MIN_USEFUL_ODDS, UNDER_CAP, exposure_group
 
-    cap = _market_cap_for_target(target) if market_cap is None else market_cap
+    # Normal builds progressively widen diversification on one prepared-board
+    # snapshot. Explicit caps belong to revision/materialization flows and must
+    # remain fixed so an already-approved combination keeps its policy context.
+    progressive_market_caps = (
+        list(range(_market_cap_for_target(MIN_TARGET), MAX_BUILDER_MARKET_CAP + 1))
+        if market_cap is None
+        else [min(int(market_cap), MAX_BUILDER_MARKET_CAP)]
+    )
+    cap = progressive_market_caps[0]
     team_to_score_cap = (
         _team_to_score_cap_for_target(target)
         if team_to_score_cap is None else int(team_to_score_cap)
@@ -778,7 +787,7 @@ def build_slip(
         "market_cap": cap, "team_to_score_cap": team_to_score_cap,
         "under_cap": UNDER_CAP, "team_fixture_cap": 1,
         "max_legs": max_legs,
-        "market_cap_policy": "builder_target_aware_v1",
+        "market_cap_policy": "builder_progressive_v1",
     }
     if not candidates:
         return {
@@ -925,18 +934,75 @@ def build_slip(
             key=lambda attempt: attempt[0],
         )
 
-    # Solve the complete approved pool. The old bounded greedy search remains
-    # only as a resilience fallback if the numerical optimizer is unavailable.
-    try:
-        odds, joint, legs, optimization_status = _verified_optimize(
-            candidates, target, max_legs, cap, team_to_score_cap,
-            under_cap=UNDER_CAP,
-            required_selection_ids=required_selection_ids,
+    # Solve the same approved pool from the most conservative broad-market cap
+    # through the maximum approved envelope. Stop at the first cap that both
+    # reaches the target and passes the existing expected-return policy.
+    market_cap_attempts = []
+    solutions = []
+    first_reachable_cap = None
+    for attempted_cap in progressive_market_caps:
+        cap = attempted_cap
+        try:
+            attempt_odds, attempt_joint, attempt_legs, attempt_status = (
+                _verified_optimize(
+                    candidates, target, max_legs, cap, team_to_score_cap,
+                    under_cap=UNDER_CAP,
+                    required_selection_ids=required_selection_ids,
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "verified Builder optimization unavailable at market cap %s: %s",
+                cap, exc,
+            )
+            attempt_odds, attempt_joint, attempt_legs = _search(candidates)
+            attempt_status = "HEURISTIC"
+        quality = _solution_quality(
+            attempt_odds, attempt_joint, attempt_legs, target
         )
-    except Exception as exc:
-        logger.warning("verified Builder optimization unavailable: %s", exc)
-        odds, joint, legs = _search(candidates)
-        optimization_status = "HEURISTIC"
+        attempt = {
+            "market_cap": cap,
+            "optimization_status": attempt_status,
+            **quality,
+        }
+        market_cap_attempts.append(attempt)
+        solutions.append((
+            attempt_odds, attempt_joint, attempt_legs, attempt_status, cap,
+            quality,
+        ))
+        if quality["production_quality_target_reached"]:
+            first_reachable_cap = cap
+            break
+
+    target_solutions = [
+        solution for solution in solutions
+        if solution[5]["production_quality_target_reached"]
+    ]
+    if target_solutions:
+        chosen = target_solutions[0]
+    else:
+        # Each infeasible verified solve maximizes reachable odds under that
+        # cap. Selecting across attempts is defensive for bounded/heuristic
+        # outcomes; with exact solves the final cap naturally dominates.
+        chosen = max(
+            solutions,
+            key=lambda solution: (
+                solution[5]["passes_ev_policy"], solution[0], solution[1],
+                -len(solution[2]),
+            ),
+        )
+    odds, joint, legs, optimization_status, cap, chosen_quality = chosen
+    diagnostics["market_cap_attempts"] = market_cap_attempts
+    diagnostics["market_cap_used"] = cap
+    diagnostics["first_reachable_cap"] = first_reachable_cap
+    diagnostics["requested_target"] = target
+    diagnostics["target_reached"] = bool(first_reachable_cap is not None)
+    diagnostics["achieved_odds"] = round(odds, 2)
+    diagnostics["best_reachable"] = round(odds, 2)
+    diagnostics["binding_constraint"] = (
+        None if first_reachable_cap is not None else "APPROVED_SAFETY_ENVELOPE"
+    )
+    diagnostics["quality_constraints"]["market_cap"] = cap
     diagnostics["optimization_status"] = optimization_status
 
     # A greedy path can occasionally reserve a scarce market-group slot
@@ -1007,7 +1073,10 @@ def build_slip(
             "team_to_score_cap": team_to_score_cap,
             "under_cap": UNDER_CAP,
             "max_legs": max_legs,
-            "market_cap_policy": "builder_target_aware_v1",
+            "market_cap_policy": "builder_progressive_v1",
+            "market_cap_attempts": [
+                attempt["market_cap"] for attempt in market_cap_attempts
+            ],
         },
     }
     selected_teams = {
@@ -1031,7 +1100,18 @@ def build_slip(
         diagnostics["saturated_constraints"]
     )
 
-    if odds < target:
+    # Calculate the full positive-payout distribution before classifying a
+    # miss: a best-available ticket is publishable only when it passes the same
+    # existing EV floor as a target-reaching ticket.
+    payout_distribution = _positive_payout_distribution(legs)
+    expected_return = sum(
+        payout * probability for payout, probability in payout_distribution.items()
+    )
+    best_available = odds < target and odds >= MIN_TARGET and bool(legs)
+
+    if odds < target and not (
+        best_available and expected_return >= MIN_BUILDER_EXPECTED_RETURN
+    ):
         # Say which limit bit, because "not available" hides two different
         # answers: the board was thin, or the rules would not allow it.
         verified = optimization_status in {"OPTIMAL", "BOUNDED_OPTIMAL"}
@@ -1129,15 +1209,6 @@ def build_slip(
     if odds > target * BAND_HIGH:
         logger.info(f"slip for {target}x overshot to {odds:.1f}x")
 
-    # Calculate the full positive-payout distribution. Normal binary legs
-    # have one positive branch; DNB legs can either win at their quoted odds
-    # or push at 1.00x.
-    payout_distribution = _positive_payout_distribution(legs)
-
-    expected_return = sum(
-        payout * probability for payout, probability in payout_distribution.items()
-    )
-
     if expected_return < MIN_BUILDER_EXPECTED_RETURN:
         return {
             "ok": False,
@@ -1181,9 +1252,26 @@ def build_slip(
 
     return {
         "ok": True,
-        "result_status": "TARGET_REACHED",
+        "result_status": "BEST_AVAILABLE" if best_available else "TARGET_REACHED",
         "optimization_status": optimization_status,
         "target": target,
+        "requested_target": target,
+        "target_reached": not best_available,
+        "best_reachable": round(odds, 2),
+        "achieved_odds": round(odds, 2),
+        "market_cap_used": cap,
+        "market_cap_attempts": market_cap_attempts,
+        "first_reachable_cap": first_reachable_cap,
+        "binding_constraint": diagnostics["binding_constraint"],
+        "materialized_best_reachable": best_available,
+        "original_requested_target": target,
+        "best_reachable_combination": best_reachable_combination,
+        "reason": (
+            f"{target:g}x could not be reached within BetSightly's current "
+            "safety limits. This is the strongest verified combination "
+            "available on the current board."
+            if best_available else None
+        ),
         "odds": round(odds, 2),
         "legs": len(legs),
         "hit_probability": round(joint, 5),
@@ -1354,6 +1442,11 @@ def _public_result_from_build(
             "candidate_count_initial", "after_bookability", "after_trust",
             "after_policy", "optimizer_candidate_count", "fixture_count",
             "market_distribution", "binding_constraints", "max_legs",
+            "requested_target", "target_reached", "best_reachable",
+            "achieved_odds", "market_cap_used", "market_cap_attempts",
+            "first_reachable_cap", "materialized_best_reachable",
+            "original_requested_target", "best_reachable_combination",
+            "binding_constraint", "reason",
         )},
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "games": games,

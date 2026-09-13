@@ -419,9 +419,10 @@ def test_builder_cannot_use_deeper_public_alternative_to_manufacture_target(monk
     anchor = _pick("anchor-deep", 2.00, .82, market_group="other")
     built = build_slip(4, pool=fixture_alternatives + [anchor], max_legs=2,
                        market_cap=3)
-    assert not built["ok"], built
+    assert built["ok"], built
     assert built["optimization_status"] == "OPTIMAL"
-    assert built["result_status"] in {"QUALITY_CAPPED", "MAX_LEGS_CAPPED"}
+    assert built["result_status"] == "BEST_AVAILABLE"
+    assert built["target_reached"] is False
     assert all(int(p.get("public_rank") or 99) <= 2
                for p in built.get("picks", []))
 
@@ -443,14 +444,10 @@ def test_saturated_leg_ceiling_is_not_called_causal_without_counterfactual_gain(
         for i in range(16)
     ]
     built = build_slip(200, pool=picks, max_legs=16, market_cap=16)
-    assert not built["ok"]
-    assert "max_legs" in built["saturated_constraints"]
-    assert built["primary_binding_constraint"] is None
-    assert built["result_status"] == "CURRENT_CONSTRAINTS_CAPPED"
-    assert built["reason"] == (
-        "200x is not reachable on the current board under the current "
-        "diversification limits."
-    )
+    assert built["ok"]
+    assert "max_legs" in built["binding_constraints"]
+    assert built["result_status"] == "BEST_AVAILABLE"
+    assert "strongest verified combination" in built["reason"]
 
 
 def test_tier_selector_cannot_bypass_team_goal_cap_by_switching_sides():
@@ -552,7 +549,7 @@ def test_generate_reuses_availability_from_same_board_snapshot(monkeypatch):
     assert result["timing_ms"]["validation_readback"] == 4
 
 
-def test_builder_does_not_accept_odds_below_requested_target():
+def test_builder_returns_safe_best_available_below_requested_target():
     picks = [
         _pick("target-1", odds=1.50, confidence=0.80),
         _pick("target-2", odds=1.50, confidence=0.80),
@@ -567,7 +564,9 @@ def test_builder_does_not_accept_odds_below_requested_target():
         market_cap=10,
     )
 
-    assert not built["ok"]
+    assert built["ok"]
+    assert built["result_status"] == "BEST_AVAILABLE"
+    assert built["target_reached"] is False
     assert built["best_reachable"] == pytest.approx(3.38)
     snapshot = built["best_reachable_combination"]
     assert snapshot["original_requested_target"] == 3.5
@@ -575,7 +574,77 @@ def test_builder_does_not_accept_odds_below_requested_target():
     assert snapshot["selected_selection_ids"] == [
         pick["selection_id"] for pick in built["picks"]
     ]
-    assert snapshot["policy_context"]["market_cap"] == 10
+    assert snapshot["policy_context"]["market_cap"] == 7
+
+
+@pytest.mark.parametrize(("target", "by_cap", "expected_cap", "expected_odds"), [
+    (200, {3: 20, 4: 45, 5: 78, 6: 103, 7: 121}, 7, 121),
+    (100, {3: 35, 4: 72, 5: 94, 6: 102, 7: 130}, 6, 102),
+    (50, {3: 28, 4: 51, 5: 80}, 4, 51),
+    (10, {3: 10.2, 4: 20}, 3, 10.2),
+])
+def test_progressive_market_cap_ladder_stops_at_first_safe_reach(
+    monkeypatch, target, by_cap, expected_cap, expected_odds,
+):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    calls = []
+
+    def solve(candidates, requested, max_legs, market_cap, team_cap, **kwargs):
+        calls.append(market_cap)
+        odds = by_cap[market_cap]
+        leg = dict(candidates[0], odds=odds, selection_probability=.8)
+        return odds, .8, [leg], "OPTIMAL"
+
+    monkeypatch.setattr(slip_builder, "_verified_optimize", solve)
+    built = build_slip(target, pool=[_pick("ladder", 2, .8)])
+
+    assert built["ok"]
+    assert built["market_cap_used"] == expected_cap
+    assert built["odds"] == pytest.approx(expected_odds)
+    assert calls == list(range(3, expected_cap + 1))
+    assert built["first_reachable_cap"] == (
+        expected_cap if expected_odds >= target else None
+    )
+    assert built["result_status"] == (
+        "TARGET_REACHED" if expected_odds >= target else "BEST_AVAILABLE"
+    )
+
+
+def test_progressive_ladder_returns_and_books_cap_seven_best_available(monkeypatch):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    pick = _pick("terminal", 2, .8)
+    by_cap = {3: 20, 4: 45, 5: 78, 6: 103, 7: 121}
+
+    def solve(candidates, target, max_legs, market_cap, team_cap, **kwargs):
+        odds = by_cap[market_cap]
+        leg = dict(candidates[0], odds=odds, selection_probability=.8)
+        return odds, .8, [leg], "OPTIMAL"
+
+    monkeypatch.setattr(slip_builder, "_verified_optimize", solve)
+    monkeypatch.setattr(
+        slip_builder, "prepared_bookable_pool",
+        lambda *a, **k: ({"__meta__": {}}, [pick], {}),
+    )
+    monkeypatch.setattr("leagues.picks.to_game", lambda p: {
+        "match_id": p["match_id"], "kickoff": "2099-01-01T12:00:00Z",
+    })
+    monkeypatch.setattr(
+        "leagues.booking.create_or_reuse_generated_booking",
+        lambda games, board, **kwargs: {
+            "status": "active", "booking_status": "FULL",
+            "validation_status": "PASSED", "share_code": "BEST121",
+        },
+    )
+
+    result = slip_builder.generate(200, horizon="week")
+
+    assert result["status"] == "success"
+    assert result["result_status"] == "BEST_AVAILABLE"
+    assert result["target"] == 200
+    assert result["odds"] == pytest.approx(121)
+    assert result["market_cap_used"] == 7
+    assert result["booking"]["share_code"] == "BEST121"
+    assert result["booking"]["validation_status"] == "PASSED"
 
 
 def test_capped_generate_exposes_safe_game_diagnostics_not_internal_picks(
