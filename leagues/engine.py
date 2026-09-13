@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
-_CACHE: dict = {"entries": {}}
+_CACHE: dict = {"entries": {}, "healthy_entries": {}}
 _TTL = 3600
 _PREPARED_STALE_TTL = 6 * 3600
 _PIPELINE_LOCK = threading.Lock()
@@ -62,23 +62,55 @@ def _filter_cached(entry: dict, days_ahead: int,
 def _covering_entry(days_ahead: int, now_ts: float,
                     require_complete: bool = False,
                     allow_stale: bool = False) -> dict | None:
-    valid = [entry for entry in _CACHE["entries"].values()
+    now_dt = datetime.fromtimestamp(now_ts, timezone.utc)
+    requested_end = now_dt + timedelta(days=days_ahead)
+
+    def has_actionable_fixture(entry: dict) -> bool:
+        return any(
+            (kickoff := _parse_kickoff(fixture.get("commence_time")))
+            and now_dt <= kickoff <= requested_end
+            for fixture in entry.get("fixtures") or []
+        )
+
+    entries = list(_CACHE.get("entries", {}).values())
+    entries.extend(_CACHE.get("healthy_entries", {}).values())
+    # A complete entry may be present in both collections. Identity-based
+    # de-duplication keeps selection deterministic without copying large
+    # evaluated boards.
+    unique = {id(entry): entry for entry in entries}.values()
+    valid = [entry for entry in unique
              if (now_ts - entry["ts"] < (
                  _PREPARED_STALE_TTL if allow_stale else _TTL
              ))
              and entry["metadata"]["requested_days"] >= days_ahead
+             and has_actionable_fixture(entry)
              and (not require_complete
                   or (entry["metadata"].get("provider") or {}).get(
                       "complete", True))]
-    return (min(valid, key=lambda item: item["metadata"]["requested_days"])
-            if valid else None)
+    if not valid:
+        return None
+    # Prefer a healthy board while it remains within the explicit stale-safe
+    # window. Within the same health class, newest wins; requested horizon is
+    # only the final tie-breaker. This prevents a smaller, older degraded board
+    # from masking a newer complete covering board.
+    return max(
+        valid,
+        key=lambda item: (
+            bool((item["metadata"].get("provider") or {}).get(
+                "complete", True
+            )),
+            float(item["ts"]),
+            -int(item["metadata"]["requested_days"]),
+        ),
+    )
 
 
 def _store_cache_entry(days_ahead: int, picks: list[dict],
                        fixtures: list[dict], now: float,
-                       now_dt: datetime, provider: dict) -> None:
+                       now_dt: datetime, provider: dict,
+                       decision_snapshot_id: str | None = None) -> None:
     """Store one evaluated horizon; kept small so coverage rules are testable."""
-    _CACHE["entries"][days_ahead] = {
+    entry = {
         "picks": picks,
         "fixtures": fixtures,
         "ts": now,
@@ -89,8 +121,12 @@ def _store_cache_entry(days_ahead: int, picks: list[dict],
             "coverage_end": (now_dt + timedelta(days=days_ahead)).isoformat(),
             "fixture_count": len(fixtures),
             "provider": provider,
+            "decision_snapshot_id": decision_snapshot_id,
         },
     }
+    _CACHE.setdefault("entries", {})[days_ahead] = entry
+    if provider.get("complete", True):
+        _CACHE.setdefault("healthy_entries", {})[days_ahead] = entry
 
 
 def prepared_board_status(days_ahead: int = 7) -> dict:
@@ -106,6 +142,7 @@ def prepared_board_status(days_ahead: int = 7) -> dict:
     if not entry:
         return {"ready": False, "requested_days": days_ahead}
     provider = entry["metadata"].get("provider") or {}
+    age_seconds = round(now - entry["ts"], 1)
     return {
         **entry["metadata"],
         "ready": bool(entry.get("fixtures")),
@@ -123,8 +160,16 @@ def prepared_board_status(days_ahead: int = 7) -> dict:
             provider.get("failed_league_count")
             or len(provider.get("failed_leagues") or [])
         ),
-        "age_seconds": round(now - entry["ts"], 1),
-        "stale": bool(now - entry["ts"] >= _TTL),
+        "age_seconds": age_seconds,
+        "stale": bool(age_seconds >= _TTL),
+        "board_source": (
+            "stale_fallback" if age_seconds >= _TTL else "cache"
+        ),
+        "board_snapshot_id": entry["metadata"].get(
+            "decision_snapshot_id"
+        ),
+        "raw_fixture_count": int(provider.get("fixture_count") or 0),
+        "evaluated_fixture_count": len(entry.get("fixtures") or []),
         "refreshing": bool(_PREWARMING),
     }
 
@@ -282,9 +327,10 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     provider = espn_cache_metadata()
     # Preserve the evaluated environment before any product optimizer narrows
     # it. Archiving is observability: failure is logged and never blocks picks.
+    decision_snapshot_id = None
     try:
         from leagues.decision_archive import archive_board
-        archive_board(
+        decision_snapshot_id = archive_board(
             all_picks, fixtures, horizon=days_ahead, provider=provider,
             calibration=fit, generated_at=now_dt,
         )
@@ -292,7 +338,8 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         logger.error("decision board archive unavailable: %s", exc,
                      exc_info=True)
     _store_cache_entry(
-        days_ahead, all_picks, fixtures, now, now_dt, provider
+        days_ahead, all_picks, fixtures, now, now_dt, provider,
+        decision_snapshot_id=decision_snapshot_id,
     )
     return all_picks, fixtures
 

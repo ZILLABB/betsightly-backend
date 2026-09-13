@@ -1451,6 +1451,20 @@ def generate(
     out = _public_result_from_build(
         target, horizon, built, board, timings, force_booking=force
     )
+    try:
+        from leagues import sportybet
+        sporty = sportybet.board_metadata(board)
+        out["sportybet_board"] = {
+            "snapshot_id": sporty.get("snapshot_id"),
+            "page_count": sporty.get("page_count"),
+            "required_pages": sporty.get("required_pages"),
+            "declared_total": sporty.get("declared_total"),
+            "parsed_fixture_total": sporty.get("parsed_records"),
+            "complete": bool(sporty.get("is_complete")),
+        }
+    except Exception:
+        # Diagnostics must never make a valid Builder response fail.
+        pass
     log_runtime_memory(
         "builder_after_booking", target=target, horizon=horizon,
         booking_status=(out.get("booking") or {}).get("booking_status")

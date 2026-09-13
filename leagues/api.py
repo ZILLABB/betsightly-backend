@@ -16,6 +16,7 @@ Provides:
 """
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -346,6 +347,13 @@ def _start_builder_revision(target: float, horizon: str, result: dict) -> dict:
             "complete": bool(state.get("complete")),
             "fixture_count": int(state.get("fixture_count") or 0),
             "generated_at": state.get("generated_at"),
+            "board_snapshot_id": state.get("board_snapshot_id"),
+            "board_age_seconds": state.get("age_seconds"),
+            "board_source": state.get("board_source"),
+            "raw_fixture_count": int(state.get("raw_fixture_count") or 0),
+            "evaluated_fixture_count": int(
+                state.get("evaluated_fixture_count") or 0
+            ),
             "successful_league_count": int(
                 state.get("successful_league_count") or 0
             ),
@@ -373,6 +381,42 @@ def _cached_slip_is_placeable(result: dict, now: datetime | None = None) -> bool
     return all_games_actionable(result.get("games") or [], now)
 
 
+def _log_builder_board(builder_run_id: str, target: float, horizon: str,
+                       response: dict) -> None:
+    """Emit safe board provenance for every Builder outcome."""
+    board = response.get("board") or {}
+    diagnostics = response.get("selection_diagnostics") or {}
+    sporty = response.get("sportybet_board") or {}
+    logger.info("builder_board %s", {
+        "builder_run_id": builder_run_id, "horizon": horizon,
+        "requested_target": round(float(target), 2),
+        "board_snapshot_id": board.get("board_snapshot_id"),
+        "board_generated_at": board.get("generated_at"),
+        "board_age_seconds": board.get("board_age_seconds"),
+        "board_source": board.get("board_source"),
+        "ready": board.get("ready"), "degraded": board.get("degraded"),
+        "complete": board.get("complete"),
+        "requested_league_count": board.get("requested_league_count"),
+        "successful_league_count": board.get("successful_league_count"),
+        "failed_league_count": board.get("failed_league_count"),
+        "raw_fixture_count": board.get("raw_fixture_count"),
+        "evaluated_fixture_count": board.get("evaluated_fixture_count"),
+        "approved_canonical_candidate_count": diagnostics.get(
+            "after_policy_and_canonical_ranking"
+        ),
+        "optimizer_candidate_count": response.get("optimizer_candidate_count"),
+        "sportybet_snapshot_id": sporty.get("snapshot_id"),
+        "sportybet_page_count": sporty.get("page_count"),
+        "sportybet_declared_pages": sporty.get("required_pages"),
+        "sportybet_parsed_fixture_total": sporty.get("parsed_fixture_total"),
+        "optimizer_status": response.get("optimization_status"),
+        "achieved_odds": response.get("odds") or response.get("best_reachable"),
+        "primary_binding_constraint": diagnostics.get(
+            "primary_binding_constraint"
+        ),
+    })
+
+
 @router.get("/slip-builder/targets")
 async def slip_builder_targets():
     """The targets offered, and what each is actually worth."""
@@ -398,8 +442,10 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     from database import log_pool_exception, log_pool_status
     from utils.runtime_metrics import log_runtime_memory
 
+    builder_run_id = str(uuid.uuid4())
+
     log_pool_status(
-        "builder_start",
+        "builder_start", builder_run_id=builder_run_id,
         target=round(float(target), 2),
         horizon=horizon,
         refresh=bool(refresh),
@@ -432,11 +478,14 @@ async def slip_builder_generate(target: float, horizon: str = "week",
         response = _start_builder_revision(
             target, horizon, {**hit["result"], "cached": True}
         )
+        response["builder_run_id"] = builder_run_id
         try:
             from leagues.builder_runs import record_run
-            record_run(target, horizon, refresh, response, cached=True)
+            record_run(target, horizon, refresh, response, cached=True,
+                       request_id=builder_run_id)
         except Exception as exc:
             logger.warning(f"Builder run audit failed: {exc}")
+        _log_builder_board(builder_run_id, target, horizon, response)
         log_pool_status(
             "builder_end", target=key[0], horizon=horizon,
             status=response.get("status"), cached=True,
@@ -460,6 +509,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             "board": board,
             "requested_target": round(float(target), 2),
             "horizon": horizon,
+            "builder_run_id": builder_run_id,
         }
         log_pool_status(
             "builder_end", target=key[0], horizon=horizon,
@@ -469,6 +519,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             "builder_end", target=key[0], horizon=horizon,
             status="board_refreshing", cached=False,
         )
+        _log_builder_board(builder_run_id, target, horizon, response)
         return response
     if board.get("stale"):
         # Keep serving the last safe evaluated board while a single background
@@ -489,11 +540,14 @@ async def slip_builder_generate(target: float, horizon: str = "week",
                 result = _start_builder_revision(
                     target, horizon, {**hit["result"], "cached": True}
                 )
+                result["builder_run_id"] = builder_run_id
                 try:
                     from leagues.builder_runs import record_run
-                    record_run(target, horizon, refresh, result, cached=True)
+                    record_run(target, horizon, refresh, result, cached=True,
+                               request_id=builder_run_id)
                 except Exception as exc:
                     logger.warning(f"Builder run audit failed: {exc}")
+                _log_builder_board(builder_run_id, target, horizon, result)
                 log_pool_status(
                     "builder_end", target=key[0], horizon=horizon,
                     status=result.get("status"), cached=True,
@@ -527,7 +581,8 @@ async def slip_builder_generate(target: float, horizon: str = "week",
         try:
             from leagues.builder_runs import record_run
             record_run(target, horizon, refresh,
-                       {"status": "error", "reason": type(e).__name__})
+                       {"status": "error", "reason": type(e).__name__},
+                       request_id=builder_run_id)
         except Exception as exc:
             logger.warning(f"Builder run audit failed: {exc}")
         raise HTTPException(500, str(e))
@@ -535,11 +590,14 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     response = _start_builder_revision(
         target, horizon, {**result, "cached": False}
     )
+    response["builder_run_id"] = builder_run_id
     try:
         from leagues.builder_runs import record_run
-        record_run(target, horizon, refresh, response)
+        record_run(target, horizon, refresh, response,
+                   request_id=builder_run_id)
     except Exception as exc:
         logger.warning(f"Builder run audit failed: {exc}")
+    _log_builder_board(builder_run_id, target, horizon, response)
     log_pool_status(
         "builder_end", target=key[0], horizon=horizon,
         status=response.get("status"), cached=False,

@@ -106,8 +106,31 @@ def _compact_candidate(pick: dict) -> dict:
     availability = pick.get("sportybet_availability") or {}
     rejection = (pick.get("rejection_reasons") or
                  trust.get("rejection_reasons") or [])
+    selection_probability = pick.get("selection_probability")
+    try:
+        selection_probability = float(selection_probability)
+    except (TypeError, ValueError):
+        selection_probability = None
+    push_probability = 0.0
+    if pick.get("market") in {"dnb_home", "dnb_away"}:
+        draw = (model.get("probabilities") or {}).get("draw")
+        try:
+            push_probability = max(0.0, min(1.0, float(draw)))
+        except (TypeError, ValueError):
+            push_probability = None
+    if selection_probability is None or push_probability is None:
+        win_probability = loss_probability = None
+    else:
+        decisive = 1.0 - push_probability
+        win_probability = selection_probability * decisive
+        loss_probability = (1.0 - selection_probability) * decisive
+    fixture_id = str(pick.get("match_id") or "")
+    market = str(pick.get("market") or "")
     return {
-        "fixture_id": str(pick.get("match_id") or ""),
+        "selection_id": str(
+            pick.get("selection_id") or f"{fixture_id}:{market}"
+        ),
+        "fixture_id": fixture_id,
         "league": fixture.get("league"), "league_slug": fixture.get("league_slug"),
         "kickoff": fixture.get("commence_time"),
         "home": (fixture.get("home") or {}).get("name"),
@@ -117,7 +140,12 @@ def _compact_candidate(pick: dict) -> dict:
         "raw_probability": pick.get("raw_confidence"),
         "calibrated_probability": pick.get("confidence"),
         "evidence_adjusted_probability": pick.get("evidence_adjusted_probability"),
-        "conservative_probability": pick.get("selection_probability"),
+        "conservative_probability": selection_probability,
+        "settlement_win_probability": win_probability,
+        "settlement_push_probability": push_probability,
+        "settlement_loss_probability": loss_probability,
+        "risk_adjusted_return": pick.get("risk_adjusted_return"),
+        "market_margin": pick.get("market_margin"),
         "lower_reliability_bound": pick.get("lower_reliability_bound") or trust.get("lower_reliability_bound"),
         "trust_score": trust.get("trust_score"),
         "trust_grade": trust.get("trust_grade"),
@@ -129,6 +157,7 @@ def _compact_candidate(pick: dict) -> dict:
         "ml_probability": pick.get("ml_confidence"),
         "bookable": bool(pick.get("bookable")),
         "sportybet_mapping_state": availability.get("status"),
+        "sportybet_snapshot_id": availability.get("board_snapshot_id"),
         "model_rank": pick.get("model_rank"), "public_rank": pick.get("public_rank"),
         "quality_score": pick.get("quality_score"),
         "premium_eligible": bool(pick.get("premium_eligible") or pick.get("market_floor_eligible")),
@@ -197,6 +226,11 @@ def archive_board(picks: list[dict], fixtures: list[dict], *, horizon: int,
         publication_date = now.astimezone(timezone.utc).date().isoformat()
         provider = provider or {}
         provider_state = "complete" if provider.get("complete", True) else "degraded"
+        from leagues.selection import TEAM_TO_SCORE_CAP, UNDER_CAP
+        from leagues.slip_builder import (
+            MAX_LEGS, MIN_BUILDER_EXPECTED_RETURN,
+        )
+
         payload_obj = {
             "schema": 1,
             "metadata": {
@@ -207,6 +241,17 @@ def archive_board(picks: list[dict], fixtures: list[dict], *, horizon: int,
                 "policy_version": PUBLISHED_SELECTION_POLICY_VERSION,
                 "calibration_version": (calibration or {}).get("version"),
                 "evidence_version": "fixture-ranked-evidence-v1",
+                "provider_snapshot_id": (
+                    provider.get("snapshot_id") or provider.get("version")
+                ),
+                "policy_context": {
+                    "market_cap_policy": "builder_target_aware_v1",
+                    "team_to_score_cap": TEAM_TO_SCORE_CAP,
+                    "under_cap": UNDER_CAP,
+                    "max_legs": MAX_LEGS,
+                    "expected_return_floor": MIN_BUILDER_EXPECTED_RETURN,
+                    "policy_version": PUBLISHED_SELECTION_POLICY_VERSION,
+                },
             },
             "candidates": compact,
         }

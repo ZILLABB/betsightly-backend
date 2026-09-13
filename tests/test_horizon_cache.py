@@ -280,6 +280,112 @@ def test_interactive_builder_keeps_last_safe_board_during_refresh(monkeypatch):
     assert [item["match_id"] for item in fixtures] == ["stale-safe"]
 
 
+def test_new_complete_board_promotes_over_older_degraded(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    degraded = _fixture(now, 2, "degraded")
+    complete = _fixture(now, 3, "complete")
+    engine._store_cache_entry(
+        3, [{"match_id": "degraded"}], [degraded], time.time() - 30,
+        now, {"complete": False}, decision_snapshot_id="degraded-id",
+    )
+    engine._store_cache_entry(
+        7, [{"match_id": "complete"}], [complete], time.time(),
+        now, {"complete": True}, decision_snapshot_id="complete-id",
+    )
+
+    status = engine.prepared_board_status(1)
+    picks, _ = engine.prepared_pipeline(1)
+
+    assert status["board_snapshot_id"] == "complete-id"
+    assert status["complete"] is True
+    assert [pick["match_id"] for pick in picks] == ["complete"]
+
+
+def test_recent_complete_board_survives_temporary_degraded_refresh(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    healthy = _fixture(now, 2, "healthy")
+    degraded = _fixture(now, 3, "degraded")
+    engine._store_cache_entry(
+        7, [{"match_id": "healthy"}], [healthy], time.time() - 30,
+        now, {"complete": True}, decision_snapshot_id="healthy-id",
+    )
+    engine._store_cache_entry(
+        7, [{"match_id": "degraded"}], [degraded], time.time(),
+        now, {"complete": False}, decision_snapshot_id="degraded-id",
+    )
+
+    status = engine.prepared_board_status(7)
+    picks, _ = engine.prepared_pipeline(7)
+
+    assert status["board_snapshot_id"] == "healthy-id"
+    assert status["complete"] is True
+    assert [pick["match_id"] for pick in picks] == ["healthy"]
+
+
+def test_expired_complete_board_yields_to_new_degraded_board(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    healthy = _fixture(now, 2, "healthy")
+    degraded = _fixture(now, 3, "degraded")
+    engine._store_cache_entry(
+        7, [{"match_id": "healthy"}], [healthy],
+        time.time() - engine._PREPARED_STALE_TTL - 1,
+        now, {"complete": True}, decision_snapshot_id="healthy-id",
+    )
+    engine._store_cache_entry(
+        7, [{"match_id": "degraded"}], [degraded], time.time(),
+        now, {"complete": False}, decision_snapshot_id="degraded-id",
+    )
+
+    status = engine.prepared_board_status(7)
+    picks, _ = engine.prepared_pipeline(7)
+
+    assert status["board_snapshot_id"] == "degraded-id"
+    assert status["degraded"] is True
+    assert [pick["match_id"] for pick in picks] == ["degraded"]
+
+
+def test_started_complete_board_does_not_mask_actionable_degraded_board(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    started = _fixture(now, -1, "started")
+    actionable = _fixture(now, 2, "actionable")
+    engine._store_cache_entry(
+        7, [{"match_id": "started"}], [started], time.time() - 30,
+        now, {"complete": True}, decision_snapshot_id="healthy-id",
+    )
+    engine._store_cache_entry(
+        7, [{"match_id": "actionable"}], [actionable], time.time(),
+        now, {"complete": False}, decision_snapshot_id="degraded-id",
+    )
+
+    status = engine.prepared_board_status(7)
+    picks, _ = engine.prepared_pipeline(7)
+
+    assert status["board_snapshot_id"] == "degraded-id"
+    assert [pick["match_id"] for pick in picks] == ["actionable"]
+
+
+def test_prepared_horizons_share_source_but_filter_independently(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    today = _fixture(now, 2, "today")
+    later = _fixture(now, 72, "later")
+    engine._store_cache_entry(
+        7, [{"match_id": "today"}, {"match_id": "later"}],
+        [today, later], time.time(), now, {"complete": True},
+        decision_snapshot_id="shared-id",
+    )
+
+    today_picks, _ = engine.prepared_pipeline(1)
+    week_picks, _ = engine.prepared_pipeline(7)
+
+    assert [pick["match_id"] for pick in today_picks] == ["today"]
+    assert {pick["match_id"] for pick in week_picks} == {"today", "later"}
+
+
 def test_cold_builder_click_returns_controlled_refresh_state(monkeypatch):
     from leagues import api, slip_builder
 

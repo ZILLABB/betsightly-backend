@@ -1,4 +1,6 @@
 import json
+
+import pytest
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, select
@@ -66,9 +68,43 @@ def test_snapshot_is_idempotent_immutable_and_retains_decision_facts(monkeypatch
     assert candidate["model_rank"] == 2
     assert candidate["bookable"] is True
     assert candidate["lower_reliability_bound"] == .69
+    assert candidate["selection_id"] == "fx-1:over_1_5"
+    assert candidate["settlement_win_probability"] == .69
+    assert candidate["settlement_push_probability"] == 0.0
+    assert candidate["settlement_loss_probability"] == pytest.approx(.31)
+    policy = board["metadata"]["policy_context"]
+    assert policy["team_to_score_cap"] == 2
+    assert policy["max_legs"] == 16
+    assert policy["expected_return_floor"] == .40
 
     pick["odds"] = 9.99
     assert decision_archive.load_board(first)["candidates"][0]["odds"] == 1.5
+
+
+def test_future_dnb_archive_retains_deterministic_settlement_inputs(monkeypatch):
+    _db(monkeypatch)
+    monkeypatch.setattr(
+        "leagues.fixture_ranker.canonical_fixture_recommendations",
+        lambda picks, **kwargs: picks,
+    )
+    pick = _pick()
+    pick.update({
+        "market": "dnb_home", "market_group": "dnb",
+        "prediction": "Home (Draw No Bet)", "selection_probability": .70,
+    })
+    pick["_model"]["probabilities"] = {"draw": .25}
+    snapshot = decision_archive.archive_board(
+        [pick], [pick["_fixture"]], horizon=7,
+        provider={"complete": True, "snapshot_id": "espn-1"},
+        generated_at=datetime(2026, 9, 10, tzinfo=timezone.utc),
+    )
+
+    board = decision_archive.load_board(snapshot)
+    candidate = board["candidates"][0]
+    assert candidate["settlement_win_probability"] == .5175
+    assert candidate["settlement_push_probability"] == .25
+    assert candidate["settlement_loss_probability"] == pytest.approx(.2325)
+    assert board["metadata"]["provider_snapshot_id"] == "espn-1"
 
 
 def test_replay_is_archived_only_deterministic_and_never_publishable(monkeypatch):
