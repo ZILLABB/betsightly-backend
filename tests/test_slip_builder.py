@@ -569,6 +569,13 @@ def test_builder_does_not_accept_odds_below_requested_target():
 
     assert not built["ok"]
     assert built["best_reachable"] == pytest.approx(3.38)
+    snapshot = built["best_reachable_combination"]
+    assert snapshot["original_requested_target"] == 3.5
+    assert snapshot["achieved_odds"] == pytest.approx(3.38)
+    assert snapshot["selected_selection_ids"] == [
+        pick["selection_id"] for pick in built["picks"]
+    ]
+    assert snapshot["policy_context"]["market_cap"] == 10
 
 
 def test_capped_generate_exposes_safe_game_diagnostics_not_internal_picks(

@@ -684,6 +684,7 @@ def build_slip(
     pool: list | None = None,
     max_legs: int = MAX_LEGS,
     market_cap: int | None = None,
+    team_to_score_cap: int | None = None,
     horizon: str = DEFAULT_HORIZON,
     require_bookable: bool = True,
     locked_selection_ids: set[str] | None = None,
@@ -695,7 +696,10 @@ def build_slip(
     from leagues.selection import MIN_USEFUL_ODDS, UNDER_CAP, exposure_group
 
     cap = _market_cap_for_target(target) if market_cap is None else market_cap
-    team_to_score_cap = _team_to_score_cap_for_target(target)
+    team_to_score_cap = (
+        _team_to_score_cap_for_target(target)
+        if team_to_score_cap is None else int(team_to_score_cap)
+    )
     locked_selection_ids = set(locked_selection_ids or ())
     forced_selection_ids = set(forced_selection_ids or ())
     required_selection_ids = locked_selection_ids | forced_selection_ids
@@ -993,6 +997,19 @@ def build_slip(
         *(["max_legs"] if len(legs) >= max_legs else []),
     ]
     selected_ids = {_selection_id(pick) for pick in legs}
+    best_reachable_combination = {
+        "original_requested_target": target,
+        "achieved_odds": round(odds, 2),
+        "selected_selection_ids": [_selection_id(pick) for pick in legs],
+        "selected_fixture_ids": [str(pick.get("match_id") or "") for pick in legs],
+        "policy_context": {
+            "market_cap": cap,
+            "team_to_score_cap": team_to_score_cap,
+            "under_cap": UNDER_CAP,
+            "max_legs": max_legs,
+            "market_cap_policy": "builder_target_aware_v1",
+        },
+    }
     selected_teams = {
         str(((pick.get("_fixture") or {}).get(side) or {}).get("name") or "")
         .strip().casefold()
@@ -1103,6 +1120,7 @@ def build_slip(
                 (counterfactuals or {}).get("scenarios", {})
             ),
             "max_legs": max_legs,
+            "best_reachable_combination": best_reachable_combination,
             "trust_rejection_reasons": dict(trust_rejections),
             "selection_diagnostics": diagnostics,
             "reason": capped_reason,
@@ -1135,6 +1153,7 @@ def build_slip(
             "expected_return_basis": "conservative_selection_probability",
             "minimum_expected_return": MIN_BUILDER_EXPECTED_RETURN,
             "selection_diagnostics": diagnostics,
+            "best_reachable_combination": best_reachable_combination,
             "reason": (
                 "The target is mathematically reachable, but the strongest "
                 f"combination returns only about {expected_return:.2f} per 1 "

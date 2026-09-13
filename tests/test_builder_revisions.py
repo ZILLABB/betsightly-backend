@@ -252,6 +252,137 @@ def test_lock_and_unlock_are_local_and_do_not_wait_for_live_board(
     assert unlocked["booking"]["share_code"] == "CODE1"
 
 
+@pytest.mark.parametrize("requested,best,market_cap", [
+    (100, 36.85, 5),
+    (50, 19.81, 4),
+    (20, 10.57, 3),
+])
+def test_accept_best_reachable_materializes_exact_snapshot_without_new_search(
+        revision_db, monkeypatch, requested, best, market_cap):
+    games = _result("a", "b", odds=best)["games"]
+    capped = {
+        "status": "unavailable", "target": requested,
+        "best_reachable": best, "achieved_odds": best,
+        "games": games,
+        "best_reachable_combination": {
+            "original_requested_target": requested,
+            "achieved_odds": best,
+            "selected_selection_ids": ["a", "b"],
+            "selected_fixture_ids": ["match-a", "match-b"],
+            "policy_context": {
+                "market_cap": market_cap, "team_to_score_cap": 2,
+                "under_cap": 2, "max_legs": 16,
+                "market_cap_policy": "builder_target_aware_v1",
+            },
+        },
+    }
+    initial = builder_revisions.create_initial_run(requested, "today", capped)
+    current_pool = [
+        {**game, "selection_id": game["selection_id"],
+         "match_id": game["match_id"]}
+        for game in games
+    ]
+    monkeypatch.setattr(
+        builder_editor, "prepared_bookable_pool",
+        lambda *args, **kwargs: (
+            {"snapshot": "current"}, current_pool, {"board_lookup": 1}
+        ),
+    )
+    monkeypatch.setattr(
+        "leagues.engine.prepared_board_status",
+        lambda **kwargs: {"ready": True, "degraded": False, "complete": True},
+    )
+    monkeypatch.setattr(
+        builder_editor, "approved_builder_candidates",
+        lambda candidates: (candidates, {}),
+    )
+    calls = []
+
+    def materialize(target, **kwargs):
+        calls.append((target, kwargs))
+        return {
+            "ok": True, "picks": kwargs["pool"], "odds": best + .01,
+            "legs": 2, "hit_probability": .5, "expected_return": .9,
+            "avg_confidence": .75,
+        }
+
+    monkeypatch.setattr(builder_editor, "build_slip", materialize)
+    monkeypatch.setattr(
+        builder_editor, "_public_result_from_build",
+        lambda target, horizon, built, board, timings, force_booking=False: {
+            "status": "success", "target": target, "horizon": horizon,
+            "odds": built["odds"], "legs": 2, "games": games,
+            "booking": {
+                "status": "active", "share_code": "EXACT1",
+                "booking_status": "FULL", "readback_validation": "PASSED",
+                "actual_sportybet_odds": best + .01,
+            },
+        },
+    )
+
+    result = builder_editor.revise(
+        run_id=initial["builder_run_id"], edit_token=initial["edit_token"],
+        revision=1, request_id=f"accept-{requested}",
+        action="accept_best_reachable", target=best,
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0] == builder_editor.MIN_TARGET
+    assert calls[0][0] != best
+    assert calls[0][1]["market_cap"] == market_cap
+    assert calls[0][1]["team_to_score_cap"] == 2
+    assert calls[0][1]["forced_selection_ids"] == {"a", "b"}
+    assert [pick["selection_id"] for pick in calls[0][1]["pool"]] == ["a", "b"]
+    assert result["status"] == "success"
+    assert result["target"] == requested
+    assert result["original_requested_target"] == requested
+    assert result["best_reachable"] == pytest.approx(best + .01)
+    assert result["booking"]["share_code"] == "EXACT1"
+
+
+def test_accept_best_reachable_fails_without_reoptimizing_when_a_leg_vanishes(
+        revision_db, monkeypatch):
+    games = _result("a", "b", odds=36.85)["games"]
+    capped = {
+        "status": "unavailable", "target": 100, "best_reachable": 36.85,
+        "games": games,
+        "best_reachable_combination": {
+            "original_requested_target": 100,
+            "selected_selection_ids": ["a", "b"],
+            "selected_fixture_ids": ["match-a", "match-b"],
+            "policy_context": {"market_cap": 5, "max_legs": 16},
+        },
+    }
+    initial = builder_revisions.create_initial_run(100, "today", capped)
+    monkeypatch.setattr(
+        builder_editor, "prepared_bookable_pool",
+        lambda *args, **kwargs: ({}, [games[0]], {"board_lookup": 1}),
+    )
+    monkeypatch.setattr(
+        "leagues.engine.prepared_board_status",
+        lambda **kwargs: {"ready": True, "degraded": False, "complete": True},
+    )
+    monkeypatch.setattr(
+        builder_editor, "approved_builder_candidates",
+        lambda candidates: (candidates, {}),
+    )
+    monkeypatch.setattr(
+        builder_editor, "build_slip",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("a missing exact leg must not trigger optimization")
+        ),
+    )
+
+    result = builder_editor.revise(
+        run_id=initial["builder_run_id"], edit_token=initial["edit_token"],
+        revision=1, request_id="accept-missing", action="accept_best_reachable",
+        target=36.85,
+    )
+
+    assert result["revision_status"] == "no_change"
+    assert "No lower-target search was run" in result["action_error"]
+
+
 def test_safer_market_must_remain_on_fixture_and_improve_survival(monkeypatch):
     current = {
         "selection_id": "current", "match_id": "fixture-1",

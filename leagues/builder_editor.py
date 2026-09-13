@@ -234,11 +234,24 @@ def revise(
 
     effective_target = float(before.get("target") or state["requested_target"])
     if action == "accept_best_reachable":
-        requested = float(target or 0)
         best = float(before.get("best_reachable") or 0)
-        if not (MIN_TARGET <= requested <= min(MAX_TARGET, best + .01)):
+        snapshot = before.get("best_reachable_combination") or {}
+        snapshot_target = float(
+            snapshot.get("original_requested_target")
+            or state["requested_target"]
+        )
+        if not (MIN_TARGET <= best <= MAX_TARGET
+                and snapshot_target == float(state["requested_target"])):
             raise ValueError("invalid_best_reachable_target")
-        effective_target = requested
+        # `target` was sent by older clients as the displayed best-reachable
+        # odds. It is validation metadata only; it must never become a new
+        # optimization target because target-dependent exposure caps would
+        # change and collapse the combination again.
+        if target is not None and abs(float(target) - best) > .02:
+            raise ValueError("invalid_best_reachable_target")
+        effective_target = snapshot_target
+        action_target["best_reachable"] = best
+        action_target["original_requested_target"] = snapshot_target
 
     # Locking changes only revision constraints; it does not change a leg or
     # mint a booking code. Re-running the full live-board/bookmaker pipeline
@@ -259,7 +272,8 @@ def revise(
 
     started = time.perf_counter()
     board, bookable_pool, timings = prepared_bookable_pool(
-        state["horizon"], force=False
+        state["horizon"], force=False,
+        refresh_sportybet=action == "accept_best_reachable",
     )
     timings["revision_board_lookup"] = round((time.perf_counter() - started) * 1000)
     from leagues.engine import prepared_board_status
@@ -269,6 +283,120 @@ def revise(
         "degraded": bool(prepared_status.get("degraded")),
         "complete": bool(prepared_status.get("complete")),
     }
+
+    if action == "accept_best_reachable":
+        snapshot = before.get("best_reachable_combination") or {}
+        snapshot_ids = [str(value) for value in (
+            snapshot.get("selected_selection_ids") or []
+        )]
+        game_ids = [str(game.get("selection_id") or "")
+                    for game in before.get("games") or []]
+        if not snapshot_ids or snapshot_ids != game_ids:
+            raise ValueError("invalid_best_reachable_snapshot")
+
+        canonical, _ = approved_builder_candidates(bookable_pool)
+        by_id = {_selection_id(pick): pick for pick in canonical}
+        exact = [by_id.get(selection_id) for selection_id in snapshot_ids]
+        if any(pick is None for pick in exact):
+            unavailable = {
+                **before,
+                "revision_status": "no_change",
+                "action_error": (
+                    "The verified combination can no longer be matched on "
+                    "the current SportyBet board. No lower-target search was run."
+                ),
+                "board": board_state,
+                "timing_ms": timings,
+            }
+            return builder_revisions.persist_revision(
+                run_id=run_id, edit_token=edit_token,
+                expected_revision=revision, request_id=request_id,
+                action=action, action_target=action_target,
+                result=unavailable, locked_selection_ids=locked,
+                excluded_fixture_ids=excluded_fixtures,
+                excluded_selection_ids=excluded_selections,
+            )
+
+        policy = snapshot.get("policy_context") or {}
+        materialized = build_slip(
+            MIN_TARGET, pool=exact,
+            max_legs=int(policy.get("max_legs") or len(exact)),
+            market_cap=int(policy.get("market_cap") or len(exact)),
+            team_to_score_cap=int(policy.get("team_to_score_cap") or 2),
+            horizon=state["horizon"], require_bookable=True,
+            forced_selection_ids=set(snapshot_ids),
+        )
+        if not materialized.get("ok"):
+            unavailable = {
+                **before,
+                "revision_status": "no_change",
+                "action_error": (
+                    "The exact verified combination no longer clears the "
+                    "current booking and quality checks. No lower-target "
+                    "search was run."
+                ),
+                "board": board_state,
+                "timing_ms": timings,
+            }
+            return builder_revisions.persist_revision(
+                run_id=run_id, edit_token=edit_token,
+                expected_revision=revision, request_id=request_id,
+                action=action, action_target=action_target,
+                result=unavailable, locked_selection_ids=locked,
+                excluded_fixture_ids=excluded_fixtures,
+                excluded_selection_ids=excluded_selections,
+            )
+
+        actual_odds = float(materialized.get("odds") or 0)
+        materialized.update({
+            "result_status": "BEST_REACHABLE_MATERIALIZED",
+            "target": effective_target,
+            "best_reachable": round(actual_odds, 2),
+            "achieved_odds": round(actual_odds, 2),
+            # The accepted combination's maximum current payout is its actual
+            # odds. Reusing the 2x validation threshold here would overstate a
+            # DNB slip's chance of achieving the original, higher request.
+            "target_hit_probability": materialized.get("hit_probability", 0),
+            "original_requested_target": effective_target,
+            "best_reachable_combination": {
+                **snapshot, "current_actual_odds": round(actual_odds, 2),
+            },
+        })
+        result = _public_result_from_build(
+            effective_target, state["horizon"], materialized, board, timings,
+            force_booking=True,
+        )
+        booking = result.get("booking") or {}
+        if not (booking.get("status") == "active"
+                and booking.get("share_code")
+                and str(booking.get("readback_validation") or "").upper()
+                == "PASSED"
+                and str(booking.get("booking_status") or "").upper()
+                in {"FULL", "REBUILT_FULL"}):
+            result = {
+                **before,
+                "revision_status": "no_change",
+                "action_error": (
+                    "The exact verified combination could not receive a "
+                    "validated SportyBet code. No lower-target search was run."
+                ),
+                "board": board_state,
+                "timing_ms": timings,
+            }
+        else:
+            result["materialized_best_reachable"] = True
+            result["original_requested_target"] = effective_target
+            result["best_reachable"] = round(actual_odds, 2)
+            result["achieved_odds"] = round(actual_odds, 2)
+        result["change_summary"] = _change_summary(before, result, action)
+        return builder_revisions.persist_revision(
+            run_id=run_id, edit_token=edit_token,
+            expected_revision=revision, request_id=request_id, action=action,
+            action_target=action_target, result=result,
+            locked_selection_ids=locked,
+            excluded_fixture_ids=excluded_fixtures,
+            excluded_selection_ids=excluded_selections,
+        )
 
     if action == "replace_selection":
         canonical, _ = approved_builder_candidates(bookable_pool)
