@@ -12,6 +12,7 @@ from leagues.slip_builder import (
     _horizon_end,
     _market_cap_for_target,
     build_slip,
+    approved_builder_candidates,
 )
 
 
@@ -114,6 +115,21 @@ def test_slip_builder_requires_exact_sportybet_bookability():
     built = build_slip(2.0, pool=[pick], market_cap=10)
     assert not built["ok"]
     assert "SportyBet-bookable" in built["reason"]
+
+
+def test_bookability_filter_preserves_original_public_rank(monkeypatch):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    strongest = _pick("same", odds=1.40, confidence=.85, market="over_1_5")
+    strongest["bookable"] = False
+    secondary = _pick("same", odds=1.45, confidence=.84, market="under_4_5")
+
+    approved, rejected = approved_builder_candidates([strongest, secondary])
+
+    assert len(approved) == 1
+    assert approved[0]["market"] == "under_4_5"
+    assert approved[0]["public_rank"] == 2
+    assert approved[0]["best_public_market"] == "over_1_5"
+    assert rejected["sportybet_selection_not_exactly_bookable"] == 1
 
 
 def test_builder_caps_actual_home_and_away_team_goal_picks_together(monkeypatch):
@@ -421,7 +437,7 @@ def test_builder_cannot_use_deeper_public_alternative_to_manufacture_target(monk
                        market_cap=3)
     assert built["ok"], built
     assert built["optimization_status"] == "OPTIMAL"
-    assert built["result_status"] == "BEST_AVAILABLE"
+    assert built["result_status"] == "TARGET_CAPPED"
     assert built["target_reached"] is False
     assert all(int(p.get("public_rank") or 99) <= 2
                for p in built.get("picks", []))
@@ -446,7 +462,7 @@ def test_saturated_leg_ceiling_is_not_called_causal_without_counterfactual_gain(
     built = build_slip(200, pool=picks, max_legs=16, market_cap=16)
     assert built["ok"]
     assert "max_legs" in built["binding_constraints"]
-    assert built["result_status"] == "BEST_AVAILABLE"
+    assert built["result_status"] == "TARGET_CAPPED"
     assert "strongest verified combination" in built["reason"]
 
 
@@ -565,7 +581,7 @@ def test_builder_returns_safe_best_available_below_requested_target():
     )
 
     assert built["ok"]
-    assert built["result_status"] == "BEST_AVAILABLE"
+    assert built["result_status"] == "TARGET_CAPPED"
     assert built["target_reached"] is False
     assert built["best_reachable"] == pytest.approx(3.38)
     snapshot = built["best_reachable_combination"]
@@ -575,6 +591,24 @@ def test_builder_returns_safe_best_available_below_requested_target():
         pick["selection_id"] for pick in built["picks"]
     ]
     assert snapshot["policy_context"]["market_cap"] == 7
+
+
+def test_near_target_band_prefers_safe_combination_and_reports_solver_proof(
+        monkeypatch):
+    monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
+    first = _pick("band-a", odds=3.3, confidence=.80,
+                  market="over_1_5", market_group="goals")
+    second = _pick("band-b", odds=3.0, confidence=.80,
+                   market="home_or_draw", market_group="double_chance")
+
+    built = build_slip(10, pool=[first, second], max_legs=2, market_cap=2)
+
+    assert built["ok"]
+    assert built["odds"] == pytest.approx(9.9)
+    assert built["result_status"] == "TARGET_BAND_REACHED"
+    assert built["target_reached"] is False
+    assert built["solver_proof"]["solution_kind"] == "TARGET_BAND_REACHED"
+    assert built["solver_proof"]["optimality_proven"] is True
 
 
 @pytest.mark.parametrize(("target", "by_cap", "expected_cap", "expected_odds"), [
@@ -606,7 +640,7 @@ def test_progressive_market_cap_ladder_stops_at_first_safe_reach(
         expected_cap if expected_odds >= target else None
     )
     assert built["result_status"] == (
-        "TARGET_REACHED" if expected_odds >= target else "BEST_AVAILABLE"
+        "TARGET_REACHED" if expected_odds >= target else "TARGET_CAPPED"
     )
 
 
@@ -639,7 +673,7 @@ def test_progressive_ladder_returns_and_books_cap_seven_best_available(monkeypat
     result = slip_builder.generate(200, horizon="week")
 
     assert result["status"] == "success"
-    assert result["result_status"] == "BEST_AVAILABLE"
+    assert result["result_status"] == "TARGET_CAPPED"
     assert result["target"] == 200
     assert result["odds"] == pytest.approx(121)
     assert result["market_cap_used"] == 7

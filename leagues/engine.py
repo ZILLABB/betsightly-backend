@@ -283,9 +283,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     # snapshot so a mid-run refit cannot make two picks incomparable.
     fit = fit_calibration()
 
-    # Second opinion from the trained ensemble, in shadow only: it is recorded
-    # on each pick and evaluated against results, and does not move a published
-    # number. Built once per run because the history index is a 15s fetch.
+    # Version-compatible ensemble second opinion. It is recorded and can veto
+    # severe disagreement, but never boosts a published probability. Legacy
+    # unversioned artifacts fail closed in ml_models and return no opinion.
     try:
         history = HistoryIndex()
     except Exception as e:
@@ -316,11 +316,18 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         all_picks.extend(build_picks(
             fx, model, min_confidence=MIN_CANDIDATE_CONFIDENCE, fit=fit))
 
+    raw_pick_count = len(all_picks)
+    from leagues.fixture_ranker import canonical_fixture_recommendations
+    canonical_picks = canonical_fixture_recommendations(
+        all_picks, include_all_eligible=True, include_subfloor=True,
+    )
+
     logger.info(
         f"Pipeline: {len(fixtures)} fixtures ({priced} priced, {unpriced} base-rate only, "
         f"{sb_matched} with SportyBet prices, {with_elo} with ELO, "
         f"{sum(1 for f in fixtures if (f.get('_model') or {}).get('ml'))} with ML) "
-        f"-> {len(all_picks)} candidate picks "
+        f"-> {raw_pick_count} modeled candidates, "
+        f"{len(canonical_picks)} canonical public candidates "
         f"(calibrated on {fit.get('n', 0)} settled legs)"
     )
 
@@ -337,11 +344,18 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     except Exception as exc:
         logger.error("decision board archive unavailable: %s", exc,
                      exc_info=True)
+    board_snapshot_id = str(decision_snapshot_id or (
+        f"board:{days_ahead}:{now_dt.isoformat()}"
+    ))
+    for pick in canonical_picks:
+        pick["canonical_board_snapshot_id"] = board_snapshot_id
+        pick["canonical_board_generated_at"] = now_dt.isoformat()
+        pick["canonical_board_horizon_days"] = days_ahead
     _store_cache_entry(
-        days_ahead, all_picks, fixtures, now, now_dt, provider,
+        days_ahead, canonical_picks, fixtures, now, now_dt, provider,
         decision_snapshot_id=decision_snapshot_id,
     )
-    return all_picks, fixtures
+    return canonical_picks, fixtures
 
 
 def picks_for_date(date_str: str, all_picks: list[dict] | None = None) -> list[dict]:
