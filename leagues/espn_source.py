@@ -38,7 +38,7 @@ CACHE_PATH = cache_path(
     Path(__file__).parent.parent / "cache" / "espn_fixtures.json"
 )
 CACHE_TTL = 3 * 3600  # 3 hours — odds drift, but not minute to minute
-CACHE_SCHEMA_VERSION = 2
+CACHE_SCHEMA_VERSION = 3  # refresh snapshots after switching to ESPN month queries
 
 SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard"
 
@@ -201,7 +201,40 @@ def _parse_odds(competition: dict) -> dict:
 # ── Fixture fetching ───────────────────────────────────────
 
 def _fetch_league(slug: str, date_range: str) -> list[dict]:
-    """Scheduled fixtures for one league across a date range (single request)."""
+    """Fetch a league by month while retaining the existing range contract.
+
+    ESPN currently rejects YYYYMMDD-YYYYMMDD with HTTP 400, but accepts
+    YYYYMM with limit=500. Query each overlapping month, then let the existing
+    get_fixtures window filter and deduplicator retain only relevant games.
+    """
+    if "-" in date_range:
+        start_text, end_text = date_range.split("-", 1)
+        month = datetime.strptime(start_text, "%Y%m%d").date().replace(day=1)
+        end = datetime.strptime(end_text, "%Y%m%d").date()
+        fixtures: list[dict] = []
+        failures: list[tuple[str, str]] = []
+        any_active = False
+        last_success = None
+        while month <= end:
+            month_key = month.strftime("%Y%m")
+            fixtures.extend(_fetch_league(slug, month_key))
+            health = _FETCH_HEALTH.get(slug) or {}
+            any_active = any_active or bool(health.get("provider_active"))
+            if health.get("request_succeeded"):
+                last_success = health.get("last_successful_fetch") or last_success
+            else:
+                failures.append((month_key, str(health.get("error") or "unknown")))
+            month = (month.replace(day=28) + timedelta(days=4)).replace(day=1)
+        _FETCH_HEALTH[slug] = {
+            "provider_active": any_active,
+            "request_succeeded": not failures,
+            "scheduled_fixture_count": len(fixtures),
+            "last_successful_fetch": last_success,
+            "failed_months": [key for key, _ in failures],
+            "error": "; ".join(f"{key}: {err}" for key, err in failures)[:180]
+                     if failures else None,
+        }
+        return fixtures
     try:
         resp = requests.get(
             SCOREBOARD.format(slug=slug),
