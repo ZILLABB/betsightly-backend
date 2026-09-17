@@ -1,7 +1,7 @@
 """
 Content templates.
 
-Six templates, each rendered per platform. Everything is driven by the
+Templates are rendered per platform. Everything is driven by the
 dataset — no team, odds, date or prediction is ever written into a template.
 
 Platforms differ in more than length. Telegram allows structure and a link in
@@ -68,6 +68,8 @@ def _booking_lines(tier: dict) -> list[str]:
     locked at 08:00 will not quote the same numbers by evening. Saying when it
     was priced is the difference between a convenience and a claim.
     """
+    if not tier.get("booking_verified") or not tier.get("actionable"):
+        return []
     booking = tier.get("booking") or {}
     code = booking.get("share_code")
     if not code:
@@ -76,6 +78,85 @@ def _booking_lines(tier: dict) -> list[str]:
     note = f"_Priced {priced} UTC — check the slip before you stake._" if priced \
         else "_Check the slip before you stake._"
     return ["", f"\U0001f3ab SportyBet code: `{code}`", note]
+
+
+def _code_board_tier(tier: dict, heading: str) -> list[str]:
+    """Compact, truthful status for one accumulator on the code board."""
+    lines = [heading]
+    if not tier.get("selected") or not tier.get("legs"):
+        lines += ["No safe slip today.", "We won't force this ticket."]
+        return lines
+    if not tier.get("actionable"):
+        lines += ["Today's slip is no longer actionable.",
+                  "See the next published card on BetSightly."]
+        return lines
+    booking = tier.get("booking") or {}
+    if not tier.get("booking_verified") or not booking.get("share_code"):
+        lines += [f"{len(tier['legs'])} leg"
+                  + ("" if len(tier["legs"]) == 1 else "s"),
+                  "No verified SportyBet code available."]
+        return lines
+
+    count = len(tier["legs"])
+    lines.append(f"{count} leg" + ("" if count == 1 else "s"))
+    lines.append(f"Code: `{booking['share_code']}`")
+    status = str(booking.get("booking_status") or "").upper()
+    if status == "REBUILT_FULL":
+        lines.append("✅ Validated replacement slip")
+        replacements = int(booking.get("replacement_count") or 0)
+        if replacements:
+            noun = "selection was" if replacements == 1 else "selections were"
+            lines.append(f"{replacements} unavailable {noun} replaced before booking.")
+    else:
+        lines.append(f"✅ {count}/{count} selections validated")
+    actual = booking.get("actual_sportybet_odds")
+    try:
+        actual_value = float(actual)
+    except (TypeError, ValueError):
+        actual_value = 0.0
+    if actual_value > 1.0:
+        lines.append(f"Actual SportyBet odds: {actual_value:.2f}x")
+    return lines
+
+
+def codes(data: dict, platform: str, ref: str | None = None) -> dict | None:
+    """Morning Telegram board of validated, still-actionable booking codes."""
+    if platform != "telegram":
+        return None
+    url = build_url(
+        "predictions", channel=platform, campaign="sportybet_codes",
+        content="morning_code_board", ref=ref,
+    )
+    lines = ["🎟️ *BETSIGHTLY — TODAY'S SPORTYBET CODES*",
+             f"_{_nice_date(data.get('date'))}_", ""]
+    tiers = (
+        ("banker", "🛡 *BANKER*"),
+        ("two_odds", "🎯 *2 ODDS*"),
+        ("five_odds", "⚡ *5 ODDS*"),
+        ("ten_odds", "🚀 *10 ODDS*"),
+    )
+    for key, heading in tiers:
+        lines += _code_board_tier(data.get(key) or {}, heading) + [""]
+
+    rollover_tier = data.get("rollover") or {}
+    day = rollover_tier.get("day_number")
+    target = rollover_tier.get("target_days") or 3
+    rollover_heading = "🔁 *ROLLOVER*"
+    if day:
+        rollover_heading = f"🔁 *ROLLOVER — DAY {day} OF {target}*"
+    lines += _code_board_tier(rollover_tier, rollover_heading) + [""]
+
+    singles = data.get("over_1_5") or {}
+    single_legs = singles.get("legs") or []
+    lines += ["⚽ *OVER 1.5 SINGLES*",
+              f"{len(single_legs)} independent pick"
+              + ("" if len(single_legs) == 1 else "s"),
+              "Bet separately.",
+              "See today's full list on BetSightly.", "",
+              "⚠️ SportyBet prices can change.",
+              "Always inspect the loaded selections and current odds before staking.",
+              "", f"[Open today's predictions]({url})"]
+    return {"text": "\n".join(lines), "parse_mode": "Markdown", "url": url}
 
 
 def best_pick(data: dict, platform: str, ref: str | None = None) -> dict | None:
@@ -254,79 +335,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
     return {"heading": f"Today's Top {len(legs)}", "legs": legs, "url": url}
 
 
-# ── Template C — Value ─────────────────────────────────────
-
-def value_alert(data: dict, platform: str, ref: str | None = None) -> dict | None:
-    bets = data.get("value_bets") or []
-    if not bets:
-        return None
-    top = bets[0]
-    url = build_url("value", channel=platform, campaign="value_alert",
-                    content="value", ref=ref)
-    match = f"{top['home_team']} vs {top['away_team']}"
-    # The caveat travels with the number or the number is misleading.
-    caveat = (" (exchange price — before commission)" if top.get("is_exchange") else "")
-
-    if platform == "telegram":
-        lines = [
-            "\U0001f4b0 *Betsightly Value Alert*", "",
-            f"*{match}*", f"{top['league']}", "",
-            f"➡️ {top['prediction']}",
-            f"\U0001f3e6 Best price: {top['odds']:.2f} at {top['book']}{caveat}",
-            f"\U0001f4c8 Edge vs the market: +{top['edge_pct']}%",
-            f"\U0001f50d Compared across {top['book_count']} bookmakers",
-            "",
-            "_The edge only exists at the book named above — a different book "
-            "prices this differently._", "",
-            f"[More value bets]({url})",
-        ]
-        return {"text": "\n".join(lines), "parse_mode": "Markdown", "url": url}
-
-    if platform == "x":
-        return {"text": (
-            f"\U0001f4b0 Value Alert\n\n{match}\n"
-            f"{top['prediction']} @ {top['odds']:.2f} ({top['book']})\n"
-            f"+{top['edge_pct']}% vs {top['book_count']}-book consensus\n\n{url}"
-        ), "url": url}
-
-    if platform == "instagram":
-        return {"caption": (
-            f"\U0001f4b0 VALUE ALERT\n\n{match}\n{top['league']}\n\n"
-            f"{top['prediction']}\n"
-            f"Best price {top['odds']:.2f} at {top['book']}\n"
-            f"+{top['edge_pct']}% against a {top['book_count']}-book consensus\n\n"
-            f"The edge only exists at that book.\n\nLink in bio\n\n"
-            f"#bettingvalue #footballpredictions #valuebetting"
-        ), "url": url, "card": {"kind": "value", "bet": top}}
-
-    if platform == "facebook":
-        return {"text": (
-            f"\U0001f4b0 Value Alert\n\n{match} ({top['league']})\n"
-            f"{top['prediction']} — best price {top['odds']:.2f} at {top['book']}{caveat}\n"
-            f"That is +{top['edge_pct']}% against the consensus of {top['book_count']} bookmakers.\n\n"
-            f"The edge exists only at that book, not at whichever one you normally use.\n\n{url}"
-        ), "url": url}
-
-    if platform in ("tiktok", "youtube"):
-        return {
-            "hook": "This bookmaker is out of step with forty others.",
-            "script": [
-                f"{match}.",
-                f"Most books price {top['prediction']} around the same number.",
-                f"{top['book']} is offering {top['odds']:.2f}.",
-                f"Against the consensus of {top['book_count']} books, that is a {top['edge_pct']} percent edge.",
-                "You have to bet it at that book. Anywhere else, the edge is gone.",
-            ],
-            "cta": "Full value list on the site — link in bio.",
-            "title": f"Value Bet: {match}",
-            "description": f"+{top['edge_pct']}% edge at {top['book']}. {url}",
-            "url": url,
-        }
-
-    return {"heading": "Value Bets", "bets": bets, "url": url}
-
-
-# ── Template D — Accumulator (2 / 5 / 10 odds) ─────────────
+# ── Accumulator (2 / 5 / 10 odds) ──────────────────────────
 
 def accumulator(data: dict, platform: str, tier_key: str = "two_odds",
                 ref: str | None = None) -> dict | None:
@@ -403,6 +412,53 @@ def accumulator(data: dict, platform: str, tier_key: str = "two_odds",
     return {"heading": f"{tier['label']} Accumulator", "tier": tier, "url": url}
 
 
+# ── Rollover ───────────────────────────────────────────────
+
+def rollover(data: dict, platform: str, ref: str | None = None) -> dict | None:
+    tier = data.get("rollover") or {}
+    legs = tier.get("legs") or []
+    if not tier.get("selected") or not legs:
+        return None
+
+    day = tier.get("day_number") or 1
+    target = tier.get("target_days") or 3
+    hit = float(tier.get("hit_probability") or 0)
+    complete = tier.get("completion_probability")
+    url = build_url("rollover", channel=platform, campaign="rollover",
+                    content=f"day_{day}", ref=ref)
+
+    if platform == "telegram":
+        lines = [f"🔁 *Rollover · Day {day} of {target}*",
+                 f"_{_nice_date(data.get('date'))}_", ""]
+        for leg in legs:
+            lines += [
+                f"• *{leg['home_team']} vs {leg['away_team']}*",
+                f"    {leg['prediction']} @ {_odds_str(leg)} "
+                f"({safe_confidence(leg['confidence'])})",
+            ]
+        lines += ["", f"💵 Today’s odds: *{tier['total_odds']:.2f}x*",
+                  f"📊 Today’s slip lands about *{hit:.0%}* of the time."]
+        if complete is not None:
+            lines.append(
+                f"All {target} scheduled days land about *{float(complete):.0%}* "
+                "of the time at the current model estimates."
+            )
+        lines += _booking_lines(tier)
+        lines += ["", f"[Open the rollover challenge]({url})"]
+        return {"text": "\n".join(lines), "parse_mode": "Markdown", "url": url}
+
+    if platform == "x":
+        return {"text": (
+            f"🔁 Rollover Day {day}/{target} — {tier['total_odds']:.2f}x\n\n"
+            + "\n".join(f"• {leg['home_team']} v {leg['away_team']}: "
+                         f"{leg['prediction']}" for leg in legs)
+            + f"\n\nDaily landing estimate: {hit:.0%}\n{url}"
+        ), "url": url}
+
+    return {"heading": f"Rollover Day {day} of {target}",
+            "tier": tier, "url": url}
+
+
 # ── Template E — Over 1.5 ──────────────────────────────────
 
 def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
@@ -410,24 +466,27 @@ def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
     if not tier.get("selected") or not tier.get("legs"):
         return None
     legs = tier["legs"]
+    average = sum(float(leg.get("confidence") or 0) for leg in legs) / len(legs)
+    count_line = f"{len(legs)} independent pick" + ("" if len(legs) == 1 else "s")
+    average_line = f"Average pick confidence: {safe_confidence(average)}"
     url = build_url("predictions", channel=platform, campaign="over_15",
                     content="over_1_5", ref=ref)
 
     if platform == "telegram":
-        lines = ["⚽ *Today's Over 1.5 Picks*",
-                 f"_{_nice_date(data.get('date'))}_", ""]
+        lines = ["⚽ *Today's Over 1.5 Singles*",
+                 f"_{_nice_date(data.get('date'))}_", "",
+                 count_line, average_line, "*Bet separately.*", ""]
         for leg in legs:
             lines += [
                 f"• *{leg['home_team']} vs {leg['away_team']}*",
                 f"    {leg['league']} · {safe_confidence(leg['confidence'])} @ {_odds_str(leg)}",
             ]
-        lines += ["", f"\U0001f4b5 Combined: *{tier['total_odds']:.2f}x* — "
-                      f"lands about {tier['hit_probability']:.0%} of the time.",
-                  "", f"[Full card]({url})"]
+        lines += ["", f"[Full singles list]({url})"]
         return {"text": "\n".join(lines), "parse_mode": "Markdown", "url": url}
 
     if platform == "x":
-        body = ["⚽ Over 1.5 picks today", ""]
+        body = ["⚽ Over 1.5 singles today", count_line,
+                average_line, "Bet separately.", ""]
         for leg in legs[:4]:
             body.append(f"• {leg['home_team']} v {leg['away_team']} "
                         f"({safe_confidence(leg['confidence'])})")
@@ -435,37 +494,48 @@ def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
         return {"text": "\n".join(body), "url": url}
 
     if platform == "instagram":
-        cap = ["⚽ TODAY'S OVER 1.5 PICKS", ""]
+        cap = ["⚽ TODAY'S OVER 1.5 SINGLES", count_line,
+               average_line, "BET SEPARATELY", ""]
         for leg in legs:
             cap.append(f"• {leg['home_team']} v {leg['away_team']} — "
                        f"{safe_confidence(leg['confidence'])}")
-        cap += ["", f"Combined {tier['total_odds']:.2f}x", "Link in bio", "",
+        cap += ["", "Full singles list — link in bio", "",
                 "#over15 #footballtips #goals"]
+        card = {
+            "kind": "over15_singles", "legs": legs,
+            "leg_count": len(legs), "average_pick_confidence": average,
+            "presentation": "singles",
+        }
         return {"caption": "\n".join(cap), "url": url,
-                "card": {"kind": "over15", "tier": tier}}
+                "card": card}
 
     if platform == "facebook":
-        lines = ["⚽ Today's Over 1.5 Picks", ""]
+        lines = ["⚽ Today's Over 1.5 Singles", count_line,
+                 average_line, "Bet separately.", ""]
         for leg in legs:
             lines.append(f"• {leg['home_team']} vs {leg['away_team']} ({leg['league']}) — "
                          f"{safe_confidence(leg['confidence'])} @ {_odds_str(leg)}")
-        lines += ["", f"Combined {tier['total_odds']:.2f}x, landing about "
-                      f"{tier['hit_probability']:.0%} of the time.", "", url]
+        lines += ["", "See the full singles list on BetSightly.", "", url]
         return {"text": "\n".join(lines), "url": url}
 
     if platform in ("tiktok", "youtube"):
         return {
-            "hook": "Goals picks for today.",
+            "hook": "Independent goals picks for today.",
             "script": [f"{l['home_team']} against {l['away_team']}, over one point five goals, "
                        f"{safe_confidence(l['confidence'])} confidence." for l in legs]
-                      + [f"Together that is {tier['total_odds']:.2f} times your stake."],
-            "cta": "Link in bio.",
-            "title": "Over 1.5 Goals Predictions Today",
-            "description": f"{len(legs)} over 1.5 picks. {url}",
+                      + [f"These are {count_line.lower()}. Bet them separately.",
+                         average_line + "."],
+            "cta": "Full singles list — link in bio.",
+            "title": "Over 1.5 Goal Singles Today",
+            "description": f"{count_line}. Bet separately. {url}",
             "url": url,
         }
 
-    return {"heading": "Over 1.5 Picks", "tier": tier, "url": url}
+    return {
+        "heading": "Over 1.5 Singles", "presentation": "singles",
+        "leg_count": len(legs), "average_pick_confidence": average,
+        "legs": legs, "staking_note": "Bet separately.", "url": url,
+    }
 
 
 # ── Template F — Results ───────────────────────────────────
@@ -497,6 +567,13 @@ def results(data: dict, platform: str, ref: str | None = None) -> dict | None:
             else:
                 mark = "✅" if slip["status"] == "won" else "❌"
                 lines.append(f"{mark} {slip['label']} ({slip['total_odds']:.2f}x)")
+        for day in res.get("rollover_settled", []):
+            mark = {"won": "✅", "lost": "❌", "void": "➖"}.get(
+                day.get("status"), "⏳")
+            lines.append(
+                f"{mark} Rollover Day {day.get('day_number')} "
+                f"({float(day.get('combined_odds') or 0):.2f}x)"
+            )
         singles = res.get("singles") or {}
         if singles.get("settled"):
             lines.append("")
@@ -547,12 +624,13 @@ def results(data: dict, platform: str, ref: str | None = None) -> dict | None:
 
 # Registry — content.py drives everything through this.
 TEMPLATES = {
+    "codes": codes,
     "best_pick": best_pick,
     "daily_5": daily_5,
-    "value": value_alert,
     "two_odds": lambda d, p, ref=None: accumulator(d, p, "two_odds", ref),
     "five_odds": lambda d, p, ref=None: accumulator(d, p, "five_odds", ref),
     "ten_odds": lambda d, p, ref=None: accumulator(d, p, "ten_odds", ref),
+    "rollover": rollover,
     "over_1_5": over_15,
     "results": results,
 }

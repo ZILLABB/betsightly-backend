@@ -12,6 +12,7 @@ from database import get_db
 from fixture import Fixture
 from prediction import Prediction
 from services.fixture_service import FixtureService as OddsFixtureService
+from utils.security import require_api_key
 
 router = APIRouter()
 
@@ -116,7 +117,7 @@ def get_daily_fixtures_odds_api(
         raise HTTPException(status_code=500, detail="Failed to fetch fixtures")
 
 
-@router.post("/apifootball/sync")
+@router.post("/apifootball/sync", dependencies=[Depends(require_api_key)])
 def sync_fixtures_from_apifootball(
     date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format (defaults to today)"),
     db: Session = Depends(get_db)

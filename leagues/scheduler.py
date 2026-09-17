@@ -110,26 +110,59 @@ def _finish(run_date: str, report: dict) -> None:
         logger.warning(f"daily run bookkeeping failed: {e}")
 
 
-def _step(report: dict, name: str, fn):
+def _persist_progress(run_date: str, report: dict) -> None:
+    """Durably expose the active step without marking the run finished."""
+    import json
+    from sqlalchemy import text
+    from database import engine
+    try:
+        with engine.begin() as conn:
+            _ensure_table(conn)
+            conn.execute(text(
+                "UPDATE daily_runs SET status = 'running', report = :r WHERE run_date = :d"),
+                {"d": run_date, "r": json.dumps(report)[:8000]})
+    except Exception as exc:
+        logger.warning(f"daily run progress bookkeeping failed: {exc}")
+
+
+def _step(report: dict, name: str, fn, run_date: str | None = None):
     """Run one step, recording what happened without letting it end the run.
 
     A failure to settle yesterday must not stop today's card being published,
     and a Telegram outage must not stop either. Each step is recorded and the
     run continues.
     """
+    report["steps"][name] = {"status": "running", "started_at": _now()}
+    if run_date:
+        _persist_progress(run_date, report)
     try:
         result = fn()
-        report["steps"][name] = {"ok": True, "detail": result}
+        report["steps"][name] = {"status": "complete", "ok": True,
+                                 "started_at": report["steps"][name]["started_at"],
+                                 "finished_at": _now(), "detail": result}
+        if run_date:
+            _persist_progress(run_date, report)
         return result
     except Exception as e:
         logger.error(f"daily run step '{name}' failed: {e}", exc_info=True)
-        report["steps"][name] = {"ok": False, "error": str(e)[:300]}
+        from database import log_pool_exception, log_pool_status
+        log_pool_exception("daily_job_pool_timeout", e, step=name)
+        log_pool_status(
+            "daily_job_error", level=logging.ERROR,
+            step=name, error_type=type(e).__name__,
+        )
+        report["steps"][name] = {"status": "failed", "ok": False,
+                                 "started_at": report["steps"][name]["started_at"],
+                                 "finished_at": _now(), "error": str(e)[:300]}
         report["failed"].append(name)
+        if run_date:
+            _persist_progress(run_date, report)
         return None
 
 
 def run_daily_job(force: bool = False, publish: bool = True) -> dict:
     """The whole day, once. Safe to call repeatedly."""
+    from database import log_pool_exception, log_pool_status
     from leagues.daily_feed import _publish_date
 
     run_date = _publish_date()
@@ -138,28 +171,62 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
         "steps": {}, "failed": [], "started_at": _now(),
     }
 
-    claimed, why = _claim(run_date, force)
+    log_pool_status(
+        "daily_job_start", run_date=run_date,
+        force=bool(force), publish=bool(publish),
+    )
+    try:
+        claimed, why = _claim(run_date, force)
+    except Exception as exc:
+        log_pool_exception("daily_job_pool_timeout", exc, step="claim")
+        log_pool_status(
+            "daily_job_error", level=logging.ERROR, run_date=run_date,
+            step="claim", error_type=type(exc).__name__,
+        )
+        raise
     if not claimed:
         logger.info(f"daily run {run_date}: skipped — {why}")
+        log_pool_status(
+            "daily_job_end", run_date=run_date,
+            status="skipped", reason=why,
+        )
         return {**report, "status": "skipped", "reason": why}
 
     logger.info(f"daily run {run_date}: starting")
 
     # 1. Settle what finished, then refit on the new evidence.
     def _settle():
-        from leagues.results_checker import check_all_pending, settle_published_slips
+        from leagues.results_checker import (
+            check_all_pending, settle_builder_predictions,
+            settle_published_slips,
+        )
         summary = check_all_pending()
         slips = settle_published_slips()
-        return {"scores": summary, "slips": slips}
+        builders = settle_builder_predictions()
+        return {"scores": summary, "slips": slips, "builders": builders}
 
-    _step(report, "settle", _settle)
+    _step(report, "settle", _settle, run_date)
 
     def _recalibrate():
         from leagues.calibrator import fit_calibration
         fit = fit_calibration(force=True)
         return {"legs": fit.get("n", 0)}
 
-    _step(report, "calibrate", _recalibrate)
+    _step(report, "calibrate", _recalibrate, run_date)
+
+    def _prepare_weekly_board():
+        from leagues.engine import prepared_board_status, run_pipeline
+        run_pipeline(days_ahead=7, force=force)
+        status = prepared_board_status(days_ahead=7)
+        if not status.get("ready"):
+            raise RuntimeError(
+                "weekly board incomplete: "
+                f"{len((status.get('provider') or {}).get('failed_leagues') or [])} "
+                "provider fetches failed"
+            )
+        return status
+
+    _step(report, "weekly_board", _prepare_weekly_board, run_date)
 
     # 2. Build and lock the card. First write wins, so calling this again
     #    later in the day returns the same card rather than replacing it.
@@ -176,27 +243,59 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
             "tiers": {k: len(v.get("games") or []) for k, v in accs.items()},
         }
 
-    _step(report, "card", _publish_card)
+    _step(report, "card", _publish_card, run_date)
 
     # 3. Book the tiers. After the lock, so a code always describes the card
     #    that was actually published, and before distribution, so the Telegram
     #    post can carry the codes rather than a list to retype.
     def _book():
+        from leagues import daily_feed
         from leagues.booking import book_card
+        card = daily_feed.build_daily_accumulators()
+        report = book_card(run_date, (card or {}).get("accumulators") or {})
+        # Drop the served card so the codes appear now rather than whenever
+        # the cache next lapses. The card is cached for fifteen minutes and
+        # was built by the step above — before any of these codes existed —
+        # so without this the site shows a card with no codes on it while the
+        # codes sit in the database, and self-heals only on expiry.
+        daily_feed._accum_cache.update({"result": None, "ts": 0})
+        return report
+
+    _step(report, "book", _book, run_date)
+
+    # 4. Tell subscribers, counted off the card that was actually published.
+    #
+    # This used to run from application startup, which is why deploying sent
+    # a notification: the guard was a dict in process memory, so every new
+    # process announced the day again. Here it sits inside the claimed daily
+    # run and behind a delivery row of its own, so it fires once per
+    # publishing day whatever restarts happen — and it can no longer fire at
+    # three in the afternoon announcing the morning's card.
+    def _alert():
         from leagues.daily_feed import build_daily_accumulators
+        from services.push_notification_service import notify_predictions_ready
         card = build_daily_accumulators()
-        return book_card(run_date, (card or {}).get("accumulators") or {})
+        accs = (card or {}).get("accumulators") or {}
+        cats = {k: bool((c or {}).get("games"))
+                for k, c in accs.items() if k != "rollover"}
+        count = sum(len((c or {}).get("games") or [])
+                    for k, c in accs.items() if k != "rollover")
+        if not count:
+            return {"sent": False, "reason": "nothing published to announce"}
+        notify_predictions_ready(prediction_date=run_date,
+                                 predictions_count=count, categories=cats)
+        return {"sent": True, "picks": count}
 
-    _step(report, "book", _book)
+    _step(report, "alert", _alert, run_date)
 
-    # 4. Distribution. Its own duplicate guard sits on
+    # 5. Distribution. Its own duplicate guard sits on
     #    (publish_date, channel, template), so this is safe on a retry too.
     if publish:
         def _distribute():
             from growth.engine import run_daily
             return run_daily(publish=True)
 
-        _step(report, "distribute", _distribute)
+        _step(report, "distribute", _distribute, run_date)
     else:
         report["steps"]["distribute"] = {"ok": True, "detail": "skipped"}
 
@@ -207,6 +306,10 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
     logger.info(
         f"daily run {run_date}: {report['status']} "
         f"(failed: {report['failed'] or 'none'})")
+    log_pool_status(
+        "daily_job_end", run_date=run_date,
+        status=report["status"], failed=report["failed"],
+    )
     return report
 
 

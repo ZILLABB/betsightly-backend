@@ -8,10 +8,9 @@ It centralizes shared functionality to reduce code duplication.
 import os
 import logging
 import json
+import math
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple, Union, Callable
-import pandas as pd
-import numpy as np
 
 # Set up logging
 def setup_logging(name: str, level: int = logging.INFO) -> logging.Logger:
@@ -107,16 +106,33 @@ def json_serializer(obj: Any) -> Any:
     Returns:
         Serialized object
     """
-    if isinstance(obj, (datetime, pd.Timestamp)):
+    if isinstance(obj, datetime):
         return obj.isoformat()
-    if isinstance(obj, np.integer):
-        return int(obj)
-    if isinstance(obj, np.floating):
-        return float(obj)
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if pd.isna(obj):
+    if isinstance(obj, float) and math.isnan(obj):
         return None
+
+    # pandas/numpy are sizeable imports. Most API processes only use this
+    # module for setup_logging, so import scientific types only when a value
+    # from one of those packages actually reaches the JSON serializer.
+    value_module = type(obj).__module__.split(".", 1)[0]
+    if value_module == "pandas":
+        import pandas as pd
+
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        if pd.isna(obj):
+            return None
+    if value_module == "numpy":
+        import numpy as np
+
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if np.isscalar(obj) and np.isnan(obj):
+            return None
     raise TypeError(f"Type {type(obj)} not serializable")
 
 def safe_divide(numerator: Union[int, float], denominator: Union[int, float], default: Union[int, float] = 0) -> Union[int, float]:

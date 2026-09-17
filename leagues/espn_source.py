@@ -28,63 +28,73 @@ from pathlib import Path
 
 import requests
 
+from leagues.competition_registry import provider_slugs, tournament_context
+
 logger = logging.getLogger(__name__)
 
-CACHE_PATH = Path(__file__).parent.parent / "cache" / "espn_fixtures.json"
+from leagues.cache_paths import cache_path
+
+CACHE_PATH = cache_path(
+    Path(__file__).parent.parent / "cache" / "espn_fixtures.json"
+)
 CACHE_TTL = 3 * 3600  # 3 hours — odds drift, but not minute to minute
+CACHE_SCHEMA_VERSION = 3  # refresh snapshots after switching to ESPN month queries
 
 SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard"
 
-# Every league we track. Out-of-season leagues simply return no fixtures, so
-# listing them costs one cheap request and means European leagues light up
-# automatically when their seasons start.
-ESPN_CLUB_LEAGUES = {
-    # Europe — top flights
-    "eng.1": "Premier League", "eng.2": "EFL Championship", "eng.3": "EFL League One",
-    "eng.4": "EFL League Two", "eng.fa": "FA Cup", "eng.league_cup": "Carabao Cup",
-    "esp.1": "LaLiga", "esp.2": "LaLiga 2", "esp.copa_del_rey": "Copa del Rey",
-    "ger.1": "Bundesliga", "ger.2": "2. Bundesliga", "ger.dfb_pokal": "DFB Pokal",
-    "ita.1": "Serie A", "ita.2": "Serie B", "ita.coppa_italia": "Coppa Italia",
-    "fra.1": "Ligue 1", "fra.2": "Ligue 2",
-    "por.1": "Primeira Liga", "ned.1": "Eredivisie", "bel.1": "Belgian Pro League",
-    "tur.1": "Süper Lig", "sui.1": "Swiss Super League", "aut.1": "Austrian Bundesliga",
-    "gre.1": "Greek Super League", "sco.1": "Scottish Premiership",
-    "sco.2": "Scottish Championship", "den.1": "Danish Superliga",
-    "nor.1": "Eliteserien", "swe.1": "Allsvenskan", "fin.1": "Veikkausliiga",
-    "irl.1": "League of Ireland", "pol.1": "Ekstraklasa", "cze.1": "Czech First League",
-    "rou.1": "Liga I", "rus.1": "Russian Premier League", "ukr.1": "Ukrainian Premier League",
-    "cro.1": "HNL", "srb.1": "Serbian SuperLiga", "hun.1": "NB I", "isr.1": "Ligat ha'Al",
-    # UEFA clubs
-    "uefa.champions": "UEFA Champions League", "uefa.europa": "UEFA Europa League",
-    "uefa.europa.conf": "UEFA Conference League",
-    # North & Central America
-    "usa.1": "MLS", "usa.nwsl": "NWSL", "usa.usl.1": "USL Championship",
-    "mex.1": "Liga MX", "mex.2": "Liga de Expansión MX", "can.1": "Canadian Premier League",
-    "crc.1": "Liga Promerica", "gua.1": "Liga Nacional Guatemala",
-    "hon.1": "Liga Nacional Honduras", "slv.1": "Primera División El Salvador",
-    "pan.1": "LPF Panamá", "jam.1": "Jamaica Premier League",
-    "concacaf.champions": "CONCACAF Champions Cup",
-    # South America
-    "bra.1": "Brasileirão Série A", "bra.2": "Brasileirão Série B",
-    "arg.1": "Liga Profesional Argentina", "arg.2": "Primera Nacional",
-    "chi.1": "Primera División Chile", "col.1": "Categoría Primera A",
-    "per.1": "Liga 1 Perú", "uru.1": "Primera División Uruguay",
-    "ecu.1": "LigaPro Ecuador", "par.1": "División Profesional Paraguay",
-    "bol.1": "División Profesional Bolivia", "ven.1": "Primera División Venezuela",
-    "conmebol.libertadores": "Copa Libertadores", "conmebol.sudamericana": "Copa Sudamericana",
-    # Asia & Oceania
-    "jpn.1": "J1 League", "jpn.2": "J2 League", "kor.1": "K League 1",
-    "chn.1": "Chinese Super League", "aus.1": "A-League", "idn.1": "Liga 1 Indonesia",
-    "tha.1": "Thai League 1", "ind.1": "Indian Super League", "mys.1": "Malaysia Super League",
-    "qat.1": "Qatar Stars League", "sau.1": "Saudi Pro League", "uae.1": "UAE Pro League",
-    "irn.1": "Persian Gulf Pro League",
-    # Africa
-    "rsa.1": "South African Premiership", "egy.1": "Egyptian Premier League",
-    "mar.1": "Botola Pro", "tun.1": "Tunisian Ligue 1", "alg.1": "Algerian Ligue 1",
-    "nga.1": "Nigeria Premier League", "gha.1": "Ghana Premier League",
-    # Misc
-    "club.friendly": "Club Friendly",
-}
+# Compatibility name retained for existing callers. The registry is now the
+# only source of truth and includes club and international competitions.
+ESPN_CLUB_LEAGUES = provider_slugs()
+ESPN_COMPETITIONS = ESPN_CLUB_LEAGUES
+_FETCH_HEALTH: dict[str, dict] = {}
+_LAST_CACHE_METADATA: dict = {}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _registry_version(leagues: dict | None = None) -> str:
+    names = sorted((leagues or ESPN_CLUB_LEAGUES).keys())
+    return hashlib.sha256("|".join(names).encode()).hexdigest()[:12]
+
+
+def cache_metadata() -> dict:
+    """Metadata for the fixture snapshot returned by the latest call."""
+    return dict(_LAST_CACHE_METADATA)
+
+
+def _parse_time(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _filter_window(fixtures: list[dict], start: datetime,
+                   end: datetime) -> list[dict]:
+    filtered = []
+    for fixture in fixtures:
+        kickoff = _parse_time(fixture.get("commence_time"))
+        if kickoff is not None and start <= kickoff <= end:
+            filtered.append(fixture)
+    return sorted(filtered, key=lambda fixture: fixture["commence_time"])
+
+
+def _cache_covers(payload: dict, start: datetime, end: datetime) -> bool:
+    metadata = payload.get("metadata") or {}
+    cached_start = _parse_time(metadata.get("coverage_start"))
+    cached_end = _parse_time(metadata.get("coverage_end"))
+    return bool(
+        payload.get("schema_version") == CACHE_SCHEMA_VERSION
+        and metadata.get("complete") is True
+        and cached_start is not None and cached_end is not None
+        and cached_start <= start and cached_end >= end
+        and metadata.get("registry_version") == _registry_version()
+        and set(metadata.get("leagues_requested") or [])
+        == set(ESPN_CLUB_LEAGUES)
+    )
 
 
 # ── Odds helpers ───────────────────────────────────────────
@@ -184,6 +194,19 @@ def _parse_odds(competition: dict) -> dict:
         out["implied_over"] = round(ou.get("over", 0), 4)
         out["implied_under"] = round(ou.get("under", 0), 4)
         out["ou_line"] = float(line) if line is not None else None
+        captured_at = datetime.now(timezone.utc).isoformat()
+        out["captured_at"] = captured_at
+        out["total_quotes"] = [{
+            "market": "total_goals",
+            "period": "full_game",
+            "line": float(line) if line is not None else None,
+            "over_odds": over_dec,
+            "under_odds": under_dec,
+            "implied_over": out["implied_over"],
+            "implied_under": out["implied_under"],
+            "captured_at": captured_at,
+            "source": out.get("provider"),
+        }]
 
     return out
 
@@ -191,16 +214,59 @@ def _parse_odds(competition: dict) -> dict:
 # ── Fixture fetching ───────────────────────────────────────
 
 def _fetch_league(slug: str, date_range: str) -> list[dict]:
-    """Scheduled fixtures for one league across a date range (single request)."""
+    """Fetch a league by month while retaining the existing range contract.
+
+    ESPN currently rejects YYYYMMDD-YYYYMMDD with HTTP 400, but accepts
+    YYYYMM with limit=500. Query each overlapping month, then let the existing
+    get_fixtures window filter and deduplicator retain only relevant games.
+    """
+    if "-" in date_range:
+        start_text, end_text = date_range.split("-", 1)
+        month = datetime.strptime(start_text, "%Y%m%d").date().replace(day=1)
+        end = datetime.strptime(end_text, "%Y%m%d").date()
+        fixtures: list[dict] = []
+        failures: list[tuple[str, str]] = []
+        any_active = False
+        last_success = None
+        while month <= end:
+            month_key = month.strftime("%Y%m")
+            fixtures.extend(_fetch_league(slug, month_key))
+            health = _FETCH_HEALTH.get(slug) or {}
+            any_active = any_active or bool(health.get("provider_active"))
+            if health.get("request_succeeded"):
+                last_success = health.get("last_successful_fetch") or last_success
+            else:
+                failures.append((month_key, str(health.get("error") or "unknown")))
+            month = (month.replace(day=28) + timedelta(days=4)).replace(day=1)
+        _FETCH_HEALTH[slug] = {
+            "provider_active": any_active,
+            "request_succeeded": not failures,
+            "scheduled_fixture_count": len(fixtures),
+            "last_successful_fetch": last_success,
+            "failed_months": [key for key, _ in failures],
+            "error": "; ".join(f"{key}: {err}" for key, err in failures)[:180]
+                     if failures else None,
+        }
+        return fixtures
     try:
         resp = requests.get(
             SCOREBOARD.format(slug=slug),
             params={"dates": date_range, "limit": 500}, timeout=25,
         )
         if resp.status_code != 200:
+            _FETCH_HEALTH[slug] = {
+                "provider_active": False,
+                "request_succeeded": False,
+                "error": f"HTTP {resp.status_code}",
+            }
             return []
         payload = resp.json()
     except Exception as e:
+        _FETCH_HEALTH[slug] = {
+            "provider_active": False,
+            "request_succeeded": False,
+            "error": str(e)[:180],
+        }
         logger.debug(f"ESPN fetch failed {slug}: {e}")
         return []
 
@@ -230,6 +296,8 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
                     rec = r.get("summary", "")
                     break
             return {
+                "id": t.get("id"),
+                "uid": t.get("uid"),
                 "name": t.get("displayName", ""),
                 "short": t.get("shortDisplayName", ""),
                 "abbrev": t.get("abbreviation", ""),
@@ -245,6 +313,7 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
             broadcasts.extend(b.get("names") or [])
 
         h, a = team_info(home), team_info(away)
+        context = tournament_context(slug, ev, comp)
         out.append({
             "event_id": ev.get("id"),
             "league_slug": slug,
@@ -259,45 +328,138 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
             },
             "broadcast": broadcasts,
             "odds": _parse_odds(comp),
+            "competition": context,
+            **{key: context.get(key) for key in (
+                "competition_type", "region", "team_type", "stage", "round",
+                "leg_number", "knockout", "neutral_venue", "context_label",
+            )},
         })
+    _FETCH_HEALTH[slug] = {
+        "provider_active": bool(payload.get("leagues")),
+        # A valid empty scoreboard is still a complete provider response. It
+        # must not poison the wide cache merely because this league has no
+        # scheduled fixture inside the requested window.
+        "request_succeeded": True,
+        "scheduled_fixture_count": len(out),
+        "last_successful_fetch": datetime.now(timezone.utc).isoformat(),
+        "error": None,
+    }
     return out
 
 
-def get_fixtures(days_ahead: int = 3, force: bool = False) -> list[dict]:
+def fetch_health() -> dict[str, dict]:
+    """Last in-process provider health, keyed by competition slug."""
+    return {slug: dict(value) for slug, value in _FETCH_HEALTH.items()}
+
+
+def get_fixtures(days_ahead: int = 3, force: bool = False,
+                 now: datetime | None = None) -> list[dict]:
     """All scheduled fixtures with odds across every tracked league. Cached."""
+    global _LAST_CACHE_METADATA
+    days_ahead = max(1, min(14, int(days_ahead)))
+    now = now or _utcnow()
+    requested_end = now + timedelta(days=days_ahead)
     if not force and CACHE_PATH.exists():
         try:
             if time.time() - CACHE_PATH.stat().st_mtime < CACHE_TTL:
                 cached = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-                if cached:
-                    return cached
+                if isinstance(cached, dict) and _cache_covers(
+                        cached, now, requested_end):
+                    fixtures = _filter_window(
+                        cached.get("fixtures") or [], now, requested_end
+                    )
+                    _LAST_CACHE_METADATA = {
+                        **(cached.get("metadata") or {}),
+                        "cache_hit": True,
+                        "requested_days": days_ahead,
+                        "returned_fixture_count": len(fixtures),
+                    }
+                    return fixtures
         except Exception:
             pass
 
-    now = datetime.now(timezone.utc)
     date_range = f"{now.strftime('%Y%m%d')}-{(now + timedelta(days=days_ahead)).strftime('%Y%m%d')}"
 
+    for slug in ESPN_CLUB_LEAGUES:
+        _FETCH_HEALTH.pop(slug, None)
     fixtures: list[dict] = []
-    with ThreadPoolExecutor(max_workers=16) as pool:
-        for chunk in pool.map(lambda s: _fetch_league(s, date_range), ESPN_CLUB_LEAGUES):
+    pending = list(ESPN_CLUB_LEAGUES)
+    for retry_round in range(3):
+        if not pending:
+            break
+        if retry_round:
+            time.sleep(.15 * retry_round)
+        attempted = list(pending)
+        with ThreadPoolExecutor(max_workers=min(16, len(attempted))) as pool:
+            chunks = list(pool.map(
+                lambda slug: _fetch_league(slug, date_range), attempted
+            ))
+        for chunk in chunks:
             fixtures.extend(chunk)
+        # `_fetch_league` marks a valid empty scoreboard successful, so only
+        # transport/provider failures enter the next bounded retry round.
+        pending = [
+            slug for slug in attempted
+            if not (_FETCH_HEALTH.get(slug) or {}).get("request_succeeded")
+        ]
+
+    # Provider registries occasionally overlap competitions. Preserve the
+    # first normalized fixture and never let retries or overlap duplicate it.
+    unique = {}
+    for fixture in fixtures:
+        key = (
+            str((fixture.get("home") or {}).get("name") or "").casefold(),
+            str((fixture.get("away") or {}).get("name") or "").casefold(),
+            str(fixture.get("commence_time") or ""),
+        )
+        unique.setdefault(key, fixture)
+    fixtures = list(unique.values())
 
     # Drop fixtures that already kicked off
-    cutoff = now.isoformat().replace("+00:00", "Z")
-    fixtures = [f for f in fixtures if f["commence_time"] >= cutoff]
-    fixtures.sort(key=lambda f: f["commence_time"])
+    fixtures = _filter_window(fixtures, now, requested_end)
 
     for f in fixtures:
         f["match_id"] = hashlib.md5(
             f"{f['home']['name']}{f['away']['name']}{f['commence_time']}".encode()
         ).hexdigest()
 
+    successful = sorted(
+        slug for slug in ESPN_CLUB_LEAGUES
+        if (_FETCH_HEALTH.get(slug) or {}).get("request_succeeded")
+    )
+    failed = sorted(slug for slug in ESPN_CLUB_LEAGUES if slug not in successful)
+    metadata = {
+        "generated_at": _utcnow().isoformat(),
+        "requested_days": days_ahead,
+        "coverage_start": now.isoformat(),
+        "coverage_end": requested_end.isoformat(),
+        "leagues_requested": sorted(ESPN_CLUB_LEAGUES),
+        "successful_leagues": successful,
+        "failed_leagues": failed,
+        "fixture_count": len(fixtures),
+        "complete": not failed,
+        "successful_league_count": len(successful),
+        "requested_league_count": len(ESPN_CLUB_LEAGUES),
+        "failed_league_count": len(failed),
+        "registry_version": _registry_version(),
+        "cache_hit": False,
+        "returned_fixture_count": len(fixtures),
+    }
+    _LAST_CACHE_METADATA = metadata
     try:
         CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CACHE_PATH.write_text(json.dumps(fixtures, ensure_ascii=False), encoding="utf-8")
+        CACHE_PATH.write_text(json.dumps({
+            "schema_version": CACHE_SCHEMA_VERSION,
+            "metadata": metadata,
+            "fixtures": fixtures,
+        }, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass
 
     with_odds = sum(1 for f in fixtures if f["odds"].get("implied"))
-    logger.info(f"ESPN: {len(fixtures)} fixtures across {len(ESPN_CLUB_LEAGUES)} leagues ({with_odds} priced)")
+    logger.info(
+        "ESPN: %s fixtures across %s/%s leagues (%s priced, complete=%s)",
+        len(fixtures), len(successful), len(ESPN_CLUB_LEAGUES), with_odds,
+        metadata["complete"],
+    )
     return fixtures

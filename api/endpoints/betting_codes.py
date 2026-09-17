@@ -18,6 +18,7 @@ from punter import Punter
 from bookmaker import Bookmaker
 from schemas.betting_code import BettingCodeCreate, BettingCodeUpdate, BettingCodeResponse, BettingCodeListResponse
 from utils.common import setup_logging
+from utils.security import require_api_key
 
 # Set up logging
 logger = setup_logging(__name__)
@@ -28,8 +29,8 @@ router = APIRouter()
 @router.get("/", response_model=BettingCodeListResponse)
 def get_betting_codes(
     db: Session = Depends(get_db),
-    skip: int = Query(0, description="Number of codes to skip"),
-    limit: int = Query(100, description="Maximum number of codes to return"),
+    skip: int = Query(0, ge=0, description="Number of codes to skip"),
+    limit: int = Query(100, ge=1, le=200, description="Maximum number of codes to return"),
     punter_id: Optional[int] = Query(None, description="Filter by punter ID"),
     code: Optional[str] = Query(None, description="Filter by code value"),
     featured: Optional[bool] = Query(None, description="Filter by featured status"),
@@ -124,7 +125,7 @@ def get_betting_code(
         logger.error(f"Error getting betting code {code_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve betting code")
 
-@router.post("/", response_model=BettingCodeResponse)
+@router.post("/", response_model=BettingCodeResponse, dependencies=[Depends(require_api_key)])
 def create_betting_code(
     betting_code: BettingCodeCreate,
     db: Session = Depends(get_db)
@@ -178,7 +179,7 @@ def create_betting_code(
         logger.error(f"Error creating betting code: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to create betting code")
 
-@router.put("/{code_id}", response_model=BettingCodeResponse)
+@router.put("/{code_id}", response_model=BettingCodeResponse, dependencies=[Depends(require_api_key)])
 def update_betting_code(
     code_id: int,
     betting_code: BettingCodeUpdate,
@@ -236,7 +237,7 @@ def update_betting_code(
         logger.error(f"Error updating betting code {code_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to update betting code")
 
-@router.delete("/{code_id}")
+@router.delete("/{code_id}", dependencies=[Depends(require_api_key)])
 def delete_betting_code(
     code_id: int,
     db: Session = Depends(get_db)

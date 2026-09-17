@@ -19,6 +19,7 @@ import logging
 import time
 import threading
 import requests
+from leagues.competition_registry import regulation_score
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 
@@ -43,6 +44,11 @@ APIFOOTBALL_LEAGUES = {
 SCORES_SPORTS_WC = ["soccer_fifa_world_cup"]
 
 _last_successful_check: Optional[str] = None
+
+# A result missing for this long is overwhelmingly likely to be postponed,
+# cancelled, or absent from the source rather than merely still in play.  At
+# that point only the missing leg is voided; known legs retain their results.
+MISSING_RESULT_GRACE = timedelta(hours=48)
 
 
 # ── ESPN scores fetcher (PRIMARY — no API key needed) ────────
@@ -108,7 +114,7 @@ def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, D
             for event in _fetch_espn_scores(espn_slug, espn_date):
                 comp = (event.get("competitions") or [{}])[0]
                 status = comp.get("status", {}).get("type", {}).get("name", "")
-                if status != "STATUS_FULL_TIME":
+                if not comp.get("status", {}).get("type", {}).get("completed"):
                     continue
                 teams = comp.get("competitors", [])
                 if len(teams) < 2:
@@ -117,11 +123,10 @@ def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, D
                 away_data = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
                 home = home_data.get("team", {}).get("displayName", "")
                 away = away_data.get("team", {}).get("displayName", "")
-                try:
-                    home_score = int(home_data.get("score", 0))
-                    away_score = int(away_data.get("score", 0))
-                except (ValueError, TypeError):
+                score = regulation_score(comp)
+                if not score:
                     continue
+                home_score, away_score = score["home_score"], score["away_score"]
 
                 payload = {
                     "home": home,
@@ -129,6 +134,10 @@ def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, D
                     "home_score": home_score,
                     "away_score": away_score,
                     "completed": True,
+                    **{key: score.get(key) for key in (
+                        "score_90", "score_extra_time", "penalty_score",
+                        "qualified_team", "match_status",
+                    )},
                 }
                 # Index under BOTH the ESPN date and the original requested dates
                 # so matching works regardless of timezone shift
@@ -182,14 +191,20 @@ def _collect_apifootball_scores(sport_keys: List[str], date_from: str, date_to: 
         for fx in _fetch_apifootball_scores(league_id, date_from, date_to):
             teams = fx.get("teams", {})
             goals = fx.get("goals", {})
+            scores = fx.get("score", {})
+            regulation = scores.get("fulltime") or goals
             fixture_info = fx.get("fixture", {})
             home = teams.get("home", {}).get("name", "")
             away = teams.get("away", {}).get("name", "")
-            home_score = goals.get("home")
-            away_score = goals.get("away")
+            home_score = regulation.get("home")
+            away_score = regulation.get("away")
             if home_score is None or away_score is None:
                 continue
-            payload = {"home": home, "away": away, "home_score": int(home_score), "away_score": int(away_score), "completed": True}
+            payload = {"home": home, "away": away, "home_score": int(home_score), "away_score": int(away_score), "completed": True,
+                       "score_90": {"home": int(home_score), "away": int(away_score)},
+                       "score_extra_time": scores.get("extratime"),
+                       "penalty_score": scores.get("penalty"),
+                       "match_status": (fixture_info.get("status") or {}).get("short")}
             fixture_date = (fixture_info.get("date") or "")[:10]
             ck = f"{_normalize_name(home)}|{_normalize_name(away)}|{fixture_date}"
             finished[ck] = payload
@@ -284,7 +299,7 @@ def _collect_espn_scores_ranged(start_date: str, end_date: str) -> Dict[str, Dic
         return {}
     rng = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
 
-    slugs = list(ESPN_LEAGUE_SLUGS.values()) + ["fifa.world"]
+    slugs = sorted(set(ESPN_LEAGUE_SLUGS.values()))
 
     def fetch(slug: str) -> List[dict]:
         try:
@@ -303,7 +318,7 @@ def _collect_espn_scores_ranged(start_date: str, end_date: str) -> Dict[str, Dic
         for events in pool.map(fetch, slugs):
             for event in events:
                 comp = (event.get("competitions") or [{}])[0]
-                if comp.get("status", {}).get("type", {}).get("name") != "STATUS_FULL_TIME":
+                if not comp.get("status", {}).get("type", {}).get("completed"):
                     continue
                 teams = comp.get("competitors", [])
                 if len(teams) < 2:
@@ -312,12 +327,16 @@ def _collect_espn_scores_ranged(start_date: str, end_date: str) -> Dict[str, Dic
                 ad = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
                 home = hd.get("team", {}).get("displayName", "")
                 away = ad.get("team", {}).get("displayName", "")
-                try:
-                    hs, as_ = int(hd.get("score", 0)), int(ad.get("score", 0))
-                except (TypeError, ValueError):
+                score = regulation_score(comp)
+                if not score:
                     continue
+                hs, as_ = score["home_score"], score["away_score"]
                 payload = {"home": home, "away": away, "home_score": hs,
-                           "away_score": as_, "completed": True}
+                           "away_score": as_, "completed": True,
+                           **{key: score.get(key) for key in (
+                               "score_90", "score_extra_time", "penalty_score",
+                               "qualified_team", "match_status",
+                           )}}
                 date = (event.get("date") or "")[:10]
                 finished[f"{_normalize_name(home)}|{_normalize_name(away)}|{date}"] = payload
                 finished.setdefault(f"{_normalize_name(home)}|{_normalize_name(away)}", payload)
@@ -383,7 +402,12 @@ def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tup
 
 def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
     """Compare a single pick against the actual score. Returns 'won' | 'lost' | 'void'."""
-    market = pick.get("market", "match_result")
+    # Persisted rollover legs store the diversity group in ``market`` and the
+    # actual selection in ``market_key``.  Always prefer the precise key: a
+    # group such as ``goals`` is not enough to distinguish Under 4.5 from
+    # Over 1.5, and historically those newer lines were silently voided.
+    market = pick.get("market_key") or pick.get("market", "match_result")
+    market_group = pick.get("market_group") or market
     prediction = (pick.get("prediction") or "").lower()
     total = home_score + away_score
     diff = home_score - away_score
@@ -391,7 +415,14 @@ def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
     home = (pick.get("home_team") or "").lower()
     away = (pick.get("away_team") or "").lower()
 
-    if market == "match_result":
+    if market in ("home_win", "away_win", "draw"):
+        if market == "home_win":
+            return "won" if diff > 0 else "lost"
+        if market == "away_win":
+            return "won" if diff < 0 else "lost"
+        return "won" if diff == 0 else "lost"
+
+    if market_group == "match_result":
         if "draw" in prediction and "or" not in prediction:
             return "won" if diff == 0 else "lost"
         if home and home in prediction:
@@ -400,7 +431,14 @@ def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
             return "won" if diff < 0 else "lost"
         return "void"
 
-    if market == "double_chance":
+    if market in ("home_or_draw", "away_or_draw", "home_or_away"):
+        if market == "home_or_draw":
+            return "won" if diff >= 0 else "lost"
+        if market == "away_or_draw":
+            return "won" if diff <= 0 else "lost"
+        return "won" if diff != 0 else "lost"
+
+    if market_group == "double_chance":
         if "or draw" in prediction:
             if home and home in prediction:
                 return "won" if diff >= 0 else "lost"
@@ -408,18 +446,49 @@ def _evaluate_pick(pick: dict, home_score: int, away_score: int) -> str:
                 return "won" if diff <= 0 else "lost"
         return "void"
 
-    if market == "goals":
-        if "over 1.5" in prediction:
-            return "won" if total > 1 else "lost"
-        if "over 2.5" in prediction:
-            return "won" if total > 2 else "lost"
-        if "under 2.5" in prediction:
-            return "won" if total <= 2 else "lost"
-        if "over 0.5" in prediction:
-            return "won" if total >= 1 else "lost"
-        return "void"
+    if market in ("dnb_home", "dnb_away"):
+        if diff == 0:
+            return "void"
+        won = diff > 0 if market == "dnb_home" else diff < 0
+        return "won" if won else "lost"
 
-    if market == "btts":
+    # Match totals. Half-goal lines cannot push, so integer comparison is
+    # exact and covers every line the predictor can publish.
+    if market.startswith(("over_", "under_")):
+        try:
+            line = float(market.rsplit("_", 2)[-2] + "." + market.rsplit("_", 1)[-1])
+        except (ValueError, IndexError):
+            return "void"
+        won = total > line if market.startswith("over_") else total < line
+        return "won" if won else "lost"
+
+    # Per-team totals use the same key suffix, but settle against the named
+    # team's score rather than the match total.
+    if market.startswith(("home_over_", "away_over_")):
+        parts = market.split("_")
+        try:
+            line = float(parts[-2] + "." + parts[-1])
+        except (ValueError, IndexError):
+            return "void"
+        scored = home_score if market.startswith("home_") else away_score
+        return "won" if scored > line else "lost"
+
+    # Backwards-compatible text grading for old rows that only stored a group.
+    if market_group == "goals":
+        import re
+        hit = re.search(r"\b(over|under)\s+(\d+(?:\.\d+)?)", prediction)
+        if not hit:
+            return "void"
+        direction, line_text = hit.groups()
+        line = float(line_text)
+        won = total > line if direction == "over" else total < line
+        return "won" if won else "lost"
+
+    if market in ("btts_yes", "btts_no"):
+        yes = home_score > 0 and away_score > 0
+        return "won" if yes == (market == "btts_yes") else "lost"
+
+    if market_group == "btts":
         # Check the negative first: "Both Teams to Score - No" also contains
         # "both teams to score", so testing the positive first settles every
         # BTTS-No pick as though it were BTTS-Yes.
@@ -457,6 +526,38 @@ def _normalize_name(name: str) -> str:
     if not name:
         return ""
     return name.lower().strip()
+
+
+def _lookup_score(scores: Dict[str, Dict[str, Any]], home: str, away: str,
+                  date: str = "") -> Optional[Dict[str, Any]]:
+    # Prefer an exact fixture date before the loose home|away fallback.
+    home_key = _normalize_name(home)
+    away_key = _normalize_name(away)
+    home_alias = TEAM_ALIASES.get(home_key, home_key)
+    away_alias = TEAM_ALIASES.get(away_key, away_key)
+
+    # If the caller knows the fixture date, keep the lookup date-scoped.
+    # Falling back to a loose home|away key can grade a rematch against the
+    # wrong game when the same teams occur more than once in the score window.
+    # A missing exact-date score is safer left pending (and later voided) than
+    # turned into a false win or loss.
+    if date:
+        candidates = [
+            f"{home_key}|{away_key}|{date}",
+            f"{home_alias}|{away_alias}|{date}",
+        ]
+    else:
+        # Legacy callers without a date may still use the old pair key.
+        candidates = [
+            f"{home_key}|{away_key}",
+            f"{home_alias}|{away_alias}",
+        ]
+
+    for key in candidates:
+        hit = scores.get(key)
+        if hit:
+            return hit
+    return None
 
 
 # ── Smart scheduling helpers ─────────────────────────────────
@@ -552,6 +653,31 @@ def _already_checked_today(rows) -> bool:
         return False
 
 
+def _missing_result_expired(pick: dict, now: datetime | None = None) -> bool:
+    """Whether a scoreless fixture has had a fair result-reporting window."""
+    raw = pick.get("commence_time") or ""
+    if not raw:
+        return False
+    try:
+        kickoff = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    return (now or datetime.now(timezone.utc)) >= kickoff + MISSING_RESULT_GRACE
+
+
+def _rollover_day_status(results: list[str]) -> str:
+    """Settle an accumulator correctly when one or more legs are void."""
+    if not results or any(result == "pending" for result in results):
+        return "pending"
+    if any(result == "lost" for result in results):
+        return "lost"
+    if all(result == "void" for result in results):
+        return "void"
+    if all(result in ("won", "void") for result in results):
+        return "won"
+    return "pending"
+
+
 # ── Fuzzy team name matching ─────────────────────────────────
 
 def _fuzzy_match_team(pick_name: str, score_keys: list[str]) -> Optional[str]:
@@ -604,7 +730,9 @@ def _sync_chain_to_db():
 def check_all_pending() -> Dict[str, int]:
     """Scan all pending rollover days; mark won/lost where matches finished."""
     global _last_successful_check
-    summary = {"checked_chain_days": 0, "marked_won": 0, "marked_lost": 0, "still_pending": 0, "api_calls": 0, "source": "none"}
+    summary = {"checked_chain_days": 0, "marked_won": 0, "marked_lost": 0,
+               "marked_void": 0, "still_pending": 0, "api_calls": 0,
+               "source": "none"}
     try:
         from leagues.rollover_db import RolloverDay
         from database import SessionLocal
@@ -638,17 +766,12 @@ def check_all_pending() -> Dict[str, int]:
                 summary["still_pending"] = len(pending)
                 return summary
 
-            if _already_checked_today(checkable):
-                logger.info("Results check: already checked after today's last game — skipping")
-                summary["still_pending"] = len(pending)
-                return summary
-
             finished, source = _collect_finished_scores(checkable, has_club_picks=True)
             summary["source"] = source
             summary["api_calls"] = len(finished)
             if not finished:
-                logger.info("Results check: no finished matches from any source")
-                return summary
+                logger.info("Results check: no finished matches from any source; "
+                            "checking expired fixtures for voids")
 
             score_keys = list(finished.keys())
 
@@ -667,38 +790,32 @@ def check_all_pending() -> Dict[str, int]:
                     home = pick.get("home_team", "")
                     away = pick.get("away_team", "")
                     ct = (pick.get("commence_time") or "")[:10]
-                    composite = f"{_normalize_name(home)}|{_normalize_name(away)}|{ct}"
+                    match_date = ct or (getattr(row, "date", "") or "")[:10]
 
-                    # Try exact match first
-                    match_data = finished.get(mid) or finished.get(composite)
-
-                    # Try with aliased team names (ESPN vs Odds API naming)
+                    # Use the same conservative fixture matcher as published
+                    # slips. A one-team fuzzy match can pick the wrong fixture
+                    # on a busy date (or even reverse home/away), corrupting the
+                    # public rollover record. Exact provider IDs remain valid
+                    # when a score source supplies them; otherwise both teams
+                    # and the fixture date must agree, including known aliases.
+                    match_data = finished.get(mid) if mid else None
                     if not match_data:
-                        home_alias = TEAM_ALIASES.get(_normalize_name(home), "")
-                        away_alias = TEAM_ALIASES.get(_normalize_name(away), "")
-                        for h in [_normalize_name(home), home_alias]:
-                            for a in [_normalize_name(away), away_alias]:
-                                if not h or not a:
-                                    continue
-                                alias_key = f"{h}|{a}|{ct}"
-                                match_data = finished.get(alias_key)
-                                if match_data:
-                                    logger.info(f"Day {row.day_number}: alias matched '{home} vs {away}' → '{alias_key}'")
-                                    break
-                            if match_data:
-                                break
-
-                    # Fuzzy word-match if alias also fails
-                    if not match_data:
-                        fuzzy_key = _fuzzy_match_team(home, [k for k in score_keys if ct in k])
-                        if fuzzy_key:
-                            match_data = finished.get(fuzzy_key)
-                            if match_data:
-                                logger.info(f"Day {row.day_number}: fuzzy matched '{home} vs {away}' → '{fuzzy_key}'")
+                        match_data = _lookup_score(
+                            finished,
+                            home,
+                            away,
+                            match_date,
+                        )
 
                     if not match_data:
-                        logger.info(f"Day {row.day_number}: no score yet for {home} vs {away} (composite={composite})")
-                        pick_results.append("pending")
+                        if _missing_result_expired(pick):
+                            logger.warning(
+                                f"Day {row.day_number}: no score after 48h for "
+                                f"{home} vs {away}; voiding this leg only")
+                            pick_results.append("void")
+                        else:
+                            logger.info(f"Day {row.day_number}: no score yet for {home} vs {away} (date={match_date})")
+                            pick_results.append("pending")
                         continue
                     r = _evaluate_pick(pick, match_data["home_score"], match_data["away_score"])
                     logger.info(f"Day {row.day_number}: {home} vs {away} → {match_data['home_score']}-{match_data['away_score']} → {r}")
@@ -713,16 +830,30 @@ def check_all_pending() -> Dict[str, int]:
                         pick["status"] = outcome
                 row.picks = json.dumps(picks)
 
-                if any(r == "lost" for r in pick_results):
-                    row.status = "lost"
+                day_status = _rollover_day_status(pick_results)
+                if day_status == "lost":
+                    row.status = day_status
                     summary["marked_lost"] += 1
-                elif all(r == "won" for r in pick_results):
-                    row.status = "won"
+                elif day_status == "won":
+                    row.status = day_status
                     summary["marked_won"] += 1
+                elif day_status == "void":
+                    row.status = day_status
+                    summary["marked_void"] += 1
                 else:
                     summary["still_pending"] += 1
 
             db.commit()
+            # The daily endpoint caches the locked card for 15 minutes. Its
+            # rollover section is refreshed from these rows, so leaving the
+            # cache intact makes a settled day continue to display as pending
+            # until both backend and frontend caches expire.
+            if summary["marked_won"] or summary["marked_lost"] or summary["marked_void"]:
+                try:
+                    from leagues.daily_feed import _accum_cache
+                    _accum_cache.update({"result": None, "ts": 0.0})
+                except Exception:
+                    pass
             _last_successful_check = datetime.now(timezone.utc).isoformat()
             logger.info(f"Results check complete: {summary}")
             return summary
@@ -749,6 +880,10 @@ def run_loop():
             settle_published_slips()
         except Exception as e:
             logger.error(f"Slip settlement failed: {e}")
+        try:
+            settle_builder_predictions()
+        except Exception as e:
+            logger.error(f"Builder settlement failed: {e}")
         time.sleep(3600)
 
         if iteration % 168 == 0:
@@ -807,13 +942,19 @@ def settle_published_slips() -> Dict[str, int]:
             if pick.get("status") in ("won", "lost", "void"):
                 outcomes.append(pick["status"])
                 continue
-            match = _lookup(pick.get("home_team", ""), pick.get("away_team", ""))
+            match_date = (pick.get("commence_time") or slip.date or "")[:10]
+            match = _lookup_score(
+                scores,
+                pick.get("home_team", ""),
+                pick.get("away_team", ""),
+                match_date,
+            )
             if not match:
                 outcomes.append("pending")
                 continue
             outcomes.append(
                 _evaluate_pick(
-                    {**pick, "market": pick.get("market_group", pick.get("market", "match_result"))},
+                    pick,
                     match["home_score"], match["away_score"],
                 )
             )
@@ -836,6 +977,60 @@ def settle_published_slips() -> Dict[str, int]:
     if won or lost:
         logger.info(f"Slip settlement: {won} won, {lost} lost, {still} pending")
     return {"slips_checked": len(slips), "won": won, "lost": lost, "still_pending": still}
+
+
+def settle_builder_predictions(scores: dict | None = None,
+                               now: datetime | None = None) -> Dict[str, int]:
+    """Settle unique Builder prediction sets with the canonical evaluator."""
+    from leagues.builder_runs import pending_predictions, settle_prediction
+
+    current = now or datetime.now(timezone.utc)
+    rows = pending_predictions()
+    summary = {"builds_checked": len(rows), "won": 0, "lost": 0,
+               "void": 0, "still_pending": 0}
+    if not rows:
+        return summary
+
+    if scores is None:
+        dates = sorted({
+            str(pick.get("kickoff") or pick.get("date") or "")[:10]
+            for row in rows
+            for pick in json.loads(row.get("picks") or "[]")
+            if str(pick.get("kickoff") or pick.get("date") or "")[:10]
+            <= current.strftime("%Y-%m-%d")
+        })
+        scores = (_collect_espn_scores_ranged(dates[0], dates[-1])
+                  if dates else {})
+
+    for row in rows:
+        picks = json.loads(row.get("picks") or "[]")
+        outcomes = []
+        for pick in picks:
+            if pick.get("status") in ("won", "lost", "void"):
+                outcomes.append(pick["status"])
+                continue
+            match_date = str(pick.get("kickoff") or pick.get("date") or "")[:10]
+            match = _lookup_score(
+                scores,
+                pick.get("home_team", ""),
+                pick.get("away_team", ""),
+                match_date,
+            )
+            if match:
+                outcomes.append(_evaluate_pick(
+                    pick, match["home_score"], match["away_score"]
+                ))
+            elif _missing_result_expired(
+                {**pick, "commence_time": pick.get("kickoff") or pick.get("date")},
+                current,
+            ):
+                outcomes.append("void")
+            else:
+                outcomes.append("pending")
+        status = settle_prediction(row["selection_fingerprint"], outcomes)
+        key = status if status in ("won", "lost", "void") else "still_pending"
+        summary[key] += 1
+    return summary
 
 def backfill_leg_status(limit_days: int = 120) -> Dict[str, int]:
     """Fill in per-leg outcomes on chain days that were settled before we
@@ -886,8 +1081,12 @@ def backfill_leg_status(limit_days: int = 120) -> Dict[str, int]:
                 for pick in picks:
                     if pick.get("status") in ("won", "lost", "void"):
                         continue
-                    match = _find(pick.get("home_team", ""), pick.get("away_team", ""),
-                                  (pick.get("commence_time") or "")[:10])
+                    match = _lookup_score(
+                        scores,
+                        pick.get("home_team", ""),
+                        pick.get("away_team", ""),
+                        (pick.get("commence_time") or row.date or "")[:10],
+                    )
                     if not match:
                         continue
                     pick["status"] = _evaluate_pick(pick, match["home_score"], match["away_score"])

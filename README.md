@@ -1,5 +1,11 @@
 # 🎯 BetSightly Backend - Advanced ML Betting Platform
 
+> **Current production architecture:** `/api/leagues/*` is the sole
+> authoritative prediction, fixture-ranking, Daily, Rollover and Builder
+> path. The older `/api/predictions/*` engine is retired and disabled by
+> default. Builder generation immediately requests a validated SportyBet code;
+> code revalidation remains available after edits or booking failures.
+
 <div align="center">
 
 ![BetSightly Logo](https://img.shields.io/badge/BetSightly-ML%20Betting%20Platform-blue?style=for-the-badge)

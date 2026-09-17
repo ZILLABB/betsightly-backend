@@ -15,7 +15,6 @@ from sqlalchemy import func, desc
 # Import models directly
 from punter import Punter
 from prediction import Prediction
-from database import get_db
 from utils.common import setup_logging
 from utils.config import settings
 
@@ -33,14 +32,16 @@ class PunterService:
     - Validate and store predictions
     """
 
-    def __init__(self, db: Optional[Session] = None):
+    def __init__(self, db: Session):
         """
         Initialize the punter service.
 
         Args:
             db: Database session
         """
-        self.db = db or next(get_db())
+        # The request or caller owns this session. A service instance must
+        # never create or retain a process-lifetime ORM session.
+        self.db = db
 
         # Ensure cache directory exists
         self.cache_dir = os.path.join(settings.punter.CACHE_DIR)
@@ -557,6 +558,3 @@ class PunterService:
         except Exception as e:
             logger.error(f"Error getting punter performance: {str(e)}")
             return {}
-
-# Create a singleton instance
-punter_service = PunterService()

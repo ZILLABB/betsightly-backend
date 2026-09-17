@@ -12,7 +12,8 @@ up would not be.
 import pytest
 
 from leagues.picks import ESTIMATE_MARGIN
-from leagues.selection import _mean_margin, select_accumulator, select_banker
+from leagues.selection import (_mean_margin, select_accumulator, select_banker,
+                               select_rollover_day)
 
 
 def _pick(match_id, confidence, odds, margin=None, group="goals_over",
@@ -25,6 +26,13 @@ def _pick(match_id, confidence, odds, margin=None, group="goals_over",
         "odds_provider": "SportyBet" if margin is not None else None,
         "market_margin": margin,
         "expected_value": round(confidence * odds - 1.0, 4),
+        # These tests isolate price/margin selection. Evidence uncertainty has
+        # its own suite, so use a supported point estimate with no lower bound.
+        "trust": {
+            "evidence_state": "SUPPORTED",
+            "evidence_strength": 1.0,
+            "evidence_adjusted_probability": confidence,
+        },
     }
 
 
@@ -112,30 +120,60 @@ def test_mixed_real_and_estimated_prices_do_not_crash_the_search():
 
 # ── Expected-value ceiling ─────────────────────────────────
 
-def test_a_slip_claiming_an_incredible_edge_is_refused():
-    """The search maximises expected value, so it reaches for the tail.
-
-    Capping each leg is not enough — legs that individually pass compound.
-    Four at 1.05 apiece make 1.22, and every one of them looked fine alone.
-    """
-    picks = [_pick(f"p{i}", 0.90, 1.40, 0.04) for i in range(4)]  # EV 1.26/leg
+def test_a_slip_whose_typical_leg_beats_the_market_too_far_is_refused():
+    """The search maximises expected value, so it reaches for the tail."""
+    picks = [_pick(f"p{i}", 0.90, 1.40, 0.04) for i in range(4)]  # 1.26 per leg
     chosen, _, _ = select_accumulator(
         picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
-        band_low=0.90, max_ev=1.10)
-    assert not chosen, "a slip claiming a 26% edge should not be published"
+        band_low=0.90, max_leg_ev=1.04)
+    assert not chosen, "a leg claiming a 26% edge should not be published"
 
 
 def test_the_ceiling_leaves_ordinary_slips_alone():
-    picks = [_pick(f"p{i}", 0.72, 1.40, 0.04) for i in range(4)]  # EV 1.008/leg
+    picks = [_pick(f"p{i}", 0.72, 1.40, 0.04) for i in range(4)]  # 1.008 per leg
     chosen, combined, _ = select_accumulator(
         picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
-        band_low=0.90, max_ev=1.10)
+        band_low=0.90, max_leg_ev=1.04)
     assert chosen and combined > 1.0
+
+
+def test_the_ceiling_is_per_leg_so_long_slips_are_not_punished():
+    """The bug this replaced: a flat slip-level cap emptied the 10 odds tier.
+
+    Expected value compounds, so eight legs each a credible 3% above the
+    market make 1.27 together. A flat cap at 1.10 refused every one of them
+    on the richest day of the week, while waving through a two-leg slip at
+    exactly the same per-leg optimism.
+    """
+    # Spread across market groups, or _PER_BAND_GROUP trims the candidate
+    # list to four and the target becomes unreachable for reasons that have
+    # nothing to do with the ceiling under test.
+    groups = ["goals_over", "goals_under", "match_result",
+              "team_goals_home", "team_goals_away", "dnb"]
+    legs = [_pick(f"p{i}", 0.74, 1.40, 0.04, group=groups[i % len(groups)])
+            for i in range(8)]  # 1.036 per leg
+    chosen, combined, joint = select_accumulator(
+        legs, target_odds=7.5, max_picks=8, min_confidence=0.70,
+        band_low=0.80, max_leg_ev=1.04)
+    assert chosen, "a long slip of individually credible legs must survive"
+    assert (combined * joint) > 1.10,         "and its compounded value legitimately exceeds the old flat cap"
 
 
 def test_floor_and_ceiling_can_both_bind():
     picks = [_pick(f"p{i}", 0.75, 1.40, 0.04) for i in range(4)]
     none, _, _ = select_accumulator(
         picks, target_odds=1.96, max_picks=2, min_confidence=0.70,
-        band_low=0.90, min_ev=1.20, max_ev=1.10)
+        band_low=0.90, min_ev=1.20, max_leg_ev=1.04)
     assert not none, "an impossible window should return nothing, not crash"
+
+
+def test_rollover_can_use_up_to_six_short_safe_legs_inside_2x_to_3x():
+    groups = ["goals_over", "goals_under", "match_result"]
+    picks = [
+        _pick(f"r{i}", 0.90, 1.13, 0.02, group=groups[i % len(groups)])
+        for i in range(7)
+    ]
+    chosen, combined, joint = select_rollover_day(picks)
+    assert len(chosen) == 6
+    assert 2.0 <= combined <= 3.0
+    assert joint == pytest.approx(0.9 ** 6, abs=0.001)

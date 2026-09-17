@@ -4,7 +4,7 @@ PostgreSQL persistence for the rollover chain.
 The chain previously lived in worldcup/data/wc_rollover_chain.json, which
 gets wiped on every Render container restart (no persistent disk on the
 Starter plan). Now persisted in the same Postgres that the rest of the
-app uses, so the 10-day chain survives deploys.
+app uses, so the challenge survives deploys.
 
 Falls back to a no-op (returning empty chain / accepting writes silently)
 if the DB isn't available — so local dev still works.
@@ -12,28 +12,30 @@ if the DB isn't available — so local dev still works.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float
+from sqlalchemy import Column, Integer, String, Text, DateTime, Float, inspect, text
 
 from database import Base, SessionLocal
+from leagues.policy_version import PUBLISHED_SELECTION_POLICY_VERSION
 
 logger = logging.getLogger(__name__)
 
 
 class RolloverDay(Base):
-    """One day-slot of the WC rollover chain (1-3 picks per row)."""
+    """One day-slot of the rollover challenge (up to 6 picks per row)."""
     __tablename__ = "wc_rollover_days"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     chain_start_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
-    day_number = Column(Integer, nullable=False)  # 1-10
+    day_number = Column(Integer, nullable=False)  # 1-TARGET_DAYS
     date = Column(String(10), nullable=False, index=True)
     picks = Column(Text, nullable=False)  # JSON list of pick dicts
     combined_odds = Column(Float, nullable=False)
     avg_confidence = Column(Float, nullable=False)
     status = Column(String(20), default="pending")  # pending | won | lost | void
+    policy_version = Column(String(40), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -60,6 +62,7 @@ def _day_dict(r) -> Dict[str, Any]:
 
     hit = round(joint, 4) if have else r.avg_confidence
     return {
+        "archive_id": r.id,
         "day_number": r.day_number,
         "date": r.date,
         "picks": picks,
@@ -69,6 +72,8 @@ def _day_dict(r) -> Dict[str, Any]:
         # expect it, and it is the same quantity.
         "avg_confidence": hit,
         "status": r.status,
+        "policy_version": r.policy_version,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
     }
 
 
@@ -110,6 +115,38 @@ def load_chain(default_start_date: str) -> Dict[str, Any]:
         return {"start_date": default_start_date, "days": [], "status": "active"}
 
 
+def history(limit_days: int = 90) -> List[Dict[str, Any]]:
+    """Every rollover day in the window, across current and older chains."""
+    cutoff = (
+        datetime.utcnow() - timedelta(days=max(1, limit_days) - 1)
+    ).strftime("%Y-%m-%d")
+    try:
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(RolloverDay)
+                .filter(RolloverDay.date >= cutoff)
+                .order_by(RolloverDay.date.desc(), RolloverDay.day_number.desc())
+                .all()
+            )
+            out = []
+            seen = set()
+            for row in rows:
+                key = (row.chain_start_date, row.day_number)
+                if key in seen:
+                    continue
+                seen.add(key)
+                item = _day_dict(row)
+                item["chain_start_date"] = row.chain_start_date
+                out.append(item)
+            return out
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Rollover history load failed: {e}")
+        return []
+
+
 def append_day(chain_start_date: str, day: Dict[str, Any]) -> bool:
     """Append a single day-slot to the chain. Idempotent — skips if already exists."""
     try:
@@ -135,6 +172,7 @@ def append_day(chain_start_date: str, day: Dict[str, Any]) -> bool:
                     day.get("hit_probability", day.get("avg_confidence", 0.5))
                 ),
                 status=day.get("status", "pending"),
+                policy_version=PUBLISHED_SELECTION_POLICY_VERSION,
             )
             db.add(row)
             db.commit()
@@ -221,6 +259,15 @@ def ensure_table():
     try:
         from database import engine
         RolloverDay.__table__.create(bind=engine, checkfirst=True)
+        existing = {column["name"] for column in inspect(engine).get_columns(
+            RolloverDay.__tablename__
+        )}
+        if "policy_version" not in existing:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE wc_rollover_days "
+                    "ADD COLUMN policy_version VARCHAR(40)"
+                ))
         logger.info("wc_rollover_days table ready")
     except Exception as e:
         logger.warning(f"Could not create wc_rollover_days table: {e}")

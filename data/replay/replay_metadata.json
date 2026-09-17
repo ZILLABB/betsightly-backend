@@ -1,0 +1,62 @@
+{
+  "anti_leakage": {
+    "elo_used": false,
+    "league_window_days": 45,
+    "ml_used": false,
+    "same_day_grouping": true,
+    "strictly_before_fixture": true
+  },
+  "code_revision": "dc499b65ada1274e",
+  "date_range": [
+    "2000-07-28",
+    "2026-06-01"
+  ],
+  "duplicates_detected": 44129,
+  "fidelity_counts": {
+    "DERIVED_REPLAY": 93629,
+    "INSUFFICIENT": 3030,
+    "MARKET_REPLAY": 154285
+  },
+  "fields_merged": 0,
+  "generated_at": "2026-09-04T14:36:24.193760+00:00",
+  "history_fallbacks": 11669,
+  "leagues": 64,
+  "markets_evaluated": [
+    "home_win",
+    "draw",
+    "away_win",
+    "home_or_draw",
+    "home_or_away",
+    "away_or_draw",
+    "dnb_home",
+    "dnb_away",
+    "over_1_5",
+    "over_2_5",
+    "over_3_5",
+    "under_1_5",
+    "under_2_5",
+    "under_3_5",
+    "under_4_5",
+    "home_over_0_5",
+    "away_over_0_5",
+    "home_over_1_5",
+    "away_over_1_5",
+    "btts_yes",
+    "btts_no"
+  ],
+  "matches_considered": 250944,
+  "outcomes_evaluated": 5074686,
+  "potential_cross_source_duplicates": 44129,
+  "predictions_generated": 247914,
+  "records_rejected": 3,
+  "runtime_seconds": 288.05,
+  "source_rows": {
+    "api_football": 66699,
+    "github_football": 228377
+  },
+  "sources": {
+    "api_football": "data/api-football/matches.csv",
+    "github_football": "data/github-football/Matches.csv"
+  },
+  "unique_matches": 250944
+}

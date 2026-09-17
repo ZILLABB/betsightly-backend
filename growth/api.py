@@ -40,6 +40,7 @@ async def track(request: Request, payload: dict = Body(default={})):
     """
     try:
         from growth import analytics
+        from growth.analytics_enrichment import request_geo
         from growth.models import ensure_tables
 
         ensure_tables()
@@ -47,17 +48,39 @@ async def track(request: Request, payload: dict = Body(default={})):
         ip = fwd.split(",")[0].strip() if fwd else (
             request.client.host if request.client else "")
 
+        geo = request_geo(request.headers, payload.get("timezone"))
+        metadata = (dict(payload.get("metadata"))
+                    if isinstance(payload.get("metadata"), dict) else {})
+        if payload.get("client_timestamp"):
+            metadata["client_timestamp"] = str(payload["client_timestamp"])[:64]
         analytics.record(
             event_type=str(payload.get("event") or "pageview"),
             path=payload.get("path"),
             source=payload.get("utm_source"),
             medium=payload.get("utm_medium"),
             campaign=payload.get("utm_campaign"),
-            content_tag=payload.get("utm_content"),
+            content_tag=payload.get("content_tag") or payload.get("utm_content"),
+            utm_term=payload.get("utm_term"),
             ref=payload.get("ref"),
             referrer=payload.get("referrer"),
             ip=ip,
             user_agent=request.headers.get("user-agent", ""),
+            visitor_id=payload.get("visitor_id"),
+            session_id=payload.get("session_id"),
+            event_id=payload.get("event_id"),
+            tier=payload.get("tier"),
+            target_odds=payload.get("target_odds"),
+            booking_status=payload.get("booking_status"),
+            leg_count=payload.get("leg_count"),
+            actual_odds=payload.get("actual_odds"),
+            country_code=geo["country_code"], region=geo["region"],
+            city=geo["city"], timezone_name=geo["timezone"],
+            geo_source=geo["geo_source"],
+            screen_width=payload.get("screen_width"),
+            screen_height=payload.get("screen_height"),
+            booking_id=payload.get("booking_id"),
+            product_area=payload.get("product_source"),
+            metadata=metadata,
         )
     except Exception as e:
         logger.debug(f"growth track failed: {e}")
@@ -178,11 +201,10 @@ async def admin_me(admin: str = Depends(require_admin)):
 # ── Admin: dataset + content ───────────────────────────────
 
 @router.get("/daily")
-async def growth_daily(admin: str = Depends(require_admin),
-                       value_bets: bool = Query(True)):
+async def growth_daily(admin: str = Depends(require_admin)):
     """Today's marketing dataset, exactly as the generators see it."""
     from growth.dataset import build
-    data = build(include_value_bets=value_bets)
+    data = build()
     if not data:
         raise HTTPException(404, "No published card yet today.")
     return {"status": "success", "data": data}
@@ -286,11 +308,24 @@ async def growth_retry(admin: str = Depends(require_admin)):
 
 @router.get("/analytics")
 async def growth_analytics(admin: str = Depends(require_admin),
-                           days: int = Query(7, ge=1, le=90)):
+                           days: int = Query(1, ge=1, le=90),
+                           start: Optional[str] = Query(None),
+                           end: Optional[str] = Query(None)):
     from growth.analytics import compare, summary
+    if bool(start) != bool(end):
+        raise HTTPException(400, "Custom range requires both start and end dates.")
+    if start and end:
+        try:
+            from datetime import datetime
+            first = datetime.strptime(start, "%Y-%m-%d")
+            last = datetime.strptime(end, "%Y-%m-%d")
+            if last < first or (last - first).days > 90:
+                raise ValueError
+        except ValueError:
+            raise HTTPException(400, "Choose a valid range of 90 days or less.")
     return {"status": "success",
-            "summary": summary(days),
-            "vs_previous": compare(days)}
+            "summary": summary(days, start, end),
+            "vs_previous": compare(days, start, end)}
 
 
 @router.get("/status")

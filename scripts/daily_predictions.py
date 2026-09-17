@@ -180,16 +180,18 @@ def run(target_date: str = None, force: bool = False):
 
         if force:
             # Delete existing predictions for this date to force regeneration
-            from database import get_db
+            from database import SessionLocal
             from services.daily_predictions_service import DailyPredictionSummary
-            db = next(get_db())
-            existing = db.query(DailyPredictionSummary).filter(
-                DailyPredictionSummary.prediction_date == datetime.strptime(target_date, "%Y-%m-%d").date()
-            ).first()
-            if existing:
-                existing.generation_status = "pending"
-                db.commit()
-            db.close()
+            db = SessionLocal()
+            try:
+                existing = db.query(DailyPredictionSummary).filter(
+                    DailyPredictionSummary.prediction_date == datetime.strptime(target_date, "%Y-%m-%d").date()
+                ).first()
+                if existing:
+                    existing.generation_status = "pending"
+                    db.commit()
+            finally:
+                db.close()
 
         db_result = db_service.generate_daily_predictions(target_date)
         if db_result["status"] == "success":

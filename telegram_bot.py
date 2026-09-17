@@ -315,8 +315,58 @@ async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ── World Cup Commands ──────────────────────────────────────
 
 
+async def _official_predictions_command(update: Update, heading: str) -> None:
+    """Render the same locked card used by the website.
+
+    The old World Cup commands read a static JSON file and constructed 55% and
+    40% accumulators outside the canonical selector. Their command names stay
+    compatible, but their output now has official-card provenance.
+    """
+    try:
+        from leagues.daily_feed import build_daily_accumulators
+
+        card = build_daily_accumulators() or {}
+        accumulators = card.get("accumulators") or {}
+        lines = [heading, f"Official card: {card.get('date') or 'current'}", ""]
+        for key, label in (
+            ("banker", "Banker"), ("2_odds", "2 Odds"),
+            ("5_odds", "5 Odds"), ("10_odds", "10 Odds"),
+            ("rollover", "Rollover"),
+        ):
+            product = accumulators.get(key) or {}
+            games = product.get("games") or product.get("picks") or []
+            if not product.get("selected") or not games:
+                continue
+            lines.append(
+                f"{label} ({float(product.get('total_odds') or 0):.2f}x)"
+            )
+            for game in games:
+                lines.append(
+                    f"  {game.get('home_team', '?')} vs {game.get('away_team', '?')}"
+                )
+                lines.append(
+                    f"  -> {game.get('prediction') or game.get('readable_prediction') or '?'}"
+                )
+            lines.append("")
+        if len(lines) == 3:
+            lines.append("No official published selections are available right now.")
+        lines.append("https://www.betsightly.com/predictions")
+        await update.message.reply_text("\n".join(lines))
+    except Exception as exc:
+        logger.error("official Telegram card unavailable: %s", exc, exc_info=True)
+        await update.message.reply_text(
+            "The official BetSightly card could not be loaded right now. "
+            "Please try again shortly."
+        )
+
+
 async def wctips_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show today's World Cup tips: /wctips or /wctips 2026-06-12"""
+    if os.getenv("ENABLE_LEGACY_WC_JSON_COMMANDS", "false").lower() not in {
+        "1", "true", "yes", "on",
+    }:
+        await _official_predictions_command(update, "Official BetSightly picks")
+        return
     try:
         import json
         from pathlib import Path
@@ -376,6 +426,13 @@ async def wctips_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def wcacca_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show World Cup accumulator picks: /wcacca"""
+    if os.getenv("ENABLE_LEGACY_WC_JSON_COMMANDS", "false").lower() not in {
+        "1", "true", "yes", "on",
+    }:
+        await _official_predictions_command(
+            update, "Official BetSightly accumulators"
+        )
+        return
     try:
         import json
         from pathlib import Path
@@ -823,7 +880,7 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # The daily group post is no longer scheduled here. The Growth Engine owns
-    # scheduled distribution now: it posts the top 5, the value alert, the
+    # scheduled distribution now: it posts the top 5, the accumulator cards, the
     # accumulator and the evening results at separate times, records every
     # publication, and claims each one under a unique constraint so a restart
     # cannot repeat it. Leaving this job armed as well would simply post the

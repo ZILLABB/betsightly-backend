@@ -1,0 +1,884 @@
+{
+  "away_or_draw": {
+    "all": {
+      "actual": 0.5547,
+      "brier": 0.2228,
+      "calibration_error": 0.006,
+      "log_loss": 0.6355,
+      "n": 247914,
+      "predicted": 0.5607
+    },
+    "last_2_seasons": {
+      "actual": 0.5608,
+      "brier": 0.2196,
+      "calibration_error": 0.0038,
+      "log_loss": 0.6283,
+      "n": 10500,
+      "predicted": 0.5645
+    },
+    "last_3_seasons": {
+      "actual": 0.5607,
+      "brier": 0.2196,
+      "calibration_error": 0.0033,
+      "log_loss": 0.6286,
+      "n": 21999,
+      "predicted": 0.564
+    },
+    "last_5_seasons": {
+      "actual": 0.5616,
+      "brier": 0.2195,
+      "calibration_error": 0.0037,
+      "log_loss": 0.6282,
+      "n": 50078,
+      "predicted": 0.5653
+    },
+    "latest_complete_season": {
+      "actual": 0.563,
+      "brier": 0.2188,
+      "calibration_error": 0.0027,
+      "log_loss": 0.6266,
+      "n": 9503,
+      "predicted": 0.5656
+    }
+  },
+  "away_over_0_5": {
+    "all": {
+      "actual": 0.6735,
+      "brier": 0.2114,
+      "calibration_error": 0.0049,
+      "log_loss": 0.6114,
+      "n": 247914,
+      "predicted": 0.6784
+    },
+    "last_2_seasons": {
+      "actual": 0.6924,
+      "brier": 0.2031,
+      "calibration_error": -0.0045,
+      "log_loss": 0.5925,
+      "n": 10500,
+      "predicted": 0.6879
+    },
+    "last_3_seasons": {
+      "actual": 0.6907,
+      "brier": 0.2049,
+      "calibration_error": -0.0032,
+      "log_loss": 0.5969,
+      "n": 21999,
+      "predicted": 0.6874
+    },
+    "last_5_seasons": {
+      "actual": 0.6876,
+      "brier": 0.2057,
+      "calibration_error": -0.0009,
+      "log_loss": 0.5989,
+      "n": 50078,
+      "predicted": 0.6868
+    },
+    "latest_complete_season": {
+      "actual": 0.6931,
+      "brier": 0.2031,
+      "calibration_error": -0.0033,
+      "log_loss": 0.5925,
+      "n": 9503,
+      "predicted": 0.6898
+    }
+  },
+  "away_over_1_5": {
+    "all": {
+      "actual": 0.3175,
+      "brier": 0.205,
+      "calibration_error": 0.0115,
+      "log_loss": 0.5983,
+      "n": 247914,
+      "predicted": 0.3291
+    },
+    "last_2_seasons": {
+      "actual": 0.3383,
+      "brier": 0.2104,
+      "calibration_error": 0.0029,
+      "log_loss": 0.6099,
+      "n": 10500,
+      "predicted": 0.3412
+    },
+    "last_3_seasons": {
+      "actual": 0.3372,
+      "brier": 0.2102,
+      "calibration_error": 0.0036,
+      "log_loss": 0.6097,
+      "n": 21999,
+      "predicted": 0.3408
+    },
+    "last_5_seasons": {
+      "actual": 0.3334,
+      "brier": 0.2086,
+      "calibration_error": 0.0067,
+      "log_loss": 0.6062,
+      "n": 50078,
+      "predicted": 0.3401
+    },
+    "latest_complete_season": {
+      "actual": 0.3418,
+      "brier": 0.2113,
+      "calibration_error": 0.0016,
+      "log_loss": 0.612,
+      "n": 9503,
+      "predicted": 0.3434
+    }
+  },
+  "away_win": {
+    "all": {
+      "actual": 0.2894,
+      "brier": 0.1864,
+      "calibration_error": 0.0103,
+      "log_loss": 0.5544,
+      "n": 247914,
+      "predicted": 0.2998
+    },
+    "last_2_seasons": {
+      "actual": 0.2973,
+      "brier": 0.1891,
+      "calibration_error": 0.0113,
+      "log_loss": 0.5601,
+      "n": 10500,
+      "predicted": 0.3086
+    },
+    "last_3_seasons": {
+      "actual": 0.2973,
+      "brier": 0.1884,
+      "calibration_error": 0.0111,
+      "log_loss": 0.5584,
+      "n": 21999,
+      "predicted": 0.3083
+    },
+    "last_5_seasons": {
+      "actual": 0.2973,
+      "brier": 0.1878,
+      "calibration_error": 0.0122,
+      "log_loss": 0.557,
+      "n": 50078,
+      "predicted": 0.3095
+    },
+    "latest_complete_season": {
+      "actual": 0.3001,
+      "brier": 0.1895,
+      "calibration_error": 0.0103,
+      "log_loss": 0.5609,
+      "n": 9503,
+      "predicted": 0.3104
+    }
+  },
+  "btts_no": {
+    "all": {
+      "actual": 0.4811,
+      "brier": 0.248,
+      "calibration_error": 0.0087,
+      "log_loss": 0.6892,
+      "n": 247914,
+      "predicted": 0.4898
+    },
+    "last_2_seasons": {
+      "actual": 0.4584,
+      "brier": 0.2456,
+      "calibration_error": 0.0212,
+      "log_loss": 0.6844,
+      "n": 10500,
+      "predicted": 0.4796
+    },
+    "last_3_seasons": {
+      "actual": 0.4634,
+      "brier": 0.2464,
+      "calibration_error": 0.0171,
+      "log_loss": 0.6859,
+      "n": 21999,
+      "predicted": 0.4805
+    },
+    "last_5_seasons": {
+      "actual": 0.4687,
+      "brier": 0.2468,
+      "calibration_error": 0.0145,
+      "log_loss": 0.6867,
+      "n": 50078,
+      "predicted": 0.4832
+    },
+    "latest_complete_season": {
+      "actual": 0.4602,
+      "brier": 0.2458,
+      "calibration_error": 0.0182,
+      "log_loss": 0.6848,
+      "n": 9503,
+      "predicted": 0.4784
+    }
+  },
+  "btts_yes": {
+    "all": {
+      "actual": 0.5189,
+      "brier": 0.248,
+      "calibration_error": -0.0087,
+      "log_loss": 0.6892,
+      "n": 247914,
+      "predicted": 0.5102
+    },
+    "last_2_seasons": {
+      "actual": 0.5416,
+      "brier": 0.2456,
+      "calibration_error": -0.0212,
+      "log_loss": 0.6844,
+      "n": 10500,
+      "predicted": 0.5204
+    },
+    "last_3_seasons": {
+      "actual": 0.5366,
+      "brier": 0.2464,
+      "calibration_error": -0.0171,
+      "log_loss": 0.6859,
+      "n": 21999,
+      "predicted": 0.5195
+    },
+    "last_5_seasons": {
+      "actual": 0.5313,
+      "brier": 0.2468,
+      "calibration_error": -0.0145,
+      "log_loss": 0.6867,
+      "n": 50078,
+      "predicted": 0.5168
+    },
+    "latest_complete_season": {
+      "actual": 0.5398,
+      "brier": 0.2458,
+      "calibration_error": -0.0182,
+      "log_loss": 0.6848,
+      "n": 9503,
+      "predicted": 0.5216
+    }
+  },
+  "dnb_away": {
+    "all": {
+      "actual": 0.3939,
+      "brier": 0.2029,
+      "calibration_error": 0.011,
+      "log_loss": 0.5901,
+      "n": 182160,
+      "predicted": 0.4049
+    },
+    "last_2_seasons": {
+      "actual": 0.4036,
+      "brier": 0.2021,
+      "calibration_error": 0.0087,
+      "log_loss": 0.5882,
+      "n": 7734,
+      "predicted": 0.4124
+    },
+    "last_3_seasons": {
+      "actual": 0.4036,
+      "brier": 0.2016,
+      "calibration_error": 0.0091,
+      "log_loss": 0.5871,
+      "n": 16203,
+      "predicted": 0.4127
+    },
+    "last_5_seasons": {
+      "actual": 0.4041,
+      "brier": 0.2014,
+      "calibration_error": 0.0109,
+      "log_loss": 0.5864,
+      "n": 36840,
+      "predicted": 0.4149
+    },
+    "latest_complete_season": {
+      "actual": 0.4071,
+      "brier": 0.2017,
+      "calibration_error": 0.0074,
+      "log_loss": 0.5872,
+      "n": 7005,
+      "predicted": 0.4146
+    }
+  },
+  "dnb_home": {
+    "all": {
+      "actual": 0.6061,
+      "brier": 0.2029,
+      "calibration_error": -0.011,
+      "log_loss": 0.5901,
+      "n": 182160,
+      "predicted": 0.5951
+    },
+    "last_2_seasons": {
+      "actual": 0.5964,
+      "brier": 0.2021,
+      "calibration_error": -0.0087,
+      "log_loss": 0.5882,
+      "n": 7734,
+      "predicted": 0.5876
+    },
+    "last_3_seasons": {
+      "actual": 0.5964,
+      "brier": 0.2016,
+      "calibration_error": -0.0091,
+      "log_loss": 0.5871,
+      "n": 16203,
+      "predicted": 0.5873
+    },
+    "last_5_seasons": {
+      "actual": 0.5959,
+      "brier": 0.2014,
+      "calibration_error": -0.0109,
+      "log_loss": 0.5864,
+      "n": 36840,
+      "predicted": 0.5851
+    },
+    "latest_complete_season": {
+      "actual": 0.5929,
+      "brier": 0.2017,
+      "calibration_error": -0.0074,
+      "log_loss": 0.5872,
+      "n": 7005,
+      "predicted": 0.5854
+    }
+  },
+  "draw": {
+    "all": {
+      "actual": 0.2652,
+      "brier": 0.1927,
+      "calibration_error": -0.0043,
+      "log_loss": 0.5723,
+      "n": 247914,
+      "predicted": 0.261
+    },
+    "last_2_seasons": {
+      "actual": 0.2635,
+      "brier": 0.1919,
+      "calibration_error": -0.0075,
+      "log_loss": 0.5707,
+      "n": 10500,
+      "predicted": 0.2559
+    },
+    "last_3_seasons": {
+      "actual": 0.2635,
+      "brier": 0.1919,
+      "calibration_error": -0.0078,
+      "log_loss": 0.5707,
+      "n": 21999,
+      "predicted": 0.2556
+    },
+    "last_5_seasons": {
+      "actual": 0.2644,
+      "brier": 0.1921,
+      "calibration_error": -0.0084,
+      "log_loss": 0.571,
+      "n": 50078,
+      "predicted": 0.2559
+    },
+    "latest_complete_season": {
+      "actual": 0.2629,
+      "brier": 0.1917,
+      "calibration_error": -0.0076,
+      "log_loss": 0.5704,
+      "n": 9503,
+      "predicted": 0.2552
+    }
+  },
+  "home_or_away": {
+    "all": {
+      "actual": 0.7348,
+      "brier": 0.1927,
+      "calibration_error": 0.0043,
+      "log_loss": 0.5723,
+      "n": 247914,
+      "predicted": 0.739
+    },
+    "last_2_seasons": {
+      "actual": 0.7365,
+      "brier": 0.1919,
+      "calibration_error": 0.0075,
+      "log_loss": 0.5707,
+      "n": 10500,
+      "predicted": 0.7441
+    },
+    "last_3_seasons": {
+      "actual": 0.7365,
+      "brier": 0.1919,
+      "calibration_error": 0.0078,
+      "log_loss": 0.5707,
+      "n": 21999,
+      "predicted": 0.7444
+    },
+    "last_5_seasons": {
+      "actual": 0.7356,
+      "brier": 0.1921,
+      "calibration_error": 0.0084,
+      "log_loss": 0.571,
+      "n": 50078,
+      "predicted": 0.7441
+    },
+    "latest_complete_season": {
+      "actual": 0.7371,
+      "brier": 0.1917,
+      "calibration_error": 0.0076,
+      "log_loss": 0.5704,
+      "n": 9503,
+      "predicted": 0.7448
+    }
+  },
+  "home_or_draw": {
+    "all": {
+      "actual": 0.7106,
+      "brier": 0.1864,
+      "calibration_error": -0.0103,
+      "log_loss": 0.5544,
+      "n": 247914,
+      "predicted": 0.7002
+    },
+    "last_2_seasons": {
+      "actual": 0.7027,
+      "brier": 0.1891,
+      "calibration_error": -0.0113,
+      "log_loss": 0.5601,
+      "n": 10500,
+      "predicted": 0.6914
+    },
+    "last_3_seasons": {
+      "actual": 0.7027,
+      "brier": 0.1884,
+      "calibration_error": -0.0111,
+      "log_loss": 0.5584,
+      "n": 21999,
+      "predicted": 0.6917
+    },
+    "last_5_seasons": {
+      "actual": 0.7027,
+      "brier": 0.1878,
+      "calibration_error": -0.0122,
+      "log_loss": 0.557,
+      "n": 50078,
+      "predicted": 0.6905
+    },
+    "latest_complete_season": {
+      "actual": 0.6999,
+      "brier": 0.1895,
+      "calibration_error": -0.0103,
+      "log_loss": 0.5609,
+      "n": 9503,
+      "predicted": 0.6896
+    }
+  },
+  "home_over_0_5": {
+    "all": {
+      "actual": 0.7664,
+      "brier": 0.1714,
+      "calibration_error": -0.0111,
+      "log_loss": 0.5217,
+      "n": 247914,
+      "predicted": 0.7553
+    },
+    "last_2_seasons": {
+      "actual": 0.7774,
+      "brier": 0.1649,
+      "calibration_error": -0.0199,
+      "log_loss": 0.5064,
+      "n": 10500,
+      "predicted": 0.7574
+    },
+    "last_3_seasons": {
+      "actual": 0.7725,
+      "brier": 0.1669,
+      "calibration_error": -0.0149,
+      "log_loss": 0.5107,
+      "n": 21999,
+      "predicted": 0.7575
+    },
+    "last_5_seasons": {
+      "actual": 0.7692,
+      "brier": 0.1688,
+      "calibration_error": -0.0134,
+      "log_loss": 0.5152,
+      "n": 50078,
+      "predicted": 0.7558
+    },
+    "latest_complete_season": {
+      "actual": 0.7741,
+      "brier": 0.1664,
+      "calibration_error": -0.0167,
+      "log_loss": 0.5096,
+      "n": 9503,
+      "predicted": 0.7573
+    }
+  },
+  "home_over_1_5": {
+    "all": {
+      "actual": 0.4327,
+      "brier": 0.2291,
+      "calibration_error": -0.0079,
+      "log_loss": 0.6498,
+      "n": 247914,
+      "predicted": 0.4248
+    },
+    "last_2_seasons": {
+      "actual": 0.4424,
+      "brier": 0.2298,
+      "calibration_error": -0.0131,
+      "log_loss": 0.6512,
+      "n": 10500,
+      "predicted": 0.4293
+    },
+    "last_3_seasons": {
+      "actual": 0.439,
+      "brier": 0.2284,
+      "calibration_error": -0.0094,
+      "log_loss": 0.6483,
+      "n": 21999,
+      "predicted": 0.4295
+    },
+    "last_5_seasons": {
+      "actual": 0.4365,
+      "brier": 0.2274,
+      "calibration_error": -0.0094,
+      "log_loss": 0.6461,
+      "n": 50078,
+      "predicted": 0.427
+    },
+    "latest_complete_season": {
+      "actual": 0.4402,
+      "brier": 0.2295,
+      "calibration_error": -0.0108,
+      "log_loss": 0.6507,
+      "n": 9503,
+      "predicted": 0.4294
+    }
+  },
+  "home_win": {
+    "all": {
+      "actual": 0.4453,
+      "brier": 0.2228,
+      "calibration_error": -0.006,
+      "log_loss": 0.6355,
+      "n": 247914,
+      "predicted": 0.4393
+    },
+    "last_2_seasons": {
+      "actual": 0.4392,
+      "brier": 0.2196,
+      "calibration_error": -0.0038,
+      "log_loss": 0.6283,
+      "n": 10500,
+      "predicted": 0.4355
+    },
+    "last_3_seasons": {
+      "actual": 0.4393,
+      "brier": 0.2196,
+      "calibration_error": -0.0033,
+      "log_loss": 0.6286,
+      "n": 21999,
+      "predicted": 0.436
+    },
+    "last_5_seasons": {
+      "actual": 0.4384,
+      "brier": 0.2195,
+      "calibration_error": -0.0037,
+      "log_loss": 0.6282,
+      "n": 50078,
+      "predicted": 0.4347
+    },
+    "latest_complete_season": {
+      "actual": 0.437,
+      "brier": 0.2188,
+      "calibration_error": -0.0027,
+      "log_loss": 0.6266,
+      "n": 9503,
+      "predicted": 0.4344
+    }
+  },
+  "over_1_5": {
+    "all": {
+      "actual": 0.7384,
+      "brier": 0.1909,
+      "calibration_error": -0.0006,
+      "log_loss": 0.5687,
+      "n": 247914,
+      "predicted": 0.7378
+    },
+    "last_2_seasons": {
+      "actual": 0.7547,
+      "brier": 0.1816,
+      "calibration_error": -0.0083,
+      "log_loss": 0.5477,
+      "n": 10500,
+      "predicted": 0.7463
+    },
+    "last_3_seasons": {
+      "actual": 0.7495,
+      "brier": 0.1844,
+      "calibration_error": -0.0037,
+      "log_loss": 0.5541,
+      "n": 21999,
+      "predicted": 0.7458
+    },
+    "last_5_seasons": {
+      "actual": 0.748,
+      "brier": 0.1854,
+      "calibration_error": -0.0037,
+      "log_loss": 0.5562,
+      "n": 50078,
+      "predicted": 0.7442
+    },
+    "latest_complete_season": {
+      "actual": 0.7538,
+      "brier": 0.182,
+      "calibration_error": -0.0062,
+      "log_loss": 0.5486,
+      "n": 9503,
+      "predicted": 0.7475
+    }
+  },
+  "over_2_5": {
+    "all": {
+      "actual": 0.4926,
+      "brier": 0.2451,
+      "calibration_error": 0.0008,
+      "log_loss": 0.6833,
+      "n": 247914,
+      "predicted": 0.4934
+    },
+    "last_2_seasons": {
+      "actual": 0.5169,
+      "brier": 0.2434,
+      "calibration_error": -0.0116,
+      "log_loss": 0.6797,
+      "n": 10500,
+      "predicted": 0.5053
+    },
+    "last_3_seasons": {
+      "actual": 0.5114,
+      "brier": 0.2434,
+      "calibration_error": -0.0059,
+      "log_loss": 0.6798,
+      "n": 21999,
+      "predicted": 0.5055
+    },
+    "last_5_seasons": {
+      "actual": 0.5081,
+      "brier": 0.2435,
+      "calibration_error": -0.0048,
+      "log_loss": 0.68,
+      "n": 50078,
+      "predicted": 0.5033
+    },
+    "latest_complete_season": {
+      "actual": 0.5187,
+      "brier": 0.2435,
+      "calibration_error": -0.0116,
+      "log_loss": 0.68,
+      "n": 9503,
+      "predicted": 0.5071
+    }
+  },
+  "over_3_5": {
+    "all": {
+      "actual": 0.2758,
+      "brier": 0.196,
+      "calibration_error": 0.0011,
+      "log_loss": 0.5797,
+      "n": 247914,
+      "predicted": 0.2769
+    },
+    "last_2_seasons": {
+      "actual": 0.2906,
+      "brier": 0.2009,
+      "calibration_error": -0.0019,
+      "log_loss": 0.5897,
+      "n": 10500,
+      "predicted": 0.2886
+    },
+    "last_3_seasons": {
+      "actual": 0.2876,
+      "brier": 0.1997,
+      "calibration_error": 0.001,
+      "log_loss": 0.5873,
+      "n": 21999,
+      "predicted": 0.2886
+    },
+    "last_5_seasons": {
+      "actual": 0.2866,
+      "brier": 0.1995,
+      "calibration_error": -0.0003,
+      "log_loss": 0.5869,
+      "n": 50078,
+      "predicted": 0.2863
+    },
+    "latest_complete_season": {
+      "actual": 0.2918,
+      "brier": 0.2016,
+      "calibration_error": -0.0016,
+      "log_loss": 0.5913,
+      "n": 9503,
+      "predicted": 0.2902
+    }
+  },
+  "under_1_5": {
+    "all": {
+      "actual": 0.2616,
+      "brier": 0.1909,
+      "calibration_error": 0.0006,
+      "log_loss": 0.5687,
+      "n": 247914,
+      "predicted": 0.2622
+    },
+    "last_2_seasons": {
+      "actual": 0.2453,
+      "brier": 0.1816,
+      "calibration_error": 0.0083,
+      "log_loss": 0.5477,
+      "n": 10500,
+      "predicted": 0.2537
+    },
+    "last_3_seasons": {
+      "actual": 0.2505,
+      "brier": 0.1844,
+      "calibration_error": 0.0037,
+      "log_loss": 0.5541,
+      "n": 21999,
+      "predicted": 0.2542
+    },
+    "last_5_seasons": {
+      "actual": 0.252,
+      "brier": 0.1854,
+      "calibration_error": 0.0037,
+      "log_loss": 0.5562,
+      "n": 50078,
+      "predicted": 0.2558
+    },
+    "latest_complete_season": {
+      "actual": 0.2462,
+      "brier": 0.182,
+      "calibration_error": 0.0062,
+      "log_loss": 0.5486,
+      "n": 9503,
+      "predicted": 0.2525
+    }
+  },
+  "under_2_5": {
+    "all": {
+      "actual": 0.5074,
+      "brier": 0.2451,
+      "calibration_error": -0.0008,
+      "log_loss": 0.6833,
+      "n": 247914,
+      "predicted": 0.5066
+    },
+    "last_2_seasons": {
+      "actual": 0.4831,
+      "brier": 0.2434,
+      "calibration_error": 0.0116,
+      "log_loss": 0.6797,
+      "n": 10500,
+      "predicted": 0.4947
+    },
+    "last_3_seasons": {
+      "actual": 0.4886,
+      "brier": 0.2434,
+      "calibration_error": 0.0059,
+      "log_loss": 0.6798,
+      "n": 21999,
+      "predicted": 0.4945
+    },
+    "last_5_seasons": {
+      "actual": 0.4919,
+      "brier": 0.2435,
+      "calibration_error": 0.0048,
+      "log_loss": 0.68,
+      "n": 50078,
+      "predicted": 0.4967
+    },
+    "latest_complete_season": {
+      "actual": 0.4813,
+      "brier": 0.2435,
+      "calibration_error": 0.0116,
+      "log_loss": 0.68,
+      "n": 9503,
+      "predicted": 0.4929
+    }
+  },
+  "under_3_5": {
+    "all": {
+      "actual": 0.7242,
+      "brier": 0.196,
+      "calibration_error": -0.0011,
+      "log_loss": 0.5797,
+      "n": 247914,
+      "predicted": 0.7231
+    },
+    "last_2_seasons": {
+      "actual": 0.7094,
+      "brier": 0.2009,
+      "calibration_error": 0.0019,
+      "log_loss": 0.5897,
+      "n": 10500,
+      "predicted": 0.7114
+    },
+    "last_3_seasons": {
+      "actual": 0.7124,
+      "brier": 0.1997,
+      "calibration_error": -0.001,
+      "log_loss": 0.5873,
+      "n": 21999,
+      "predicted": 0.7114
+    },
+    "last_5_seasons": {
+      "actual": 0.7134,
+      "brier": 0.1995,
+      "calibration_error": 0.0003,
+      "log_loss": 0.5869,
+      "n": 50078,
+      "predicted": 0.7137
+    },
+    "latest_complete_season": {
+      "actual": 0.7082,
+      "brier": 0.2016,
+      "calibration_error": 0.0016,
+      "log_loss": 0.5913,
+      "n": 9503,
+      "predicted": 0.7098
+    }
+  },
+  "under_4_5": {
+    "all": {
+      "actual": 0.8677,
+      "brier": 0.113,
+      "calibration_error": -0.0006,
+      "log_loss": 0.3832,
+      "n": 247914,
+      "predicted": 0.8671
+    },
+    "last_2_seasons": {
+      "actual": 0.8591,
+      "brier": 0.1187,
+      "calibration_error": -0.0005,
+      "log_loss": 0.3966,
+      "n": 10500,
+      "predicted": 0.8585
+    },
+    "last_3_seasons": {
+      "actual": 0.8596,
+      "brier": 0.1183,
+      "calibration_error": -0.0009,
+      "log_loss": 0.3958,
+      "n": 21999,
+      "predicted": 0.8587
+    },
+    "last_5_seasons": {
+      "actual": 0.8599,
+      "brier": 0.1181,
+      "calibration_error": 0.0005,
+      "log_loss": 0.3956,
+      "n": 50078,
+      "predicted": 0.8604
+    },
+    "latest_complete_season": {
+      "actual": 0.8609,
+      "brier": 0.1175,
+      "calibration_error": -0.0034,
+      "log_loss": 0.3939,
+      "n": 9503,
+      "predicted": 0.8575
+    }
+  }
+}

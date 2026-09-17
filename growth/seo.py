@@ -57,7 +57,7 @@ def find_leg(slug: str) -> Optional[dict]:
     """
     try:
         from growth.dataset import build
-        data = build(include_value_bets=False)
+        data = build()
         if not data:
             return None
 
@@ -215,7 +215,6 @@ def build_sitemap() -> str:
     static = [
         ("/", "1.0", "daily"),
         ("/predictions", "0.9", "daily"),
-        ("/value", "0.9", "daily"),
         ("/rollover", "0.8", "daily"),
         ("/results", "0.8", "daily"),
         ("/punters", "0.6", "weekly"),
@@ -233,7 +232,7 @@ def build_sitemap() -> str:
 
     try:
         from growth.dataset import build
-        data = build(include_value_bets=False)
+        data = build()
         if data:
             seen = set()
             for key in ("banker", "over_1_5", "two_odds", "five_odds", "ten_odds"):

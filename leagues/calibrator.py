@@ -58,9 +58,17 @@ import math
 import time
 from pathlib import Path
 
+from leagues.policy_version import (
+    POLICY_PRIOR_STRENGTH,
+    PUBLISHED_SELECTION_POLICY_VERSION,
+    policy_weight,
+    sample_readiness,
+)
+from leagues.cache_paths import cache_path
+
 logger = logging.getLogger(__name__)
 
-CACHE_PATH = Path(__file__).parent / "data" / "calibration_fit.json"
+CACHE_PATH = cache_path(Path(__file__).parent / "data" / "calibration_fit.json")
 REFIT_TTL = 6 * 3600
 
 # A group with this many settled legs is weighted 50/50 against the global fit.
@@ -142,40 +150,22 @@ def _regularised(sub: list[tuple[float, bool]]) -> list[tuple[float, bool]]:
     return list(sub) + [(mean_p, True), (mean_p, False)]
 
 
+def _collect_observations() -> list[dict]:
+    """Unique fixture-market forecasts across public tiers and Rollover."""
+    try:
+        from leagues.forecast_observations import collect_forecast_observations
+        return collect_forecast_observations(limit_days=365)
+    except Exception as exc:
+        logger.debug(f"calibration observations unavailable ({exc})")
+        return []
+
+
 def _collect_legs() -> list[tuple[float, bool, str]]:
-    """(confidence, won, market_group) for every settled published leg."""
-    legs: list[tuple[float, bool, str]] = []
-
-    try:
-        from leagues.picks_db import get_history
-        for slip in get_history(limit_days=365):
-            for leg in slip.get("picks", []):
-                conf, status = _raw_conf(leg), leg.get("status")
-                if conf is None or status not in ("won", "lost"):
-                    continue
-                legs.append((conf, status == "won", _calibration_group(leg)))
-    except Exception as e:
-        logger.debug(f"calibration: archive unavailable ({e})")
-
-    # Rollover legs are settled the same way and carry the same confidences.
-    # They store the market *group* under the "market" key, so no lookup.
-    try:
-        from leagues.rollover_db import RolloverDay
-        from database import SessionLocal
-        db = SessionLocal()
-        try:
-            for row in db.query(RolloverDay).all():
-                for leg in json.loads(row.picks or "[]"):
-                    conf, status = _raw_conf(leg), leg.get("status")
-                    if conf is None or status not in ("won", "lost"):
-                        continue
-                    legs.append((conf, status == "won", _calibration_group(leg)))
-        finally:
-            db.close()
-    except Exception as e:
-        logger.debug(f"calibration: rollover unavailable ({e})")
-
-    return legs
+    """Compatibility view of the deduplicated observations."""
+    return [
+        (row["raw_probability"], row["won"], _group_of(row.get("market")))
+        for row in _collect_observations()
+    ]
 
 
 def _raw_conf(leg: dict) -> float | None:
@@ -199,7 +189,11 @@ def _calibration_group(leg: dict) -> str:
     lumps overs and unders together. Calibration needs them apart — see
     CALIBRATION_GROUP in picks.py.
     """
-    market = leg.get("market")
+    # Rollover stores the market *group* under "market" and the specific
+    # market under "market_key", so prefer the latter where it exists. Without
+    # it a rollover goals leg lands in a cell named "goals", which matches no
+    # calibration group at all and quietly drops out of every fit.
+    market = leg.get("market_key") or leg.get("market")
     if market:
         try:
             from leagues.picks import CALIBRATION_GROUP
@@ -235,53 +229,8 @@ def fit_calibration(force: bool = False) -> dict:
         except Exception:
             pass
 
-    legs = _collect_legs()
-    total = len(legs)
-
-    if total < 20:
-        # Not enough to correct anything without inventing a trend.
-        fit = {"global": 0.0, "groups": {}, "n": total, "fitted_at": now,
-               "note": "insufficient data — no correction applied"}
-        _MEM.update({"fit": fit, "ts": now})
-        return fit
-
-    raw_global = _solve_shift([(p, w) for p, w, _ in legs])
-    # Pull the global fit itself toward zero until the sample earns it.
-    g_weight = total / (total + GLOBAL_K)
-    global_shift = _clamp(raw_global * g_weight)
-
-    by_group: dict[str, list[tuple[float, bool]]] = {}
-    for p, w, grp in legs:
-        by_group.setdefault(grp, []).append((p, w))
-
-    groups: dict[str, dict] = {}
-    for grp, sub in by_group.items():
-        n = len(sub)
-        if n < MIN_GROUP_N:
-            continue
-        raw = _solve_shift(_regularised(sub))
-        w = n / (n + SHRINK_K)
-        # Shrink the group's own effect toward the global correction.
-        shift = _clamp(w * raw + (1 - w) * global_shift)
-        promised = sum(p for p, _ in sub) / n
-        actual = sum(1 for _, won in sub if won) / n
-        groups[grp] = {
-            "shift": round(shift, 4),
-            "raw_shift": round(raw, 4),
-            "n": n,
-            "weight": round(w, 3),
-            "promised": round(promised, 4),
-            "actual": round(actual, 4),
-        }
-
-    fit = {
-        "global": round(global_shift, 4),
-        "raw_global": round(raw_global, 4),
-        "groups": groups,
-        "n": total,
-        "fitted_at": now,
-        "note": None,
-    }
+    observations = _collect_observations()
+    fit = _fit_observations(observations, now)
 
     try:
         CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -291,9 +240,156 @@ def fit_calibration(force: bool = False) -> dict:
 
     _MEM.update({"fit": fit, "ts": now})
     logger.info(
-        f"Calibration fitted on {total} legs: global={global_shift:+.3f}, "
-        + ", ".join(f"{g}={v['shift']:+.3f}(n={v['n']})" for g, v in groups.items())
+        f"Calibration fitted on {fit['n']} unique forecasts: "
+        f"global={fit['global']:+.3f}, removed={fit.get('duplicates_removed', 0)}, "
+        + ", ".join(f"{g}={v['shift']:+.3f}(n={v['n']})"
+                    for g, v in fit.get("groups", {}).items())
     )
+    return fit
+
+
+def _cohort_stats(rows: list[dict]) -> dict:
+    n = len(rows)
+    return {
+        "n": n,
+        "promised": (sum(row["raw_probability"] for row in rows) / n
+                     if n else None),
+        "actual": (sum(bool(row["won"]) for row in rows) / n if n else None),
+    }
+
+
+def _fit_observations(observations: list[dict], fitted_at: float = 0.0) -> dict:
+    """Hierarchical fit with continuously increasing current-policy weight."""
+    total = len(observations)
+    current = [row for row in observations if row.get("policy_version")
+               == PUBLISHED_SELECTION_POLICY_VERSION]
+    historical = [row for row in observations if row.get("policy_version")
+                  != PUBLISHED_SELECTION_POLICY_VERSION]
+    current_weight = policy_weight(len(current))
+    current_categories: dict[str, int] = {}
+    for row in current:
+        for category in row.get("categories") or [row.get("category", "unknown")]:
+            current_categories[category] = current_categories.get(category, 0) + 1
+    policy = {
+        "version": PUBLISHED_SELECTION_POLICY_VERSION,
+        "settled_unique_forecasts": len(current),
+        "historical_unique_forecasts": len(historical),
+        "weight": round(current_weight, 4),
+        "prior_strength": POLICY_PRIOR_STRENGTH,
+        "category_forecast_samples": current_categories,
+        **sample_readiness(len(current)),
+    }
+
+    if total < 20:
+        # Not enough to correct anything without inventing a trend.
+        fit = {"global": 0.0, "groups": {}, "n": total,
+               "fitted_at": fitted_at,
+               "note": "insufficient data — no correction applied",
+               "policy": policy,
+               "raw_observations": sum(row.get("duplicate_count", 1)
+                                       for row in observations),
+               "duplicates_removed": sum(row.get("duplicate_count", 1)
+                                         for row in observations) - total}
+        return fit
+
+    historical_legs = [(row["raw_probability"], row["won"])
+                       for row in historical]
+    current_legs = [(row["raw_probability"], row["won"])
+                    for row in current]
+    historical_raw = _solve_shift(_regularised(historical_legs))
+    historical_weight = len(historical) / (len(historical) + GLOBAL_K)
+    historical_shift = historical_raw * historical_weight
+    current_raw = (_solve_shift(_regularised(current_legs))
+                   if current_legs else historical_shift)
+    global_shift = _clamp(
+        (1 - current_weight) * historical_shift
+        + current_weight * current_raw
+    )
+
+    by_group: dict[str, list[dict]] = {}
+    for row in observations:
+        by_group.setdefault(_group_of(row.get("market")), []).append(row)
+
+    groups: dict[str, dict] = {}
+    for grp, rows in by_group.items():
+        sub = [(row["raw_probability"], row["won"]) for row in rows]
+        n = len(sub)
+        if n < MIN_GROUP_N:
+            continue
+        historical_rows = [row for row in rows if row.get("policy_version")
+                           != PUBLISHED_SELECTION_POLICY_VERSION]
+        current_rows = [row for row in rows if row.get("policy_version")
+                        == PUBLISHED_SELECTION_POLICY_VERSION]
+        historical_sub = [(row["raw_probability"], row["won"])
+                          for row in historical_rows]
+        current_sub = [(row["raw_probability"], row["won"])
+                       for row in current_rows]
+        historical_group_raw = (_solve_shift(_regularised(historical_sub))
+                                if historical_sub else historical_shift)
+        group_history_weight = len(historical_sub) / (
+            len(historical_sub) + SHRINK_K
+        )
+        historical_group_shift = (
+            group_history_weight * historical_group_raw
+            + (1 - group_history_weight) * historical_shift
+        )
+        current_group_raw = (_solve_shift(_regularised(current_sub))
+                             if current_sub else historical_group_shift)
+        group_current_weight = policy_weight(len(current_sub))
+        shift = _clamp(
+            group_current_weight * current_group_raw
+            + (1 - group_current_weight) * historical_group_shift
+        )
+        promised = sum(p for p, _ in sub) / n
+        actual = sum(1 for _, won in sub if won) / n
+        hist_stats = _cohort_stats(historical_rows)
+        current_stats = _cohort_stats(current_rows)
+        prior_reliability = (hist_stats["actual"] if hist_stats["actual"] is not None
+                             else promised)
+        current_reliability = (current_stats["actual"]
+                               if current_stats["actual"] is not None
+                               else prior_reliability)
+        blended_reliability = (
+            (1 - group_current_weight) * prior_reliability
+            + group_current_weight * current_reliability
+        )
+        groups[grp] = {
+            "shift": round(shift, 4),
+            "raw_shift": round(current_group_raw, 4),
+            "n": n,
+            "weight": round(group_current_weight, 3),
+            "promised": round(promised, 4),
+            "actual": round(actual, 4),
+            "historical_sample": hist_stats["n"],
+            "current_policy_sample": current_stats["n"],
+            "historical_reliability_estimate": round(prior_reliability, 4),
+            "current_policy_promised": (round(current_stats["promised"], 4)
+                                          if current_stats["promised"] is not None else None),
+            "current_policy_actual": (round(current_stats["actual"], 4)
+                                       if current_stats["actual"] is not None else None),
+            "blended_reliability_estimate": round(blended_reliability, 4),
+            "current_policy_weight": round(group_current_weight, 4),
+        }
+
+    all_stats = _cohort_stats(observations)
+    historical_stats = _cohort_stats(historical)
+    current_stats = _cohort_stats(current)
+    fit = {
+        "global": round(global_shift, 4),
+        "raw_global": round(current_raw, 4),
+        "groups": groups,
+        "n": total,
+        "fitted_at": fitted_at,
+        "note": None,
+        "policy": policy,
+        "all_policy": all_stats,
+        "historical": historical_stats,
+        "current_policy": current_stats,
+        "raw_observations": sum(row.get("duplicate_count", 1)
+                                for row in observations),
+        "duplicates_removed": sum(row.get("duplicate_count", 1)
+                                  for row in observations) - total,
+    }
     return fit
 
 
@@ -302,13 +398,35 @@ def _clamp(shift: float) -> float:
 
 
 def calibrate(prob: float, market_group: str, fit: dict | None = None) -> float:
-    """Published probability for a raw model probability."""
+    """Published probability for a raw model probability.
+
+    A group with no settled legs is corrected by nothing at all.
+
+    It used to inherit the global shift, which sounds cautious and is not. The
+    global figure is an average over the markets that *do* have records, and
+    those records currently say over_1_5 and match_result have been
+    under-promising — so the global shift is a positive boost. Handing it to a
+    market that has never settled a leg asserts, on no evidence, that it is
+    under-promising too.
+
+    That is not hypothetical. Under 4.5 on Real Madrid v Real Sociedad came out
+    of the Poisson at 0.7553, was lifted to 0.7754 by a +0.1122 global shift
+    earned entirely by other markets, and went onto the card at 78% — against
+    a bookmaker quoting 1.37, which implies about 69%. We had no record for
+    that line at all and were publishing a number above the market's on the
+    strength of corrections fitted elsewhere.
+
+    Zero is the honest default. It can under-state a new market that really is
+    under-promising, which costs picks; the alternative over-states one, which
+    costs money. MIN_EVIDENCE_LEGS then lets each group earn its own
+    correction from its own results.
+    """
     if prob <= 0 or prob >= 1:
         return prob
     if fit is None:
         fit = fit_calibration()
     grp = (fit.get("groups") or {}).get(market_group)
-    shift = grp["shift"] if grp else fit.get("global", 0.0)
+    shift = grp["shift"] if grp else 0.0
     if not shift:
         return prob
     return _sigmoid(_logit(prob) + shift)
@@ -319,8 +437,11 @@ def status() -> dict:
     fit = fit_calibration()
     return {
         "n_legs": fit.get("n", 0),
+        "raw_observations": fit.get("raw_observations", fit.get("n", 0)),
+        "duplicates_removed": fit.get("duplicates_removed", 0),
         "global_shift": fit.get("global", 0.0),
         "note": fit.get("note"),
+        "policy": fit.get("policy", {}),
         "groups": fit.get("groups", {}),
         # What the correction does to a few reference probabilities, which is
         # far easier to sanity-check than a log-odds shift.

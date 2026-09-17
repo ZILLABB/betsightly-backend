@@ -14,6 +14,7 @@ from database import get_db
 from services.daily_predictions_service import DailyPrediction, DailyPredictionSummary
 from services.accumulator_builder import AccumulatorBuilder, format_accumulator_for_display
 from services.fixture_service import FixtureService
+from utils.security import require_api_key
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -478,7 +479,7 @@ def get_accumulator_results(
         raise HTTPException(status_code=500, detail="Failed to check accumulator results")
 
 
-@router.post("/rebuild")
+@router.post("/rebuild", dependencies=[Depends(require_api_key)])
 def rebuild_accumulators(
     target_date: str = Query(None, description="Date in YYYY-MM-DD format (default: today)"),
     db: Session = Depends(get_db)

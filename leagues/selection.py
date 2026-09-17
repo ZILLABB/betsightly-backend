@@ -55,6 +55,24 @@ MIN_USEFUL_ODDS = 1.12
 # on a day with 35 of them.
 MARKET_CAP = 3
 
+# Home-team and away-team goal markets are separate calibration groups, but
+# to a bettor they are the same exposure: "this team scores". Counting the
+# two groups separately allowed as many as six of those legs on one ticket.
+TEAM_TO_SCORE_GROUPS = {"team_goals_home", "team_goals_away"}
+TEAM_TO_SCORE_CAP = 2
+# Replay validates Under 3.5 and Under 4.5 independently but contains no
+# evidence that a third Grade-A Under is worse than a weaker market inserted
+# for cosmetic variety. Per-line MARKET_CAP and canonical quality ranking are
+# therefore the exposure control; Under 2.5 remains policy-restricted.
+UNDER_CAP = None
+
+
+def exposure_group(market_group: str) -> str:
+    """Group markets by the risk pattern a bettor is actually taking."""
+    if market_group in TEAM_TO_SCORE_GROUPS:
+        return "team_to_score"
+    return market_group
+
 # How close two slips have to score before the bookmaker's margin decides
 # between them. Expected value already moves with price — a tighter market
 # quotes a longer price for the same probability, so it scores higher without
@@ -78,7 +96,8 @@ def _mean_margin(combo) -> float:
 
 def _cost(pick: dict) -> float:
     """Risk paid per unit of multiplier gained. Lower is better."""
-    p = max(1e-6, min(0.999, pick["confidence"]))
+    from leagues.selection_quality import selection_probability
+    p = max(1e-6, min(0.999, selection_probability(pick)))
     o = max(1.0001, pick["odds"])
     return -math.log(p) / math.log(o)
 
@@ -95,6 +114,14 @@ _PRICE_BANDS = [(1.12, 1.30), (1.30, 1.50), (1.50, 1.80), (1.80, 2.40), (2.40, 9
 _PER_BAND = 9
 # No group may take a whole band, so a slip is never one market end to end.
 _PER_BAND_GROUP = 4
+
+# Exact enumeration grows combinatorially (45 choose 8 is 215 million). A
+# live SportyBet board can fill every price band, so leaving all stratified
+# candidates in the search pinned a worker for minutes and pushed the process
+# close to a 2 GB container limit. Eighteen candidates still cover every band
+# and allow an eight-leg slip, while bounding the full search below 107k
+# combinations. Small pools remain completely exact.
+_MAX_SEARCH_CANDIDATES = 18
 
 
 def _stratify(candidates: list[dict]) -> list[dict]:
@@ -122,16 +149,51 @@ def _stratify(candidates: list[dict]) -> list[dict]:
     return sorted(out, key=_cost)
 
 
+def _bound_search_space(candidates: list[dict]) -> list[dict]:
+    """Keep a diverse, bounded candidate set for exact combination search.
+
+    Round-robin selection across price bands avoids recreating the old bug
+    where a flat top-N list contained only short-priced goals markets and
+    could not reach the requested multiplier.
+    """
+    if len(candidates) <= _MAX_SEARCH_CANDIDATES:
+        return candidates
+
+    buckets = [
+        sorted(
+            (p for p in candidates if lo <= p["odds"] < hi),
+            key=_cost,
+        )
+        for lo, hi in _PRICE_BANDS
+    ]
+    bounded: list[dict] = []
+    index = 0
+    while len(bounded) < _MAX_SEARCH_CANDIDATES:
+        progressed = False
+        for bucket in buckets:
+            if index < len(bucket):
+                bounded.append(bucket[index])
+                progressed = True
+                if len(bounded) >= _MAX_SEARCH_CANDIDATES:
+                    break
+        if not progressed:
+            break
+        index += 1
+    return sorted(bounded, key=_cost)
+
+
 def select_accumulator(
     picks: list[dict],
     target_odds: float,
     max_picks: int = 5,
     min_confidence: float = 0.50,
     min_ev: float = 0.0,
-    max_ev: float = 1.10,
+    max_leg_ev: float = 1.04,
     prefer_real_odds: bool = True,
     prefer: str = "ev",
     band_low: float = 0.80,
+    band_high: float = 1.45,
+    canonicalize: bool = True,
 ) -> tuple[list[dict], float, float]:
     """Pick the best slip that reaches `target_odds`.
 
@@ -151,9 +213,14 @@ def select_accumulator(
     Returns (picks, combined_odds, joint_probability). Empty when the day
     cannot support the target honestly.
     """
+    from leagues.fixture_ranker import canonical_fixture_recommendations
+    from leagues.selection_quality import selection_probability
+    if canonicalize:
+        picks = canonical_fixture_recommendations(picks, safe_only=target_odds <= 2.0)
     pool = [
         p for p in picks
-        if p["confidence"] >= min_confidence and p["odds"] >= MIN_USEFUL_ODDS
+        if selection_probability(p) >= min_confidence
+        and p["odds"] >= MIN_USEFUL_ODDS
     ]
     if not pool:
         return [], 0.0, 0.0
@@ -186,7 +253,7 @@ def select_accumulator(
     # could reach 5x or 10x at all — those tiers came back empty however the
     # gates were set. Banding guarantees the search can actually buy the
     # multiplier it is being asked for.
-    candidates = _stratify(candidates)
+    candidates = _bound_search_space(_stratify(candidates))
 
     # Widened from 0.85. With every leg capped at 1.45, the multiplier a slip
     # can reach moves in coarse steps — seven legs reached 8.25x against a
@@ -195,16 +262,18 @@ def select_accumulator(
     # better outcome than publishing nothing, and the expected-value floor
     # still decides whether the slip is worth staking at all.
     lo_band = target_odds * band_low
-    hi_band = target_odds * 1.45
+    hi_band = target_odds * band_high
 
     best: tuple[list[dict], float, float] | None = None
-    best_key: tuple[int, float] | None = None
+    best_key: tuple | None = None
     fallback: tuple[list[dict], float, float] | None = None
-    fallback_key: tuple[int, float] | None = None
+    fallback_key: tuple | None = None
 
     for size in range(1, min(max_picks, len(candidates)) + 1):
         for combo in itertools.combinations(candidates, size):
             groups: dict[str, int] = {}
+            exposures: dict[str, int] = {}
+            under_count = 0
             fixtures_used: set[str] = set()
             ok = True
             for p in combo:
@@ -219,6 +288,18 @@ def select_accumulator(
                 if groups[g] > MARKET_CAP:
                     ok = False
                     break
+                exposure = exposure_group(g)
+                exposures[exposure] = exposures.get(exposure, 0) + 1
+                if (exposure == "team_to_score"
+                        and exposures[exposure] > TEAM_TO_SCORE_CAP):
+                    ok = False
+                    break
+                if (UNDER_CAP is not None
+                        and str(p.get("market", "")).startswith("under_")):
+                    under_count += 1
+                    if under_count > UNDER_CAP:
+                        ok = False
+                        break
             if not ok:
                 continue
 
@@ -226,28 +307,47 @@ def select_accumulator(
             joint = 1.0
             for p in combo:
                 combined *= p["odds"]
-                joint *= p["confidence"]
+                joint *= selection_probability(p)
 
             ev = combined * joint
             if ev < min_ev:
                 continue
             # A ceiling as well as a floor, because this search maximises
             # expected value and will therefore stack whichever legs the model
-            # most disagrees with the bookmaker about. Capping each leg is not
-            # enough: four legs at 1.05 apiece compound to 1.22, and every one
-            # of them passed on its own.
+            # most disagrees with the bookmaker about. A slip claiming to beat
+            # the market by a quarter is not a find, it is several correlated
+            # mistakes multiplied together, and the search reaches for exactly
+            # that combination by construction.
             #
-            # A slip claiming to beat the market by a quarter is not a find,
-            # it is four correlated mistakes multiplied together — and the
-            # search reaches for exactly that combination by construction.
-            if ev > max_ev:
+            # Applied per leg rather than to the slip, because expected value
+            # compounds: eight legs each a credible 3% above the market make
+            # 1.27 together, and a flat slip-level cap refused every one of
+            # them. That emptied the 10 odds tier on the richest day of the
+            # week — 794 qualifying picks and no slip published — while
+            # letting a two-leg slip through at the same per-leg optimism.
+            #
+            # The geometric mean asks the question that actually matters: how
+            # far above the market is the *typical* leg? Three percent is
+            # generous for a model measured at roughly five percent skill on
+            # one market and none on goals; seven, which is what the
+            # unconstrained search reached for, is not.
+            if ev ** (1.0 / size) > max_leg_ev:
                 continue
             score = joint if prefer == "joint" else ev
             # Score first, banded; the cheaper slip wins ties. Comparing the
             # raw score alone would leave margin unused, because two slips
             # never score identically to full float precision even when they
             # are the same product for staking purposes.
-            key = (round(score / _SCORE_TIE_BAND), -_mean_margin(combo))
+            # Score first, banded; then how much of the slip can actually be
+            # booked; then the cheaper price. Bookability sits above margin
+            # because a tier where one leg has no SportyBet counterpart gets
+            # no code at all — partial slips are refused — so an unbookable
+            # leg costs far more than a point of margin ever saves.
+            bookable = sum(1 for p in combo if p.get("bookable"))
+            key = (round(score / _SCORE_TIE_BAND),
+                   bookable == len(combo),
+                   bookable,
+                   -_mean_margin(combo))
 
             if lo_band <= combined <= hi_band:
                 if best_key is None or key > best_key:
@@ -265,16 +365,19 @@ def select_accumulator(
     chosen, combined, joint = result
 
     if prefer_real_odds:
-        chosen.sort(key=lambda p: (not p["odds_are_real"], -p["confidence"]))
+        chosen.sort(key=lambda p: (
+            not p["odds_are_real"], -selection_probability(p)
+        ))
     else:
-        chosen.sort(key=lambda p: -p["confidence"])
+        chosen.sort(key=lambda p: -selection_probability(p))
 
     return chosen, round(combined, 2), round(joint, 4)
 
 
 def select_banker(picks: list[dict], max_picks: int = 1,
-                  min_confidence: float = 0.72,
-                  min_price: float = MIN_USEFUL_ODDS) -> tuple[list[dict], float, float]:
+                   min_confidence: float = 0.72,
+                   min_price: float = MIN_USEFUL_ODDS,
+                   canonicalize: bool = True) -> tuple[list[dict], float, float]:
     """The single most reliable pick of the day.
 
     One pick, not two. Two legs multiply: on 14 August the best pair came out
@@ -306,20 +409,24 @@ def select_banker(picks: list[dict], max_picks: int = 1,
     be worth staking at all. Real quotes break ties, since only a real price
     can be genuinely mispriced in our favour.
     """
+    from leagues.fixture_ranker import canonical_fixture_recommendations
+    from leagues.selection_quality import selection_probability
+    if canonicalize:
+        picks = canonical_fixture_recommendations(picks, safe_only=True)
     pool = [
         p for p in picks
-        if p["confidence"] >= min_confidence and p["odds"] >= min_price
+        if selection_probability(p) >= min_confidence and p["odds"] >= min_price
     ]
     if not pool:
         # Nothing clears the bar at full strength — widen a little rather than
         # publishing nothing, but never below a stakeable price.
         pool = [p for p in picks
-                if p["confidence"] >= 0.68 and p["odds"] >= min_price]
+                if selection_probability(p) >= 0.68 and p["odds"] >= min_price]
     if not pool:
         return [], 0.0, 0.0
 
     best_per_fixture: dict[str, dict] = {}
-    for p in sorted(pool, key=lambda x: -x["confidence"]):
+    for p in sorted(pool, key=lambda x: -selection_probability(x)):
         best_per_fixture.setdefault(p["match_id"], p)
 
     # Safest first — this tier is about landing, not edge. A real quote wins a
@@ -330,7 +437,7 @@ def select_banker(picks: list[dict], max_picks: int = 1,
         # value. Banding matters here for the same reason it does on Over 1.5:
         # this tier stakes a single pick, so it pays the margin exactly once
         # and a point saved is a point kept.
-        key=lambda p: (-round(p["confidence"] / _SCORE_TIE_BAND / 2),
+        key=lambda p: (-round(selection_probability(p) / _SCORE_TIE_BAND / 2),
                        _mean_margin([p]),
                        not p["odds_are_real"],
                        -p["expected_value"]),
@@ -354,12 +461,12 @@ def select_banker(picks: list[dict], max_picks: int = 1,
     joint = 1.0
     for p in chosen:
         combined *= p["odds"]
-        joint *= p["confidence"]
+        joint *= selection_probability(p)
     return chosen, round(combined, 2), round(joint, 4)
 
 
 def select_rollover_day(picks: list[dict], target_odds: float = 2.0,
-                        max_picks: int = 4) -> tuple[list[dict], float, float]:
+                        max_picks: int = 6) -> tuple[list[dict], float, float]:
     """One rollover day, aiming at `target_odds` with the best hit rate.
 
     Odds and probability are inverses, so a daily target is a choice about how
@@ -389,10 +496,9 @@ def select_rollover_day(picks: list[dict], target_odds: float = 2.0,
         # picking a 44% day over a 69% day because it paid more, which is how
         # you build a chain out of its least likely links.
         prefer="joint",
-        # The band used to open at 0.80 of target, so a chain advertised as
-        # "2 odds a day" published days at 1.60x and never looked like what it
-        # claimed. Held at 0.95, a day has to actually reach ~1.9x, and with a
-        # fourth leg available it can get there on safe picks rather than by
-        # reaching for a long one.
-        band_low=0.95,
+        # The product promises a 2x–3x daily slot. Two strong legs normally
+        # win, but up to six shorter, safer prices are allowed when they have
+        # a higher joint chance. The ceiling is permission, not a quota.
+        band_low=1.0,
+        band_high=1.5,
     )

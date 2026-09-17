@@ -5,7 +5,7 @@ Main application.
 import logging
 import os
 from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -14,10 +14,11 @@ from sqlalchemy.orm import Session
 import threading
 
 from api.api import api_router
-from database import init_db, get_db
+from database import get_db, init_db, log_pool_exception, log_pool_status
 from utils.config import settings
 from utils.error_handling import setup_exception_handlers
 from utils.security import SecurityMiddleware, RateLimitMiddleware
+from utils.runtime_metrics import log_runtime_memory
 
 # ---------------------------------------------------------------------------
 # Sentry — error tracking (no-op when SENTRY_DSN is not set)
@@ -49,6 +50,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Background publishers and settlement loops must never start merely because
+# a test imports the ASGI app. Production keeps the current behavior; local
+# runs can opt in with ENABLE_BACKGROUND_JOBS=true.
+_environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+_background_default = "true" if _environment == "production" else "false"
+BACKGROUND_JOBS_ENABLED = os.getenv(
+    "ENABLE_BACKGROUND_JOBS", _background_default
+).strip().lower() in {"1", "true", "yes", "on"}
+LEGACY_PREDICTION_SETTLEMENT_ENABLED = os.getenv(
+    "ENABLE_LEGACY_PREDICTION_SETTLEMENT", "false"
+).strip().lower() in {"1", "true", "yes", "on"}
+
 # httpx logs full request URLs at INFO — the Telegram bot token is part of the
 # URL, so it would leak into production logs. Keep these loggers at WARNING.
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -79,6 +92,25 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.DEBUG else None
 )
 
+
+@app.middleware("http")
+async def trace_important_requests(request: Request, call_next):
+    """Log arrival of expensive public requests without request credentials."""
+    if request.url.path == "/api/leagues/slip-builder/generate":
+        raw_cf_ray = request.headers.get("cf-ray", "")
+        cf_ray = "".join(
+            char for char in raw_cf_ray[:128]
+            if char.isalnum() or char in {"-", "_", ".", ":"}
+        ) or "absent"
+        logger.info(
+            "request_start method=%s path=%s cf_ray=%s timestamp=%s",
+            request.method,
+            request.url.path,
+            cf_ray,
+            datetime.now().astimezone().isoformat(),
+        )
+    return await call_next(request)
+
 # Phase 5: Re-enable production middleware
 app.add_middleware(
     TrustedHostMiddleware,
@@ -103,6 +135,8 @@ _defaults = [
     "http://localhost:3777",
     "http://localhost:5173",
     "http://localhost:5180",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5180",
 ]
 _allowed_origins = list(set(_explicit_origins + _defaults))
 
@@ -163,15 +197,27 @@ try:
     )
     _slips_ensure_table()
     _cards_ensure_table()
+    from leagues.builder_revisions import ensure_tables as _builder_revision_tables
+    _builder_revision_tables()
+    from leagues.decision_archive import ensure_tables as _decision_archive_tables
+    _decision_archive_tables()
 except Exception as e:
     logger.warning(f"Could not ensure rollover_days table: {e}")
 
-# Start background results checker (every 6h) — World Cup rollover chains
-try:
-    from leagues.results_checker import start_background_loop as _start_results_loop
-    _start_results_loop()
-except Exception as e:
-    logger.warning(f"Could not start results checker: {e}")
+def _start_current_results_checker(start=None):
+    """Start the authoritative leagues settlement loop."""
+    if start is None:
+        from leagues.results_checker import start_background_loop
+        start = start_background_loop
+    start()
+
+
+# Start background results checker (every 6h) — authoritative leagues records.
+if BACKGROUND_JOBS_ENABLED:
+    try:
+        _start_current_results_checker()
+    except Exception as e:
+        logger.warning(f"Could not start results checker: {e}")
 
 
 def _start_prediction_settlement_loop():
@@ -202,10 +248,15 @@ def _start_prediction_settlement_loop():
     logger.info("Prediction settlement loop started (12h interval)")
 
 
-try:
-    _start_prediction_settlement_loop()
-except Exception as e:
-    logger.warning(f"Could not start prediction settlement loop: {e}")
+def _legacy_prediction_settlement_should_start() -> bool:
+    return BACKGROUND_JOBS_ENABLED and LEGACY_PREDICTION_SETTLEMENT_ENABLED
+
+
+if _legacy_prediction_settlement_should_start():
+    try:
+        _start_prediction_settlement_loop()
+    except Exception as e:
+        logger.warning(f"Could not start prediction settlement loop: {e}")
 
 
 def _start_telegram_bot_thread():
@@ -254,55 +305,32 @@ def _start_telegram_bot_thread():
     logger.info("Telegram bot started in supervised background thread")
 
 
-try:
-    _start_telegram_bot_thread()
-except Exception as e:
-    logger.warning(f"Could not start Telegram bot: {e}")
+if BACKGROUND_JOBS_ENABLED:
+    try:
+        _start_telegram_bot_thread()
+    except Exception as e:
+        logger.warning(f"Could not start Telegram bot: {e}")
 
 # Which publishing day has already had its "new predictions" alert. The loop
 # ticks every 15 minutes; without this it would announce the card four times an
 # hour.
-_ALERTED: dict = {"date": None}
+# The in-memory alert guard that used to live here is gone. It reset on every
+# process start, which is precisely why deploying sent a notification. The
+# replacement is a claimed row in notification_deliveries, keyed on the
+# publishing day and the channel — see services/push_notification_service.py.
 
 
 def _ensure_today_generated():
-    """Generate today's predictions + accumulator feed if missing.
+    """Keep the authoritative leagues feed and growth queue current.
 
-    Idempotent: skips ML generation when the day's summary is completed,
-    and the accumulator feed reads odds through a 6h disk cache, so calling
-    this repeatedly is cheap.
+    The old DailyPredictionsService pipeline is intentionally absent. It is
+    retired, produces no useful public card, and must not consume a database
+    connection every fifteen minutes. Compatibility endpoints remain mounted
+    for read/manual access while consumers are retired separately.
     """
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    today_date = datetime.now().date()
+    log_pool_status("daily_refresh_start")
 
-    # 1) Daily ML predictions
-    try:
-        from services.daily_predictions_service import (
-            DailyPredictionsService, DailyPredictionSummary,
-        )
-        from database import SessionLocal
-
-        db = SessionLocal()
-        try:
-            existing = db.query(DailyPredictionSummary).filter(
-                DailyPredictionSummary.prediction_date == today_date
-            ).first()
-            already_done = existing is not None and existing.generation_status == "completed"
-        finally:
-            db.close()
-
-        if already_done:
-            logger.debug(f"Predictions for {today_str} already exist")
-        else:
-            logger.info(f"Daily loop: generating predictions for {today_str}...")
-            result = DailyPredictionsService().generate_daily_predictions(today_str)
-            status = result.get("status", "unknown")
-            count = result.get("summary", {}).get("predictions_generated", 0)
-            logger.info(f"Daily loop: generation complete: status={status}, predictions={count}")
-    except Exception as e:
-        logger.error(f"Daily loop: prediction generation failed: {e}")
-
-    # 2) Accumulator feed + rollover chain extension. Without this, the
+    # 1) Accumulator feed + rollover chain extension. Without this, the
     # chain only grows when a user happens to hit /accumulators/today —
     # the 09:00 Telegram post would find no picks on quiet mornings.
     try:
@@ -310,39 +338,23 @@ def _ensure_today_generated():
         build_daily_accumulators()
     except Exception as e:
         logger.error(f"Daily loop: accumulator feed build failed: {e}")
+        log_pool_exception("daily_refresh_pool_timeout", e, step="accumulator_feed")
+        log_pool_status(
+            "daily_refresh_error", level=logging.ERROR,
+            step="accumulator_feed", error_type=type(e).__name__,
+        )
 
-    # 3) Tell subscribers, counted off the card that is actually published.
+    # Subscriber alerts used to fire from here, guarded by a dict held in
+    # process memory. That dict is empty in a new process, so every deploy and
+    # every restart announced the day again — one notification per push, and
+    # two to four whenever a deploy cycled more than once. Sitting on the boot
+    # path also meant an afternoon restart re-announced the morning's card.
     #
-    # This used to fire from the retired daily-predictions pipeline, which has
-    # generated nothing for weeks, so the Chrome alert and the Telegram DM both
-    # announced "0 picks for today" while the real card was full. Sent once per
-    # publishing day, and never when the count is zero.
-    try:
-        from leagues.daily_feed import _publish_date, build_daily_accumulators
-        from services.push_notification_service import notify_predictions_ready
+    # The alert is now a step of the daily job in leagues/scheduler.py, inside
+    # the run claim and behind a delivery row of its own, so it goes out once
+    # per publishing day however often this process starts.
 
-        _pub_date = _publish_date()
-        if _ALERTED.get("date") != _pub_date:
-            _card = build_daily_accumulators()
-            _accums = (_card or {}).get("accumulators") or {}
-            _cats = {
-                key: bool((cat or {}).get("games"))
-                for key, cat in _accums.items() if key != "rollover"
-            }
-            _count = sum(len((cat or {}).get("games") or [])
-                         for key, cat in _accums.items() if key != "rollover")
-            if _count:
-                notify_predictions_ready(
-                    prediction_date=_pub_date,
-                    predictions_count=_count,
-                    categories=_cats,
-                )
-                _ALERTED["date"] = _pub_date
-                logger.info(f"Prediction alert sent for {_pub_date} ({_count} picks)")
-    except Exception as e:
-        logger.warning(f"Daily loop: prediction alert failed: {e}")
-
-    # 4) Growth Engine. Runs last and swallows its own errors, so marketing
+    # 2) Growth Engine. Runs last and swallows its own errors, so marketing
     # can never be the reason predictions fail to generate. run_daily is
     # idempotent — publication rows are claimed under a unique constraint —
     # so calling it on every 15-minute tick posts each item exactly once.
@@ -352,6 +364,12 @@ def _ensure_today_generated():
         retry_failed()
     except Exception as e:
         logger.error(f"Daily loop: growth engine failed: {e}")
+        log_pool_exception("daily_refresh_pool_timeout", e, step="growth")
+        log_pool_status(
+            "daily_refresh_error", level=logging.ERROR,
+            step="growth", error_type=type(e).__name__,
+        )
+    log_pool_status("daily_refresh_end")
 
 
 def _start_daily_generation_loop():
@@ -373,14 +391,18 @@ def _start_daily_generation_loop():
 
     def _run():
         _time.sleep(5)  # let the server finish booting first
+        try:
+            from leagues.engine import start_prepared_board_refresh
+            start_prepared_board_refresh(days_ahead=7, force=False)
+        except Exception as e:
+            logger.error(f"Weekly board prewarm failed to start: {e}")
         last_published = None
         while True:
             try:
                 now = datetime.now(_tz.utc)
                 wat = now + _td(hours=1)
                 wat_day = wat.strftime("%Y-%m-%d")
-
-                _ensure_today_generated()
+                allow_general_refresh = True
 
                 # Past 08:00 WAT, run the full day: settle, refit, publish,
                 # distribute. This used to build the card and nothing else, so
@@ -395,16 +417,31 @@ def _start_daily_generation_loop():
                 # unavailable. `last_published` stays as an in-process short
                 # circuit only; the database is what actually decides.
                 if wat.hour >= 8 and last_published != wat_day:
+                    allow_general_refresh = False
                     try:
                         from leagues.scheduler import run_daily_job
                         report = run_daily_job()
+                        skipped_in_flight = (
+                            report.get("status") == "skipped"
+                            and report.get("reason") != "already completed today"
+                        )
+                        allow_general_refresh = not skipped_in_flight
                         if report.get("status") != "skipped":
                             logger.info(
                                 f"Daily run for {wat_day}: {report.get('status')} "
                                 f"(failed: {report.get('failed') or 'none'})")
-                        last_published = wat_day
+                        if not skipped_in_flight:
+                            last_published = wat_day
                     except Exception as e:
                         logger.error(f"Daily run failed: {e}")
+
+                # Run the general refresh only after the claimed daily job.
+                # Otherwise a restart after the code-board time could render
+                # and publish content before today's booking step completed.
+                # When another worker owns the daily claim, wait for its next
+                # tick rather than racing its in-flight booking/distribution.
+                if allow_general_refresh:
+                    _ensure_today_generated()
             except Exception as e:
                 logger.error(f"Daily generation loop iteration failed: {e}")
             _time.sleep(900)
@@ -413,7 +450,16 @@ def _start_daily_generation_loop():
     logger.info("Daily generation loop started (15 min checks, publishes 08:00 WAT)")
 
 
-_start_daily_generation_loop()
+if BACKGROUND_JOBS_ENABLED:
+    _start_daily_generation_loop()
+else:
+    logger.info("Background jobs disabled for this process")
+
+log_runtime_memory(
+    "startup_complete",
+    background_jobs=BACKGROUND_JOBS_ENABLED,
+    legacy_prediction_settlement=LEGACY_PREDICTION_SETTLEMENT_ENABLED,
+)
 
 
 @app.get("/")

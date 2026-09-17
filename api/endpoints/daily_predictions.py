@@ -12,14 +12,22 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from services.daily_predictions_service import DailyPredictionsService, DailyPrediction, DailyPredictionSummary
+from utils.security import require_api_key
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Initialize service
-daily_service = DailyPredictionsService()
+_daily_service = None
+
+
+def _get_daily_service() -> DailyPredictionsService:
+    """Create the retired compatibility service only for an explicit call."""
+    global _daily_service
+    if _daily_service is None:
+        _daily_service = DailyPredictionsService()
+    return _daily_service
 
 @router.get("/today")
 def get_todays_predictions_from_db(db: Session = Depends(get_db)):
@@ -50,7 +58,7 @@ def get_todays_predictions_from_db(db: Session = Depends(get_db)):
                 "status": "pending",
                 "date": today.isoformat(),
                 "message": f"Predictions are {summary.generation_status}",
-                "summary": daily_service._summary_to_dict(summary),
+                "summary": DailyPredictionsService._summary_to_dict(summary),
                 "predictions": []
             }
         
@@ -90,7 +98,7 @@ def get_todays_predictions_from_db(db: Session = Depends(get_db)):
             "date": today.isoformat(),
             "source": "database",
             "cached": True,
-            "summary": daily_service._summary_to_dict(summary),
+            "summary": DailyPredictionsService._summary_to_dict(summary),
             "predictions": formatted_predictions
         }
         
@@ -177,11 +185,12 @@ def get_betting_categories_from_db(db: Session = Depends(get_db)):
         logger.error(f"Error getting betting categories: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve betting categories")
 
-@router.post("/generate")
+@router.post("/generate", dependencies=[Depends(require_api_key)])
 def generate_daily_predictions(
     background_tasks: BackgroundTasks,
     target_date: str = Query(None, description="Date in YYYY-MM-DD format (default: today)"),
-    force: bool = Query(False, description="Force regeneration even if predictions exist")
+    force: bool = Query(False, description="Force regeneration even if predictions exist"),
+    db: Session = Depends(get_db),
 ):
     """
     Generate predictions for a specific date (admin/manual trigger).
@@ -207,7 +216,6 @@ def generate_daily_predictions(
         
         # Check if predictions already exist (unless force)
         if not force:
-            db = next(get_db())
             existing = db.query(DailyPredictionSummary).filter(
                 DailyPredictionSummary.prediction_date == datetime.strptime(target_date, "%Y-%m-%d").date()
             ).first()
@@ -217,11 +225,11 @@ def generate_daily_predictions(
                     "status": "already_exists",
                     "date": target_date,
                     "message": "Predictions already exist. Use force=true to regenerate.",
-                    "summary": daily_service._summary_to_dict(existing)
+                    "summary": DailyPredictionsService._summary_to_dict(existing)
                 }
         
         # Generate predictions (can be slow, so run in background for production)
-        result = daily_service.generate_daily_predictions(target_date)
+        result = _get_daily_service().generate_daily_predictions(target_date)
         
         return {
             "status": "completed",
@@ -271,7 +279,7 @@ def get_prediction_status(
         return {
             "status": summary.generation_status,
             "date": target_date,
-            "summary": daily_service._summary_to_dict(summary)
+            "summary": DailyPredictionsService._summary_to_dict(summary)
         }
         
     except ValueError:
@@ -302,7 +310,7 @@ def get_prediction_history(
         
         history = []
         for summary in summaries:
-            history.append(daily_service._summary_to_dict(summary))
+            history.append(DailyPredictionsService._summary_to_dict(summary))
         
         return {
             "status": "success",
@@ -315,7 +323,7 @@ def get_prediction_history(
         logger.error(f"Error getting prediction history: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve prediction history")
 
-@router.delete("/clear")
+@router.delete("/clear", dependencies=[Depends(require_api_key)])
 def clear_predictions(
     target_date: str = Query(None, description="Date in YYYY-MM-DD format (default: today)"),
     db: Session = Depends(get_db)

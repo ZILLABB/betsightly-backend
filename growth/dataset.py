@@ -40,10 +40,26 @@ TIER_LABELS = {
 }
 
 
+def _is_actionable(kickoff: str | None, started: bool = False) -> bool:
+    """Whether a code can still be acted on at render time."""
+    if not kickoff or started:
+        return False
+    try:
+        parsed = datetime.fromisoformat(str(kickoff).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed > datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        return False
+
+
 def _leg(game: dict, tier: str | None = None) -> dict:
     """One pick, flattened to the fields any channel might render."""
     conf = game.get("confidence") or 0.0
     odds = game.get("odds") or game.get("estimated_odds") or 0.0
+    kickoff = game.get("kickoff") or game.get("date")
+    started = bool(game.get("started"))
+    actionable = _is_actionable(kickoff, started)
     return {
         "match_id": game.get("match_id"),
         "home_team": game.get("home_team"),
@@ -52,14 +68,15 @@ def _leg(game: dict, tier: str | None = None) -> dict:
         "away_team_logo": game.get("away_team_logo"),
         "league": game.get("league"),
         "league_slug": game.get("league_slug"),
-        "kickoff": game.get("kickoff") or game.get("date"),
+        "kickoff": kickoff,
         "prediction": game.get("prediction") or game.get("readable_prediction"),
         "market": game.get("market"),
         "market_group": game.get("prediction_type"),
         "confidence": round(float(conf), 4),
         "odds": round(float(odds), 2),
         "odds_are_real": bool(game.get("odds_are_real")),
-        "started": bool(game.get("started")),
+        "started": started,
+        "actionable": actionable,
         "venue": game.get("venue"),
         "home_form": game.get("home_form"),
         "away_form": game.get("away_form"),
@@ -97,6 +114,13 @@ def _tier_block(key: str, cat: dict) -> dict:
     games = cat.get("games") or []
     total = float(cat.get("total_odds") or 0.0)
     hit = float(cat.get("hit_probability") or 0.0)
+    legs = [_leg(g, key) for g in games]
+    try:
+        from leagues.booking import validated_public_booking
+        booking = validated_public_booking(cat.get("booking"), games)
+    except Exception as exc:
+        logger.warning(f"growth: booking validation failed for {key} ({exc})")
+        booking = None
     return {
         "key": key,
         "label": TIER_LABELS.get(key, key),
@@ -107,16 +131,12 @@ def _tier_block(key: str, cat: dict) -> dict:
         # Payout times the chance it lands. Published so no channel has to
         # imply a slip is better than it is.
         "expected_value": round(total * hit, 4) if total and hit else None,
-        "legs": [_leg(g, key) for g in games],
+        "legs": legs,
         "leg_count": len(games),
         "all_started": bool(cat.get("all_started")),
-        # The SportyBet code for this exact slip, when one exists. Carried
-        # through so a post can offer six characters instead of asking a
-        # reader to retype five fixtures into another app. Only ever an
-        # `active` record: a tier that failed to book advertises nothing.
-        "booking": ((cat.get("booking") or {})
-                    if (cat.get("booking") or {}).get("status") == "active"
-                    else None),
+        "actionable": bool(legs) and all(leg["actionable"] for leg in legs),
+        "booking": booking,
+        "booking_verified": bool(booking),
     }
 
 
@@ -125,7 +145,7 @@ def _rollover_block(cat: dict, today: str) -> dict:
     chain = cat.get("chain") or []
     today_day = next(
         (d for d in chain
-         if (d.get("date") or "") >= today and d.get("status") == "pending"),
+         if (d.get("date") or "") == today and d.get("status") == "pending"),
         None,
     )
     legs = []
@@ -141,12 +161,21 @@ def _rollover_block(cat: dict, today: str) -> dict:
                 "confidence": round(float(p.get("confidence") or 0.0), 4),
                 "odds": round(float(p.get("odds") or 0.0), 2),
                 "odds_are_real": bool(p.get("odds_are_real")),
+                "started": not _is_actionable(p.get("commence_time")),
+                "actionable": _is_actionable(p.get("commence_time")),
                 "slug": match_slug(p.get("home_team"), p.get("away_team")),
                 "tier": "rollover",
             })
 
     won = sum(1 for d in chain if d.get("status") == "won")
     lost = sum(1 for d in chain if d.get("status") == "lost")
+    raw_games = cat.get("games") or []
+    try:
+        from leagues.booking import validated_public_booking
+        booking = validated_public_booking(cat.get("booking"), raw_games)
+    except Exception as exc:
+        logger.warning(f"growth: rollover booking validation failed ({exc})")
+        booking = None
     return {
         "key": "rollover",
         "label": "Rollover",
@@ -158,8 +187,15 @@ def _rollover_block(cat: dict, today: str) -> dict:
         "days_lost": lost,
         "total_odds": round(float(cat.get("total_odds") or 0.0), 2),
         "hit_probability": round(float(cat.get("today_hit_probability") or 0.0), 4),
+        "completion_probability": (
+            round(float(cat.get("completion_probability")), 4)
+            if cat.get("completion_probability") is not None else None
+        ),
         "legs": legs,
         "leg_count": len(legs),
+        "actionable": bool(legs) and all(leg["actionable"] for leg in legs),
+        "booking": booking,
+        "booking_verified": bool(booking),
     }
 
 
@@ -174,64 +210,6 @@ def _dedupe_by_fixture(legs: list[dict]) -> list[dict]:
         seen.add(mid)
         out.append(leg)
     return out
-
-
-def _value_bets(days_ahead: int = 2, limit: int = 5) -> list[dict]:
-    """Genuine +EV bets, or an empty list when the shop is unavailable.
-
-    Wrapped because this is the one part of the dataset that reaches a paid
-    third-party API with a monthly credit budget. A marketing job must never
-    be the reason the budget is spent or the reason a post fails.
-    """
-    try:
-        from leagues.engine import run_pipeline
-        from leagues.odds_shop import shop_odds, lookup, SLUG_TO_ODDS_KEY
-        from collections import Counter
-
-        _, fixtures = run_pipeline(days_ahead=days_ahead)
-        ranked = [s for s, _ in Counter(f["league_slug"] for f in fixtures).most_common()
-                  if s in SLUG_TO_ODDS_KEY]
-        shopped = shop_odds(ranked[:6])
-        if not shopped:
-            return []
-
-        rows = []
-        for f in fixtures:
-            hit = lookup(shopped, f["home"]["name"], f["away"]["name"])
-            if not hit:
-                continue
-            for outcome, o in hit["outcomes"].items():
-                cp, bp = o.get("consensus_prob"), o.get("best_price")
-                if not cp or not bp:
-                    continue
-                ev = cp * bp - 1
-                if ev < 0.02:
-                    continue
-                label = {"home_win": f["home"]["name"],
-                         "away_win": f["away"]["name"]}.get(outcome, "Draw")
-                rows.append({
-                    "match_id": f["match_id"],
-                    "home_team": f["home"]["name"],
-                    "away_team": f["away"]["name"],
-                    "league": f["league"],
-                    "kickoff": f["commence_time"],
-                    "prediction": f"{label} Win" if outcome != "draw" else "Draw",
-                    "confidence": round(cp, 4),
-                    "odds": bp,
-                    "book": o.get("best_book"),
-                    "book_count": o.get("books"),
-                    "edge_pct": round(ev * 100, 1),
-                    "slug": match_slug(f["home"]["name"], f["away"]["name"]),
-                    # Exchange prices are quoted before commission, which eats
-                    # 2-5% of a thin edge. Channels must be able to say so.
-                    "is_exchange": (o.get("best_book") or "").lower() in
-                        ("betfair", "smarkets", "matchbook", "betdaq"),
-                })
-        rows.sort(key=lambda r: -r["edge_pct"])
-        return rows[:limit]
-    except Exception as e:
-        logger.warning(f"growth: value bets unavailable ({e})")
-        return []
 
 
 def _recent_results(days: int = 7) -> dict:
@@ -274,6 +252,15 @@ def _recent_results(days: int = 7) -> dict:
             })
 
         summary = performance_summary(limit_days=days)
+        try:
+            from leagues.rollover_db import history as rollover_history
+            rollover_settled = [
+                row for row in rollover_history(limit_days=days)
+                if row.get("date") == yesterday
+                and row.get("status") in ("won", "lost", "void")
+            ]
+        except Exception:
+            rollover_settled = []
 
         # Slips and singles are counted in different units and must not be
         # added together. Doing so is why Telegram announced 70 wins while the
@@ -295,6 +282,7 @@ def _recent_results(days: int = 7) -> dict:
         return {
             "date": yesterday,
             "slips_settled": settled_yesterday,
+            "rollover_settled": rollover_settled,
             # Headline figures are the slips — one bet, one outcome. Singles
             # are reported alongside rather than folded in.
             "won": slips["won"],
@@ -312,7 +300,7 @@ def _recent_results(days: int = 7) -> dict:
                 "by_category": {}}
 
 
-def build(include_value_bets: bool = True) -> Optional[dict]:
+def build() -> Optional[dict]:
     """The day's marketing dataset, or None when nothing is published yet.
 
     Returns None rather than an empty skeleton so a caller cannot mistake
@@ -363,7 +351,6 @@ def build(include_value_bets: bool = True) -> Optional[dict]:
         "banker": tiers["banker"],
         "over_1_5": tiers["over_1_5"],
         "rollover": rollover,
-        "value_bets": _value_bets() if include_value_bets else [],
         "results": _recent_results(),
         "metadata": {
             "source": "leagues",
