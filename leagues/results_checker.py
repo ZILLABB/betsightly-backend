@@ -284,65 +284,47 @@ def _collect_oddsapi_scores(sport_keys: List[str]) -> Dict[str, Dict[str, Any]]:
 # ── Unified scores collector ─────────────────────────────────
 
 
-def _collect_espn_scores_ranged(start_date: str, end_date: str) -> Dict[str, Dict[str, Any]]:
-    """Finished scores across every tracked league for a date range.
+def _slugs_for_picks(picks: list[dict]) -> set[str] | None:
+    """Request only competitions actually published; legacy rows use all."""
+    enabled = set(ESPN_LEAGUE_SLUGS.values())
+    slugs = {str(p.get("league_slug") or "").strip() for p in picks}
+    selected = {slug for slug in slugs if slug in enabled}
+    return selected or None
 
-    ESPN accepts dates=YYYYMMDD-YYYYMMDD, so each league costs one request
-    instead of one per day, and the leagues run concurrently. Keyed by
-    "home|away|date" plus a looser "home|away" so callers can match either way.
-    """
-    from concurrent.futures import ThreadPoolExecutor
 
+def _fetch_espn_scores_month(slug: str, month: str) -> List[dict]:
+    """ESPN soccer scoreboard accepts YYYYMM, not YYYYMMDD-YYYYMMDD."""
     try:
-        start = datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=1)
-        end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-    except Exception:
-        return {}
-    rng = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
-
-    slugs = sorted(set(ESPN_LEAGUE_SLUGS.values()))
-
-    def fetch(slug: str) -> List[dict]:
-        try:
-            resp = requests.get(
-                f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
-                params={"dates": rng, "limit": 500}, timeout=25,
-            )
-            if resp.status_code != 200:
-                return []
-            return resp.json().get("events", [])
-        except Exception:
+        resp = requests.get(
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+            params={"dates": month, "limit": 500}, timeout=8,
+        )
+        if resp.status_code != 200:
+            logger.warning("Score month fetch HTTP %s league=%s month=%s",
+                           resp.status_code, slug, month)
             return []
+        return resp.json().get("events", [])
+    except Exception as exc:
+        logger.warning("Score month fetch failed league=%s month=%s error=%s",
+                       slug, month, type(exc).__name__)
+        return []
 
-    finished: Dict[str, Dict[str, Any]] = {}
-    with ThreadPoolExecutor(max_workers=16) as pool:
-        for events in pool.map(fetch, slugs):
-            for event in events:
-                comp = (event.get("competitions") or [{}])[0]
-                if not comp.get("status", {}).get("type", {}).get("completed"):
-                    continue
-                teams = comp.get("competitors", [])
-                if len(teams) < 2:
-                    continue
-                hd = next((t for t in teams if t.get("homeAway") == "home"), teams[0])
-                ad = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
-                home = hd.get("team", {}).get("displayName", "")
-                away = ad.get("team", {}).get("displayName", "")
-                score = regulation_score(comp)
-                if not score:
-                    continue
-                hs, as_ = score["home_score"], score["away_score"]
-                payload = {"home": home, "away": away, "home_score": hs,
-                           "away_score": as_, "completed": True,
-                           **{key: score.get(key) for key in (
-                               "score_90", "score_extra_time", "penalty_score",
-                               "qualified_team", "match_status",
-                           )}}
-                date = (event.get("date") or "")[:10]
-                finished[f"{_normalize_name(home)}|{_normalize_name(away)}|{date}"] = payload
-                finished.setdefault(f"{_normalize_name(home)}|{_normalize_name(away)}", payload)
-    return finished
 
+def _collect_espn_scores_ranged(start_date: str, end_date: str,
+                                slugs: set[str] | None = None) -> Dict[str, Dict[str, Any]]:
+    """Collect finished scores via ESPN month requests with date-safe identity."""
+    from leagues.score_calendar import collect_monthly_scores
+    try:
+        return collect_monthly_scores(
+            start_date, end_date,
+            slugs=sorted(slugs or set(ESPN_LEAGUE_SLUGS.values())),
+            fetch_month=_fetch_espn_scores_month,
+            regulation_score=regulation_score,
+            normalize=_normalize_name,
+        )
+    except (TypeError, ValueError) as exc:
+        logger.warning("Invalid score range %s..%s: %s", start_date, end_date, exc)
+        return {}
 
 
 def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tuple[Dict[str, Dict[str, Any]], str]:
@@ -357,11 +339,13 @@ def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tup
 
     # Determine date range from checkable rows
     dates = set()
+    tracked_picks = []
     for row in checkable_rows:
         try:
             picks = json.loads(row.picks or "[]")
         except Exception:
             continue
+        tracked_picks.extend(picks)
         for pick in picks:
             ct = (pick.get("commence_time") or "")[:10]
             if ct:
@@ -376,7 +360,8 @@ def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tup
     # 1. ESPN — free, no key, no quota.
     # Ranged + concurrent: the per-date collector issues one request per league
     # per day, which across 91 leagues cannot finish inside a request timeout.
-    finished = _collect_espn_scores_ranged(date_from, date_to)
+    finished = _collect_espn_scores_ranged(
+        date_from, date_to, slugs=_slugs_for_picks(tracked_picks))
     if finished:
         logger.info(f"Scores from ESPN: {len(finished)} completed matches")
         return finished, "espn"
@@ -960,10 +945,11 @@ def settle_published_slips() -> Dict[str, int]:
 
     # Score every league we tip, across the dates in question
     dates = sorted({s.date for s in slips})
-    scores = _collect_espn_scores_ranged(dates[0], dates[-1])
     unresolved = [pick for slip in slips
                   for pick in _json.loads(slip.picks or "[]")
                   if pick.get("status") not in ("won", "lost", "void")]
+    scores = _collect_espn_scores_ranged(
+        dates[0], dates[-1], slugs=_slugs_for_picks(unresolved))
     scores = _recover_missing_score_data(unresolved, scores)
 
     def _lookup(home: str, away: str) -> Optional[Dict[str, Any]]:
@@ -1034,6 +1020,8 @@ def settle_builder_predictions(scores: dict | None = None,
         return summary
 
     if scores is None:
+        builder_picks = [p for row in rows
+                         for p in json.loads(row.get("picks") or "[]")]
         dates = sorted({
             str(pick.get("kickoff") or pick.get("date") or "")[:10]
             for row in rows
@@ -1041,7 +1029,8 @@ def settle_builder_predictions(scores: dict | None = None,
             if str(pick.get("kickoff") or pick.get("date") or "")[:10]
             <= current.strftime("%Y-%m-%d")
         })
-        scores = (_collect_espn_scores_ranged(dates[0], dates[-1])
+        scores = (_collect_espn_scores_ranged(
+                      dates[0], dates[-1], slugs=_slugs_for_picks(builder_picks))
                   if dates else {})
         unresolved = [pick for row in rows
                       for pick in json.loads(row.get("picks") or "[]")
@@ -1112,7 +1101,9 @@ def backfill_leg_status(limit_days: int = 120) -> Dict[str, int]:
             # a sleep between each — thousands of calls that never finish
             # inside a request timeout.
             dates = sorted({r.date for r, _ in todo})
-            scores = _collect_espn_scores_ranged(dates[0], dates[-1])
+            scores = _collect_espn_scores_ranged(
+                dates[0], dates[-1],
+                slugs=_slugs_for_picks([pick for _, picks in todo for pick in picks]))
 
             def _find(home: str, away: str, date: str):
                 h, a = _normalize_name(home), _normalize_name(away)

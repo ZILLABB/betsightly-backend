@@ -40,7 +40,7 @@ def recover_missing_espn_scores(
     ESPN wide-range scoreboards may omit specific events even when another
     competition returns results. Retry the *known published league* on the
     fixture day, then adjacent days if ESPN assigned it a different local day.
-    The actual event kickoff must be within 12h of the archived UTC kickoff.
+    The actual event kickoff must be within 60 minutes of the archived UTC kickoff.
     Identical-looking rematches and one-team fuzzy matches never qualify.
     """
     current = now or datetime.now(timezone.utc)
@@ -78,7 +78,7 @@ def recover_missing_espn_scores(
             if not status.get("completed"):
                 continue
             event_kickoff = _dt(event.get("date") or competition.get("date"))
-            if not event_kickoff or abs((event_kickoff - kickoff).total_seconds()) > 12 * 3600:
+            if not event_kickoff or abs((event_kickoff - kickoff).total_seconds()) > 60 * 60:
                 continue
             teams = competition.get("competitors") or []
             homes = [t for t in teams if t.get("homeAway") == "home"]

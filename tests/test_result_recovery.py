@@ -131,3 +131,14 @@ def test_rotating_budget_eventually_checks_other_pending_fixtures():
             return []
         recover(picks, fetch, now=now, max_queries=1)
     assert {"20260912", "20260913", "20260914", "20260915"} <= requested
+
+
+def test_rejects_same_teams_with_kickoff_shift_more_than_one_hour():
+    # A different match for the same clubs several hours later is not ours.
+    got = recover([pick()], lambda *_: [event(kickoff="2026-09-15T21:00:00Z")])
+    assert got == {}
+
+
+def test_allows_minor_kickoff_correction_with_verified_teams_and_league():
+    got = recover([pick()], lambda *_: [event(kickoff="2026-09-15T18:30:00Z")])
+    assert lookup(got, "Alaves", "Valencia", "2026-09-15") is not None
