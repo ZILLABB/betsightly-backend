@@ -15,6 +15,7 @@ Public entry points:
 
 import os
 import json
+import unicodedata
 import logging
 import time
 import threading
@@ -523,9 +524,13 @@ TEAM_ALIASES = {
 
 
 def _normalize_name(name: str) -> str:
+    """Preserve exact team identity while handling accents and whitespace."""
     if not name:
         return ""
-    return name.lower().strip()
+    decomposed = unicodedata.normalize("NFKD", str(name).casefold())
+    return " ".join("".join(
+        char for char in decomposed if not unicodedata.combining(char)
+    ).split())
 
 
 def _lookup_score(scores: Dict[str, Dict[str, Any]], home: str, away: str,
@@ -533,8 +538,10 @@ def _lookup_score(scores: Dict[str, Dict[str, Any]], home: str, away: str,
     # Prefer an exact fixture date before the loose home|away fallback.
     home_key = _normalize_name(home)
     away_key = _normalize_name(away)
-    home_alias = TEAM_ALIASES.get(home_key, home_key)
-    away_alias = TEAM_ALIASES.get(away_key, away_key)
+    aliases = {_normalize_name(name): _normalize_name(alias)
+               for name, alias in TEAM_ALIASES.items()}
+    home_alias = aliases.get(home_key, home_key)
+    away_alias = aliases.get(away_key, away_key)
 
     # If the caller knows the fixture date, keep the lookup date-scoped.
     # Falling back to a loose home|away key can grade a rematch against the
@@ -558,6 +565,35 @@ def _lookup_score(scores: Dict[str, Dict[str, Any]], home: str, away: str,
         if hit:
             return hit
     return None
+
+
+def _fetch_espn_scores_recovery(slug: str, date: str) -> List[dict]:
+    """Short, read-only retry; an unavailable feed is never a void result."""
+    try:
+        response = requests.get(
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+            params={"dates": date}, timeout=6,
+        )
+        if response.status_code != 200:
+            logger.warning("Score recovery HTTP %s for league=%s date=%s",
+                           response.status_code, slug, date)
+            return []
+        return response.json().get("events", [])
+    except Exception as exc:
+        logger.warning("Score recovery unavailable league=%s date=%s error=%s",
+                       slug, date, type(exc).__name__)
+        return []
+
+
+def _recover_missing_score_data(picks: list[dict], scores: dict) -> dict:
+    """Recover missed ESPN finals for archived fixtures without changing bets."""
+    from leagues.result_recovery import recover_missing_espn_scores
+
+    return recover_missing_espn_scores(
+        picks, scores, known_slugs=set(ESPN_LEAGUE_SLUGS.values()),
+        fetch_events=_fetch_espn_scores_recovery, regulation_score=regulation_score,
+        normalize=_normalize_name, lookup_score=_lookup_score,
+    )
 
 
 # ── Smart scheduling helpers ─────────────────────────────────
@@ -767,6 +803,10 @@ def check_all_pending() -> Dict[str, int]:
                 return summary
 
             finished, source = _collect_finished_scores(checkable, has_club_picks=True)
+            unresolved = [pick for row in checkable
+                          for pick in json.loads(row.picks or "[]")
+                          if pick.get("status") not in ("won", "lost", "void")]
+            finished = _recover_missing_score_data(unresolved, finished)
             summary["source"] = source
             summary["api_calls"] = len(finished)
             if not finished:
@@ -808,14 +848,12 @@ def check_all_pending() -> Dict[str, int]:
                         )
 
                     if not match_data:
-                        if _missing_result_expired(pick):
-                            logger.warning(
-                                f"Day {row.day_number}: no score after 48h for "
-                                f"{home} vs {away}; voiding this leg only")
-                            pick_results.append("void")
-                        else:
-                            logger.info(f"Day {row.day_number}: no score yet for {home} vs {away} (date={match_date})")
-                            pick_results.append("pending")
+                        logger.warning(
+                            "Day %s: no verified final score for %s vs %s (date=%s); "
+                            "preserving pending status, not time-voiding",
+                            row.day_number, home, away, match_date,
+                        )
+                        pick_results.append("pending")
                         continue
                     r = _evaluate_pick(pick, match_data["home_score"], match_data["away_score"])
                     logger.info(f"Day {row.day_number}: {home} vs {away} → {match_data['home_score']}-{match_data['away_score']} → {r}")
@@ -923,6 +961,10 @@ def settle_published_slips() -> Dict[str, int]:
     # Score every league we tip, across the dates in question
     dates = sorted({s.date for s in slips})
     scores = _collect_espn_scores_ranged(dates[0], dates[-1])
+    unresolved = [pick for slip in slips
+                  for pick in _json.loads(slip.picks or "[]")
+                  if pick.get("status") not in ("won", "lost", "void")]
+    scores = _recover_missing_score_data(unresolved, scores)
 
     def _lookup(home: str, away: str) -> Optional[Dict[str, Any]]:
         h, a = _normalize_name(home), _normalize_name(away)
@@ -959,12 +1001,12 @@ def settle_published_slips() -> Dict[str, int]:
                 )
             )
 
-        # A slip more than three days old that still cannot be scored is
-        # voided rather than left pending forever.
+        # A missing provider result is not evidence of cancellation.
+        # Leave unresolved legs pending; a verified fixture status, not age,
+        # must establish a void. An overdue-pending alert is a separate task.
         if "pending" in outcomes:
-            age_days = (datetime.utcnow() - datetime.strptime(slip.date, "%Y-%m-%d")).days
-            if age_days > 3:
-                outcomes = ["void" if o == "pending" else o for o in outcomes]
+            logger.warning("Published slip %s/%s still has unverified final scores",
+                           slip.date, slip.category)
 
         status = settle_slip(slip.id, outcomes)
         if status == "won":
@@ -1001,6 +1043,10 @@ def settle_builder_predictions(scores: dict | None = None,
         })
         scores = (_collect_espn_scores_ranged(dates[0], dates[-1])
                   if dates else {})
+        unresolved = [pick for row in rows
+                      for pick in json.loads(row.get("picks") or "[]")
+                      if pick.get("status") not in ("won", "lost", "void")]
+        scores = _recover_missing_score_data(unresolved, scores)
 
     for row in rows:
         picks = json.loads(row.get("picks") or "[]")
@@ -1020,12 +1066,8 @@ def settle_builder_predictions(scores: dict | None = None,
                 outcomes.append(_evaluate_pick(
                     pick, match["home_score"], match["away_score"]
                 ))
-            elif _missing_result_expired(
-                {**pick, "commence_time": pick.get("kickoff") or pick.get("date")},
-                current,
-            ):
-                outcomes.append("void")
             else:
+                # Never mistake an unavailable provider score for a void.
                 outcomes.append("pending")
         status = settle_prediction(row["selection_fingerprint"], outcomes)
         key = status if status in ("won", "lost", "void") else "still_pending"
