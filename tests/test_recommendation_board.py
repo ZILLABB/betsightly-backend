@@ -60,7 +60,8 @@ def test_board_returns_one_best_pick_and_ranked_alternatives_per_fixture():
 
 
 def test_supported_and_lean_recommendations_exist_without_becoming_premium():
-    supported = _pick(confidence=.62, fixture=_fixture("supported"))
+    # SUPPORTED must have a credible real price.
+    supported = _pick(confidence=.62, fixture=_fixture("supported"), odds=1.70)
     lean = _pick(confidence=.57, fixture=_fixture("lean"))
     result = build_recommendation_board(
         [supported, lean], [supported["_fixture"], lean["_fixture"]],
@@ -96,7 +97,12 @@ def test_no_prediction_requires_an_explicit_reason():
 
 
 def test_strong_requires_trusted_market_and_existing_premium_floor():
-    trusted = _pick(confidence=.70)
+    # Previously 70% at 1.35 was labelled STRONG despite a negative return.
+    underpriced = _pick(confidence=.70)
+    assert recommendation_classification({
+        **underpriced, "market_trust_state": "TRUSTED"
+    }) == "LEAN"
+    trusted = _pick(confidence=.70, odds=1.50)
     assert recommendation_classification({
         **trusted, "market_trust_state": "TRUSTED"
     }) == "STRONG"

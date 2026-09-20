@@ -14,9 +14,24 @@ from datetime import datetime, timedelta, timezone
 from leagues.fixture_ranker import canonical_fixture_recommendations
 from leagues.engine import kickoff_wat_date
 from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
-from leagues.selection_quality import selection_probability
+from leagues.selection_quality import selection_probability, risk_adjusted_return
 
 WAT = timezone(timedelta(hours=1))
+
+
+def _price_eligible(pick: dict) -> bool:
+    """Only a real, conservatively priced selection merits premium language.
+
+    This does not make a model prediction true, or validate the live fixture.
+    Existing published codes are immutable and deliberately unaffected.
+    A 0.5% cushion avoids treating rounding noise as a meaningful edge.
+    """
+    try:
+        return (bool(pick.get("odds_are_real"))
+                and float(pick.get("odds") or 0) > 1.0
+                and risk_adjusted_return(pick) >= 1.005)
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def recommendation_classification(pick: dict) -> str:
@@ -31,6 +46,9 @@ def recommendation_classification(pick: dict) -> str:
     probability = selection_probability(pick)
     state = pick.get("market_trust_state")
     if not pick.get("market_floor_eligible", True):
+        return "LEAN"
+    # A high strike probability is not a profitable or verified price.
+    if not _price_eligible(pick):
         return "LEAN"
     if state == "TRUSTED" and probability >= MIN_PUBLISHABLE_CONFIDENCE:
         return "STRONG"
@@ -101,7 +119,8 @@ def build_recommendation_board(
         probability = selection_probability(best)
         state = best.get("market_trust_state")
         premium_eligible = (
-            probability >= MIN_PUBLISHABLE_CONFIDENCE
+            _price_eligible(best)
+            and probability >= MIN_PUBLISHABLE_CONFIDENCE
             and state in {"TRUSTED", "DEVELOPING"}
             and bool(best.get("market_floor_eligible", True))
         )
@@ -111,7 +130,7 @@ def build_recommendation_board(
             "match_id": match_id,
             "classification": classification,
             "premium_eligible": premium_eligible,
-            "safe_tier_eligible": bool(best.get("safe_tier_eligible")),
+            "safe_tier_eligible": bool(best.get("safe_tier_eligible") and _price_eligible(best)),
             "best_pick": to_game(best),
             "alternatives": [to_game(pick) for pick in candidates[1:4]],
             "raw_candidate_count": raw_counts[match_id],
