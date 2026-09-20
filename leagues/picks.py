@@ -473,10 +473,10 @@ def build_picks(
         if is_real:
             if market in ("home_win", "away_win", "draw"):
                 mkt_prob = (odds.get("implied") or {}).get(market)
-            elif market in ("over_2_5", "under_2_5"):
-                from leagues.market_quotes import exact_total_probability
-                side = "over" if market == "over_2_5" else "under"
-                mkt_prob = exact_total_probability(odds, 2.5, side)
+            elif market == "over_2_5":
+                mkt_prob = odds.get("implied_over")
+            elif market == "under_2_5":
+                mkt_prob = odds.get("implied_under")
             else:
                 mkt_prob = None
             if mkt_prob:

@@ -8,7 +8,6 @@ metadata and never rewrite its probability.
 
 from __future__ import annotations
 
-import math
 import re
 from typing import Iterable
 
@@ -90,11 +89,6 @@ def deduplicate_forecasts(
                 "policy_version": slip.get("policy_version"),
                 "category": str(slip.get("category") or "unknown"),
                 "source": "published",
-                "odds": leg.get("real_odds") or leg.get("odds"),
-                "odds_are_real": bool(leg.get("odds_are_real") or leg.get("real_odds")),
-                "ml_probability": leg.get("ml_confidence"),
-                "model_version": leg.get("model_version"),
-                "ranking_policy_version": leg.get("ranking_policy_version"),
                 "order": _record_order(slip, 0),
             })
 
@@ -121,11 +115,6 @@ def deduplicate_forecasts(
                 "policy_version": day.get("policy_version"),
                 "category": "rollover",
                 "source": "rollover",
-                "odds": leg.get("real_odds") or leg.get("odds"),
-                "odds_are_real": bool(leg.get("odds_are_real") or leg.get("real_odds")),
-                "ml_probability": leg.get("ml_confidence"),
-                "model_version": leg.get("model_version"),
-                "ranking_policy_version": leg.get("ranking_policy_version"),
                 "order": _record_order(day, 1),
             })
 
@@ -158,62 +147,3 @@ def collect_forecast_observations(limit_days: int = 365) -> list[dict]:
         get_history(limit_days=limit_days),
         rollover_history(limit_days=limit_days),
     )
-
-
-def evaluation_window(limit_days: int) -> dict:
-    """Score unique immutable forecasts without mixing corrected replay data."""
-    rows = collect_forecast_observations(limit_days=limit_days)
-
-    def probability_score(key: str) -> dict:
-        usable = [row for row in rows if row.get(key) is not None]
-        if not usable:
-            return {"n": 0, "brier": None, "log_loss": None,
-                    "mean_probability": None, "actual_hit_rate": None}
-        pairs = [(min(.999999, max(.000001, float(row[key]))), int(row["won"]))
-                 for row in usable]
-        return {
-            "n": len(pairs),
-            "brier": round(sum((p - y) ** 2 for p, y in pairs) / len(pairs), 6),
-            "log_loss": round(sum(
-                -(y * math.log(p) + (1 - y) * math.log(1 - p))
-                for p, y in pairs
-            ) / len(pairs), 6),
-            "mean_probability": round(sum(p for p, _ in pairs) / len(pairs), 6),
-            "actual_hit_rate": round(sum(y for _, y in pairs) / len(pairs), 6),
-        }
-
-    def roi(real: bool) -> dict:
-        priced = [row for row in rows
-                  if bool(row.get("odds_are_real")) is real
-                  and row.get("odds") is not None
-                  and float(row.get("odds") or 0) > 1]
-        returned = sum(float(row["odds"]) if row["won"] else 0.0 for row in priced)
-        return {
-            "n": len(priced), "staked": len(priced),
-            "returned": round(returned, 4),
-            "profit": round(returned - len(priced), 4),
-            "roi": round((returned - len(priced)) / len(priced), 6)
-            if priced else None,
-        }
-
-    return {
-        "days": limit_days,
-        "unique_forecasts": len(rows),
-        "source_rows": sum(int(row.get("duplicate_count") or 1) for row in rows),
-        "duplicates_removed": sum(int(row.get("duplicate_count") or 1) for row in rows) - len(rows),
-        "published_probability": probability_score("probability"),
-        "raw_probability": probability_score("raw_probability"),
-        "ml_shadow_probability": probability_score("ml_probability"),
-        "roi": {
-            "real_bookmaker_odds": roi(True),
-            "estimated_odds": roi(False),
-        },
-        "provenance": {
-            "source": "immutable_published_history_plus_rollover",
-            "corrected_replay_mixed_in": False,
-            "sources": sorted({source for row in rows for source in row.get("sources", [])}),
-            "policy_versions": sorted({str(row.get("policy_version") or "unknown") for row in rows}),
-            "model_versions": sorted({str(row.get("model_version") or "unknown") for row in rows}),
-            "ranking_policy_versions": sorted({str(row.get("ranking_policy_version") or "unknown") for row in rows}),
-        },
-    }

@@ -197,24 +197,6 @@ def canonical_fixture_recommendations(
     """Model-rank everything, then recompute public rank among eligible markets."""
     if os.getenv("FIXTURE_RANKED_SELECTOR", "1").lower() in {"0", "false", "off"}:
         return picks
-    # An engine board is ranked once against one evidence snapshot. Product
-    # consumers filter that immutable board; they do not recalculate ranks as
-    # odds/bookability/target constraints remove candidates.
-    if picks and all(
-        pick.get("selector_version") == SELECTOR_VERSION
-        and pick.get("public_rank") is not None
-        for pick in picks
-    ):
-        preserved = []
-        for pick in picks:
-            ok, _ = _public_eligible(
-                pick, safe_only=safe_only, include_subfloor=include_subfloor,
-            )
-            if not ok:
-                continue
-            if include_all_eligible or pick.get("canonical_product_eligible"):
-                preserved.append(dict(pick))
-        return preserved
     fixtures: dict[str, list[dict]] = {}
     for pick in picks:
         fixtures.setdefault(str(pick.get("match_id")), []).append(pick)
@@ -250,7 +232,6 @@ def canonical_fixture_recommendations(
             modeled.append(pick)
         modeled.sort(key=lambda p: (-p["model_quality_score"], -float(p.get("confidence") or 0)))
         best_model = modeled[0]
-        raw_candidate_count = len(modeled)
         for model_rank, pick in enumerate(modeled, 1):
             pick["model_rank"] = model_rank
             pick["model_quality_gap"] = round(best_model["model_quality_score"] - pick["model_quality_score"], 3)
@@ -283,22 +264,16 @@ def canonical_fixture_recommendations(
                         for rank, p in enumerate(eligible[:4], 1)]
         for public_rank, pick in enumerate(eligible, 1):
             public_gap = round(best_public["quality_score"] - pick["quality_score"], 3)
-            canonical_product_eligible = (
-                public_rank == 1
-                or (public_rank == 2 and public_gap <= allowed_gap)
-            )
             pick.update(public_rank=public_rank, fixture_rank=public_rank,
                         ranking_policy_version=RANKING_POLICY_VERSION,
                         selector_version=SELECTOR_VERSION, market_policy_version=MARKET_POLICY_VERSION,
                         best_model_market=best_model.get("market"), best_public_market=best_public.get("market"),
                         best_market=best_public.get("market"), public_quality_gap=public_gap,
-                        quality_gap_from_best=public_gap,
-                        canonical_product_eligible=canonical_product_eligible,
-                        raw_fixture_candidate_count=raw_candidate_count,
-                        fixture_alternatives=alternatives,
+                        quality_gap_from_best=public_gap, fixture_alternatives=alternatives,
                         rejected_fixture_alternatives=rejected[:4])
             if (not include_all_eligible and
-                    not canonical_product_eligible):
+                    (public_rank > 2 or
+                     (public_rank == 2 and public_gap > allowed_gap))):
                 continue
             pick["selection_reason_codes"] += [f"PUBLIC_RANK_{public_rank}"]
             selected.append(pick)
