@@ -295,8 +295,42 @@ def leg_fingerprint(games: list) -> str:
     return hashlib.md5("~".join(parts).encode()).hexdigest()[:16]
 
 
+def _verified_partial_singles(record: dict, games: list) -> bool:
+    """Require the booked and excluded parts to partition the locked singles.
+
+    This permission is passed only by the Over 1.5 singles presentation. A
+    partial accumulator must never masquerade as the published full slip.
+    """
+    if (str(record.get("booking_status") or "").upper() != "PARTIAL"
+            or not record.get("partial")
+            or record.get("readback_validation") != "PASSED"):
+        return False
+    booked = record.get("final_booked_legs") or []
+    excluded = record.get("excluded_legs") or []
+    original_count = len(games)
+    if (not 0 < len(booked) < original_count
+            or len(booked) != int(record.get("booked_leg_count") or 0)
+            or len(excluded) != int(record.get("excluded_leg_count") or 0)
+            or original_count != int(record.get("original_leg_count") or 0)
+            or len(booked) + len(excluded) != original_count
+            or record.get("leg_fingerprint") != leg_fingerprint(games)
+            or record.get("booking_variant_fingerprint") != leg_fingerprint(booked)):
+        return False
+
+    def identity(game: dict) -> tuple:
+        return tuple(str(game.get(key) or "") for key in (
+            "match_id", "home_team", "away_team", "market"))
+
+    # No fabricated replacement, omitted leg, or duplicate may hide behind
+    # the claimed count. This is still NOT a live revalidation of SportyBet.
+    return (collections.Counter(map(identity, games)) ==
+            collections.Counter(map(identity, booked)) +
+            collections.Counter(map(identity, excluded)))
+
+
 def booking_lifecycle(record: dict | None, games: list,
-                      now: datetime | None = None) -> dict | None:
+                      now: datetime | None = None, *,
+                      allow_partial_singles: bool = False) -> dict | None:
     """Apply local, deterministic safety checks before a code is exposed.
 
     This never contacts SportyBet. Network readback happens when the code is
@@ -329,10 +363,11 @@ def booking_lifecycle(record: dict | None, games: list,
         return invalid("validation_failed", "READBACK_FAILED",
                        "The SportyBet code did not pass readback validation.")
     booking_status = str(record.get("booking_status") or "").upper()
-    if booking_status not in {"FULL", "REBUILT_FULL"}:
+    partial_singles = allow_partial_singles and _verified_partial_singles(record, games)
+    if booking_status not in {"FULL", "REBUILT_FULL"} and not partial_singles:
         return invalid("unavailable", "READBACK_MISMATCH",
                        "The code is not the complete displayed accumulator.")
-    if record.get("partial") or int(record.get("excluded_leg_count") or 0):
+    if (record.get("partial") or int(record.get("excluded_leg_count") or 0)) and not partial_singles:
         return invalid("unavailable", "READBACK_MISMATCH",
                        "A partial code cannot represent the full displayed slip.")
 
@@ -342,7 +377,7 @@ def booking_lifecycle(record: dict | None, games: list,
                        "This tier changed after the code was created.")
     original_count = int(record.get("original_leg_count") or 0)
     booked_count = int(record.get("booked_leg_count") or record.get("legs") or 0)
-    if original_count != len(games) or booked_count != len(games):
+    if original_count != len(games) or (not partial_singles and booked_count != len(games)):
         return invalid("stale", "READBACK_MISMATCH",
                        "The code leg count no longer matches the displayed slip.")
 
@@ -362,7 +397,10 @@ def booking_lifecycle(record: dict | None, games: list,
         return invalid("expired", "CODE_EXPIRED",
                        "The SportyBet code has expired.")
 
-    states = [game_kickoff_lifecycle(game, current) for game in games]
+    # Only the code's INCLUDED fixtures determine whether a partial
+    # singles ticket is still placeable; excluded picks remain on the card.
+    actionable_games = (record["final_booked_legs"] if partial_singles else games)
+    states = [game_kickoff_lifecycle(game, current) for game in actionable_games]
     if "invalid" in states:
         return invalid("stale", "KICKOFF_MISMATCH",
                        "A displayed fixture has no valid kickoff time.")
@@ -1236,6 +1274,8 @@ def attach_bookings(publish_date: str, accumulators: dict,
         if not record:
             continue
         data["booking"] = booking_lifecycle(
-            record, data.get("games") or [], now
+            record, data.get("games") or [], now,
+            allow_partial_singles=(tier == "over_1_5" and
+                                   data.get("presentation") == "singles"),
         )
     return accumulators
