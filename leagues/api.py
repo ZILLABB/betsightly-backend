@@ -49,7 +49,7 @@ async def replay_decision_snapshot(snapshot_id: str,
 
 
 @router.get("/daily-accumulators")
-async def get_daily_accumulators():
+def get_daily_accumulators():
     """Daily accumulator picks (2 odds / 5 odds / 10 odds / over 1.5 / rollover)."""
     try:
         from leagues.daily_feed import build_daily_accumulators
@@ -195,7 +195,7 @@ async def model_operations_status():
 
 
 @router.get("/live-scores")
-async def get_live_scores():
+def get_live_scores():
     """Scores for the fixtures on today's card, keyed by match_id.
 
     Served apart from the card on purpose: the card is locked at 08:00 and must
@@ -212,7 +212,7 @@ async def get_live_scores():
 
 
 @router.get("/bookable-now")
-async def get_bookable_now():
+def get_bookable_now():
     """A slip built only from fixtures that have not kicked off yet.
 
     The 08:00 card is deliberately frozen — it is what people booked and what
@@ -650,7 +650,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
 
 
 @router.get("/recommendations")
-async def get_fixture_recommendations(date: str | None = None,
+def get_fixture_recommendations(date: str | None = None,
                                       days_ahead: int = 3):
     """One ranked football opinion per analysed fixture on a WAT date."""
     try:
@@ -800,7 +800,7 @@ async def bookmaker_status():
 
 
 @router.get("/results")
-async def get_results(days: int = 30, category: str | None = None):
+def get_results(days: int = 30, category: str | None = None):
     """Settled history for every category, not just the rollover chain.
 
     Returns each published slip with its legs and outcome, plus a per-category
