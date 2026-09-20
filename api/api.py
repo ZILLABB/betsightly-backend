@@ -6,9 +6,10 @@ import importlib
 import os
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from api.endpoints import (
-    betting_codes, predictions, fixtures, punters,
+    betting_codes, fixtures, punters,
     bookmakers, dashboard, health,
     daily_predictions, accumulators, subscriptions,
 )
@@ -23,6 +24,9 @@ def _env_enabled(name: str, default: bool = False) -> bool:
 # authoritative public product lives under /api/leagues, so production only
 # pays that cost when an operator explicitly opts back into the retired API.
 LEGACY_ML_API_ENABLED = _env_enabled("ENABLE_LEGACY_ML_API", default=False)
+LEGACY_PREDICTIONS_API_ENABLED = _env_enabled(
+    "ENABLE_LEGACY_PREDICTIONS_API", default=False
+)
 
 
 def _mount_legacy_ml_router(router: APIRouter, enabled: bool) -> bool:
@@ -34,6 +38,29 @@ def _mount_legacy_ml_router(router: APIRouter, enabled: bool) -> bool:
         ml_predictions.router, prefix="/ml-predictions", tags=["ml-predictions"]
     )
     return True
+
+
+def _mount_legacy_predictions_router(router: APIRouter, enabled: bool) -> bool:
+    """Keep legacy route provenance explicit without importing its engines."""
+    if enabled:
+        predictions = importlib.import_module("api.endpoints.predictions")
+        router.include_router(
+            predictions.router, prefix="/predictions", tags=["predictions-legacy"]
+        )
+        return True
+
+    @router.get("/predictions/", tags=["predictions-legacy"], include_in_schema=False)
+    def retired_predictions_api():
+        return JSONResponse(status_code=410, content={
+            "status": "retired",
+            "provenance": "LEGACY_PREDICTION_ENGINE_DISABLED",
+            "message": (
+                "This prediction path is retired. Use "
+                "/api/leagues/daily-accumulators for the official card."
+            ),
+            "official_endpoint": "/api/leagues/daily-accumulators",
+        })
+    return False
 
 # Basketball re-enable when NBA data fetcher is production-ready:
 # from api.endpoints import basketball_predictions
@@ -48,7 +75,7 @@ api_router.include_router(health.router, prefix="/health", tags=["health"])
 # of on these routers wholesale. Each mutating endpoint carries
 # Depends(require_api_key); GET endpoints remain usable by the public SPA.
 api_router.include_router(betting_codes.router, prefix="/betting-codes", tags=["betting-codes"])
-api_router.include_router(predictions.router, prefix="/predictions", tags=["predictions"])
+_mount_legacy_predictions_router(api_router, LEGACY_PREDICTIONS_API_ENABLED)
 # Keep this import inside the flag. Importing it at module scope defeats the
 # memory guard even when the router is never mounted.
 _mount_legacy_ml_router(api_router, LEGACY_ML_API_ENABLED)

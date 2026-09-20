@@ -14,7 +14,7 @@ from leagues.slip_builder import (
 ACTIONS = {
     "replace_selection", "safer_same_fixture", "exclude_fixture",
     "remove_selection", "lock_selection", "unlock_selection",
-    "accept_best_reachable",
+    "accept_best_reachable", "confirm_booking",
 }
 BOOKABILITY_FAILURES = {
     "FIXTURE_STARTED", "KICKOFF_BUFFER", "FIXTURE_MAPPING_FAILED",
@@ -208,7 +208,7 @@ def revise(
 
     before = state["result"]
     current = _selected_game(before, selection_id, fixture_id)
-    if action != "accept_best_reachable" and current is None:
+    if action not in {"accept_best_reachable", "confirm_booking"} and current is None:
         raise ValueError("selection_not_in_current_revision")
 
     locked = set(state["locked_selection_ids"])
@@ -273,7 +273,7 @@ def revise(
     started = time.perf_counter()
     board, bookable_pool, timings = prepared_bookable_pool(
         state["horizon"], force=False,
-        refresh_sportybet=action == "accept_best_reachable",
+        refresh_sportybet=action in {"accept_best_reachable", "confirm_booking"},
     )
     timings["revision_board_lookup"] = round((time.perf_counter() - started) * 1000)
     from leagues.engine import prepared_board_status
@@ -284,13 +284,15 @@ def revise(
         "complete": bool(prepared_status.get("complete")),
     }
 
-    if action == "accept_best_reachable":
+    if action in {"accept_best_reachable", "confirm_booking"}:
         snapshot = before.get("best_reachable_combination") or {}
         snapshot_ids = [str(value) for value in (
             snapshot.get("selected_selection_ids") or []
         )]
         game_ids = [str(game.get("selection_id") or "")
                     for game in before.get("games") or []]
+        if action == "confirm_booking":
+            snapshot_ids = game_ids
         if not snapshot_ids or snapshot_ids != game_ids:
             raise ValueError("invalid_best_reachable_snapshot")
 
@@ -321,7 +323,11 @@ def revise(
         materialized = build_slip(
             MIN_TARGET, pool=exact,
             max_legs=int(policy.get("max_legs") or len(exact)),
-            market_cap=int(policy.get("market_cap") or len(exact)),
+            market_cap=int(
+                policy.get("market_cap")
+                or before.get("market_cap_used")
+                or len(exact)
+            ),
             team_to_score_cap=int(policy.get("team_to_score_cap") or 2),
             horizon=state["horizon"], require_bookable=True,
             forced_selection_ids=set(snapshot_ids),
@@ -349,7 +355,11 @@ def revise(
 
         actual_odds = float(materialized.get("odds") or 0)
         materialized.update({
-            "result_status": "BEST_REACHABLE_MATERIALIZED",
+            "result_status": (
+                "BEST_REACHABLE_MATERIALIZED"
+                if action == "accept_best_reachable"
+                else before.get("result_status", "TARGET_REACHED")
+            ),
             "target": effective_target,
             "best_reachable": round(actual_odds, 2),
             "achieved_odds": round(actual_odds, 2),
@@ -358,9 +368,9 @@ def revise(
             # DNB slip's chance of achieving the original, higher request.
             "target_hit_probability": materialized.get("hit_probability", 0),
             "original_requested_target": effective_target,
-            "best_reachable_combination": {
+            "best_reachable_combination": ({
                 **snapshot, "current_actual_odds": round(actual_odds, 2),
-            },
+            } if snapshot else before.get("best_reachable_combination")),
         })
         result = _public_result_from_build(
             effective_target, state["horizon"], materialized, board, timings,
@@ -384,7 +394,10 @@ def revise(
                 "timing_ms": timings,
             }
         else:
-            result["materialized_best_reachable"] = True
+            result["materialized_best_reachable"] = (
+                action == "accept_best_reachable"
+                or bool(before.get("materialized_best_reachable"))
+            )
             result["original_requested_target"] = effective_target
             result["best_reachable"] = round(actual_odds, 2)
             result["achieved_odds"] = round(actual_odds, 2)

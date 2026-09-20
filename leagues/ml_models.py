@@ -6,14 +6,17 @@ small neural net) across four targets — match result, over 1.5, over 2.5, both
 teams to score — trained on 64,218 matches and isotonic-calibrated at training
 time. `models/api_football/`.
 
-They have been sitting unused because the live engine was rebuilt around ESPN
-while these were trained on API-Football features. Nothing imported them. This
-reconnects them by rebuilding those 25 features from the ESPN feed instead.
+They were trained before the 25-feature preprocessing contract was versioned.
+Live inference now builds the corrected `football-25-v2` vector, but those old
+artifacts are deliberately rejected until a versioned retraining run produces
+compatible metadata. This avoids silently changing the meaning of two inputs
+under already-fitted models.
 
-**Nothing here moves a published number yet.** `predict_fixture` returns a
-second opinion that is recorded alongside the model already in use, and an
-evaluation endpoint compares the two against settled results. The ensemble
-earns its way in on that evidence or it does not go in at all — the accuracies
+When a compatible artifact is staged, `predict_fixture` returns a second
+opinion that is recorded alongside the model already in use. Picks currently
+use a large-disagreement veto only; the ensemble never boosts confidence. The
+evaluation endpoint compares both opinions against settled results. It earns
+greater influence on evidence or it does not go in at all — the accuracies
 in model_weights.json say match result is 50.3% on a three-way choice where
 always picking the home side is about 46%, which is real skill but not much of
 it, and not something to hand the published card on trust.
@@ -68,7 +71,13 @@ _STATE: dict = {"loaded": False, "models": {}, "calibrators": {}, "meta": None}
 
 
 def is_available() -> bool:
-    return META_PATH.exists()
+    if not META_PATH.exists():
+        return False
+    try:
+        from leagues.feature_contract import artifact_compatible
+        return artifact_compatible(json.loads(META_PATH.read_text()))[0]
+    except Exception:
+        return False
 
 
 def _load() -> dict:
@@ -81,6 +90,18 @@ def _load() -> dict:
         try:
             import joblib
             meta = json.loads(META_PATH.read_text())
+            from leagues.feature_contract import artifact_compatible
+            compatible, compatibility_reason = artifact_compatible(meta)
+            if not compatible:
+                logger.error(
+                    "ml ensemble disabled: artifact contract is incompatible (%s)",
+                    compatibility_reason,
+                )
+                _STATE.update({
+                    "loaded": True, "models": {}, "calibrators": {},
+                    "meta": meta, "compatibility_reason": compatibility_reason,
+                })
+                return _STATE
             models: dict[str, list] = {}
             for target in TARGETS:
                 loaded = []
@@ -135,44 +156,20 @@ def build_features(fixture: dict, index) -> list[float] | None:
     team_type = fixture.get("team_type") or "CLUB"
     hf = index.team_form(home, "home", team_type)
     af = index.team_form(away, "away", team_type)
+    # Training excluded fixtures until both clubs had five strictly-prior
+    # matches. Neutral defaults are not equivalent evidence and must not be
+    # passed through a fitted model as though they were observed form.
+    if (int(hf.get("history_matches") or 0) < 5
+            or int(af.get("history_matches") or 0) < 5):
+        return None
     h2h = index.head_to_head(home, away, meta.get("h2h_window", 10), team_type)
 
-    odds = fixture.get("odds") or {}
-    implied = odds.get("implied") or {}
-    has_odds = 1.0 if implied else 0.0
-    over25 = odds.get("implied_over")
-
-    values = {
-        "home_win_rate_5": hf["win_rate_5"],
-        "home_win_rate_10": hf["win_rate_10"],
-        "home_draw_rate_5": hf["draw_rate_5"],
-        "home_goals_scored_5": hf["goals_scored_5"],
-        "home_goals_conceded_5": hf["goals_conceded_5"],
-        "home_home_win_rate_5": hf["venue_win_rate_5"],
-        "home_home_goals_5": hf["venue_goals_5"],
-        "away_win_rate_5": af["win_rate_5"],
-        "away_win_rate_10": af["win_rate_10"],
-        "away_draw_rate_5": af["draw_rate_5"],
-        "away_goals_scored_5": af["goals_scored_5"],
-        "away_goals_conceded_5": af["goals_conceded_5"],
-        "away_away_win_rate_5": af["venue_win_rate_5"],
-        "away_away_goals_5": af["venue_goals_5"],
-        "h2h_home_win_rate": h2h["home_win_rate"],
-        "h2h_avg_goals": h2h["avg_goals"],
-        "h2h_btts_rate": h2h["btts_rate"],
-        "h2h_meetings": float(h2h["meetings"]),
-        "league_tier": float(_tier(fixture.get("league_slug", ""))),
-        "mkt_prob_home": float(implied.get("home_win") or 0.0),
-        "mkt_prob_draw": float(implied.get("draw") or 0.0),
-        "mkt_prob_away": float(implied.get("away_win") or 0.0),
-        "mkt_has_odds": has_odds,
-        "mkt_prob_over25": float(over25 or 0.0),
-        "mkt_ou_has": 1.0 if over25 else 0.0,
-    }
-
-    # Trained column order is authoritative; a missing column becomes 0, which
-    # is how the training pipeline encoded absence.
-    return [float(values.get(col, 0.0)) for col in meta["feature_columns"]]
+    from leagues.feature_contract import build_feature_vector
+    return build_feature_vector(
+        home_form=hf, away_form=af, h2h=h2h,
+        league_tier=_tier(fixture.get("league_slug", "")),
+        odds=fixture.get("odds") or {},
+    ).as_list()
 
 
 # Whether the isotonic layer actually helped, per target, measured on held-out
@@ -320,4 +317,9 @@ def status() -> dict:
         "n_samples": meta.get("n_samples"),
         "n_features": len(meta.get("feature_columns") or []),
         "calibrated": bool(state.get("calibrators")),
+        "feature_schema_version": meta.get("feature_schema_version"),
+        "runtime_feature_schema_version": __import__(
+            "leagues.feature_contract", fromlist=["FEATURE_SCHEMA_VERSION"]
+        ).FEATURE_SCHEMA_VERSION,
+        "compatibility": state.get("compatibility_reason") or "COMPATIBLE",
     }

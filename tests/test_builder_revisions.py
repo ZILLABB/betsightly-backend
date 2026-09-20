@@ -383,6 +383,61 @@ def test_accept_best_reachable_fails_without_reoptimizing_when_a_leg_vanishes(
     assert "No lower-target search was run" in result["action_error"]
 
 
+def test_confirm_booking_materializes_exact_current_revision_only(
+        revision_db, monkeypatch):
+    preview = _result("a", "b", odds=10.2, active=False)
+    preview["result_status"] = "TARGET_REACHED"
+    preview["market_cap_used"] = 3
+    initial = builder_revisions.create_initial_run(10, "week", preview)
+    pool = [{**game, "selection_id": game["selection_id"]}
+            for game in preview["games"]]
+    monkeypatch.setattr(
+        builder_editor, "prepared_bookable_pool",
+        lambda *args, **kwargs: ({"snapshot": "current"}, pool, {}),
+    )
+    monkeypatch.setattr(
+        "leagues.engine.prepared_board_status",
+        lambda **kwargs: {"ready": True, "degraded": False, "complete": True},
+    )
+    monkeypatch.setattr(
+        builder_editor, "approved_builder_candidates",
+        lambda candidates: (candidates, {}),
+    )
+    calls = []
+
+    def materialize(target, **kwargs):
+        calls.append((target, kwargs))
+        return {
+            "ok": True, "picks": kwargs["pool"], "odds": 10.18,
+            "legs": 2, "hit_probability": .4, "expected_return": .8,
+            "avg_confidence": .7,
+        }
+
+    monkeypatch.setattr(builder_editor, "build_slip", materialize)
+
+    def public(target, horizon, built, board, timings, force_booking=False):
+        assert force_booking is True
+        return {
+            "status": "success", "target": target, "odds": built["odds"],
+            "games": preview["games"],
+            "booking": {"status": "active", "share_code": "FINAL10",
+                        "booking_status": "FULL",
+                        "readback_validation": "PASSED"},
+        }
+
+    monkeypatch.setattr(builder_editor, "_public_result_from_build", public)
+    result = builder_editor.revise(
+        run_id=initial["builder_run_id"], edit_token=initial["edit_token"],
+        revision=1, request_id="confirm-booking-0001",
+        action="confirm_booking",
+    )
+
+    assert calls[0][0] == builder_editor.MIN_TARGET
+    assert calls[0][1]["forced_selection_ids"] == {"a", "b"}
+    assert result["booking"]["share_code"] == "FINAL10"
+    assert result["odds"] == pytest.approx(10.18)
+
+
 def test_safer_market_must_remain_on_fixture_and_improve_survival(monkeypatch):
     current = {
         "selection_id": "current", "match_id": "fixture-1",

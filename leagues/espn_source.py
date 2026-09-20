@@ -194,6 +194,19 @@ def _parse_odds(competition: dict) -> dict:
         out["implied_over"] = round(ou.get("over", 0), 4)
         out["implied_under"] = round(ou.get("under", 0), 4)
         out["ou_line"] = float(line) if line is not None else None
+        captured_at = datetime.now(timezone.utc).isoformat()
+        out["captured_at"] = captured_at
+        out["total_quotes"] = [{
+            "market": "total_goals",
+            "period": "full_game",
+            "line": float(line) if line is not None else None,
+            "over_odds": over_dec,
+            "under_odds": under_dec,
+            "implied_over": out["implied_over"],
+            "implied_under": out["implied_under"],
+            "captured_at": captured_at,
+            "source": out.get("provider"),
+        }]
 
     return out
 

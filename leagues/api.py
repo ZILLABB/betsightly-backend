@@ -49,11 +49,15 @@ async def replay_decision_snapshot(snapshot_id: str,
 
 
 @router.get("/daily-accumulators")
-async def get_daily_accumulators():
+def get_daily_accumulators():
     """Daily accumulator picks (2 odds / 5 odds / 10 odds / over 1.5 / rollover)."""
     try:
         from leagues.daily_feed import build_daily_accumulators
-        result = build_daily_accumulators()
+        # The feed performs network, solver, and database work.  Keep it off
+        # the ASGI event loop so one slow refresh cannot stall unrelated API
+        # requests.
+        import asyncio
+        result = await asyncio.to_thread(build_daily_accumulators)
         if not result:
             raise HTTPException(404, "No predictions available")
         return result
@@ -154,8 +158,44 @@ async def ml_shadow(days: int = 60):
         raise HTTPException(500, str(e))
 
 
+@router.get("/evaluation")
+async def evaluation_windows():
+    """Immutable, deduplicated 30/60/90-day forecast evaluation."""
+    try:
+        import asyncio
+        from leagues.forecast_observations import evaluation_window
+
+        windows = await asyncio.gather(*(
+            asyncio.to_thread(evaluation_window, days)
+            for days in (30, 60, 90)
+        ))
+        return {
+            "status": "success",
+            "windows": {str(row["days"]): row for row in windows},
+            "replay": {
+                "status": "separate",
+                "reason": (
+                    "Corrected chronological replay is not mixed with the "
+                    "immutable published record."
+                ),
+            },
+        }
+    except Exception as exc:
+        logger.error("Evaluation windows failed: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
+@router.get("/model-operations", dependencies=[Depends(require_api_key)])
+async def model_operations_status():
+    """Compatibility/challenger status; never exposes paths or credentials."""
+    import asyncio
+    from leagues.model_operations import status
+
+    return await asyncio.to_thread(status)
+
+
 @router.get("/live-scores")
-async def get_live_scores():
+def get_live_scores():
     """Scores for the fixtures on today's card, keyed by match_id.
 
     Served apart from the card on purpose: the card is locked at 08:00 and must
@@ -172,7 +212,7 @@ async def get_live_scores():
 
 
 @router.get("/bookable-now")
-async def get_bookable_now():
+def get_bookable_now():
     """A slip built only from fixtures that have not kicked off yet.
 
     The 08:00 card is deliberately frozen — it is what people booked and what
@@ -610,7 +650,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
 
 
 @router.get("/recommendations")
-async def get_fixture_recommendations(date: str | None = None,
+def get_fixture_recommendations(date: str | None = None,
                                       days_ahead: int = 3):
     """One ranked football opinion per analysed fixture on a WAT date."""
     try:
@@ -618,7 +658,10 @@ async def get_fixture_recommendations(date: str | None = None,
         from leagues.recommendation_board import build_recommendation_board
 
         horizon = max(1, min(7, days_ahead))
-        picks, fixtures = run_pipeline(days_ahead=horizon)
+        import asyncio
+        picks, fixtures = await asyncio.to_thread(
+            run_pipeline, days_ahead=horizon,
+        )
         result = build_recommendation_board(picks, fixtures, date=date)
         result["board"] = prepared_board_status(horizon)
         return result
@@ -637,9 +680,12 @@ async def recommendation_diagnostics(date: str | None = None):
         from leagues.engine import run_pipeline
         from leagues.recommendation_board import build_recommendation_board
 
-        picks, fixtures = run_pipeline(days_ahead=4)
+        import asyncio
+        picks, fixtures = await asyncio.to_thread(
+            run_pipeline, days_ahead=4,
+        )
         board = build_recommendation_board(picks, fixtures, date=date)
-        daily = build_daily_accumulators()
+        daily = await asyncio.to_thread(build_daily_accumulators)
         accumulators = (daily or {}).get("accumulators") or {}
         tiers = {}
         for name in ("banker", "2_odds", "5_odds", "10_odds", "rollover"):
@@ -754,7 +800,7 @@ async def bookmaker_status():
 
 
 @router.get("/results")
-async def get_results(days: int = 30, category: str | None = None):
+def get_results(days: int = 30, category: str | None = None):
     """Settled history for every category, not just the rollover chain.
 
     Returns each published slip with its legs and outcome, plus a per-category

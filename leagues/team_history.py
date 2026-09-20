@@ -45,6 +45,7 @@ NEUTRAL = {
     "win_rate_5": 0.40, "win_rate_10": 0.40, "draw_rate_5": 0.25,
     "goals_scored_5": 1.35, "goals_conceded_5": 1.35,
     "venue_win_rate_5": 0.40, "venue_goals_5": 1.35,
+    "history_matches": 0, "venue_history_matches": 0,
 }
 
 
@@ -182,6 +183,8 @@ class HistoryIndex:
             "win_rate_5": w5, "win_rate_10": w10, "draw_rate_5": d5,
             "goals_scored_5": gf5, "goals_conceded_5": ga5,
             "venue_win_rate_5": vw, "venue_goals_5": vgf,
+            "history_matches": min(len(rows), 10),
+            "venue_history_matches": len(venue_rows),
         }
 
     # ── head to head ───────────────────────────────────────

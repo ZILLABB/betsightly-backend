@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 from types import SimpleNamespace
 
 from fastapi import APIRouter
@@ -16,10 +17,37 @@ from fastapi import APIRouter
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _run_isolated(script: str, *, env: dict[str, str], timeout: int) -> str:
+    """Run a startup probe without depending on pytest's captured handles.
+
+    Python 3.14 on Windows can fail in ``DuplicateHandle`` before spawning a
+    child when pytest replaces the process standard handles. Real temporary
+    files preserve the process-isolation assertion while avoiding that host
+    test-runner defect. Stderr is retained for an actionable failure message.
+    """
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stdout_file, \
+            tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file:
+        completed = subprocess.run(
+            [sys.executable, "-c", script], cwd=ROOT, env=env,
+            stdin=subprocess.DEVNULL, stdout=stdout_file, stderr=stderr_file,
+            text=True, timeout=timeout, check=False,
+        )
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout = stdout_file.read()
+        stderr = stderr_file.read()
+    if completed.returncode:
+        raise AssertionError(
+            f"isolated startup probe exited {completed.returncode}: {stderr}"
+        )
+    return stdout
+
+
 def test_production_startup_excludes_legacy_ml_and_keeps_current_routes():
     env = os.environ.copy()
     env.update(ENVIRONMENT="production", ENABLE_BACKGROUND_JOBS="false")
     env.pop("ENABLE_LEGACY_ML_API", None)
+    env.pop("ENABLE_LEGACY_PREDICTIONS_API", None)
     env.pop("ENABLE_LEGACY_PREDICTION_SETTLEMENT", None)
     script = """
 import json
@@ -33,6 +61,8 @@ with TestClient(main.app) as client:
 print(json.dumps({
     "legacy_imported": "api.endpoints.ml_predictions" in sys.modules,
     "legacy_route": "/api/ml-predictions/today" in paths,
+    "legacy_predictions_imported": "api.endpoints.predictions" in sys.modules,
+    "legacy_predictions_route": "/api/predictions/" in paths,
     "health": "/api/health" in paths,
     "builder": "/api/leagues/slip-builder/generate" in paths,
     "daily": "/api/leagues/daily-accumulators" in paths,
@@ -40,14 +70,13 @@ print(json.dumps({
     "health_ml_test": ml_test.get("status"),
 }))
 """
-    completed = subprocess.run(
-        [sys.executable, "-c", script], cwd=ROOT, env=env,
-        capture_output=True, text=True, timeout=30, check=True,
-    )
-    report = json.loads(completed.stdout.strip().splitlines()[-1])
+    stdout = _run_isolated(script, env=env, timeout=30)
+    report = json.loads(stdout.strip().splitlines()[-1])
     assert report == {
         "legacy_imported": False,
         "legacy_route": False,
+        "legacy_predictions_imported": False,
+        "legacy_predictions_route": True,
         "health": True,
         "builder": True,
         "daily": True,
@@ -92,6 +121,12 @@ def test_disabled_compatibility_router_never_imports(monkeypatch):
 
     monkeypatch.setattr(api_module.importlib, "import_module", fail_import)
     assert api_module._mount_legacy_ml_router(APIRouter(), enabled=False) is False
+
+
+def test_retired_predictions_route_is_explicit_and_does_not_import_engine(client):
+    response = client.get("/api/predictions/")
+    assert response.status_code == 410
+    assert response.json()["official_endpoint"] == "/api/leagues/daily-accumulators"
 
 
 def test_legacy_settlement_defaults_off_and_current_checker_is_callable(monkeypatch):
@@ -154,11 +189,8 @@ print(json.dumps({
     "numpy": "numpy" in sys.modules,
 }))
 """
-    completed = subprocess.run(
-        [sys.executable, "-c", script], cwd=ROOT, env=env,
-        capture_output=True, text=True, timeout=10, check=True,
-    )
-    assert json.loads(completed.stdout.strip()) == {
+    stdout = _run_isolated(script, env=env, timeout=10)
+    assert json.loads(stdout.strip()) == {
         "pandas": False,
         "numpy": False,
     }
