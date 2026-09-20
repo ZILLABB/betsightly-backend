@@ -68,7 +68,7 @@ def test_results_totals_keep_singles_and_rollover_separate(monkeypatch):
         lambda limit_days: [{"date": "2026-09-08", "status": "won"}],
     )
 
-    result = api.get_results(days=60)
+    result = asyncio.run(api.get_results(days=60))
 
     assert result["totals"]["slips"]["settled"] == 2
     assert result["totals"]["slips"]["settled"] == (

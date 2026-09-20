@@ -184,9 +184,7 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
     # ── Derived markets ────────────────────────────────────
     total_lam = home_lam + away_lam
     p_o15 = _p_over(1.5, total_lam)
-    from leagues.market_quotes import exact_total_probability
-    exact_o25 = exact_total_probability(odds, 2.5, "over")
-    p_o25 = exact_o25 if exact_o25 is not None else _p_over(2.5, total_lam)
+    p_o25 = odds.get("implied_over") or _p_over(2.5, total_lam)
     p_o35 = _p_over(3.5, total_lam)
     p_btts = (1.0 - math.exp(-home_lam)) * (1.0 - math.exp(-away_lam))
 

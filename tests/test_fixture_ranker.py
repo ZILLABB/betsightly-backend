@@ -111,16 +111,3 @@ def test_feature_flag_preserves_old_selector(monkeypatch):
     original = [_pick("under_2_5", .90, 1.3)]
     monkeypatch.setenv("FIXTURE_RANKED_SELECTOR", "0")
     assert canonical_fixture_recommendations(original) is original
-
-
-def test_already_ranked_board_is_filtered_without_rewriting_original_ranks():
-    ranked = canonical_fixture_recommendations([
-        _pick("over_1_5", .85, 1.4),
-        _pick("under_4_5", .84, 1.45),
-    ], include_all_eligible=True)
-    ranked[0]["bookable"] = False
-    remaining = canonical_fixture_recommendations(
-        [ranked[1]], include_all_eligible=True
-    )
-    assert remaining[0]["public_rank"] == 2
-    assert remaining[0]["best_public_market"] == "over_1_5"

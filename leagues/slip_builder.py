@@ -37,7 +37,6 @@ import collections
 import logging
 import math
 import time as monotonic_time
-from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -74,24 +73,8 @@ WAT = timezone(timedelta(hours=1))
 # Reached within this fraction of the target and it counts as a hit. Prices
 # move in coarse steps, so insisting on exactly 50.0 would reject a 48.6x slip
 # that is the best thing on the board.
-BAND_LOW = 0.98
+BAND_LOW = 0.90
 BAND_HIGH = 1.45
-
-
-@dataclass(frozen=True)
-class SolverOutcome:
-    odds: float
-    joint: float
-    legs: list[dict]
-    status: str
-    proof: dict
-
-    def __iter__(self):
-        # Preserve the long-standing four-value unpacking contract.
-        yield self.odds
-        yield self.joint
-        yield self.legs
-        yield self.status
 
 # A target-reaching ticket that expects to return less than 40% of stake is a
 # lottery ticket. This is a product loss-budget, not a confidence threshold:
@@ -454,7 +437,7 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
                        under_cap: int | None = None,
                        enforce_team_diversity: bool = True,
                        required_selection_ids: set[str] | None = None,
-                       ) -> SolverOutcome:
+                       ) -> tuple[float, float, list[dict], str]:
     """Solve the Builder's binary selection problem with HiGHS MILP.
 
     The first solve maximizes evidence-adjusted joint probability subject to
@@ -478,11 +461,7 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
         valid.append(pick)
         probabilities.append(probability)
     if not valid:
-        return SolverOutcome(1.0, 1.0, [], "OPTIMAL", {
-            "status": "OPTIMAL", "optimality_proven": True,
-            "mip_gap": 0.0, "objective_bound": 0.0,
-            "solution_kind": "EMPTY_BOARD",
-        })
+        return 1.0, 1.0, [], "OPTIMAL"
 
     size = len(valid)
     rows: list[list[float]] = []
@@ -528,11 +507,7 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
         indices = [i for i, pick in enumerate(valid)
                    if _selection_id(pick) == selection]
         if not indices:
-            return SolverOutcome(1.0, 1.0, [], "SOLVER_ERROR", {
-                "status": "SOLVER_ERROR", "optimality_proven": False,
-                "mip_gap": None, "objective_bound": None,
-                "solution_kind": "INVALID_LOCK",
-            })
+            return 1.0, 1.0, [], "INVALID_LOCK"
         row = [0.0] * size
         row[indices[0]] = -1.0
         rows.append(row)
@@ -554,53 +529,22 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
         constraints=(base_constraint, target_constraint), options=options,
     )
     result = reached
-    solution_kind = "TARGET_REACHED"
     if reached.x is None:
-        # Prefer a materially safer combination inside the declared near-target
-        # band before maximizing odds.  69.96x for a 70x request is displayed
-        # honestly as band-reached, not discarded in favour of a riskier max.
-        band_constraint = LinearConstraint(
-            csr_matrix(-log_odds.reshape(1, -1)), -np.inf,
-            np.array([-math.log(target * BAND_LOW)]),
+        # Verify the maximum possible odds instead of describing a greedy
+        # incumbent as "best reachable".
+        result = milp(
+            -log_odds, integrality=np.ones(size), bounds=Bounds(0, 1),
+            constraints=base_constraint, options=options,
         )
-        band = milp(
-            risk, integrality=np.ones(size), bounds=Bounds(0, 1),
-            constraints=(base_constraint, band_constraint), options=options,
-        )
-        if band.x is not None:
-            result = band
-            solution_kind = "TARGET_BAND_REACHED"
-        else:
-            # Verify the maximum possible odds under the same policy instead
-            # of describing a greedy incumbent as a proven maximum.
-            result = milp(
-                -log_odds, integrality=np.ones(size), bounds=Bounds(0, 1),
-                constraints=base_constraint, options=options,
-            )
-            solution_kind = "MAX_REACHABLE"
     if result.x is None:
-        return SolverOutcome(1.0, 1.0, [], "INFEASIBLE", {
-            "status": "INFEASIBLE", "optimality_proven": result.status == 2,
-            "mip_gap": getattr(result, "mip_gap", None),
-            "objective_bound": getattr(result, "mip_dual_bound", None),
-            "solver_status_code": int(result.status),
-            "message": str(result.message), "solution_kind": solution_kind,
-        })
+        return 1.0, 1.0, [], "HEURISTIC"
 
     selected = [valid[i] for i, value in enumerate(result.x) if value >= .5]
     odds = math.prod(float(p["odds"]) for p in selected)
     joint = math.prod(probabilities[i] for i, value in enumerate(result.x)
                       if value >= .5)
-    status = "OPTIMAL" if result.status == 0 else "TIME_LIMIT_INCUMBENT"
-    return SolverOutcome(odds, joint, selected, status, {
-        "status": status,
-        "optimality_proven": result.status == 0,
-        "mip_gap": getattr(result, "mip_gap", None),
-        "objective_bound": getattr(result, "mip_dual_bound", None),
-        "solver_status_code": int(result.status),
-        "message": str(result.message),
-        "solution_kind": solution_kind,
-    })
+    status = "OPTIMAL" if result.status == 0 else "BOUNDED_OPTIMAL"
+    return odds, joint, selected, status
 
 
 def _solution_quality(odds: float, joint: float, legs: list[dict],
@@ -673,20 +617,15 @@ def _constraint_counterfactuals(candidates: list[dict], target: float,
                 "enforce_team_diversity", True
             ),
         }
-        solver_outcome = _verified_optimize(
+        odds, joint, legs, status = _verified_optimize(
             candidates, target, configured["max_legs"],
             configured["market_cap"], configured["team_to_score_cap"],
             under_cap=under_cap,
             enforce_team_diversity=configured["enforce_team_diversity"],
         )
-        odds, joint, legs, status = solver_outcome
         outcomes[name] = {
             **configured,
             "optimization_status": status,
-            "solver_proof": getattr(solver_outcome, "proof", {
-                "status": status,
-                "optimality_proven": status == "OPTIMAL",
-            }),
             **_solution_quality(odds, joint, legs, target),
         }
     baseline = outcomes["baseline"]["best_reachable"]
@@ -707,19 +646,17 @@ def _constraint_counterfactuals(candidates: list[dict], target: float,
 def approved_builder_candidates(
     pool: list[dict], *, require_bookable: bool = True,
 ) -> tuple[list[dict], collections.Counter]:
-    """Rank the complete board once, then apply product/bookability filters.
-
-    A stronger unbookable opinion keeps its original public rank.  Filtering
-    it out must not relabel a weaker rank-2/rank-3 market as the fixture's best
-    football prediction merely because it is convenient to book.
-    """
-    from leagues.fixture_ranker import canonical_fixture_recommendations
+    """Apply the shared trust and canonical-ranking policy exactly once."""
+    from leagues.fixture_ranker import builder_fixture_candidates
     from leagues.leg_trust import evaluate_leg_trust
     from leagues.selection_quality import attach_selection_quality
 
     rejections: collections.Counter = collections.Counter()
-    evaluated = []
+    trusted = []
     for source in pool:
+        if require_bookable and not source.get("bookable"):
+            rejections.update(["sportybet_selection_not_exactly_bookable"])
+            continue
         pick = dict(source)
         pick["selection_id"] = _selection_id(pick)
         decision = evaluate_leg_trust(pick)
@@ -731,28 +668,16 @@ def approved_builder_candidates(
         pick["selection_reason_codes"] = list(
             pick.get("selection_reason_codes") or []
         ) + list(pick.get("price_quality_reason_codes") or [])
-        evaluated.append(pick)
-
-    ranked = canonical_fixture_recommendations(
-        evaluated, include_all_eligible=True
-    )
-    approved = []
-    for pick in ranked:
-        decision = pick.get("trust") or {}
-        if not pick.get("canonical_product_eligible"):
-            rejections.update(["outside_canonical_rank_1_or_close_rank_2"])
-        elif require_bookable and not pick.get("bookable"):
-            rejections.update(["sportybet_selection_not_exactly_bookable"])
-        elif (pick.get("market") in DNB_MARKETS
-              and _leg_settlement_probabilities(pick) is None):
+        if (pick.get("market") in DNB_MARKETS
+                and _leg_settlement_probabilities(pick) is None):
             rejections.update(["dnb_missing_draw_probability"])
-        elif decision.get("accepted"):
-            approved.append(pick)
+        elif decision["accepted"]:
+            trusted.append(pick)
         else:
             rejections.update(
-                decision.get("rejection_reasons") or ["trust_grade_below_b"]
+                decision["rejection_reasons"] or ["trust_grade_below_b"]
             )
-    return approved, rejections
+    return builder_fixture_candidates(trusted), rejections
 
 
 def build_slip(
@@ -1018,16 +943,13 @@ def build_slip(
     for attempted_cap in progressive_market_caps:
         cap = attempted_cap
         try:
-            solver_outcome = _verified_optimize(
-                candidates, target, max_legs, cap, team_to_score_cap,
-                under_cap=UNDER_CAP,
-                required_selection_ids=required_selection_ids,
+            attempt_odds, attempt_joint, attempt_legs, attempt_status = (
+                _verified_optimize(
+                    candidates, target, max_legs, cap, team_to_score_cap,
+                    under_cap=UNDER_CAP,
+                    required_selection_ids=required_selection_ids,
+                )
             )
-            attempt_odds, attempt_joint, attempt_legs, attempt_status = solver_outcome
-            attempt_proof = getattr(solver_outcome, "proof", {
-                "status": attempt_status,
-                "optimality_proven": attempt_status == "OPTIMAL",
-            })
         except Exception as exc:
             logger.warning(
                 "verified Builder optimization unavailable at market cap %s: %s",
@@ -1035,24 +957,18 @@ def build_slip(
             )
             attempt_odds, attempt_joint, attempt_legs = _search(candidates)
             attempt_status = "HEURISTIC"
-            attempt_proof = {
-                "status": "HEURISTIC", "optimality_proven": False,
-                "mip_gap": None, "objective_bound": None,
-                "message": str(exc)[:160],
-            }
         quality = _solution_quality(
             attempt_odds, attempt_joint, attempt_legs, target
         )
         attempt = {
             "market_cap": cap,
             "optimization_status": attempt_status,
-            "solver_proof": attempt_proof,
             **quality,
         }
         market_cap_attempts.append(attempt)
         solutions.append((
             attempt_odds, attempt_joint, attempt_legs, attempt_status, cap,
-            quality, attempt_proof,
+            quality,
         ))
         if quality["production_quality_target_reached"]:
             first_reachable_cap = cap
@@ -1075,7 +991,7 @@ def build_slip(
                 -len(solution[2]),
             ),
         )
-    odds, joint, legs, optimization_status, cap, chosen_quality, solver_proof = chosen
+    odds, joint, legs, optimization_status, cap, chosen_quality = chosen
     diagnostics["market_cap_attempts"] = market_cap_attempts
     diagnostics["market_cap_used"] = cap
     diagnostics["first_reachable_cap"] = first_reachable_cap
@@ -1088,7 +1004,6 @@ def build_slip(
     )
     diagnostics["quality_constraints"]["market_cap"] = cap
     diagnostics["optimization_status"] = optimization_status
-    diagnostics["solver_proof"] = solver_proof
 
     # A greedy path can occasionally reserve a scarce market-group slot
     # for a slightly weaker leg. Test the selected fixtures one at a time:
@@ -1199,9 +1114,7 @@ def build_slip(
     ):
         # Say which limit bit, because "not available" hides two different
         # answers: the board was thin, or the rules would not allow it.
-        verified = (optimization_status == "OPTIMAL" and
-                    solver_proof.get("optimality_proven") is True and
-                    solver_proof.get("solution_kind") == "MAX_REACHABLE")
+        verified = optimization_status in {"OPTIMAL", "BOUNDED_OPTIMAL"}
         counterfactuals = None
         if target >= 50 and verified:
             started = monotonic_time.perf_counter()
@@ -1270,7 +1183,6 @@ def build_slip(
             "hit_probability": round(joint, 5),
             "trusted_leg_count": len(candidates),
             "optimization_status": optimization_status,
-            "solver_proof": solver_proof,
             "candidate_count_initial": diagnostics["candidate_count_initial"],
             "after_bookability": diagnostics.get("after_bookability", 0),
             "after_trust": diagnostics.get("after_trust", 0),
@@ -1302,7 +1214,6 @@ def build_slip(
             "ok": False,
             "result_status": "EXPECTED_RETURN_CAPPED",
             "optimization_status": optimization_status,
-            "solver_proof": solver_proof,
             "target": target,
             "best_reachable": round(odds, 2),
             "achieved_odds": round(odds, 2),
@@ -1339,20 +1250,13 @@ def build_slip(
         legs, odds, expected_return, joint
     )
 
-    decision_status = (
-        "TARGET_REACHED" if odds >= target
-        else "TARGET_BAND_REACHED" if odds >= target * BAND_LOW
-        else "TARGET_CAPPED"
-    )
     return {
         "ok": True,
-        "result_status": decision_status,
-        "decision_status": decision_status,
+        "result_status": "BEST_AVAILABLE" if best_available else "TARGET_REACHED",
         "optimization_status": optimization_status,
-        "solver_proof": solver_proof,
         "target": target,
         "requested_target": target,
-        "target_reached": odds >= target,
+        "target_reached": not best_available,
         "best_reachable": round(odds, 2),
         "achieved_odds": round(odds, 2),
         "market_cap_used": cap,
@@ -1513,8 +1417,6 @@ def _public_result_from_build(
         "status": "success",
         "result_status": built.get("result_status", "TARGET_REACHED"),
         "optimization_status": built.get("optimization_status", "HEURISTIC"),
-        "solver_proof": built.get("solver_proof"),
-        "decision_status": built.get("decision_status"),
         "target": target,
         "horizon": horizon,
         "first_kickoff": kickoffs[0] if kickoffs else None,

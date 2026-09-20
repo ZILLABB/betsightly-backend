@@ -125,17 +125,6 @@ def _persist_progress(run_date: str, report: dict) -> None:
         logger.warning(f"daily run progress bookkeeping failed: {exc}")
 
 
-def _published_tier_counts(accumulators: dict, *, include_rollover: bool = True) -> dict[str, int]:
-    """Count real product dictionaries, never internal metadata or string fields."""
-    return {
-        name: len(value.get("games") or [])
-        for name, value in (accumulators or {}).items()
-        if isinstance(value, dict)
-        and not str(name).startswith("_")
-        and (include_rollover or name != "rollover")
-    }
-
-
 def _step(report: dict, name: str, fn, run_date: str | None = None):
     """Run one step, recording what happened without letting it end the run.
 
@@ -251,7 +240,7 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
             "date": card.get("date"),
             "revision": card.get("revision"),
             "first_published_at": card.get("first_published_at"),
-            "tiers": _published_tier_counts(accs),
+            "tiers": {k: len(v.get("games") or []) for k, v in accs.items()},
         }
 
     _step(report, "card", _publish_card, run_date)
@@ -287,9 +276,10 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
         from services.push_notification_service import notify_predictions_ready
         card = build_daily_accumulators()
         accs = (card or {}).get("accumulators") or {}
-        tier_counts = _published_tier_counts(accs, include_rollover=False)
-        cats = {name: bool(legs) for name, legs in tier_counts.items()}
-        count = sum(tier_counts.values())
+        cats = {k: bool((c or {}).get("games"))
+                for k, c in accs.items() if k != "rollover"}
+        count = sum(len((c or {}).get("games") or [])
+                    for k, c in accs.items() if k != "rollover")
         if not count:
             return {"sent": False, "reason": "nothing published to announce"}
         notify_predictions_ready(prediction_date=run_date,

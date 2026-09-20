@@ -615,13 +615,6 @@ def test_booking_drops_the_served_card_cache(monkeypatch):
     monkeypatch.setattr("leagues.calibrator.fit_calibration", lambda **k: {"n": 0})
     monkeypatch.setattr("services.push_notification_service.notify_predictions_ready",
                         lambda **k: None)
-    # The daily job now prepares the shared seven-day board before publishing.
-    # Keep this unit test hermetic: it is testing cache invalidation after a
-    # booking, not ESPN/provider availability.
-    monkeypatch.setattr("leagues.engine.run_pipeline",
-                        lambda **k: ([], []))
-    monkeypatch.setattr("leagues.engine.prepared_board_status",
-                        lambda **k: {"ready": True, "provider": {}})
 
     daily_feed._accum_cache.update({"result": {"stale": True}, "ts": 9e9})
     report = scheduler.run_daily_job(force=True, publish=False)

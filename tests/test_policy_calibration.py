@@ -1,5 +1,4 @@
 from leagues import calibrator
-from leagues import forecast_observations
 from leagues.forecast_observations import deduplicate_forecasts
 from leagues.policy_version import PUBLISHED_SELECTION_POLICY_VERSION
 
@@ -86,32 +85,3 @@ def test_null_version_rows_remain_historical_prior_and_readiness_is_reported():
     assert group["historical_sample"] == 100
     assert group["current_policy_sample"] == 5
     assert group["current_policy_weight"] == round(5 / 35, 4)
-
-
-def test_evaluation_window_separates_real_and_estimated_roi(monkeypatch):
-    rows = [
-        {"probability": .8, "raw_probability": .75, "ml_probability": .7,
-         "won": True, "odds": 1.5, "odds_are_real": True,
-         "duplicate_count": 2, "sources": ["published"],
-         "policy_version": "p1", "model_version": "m1",
-         "ranking_policy_version": "r1"},
-        {"probability": .6, "raw_probability": .65, "ml_probability": None,
-         "won": False, "odds": 2.0, "odds_are_real": False,
-         "duplicate_count": 1, "sources": ["rollover"],
-         "policy_version": "p1", "model_version": "m1",
-         "ranking_policy_version": "r1"},
-    ]
-    monkeypatch.setattr(
-        forecast_observations, "collect_forecast_observations",
-        lambda limit_days: rows,
-    )
-
-    report = forecast_observations.evaluation_window(30)
-
-    assert report["unique_forecasts"] == 2
-    assert report["source_rows"] == 3
-    assert report["duplicates_removed"] == 1
-    assert report["published_probability"]["brier"] == .2
-    assert report["roi"]["real_bookmaker_odds"]["roi"] == .5
-    assert report["roi"]["estimated_odds"]["roi"] == -1
-    assert report["provenance"]["corrected_replay_mixed_in"] is False
