@@ -180,6 +180,7 @@ _ALIASES = {
     "paris saint germain": "psg",
     "inter milan": "inter",
     "sporting cp": "sporting",
+    "hamarkameratene": "hamkam",  # Verified club identity; NOT a U19 alias.
 }
 
 
