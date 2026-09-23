@@ -183,54 +183,53 @@ def compute_base_rates(slugs: dict[str, str], *,
 
 
 def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False,
-                   *, as_of: datetime | None = None) -> dict:
+                   *, as_of: datetime | None = None,
+                   allow_refresh: bool = True) -> dict:
     """Cached per-league base rates. Recomputed weekly."""
-    if as_of is None and not force and CACHE_PATH.exists():
+    from leagues.history_cache_io import (local_refresh_claim, read_complete,
+                                          replace_complete)
+    complete = read_complete(CACHE_PATH, HISTORY_CACHE_SCHEMA,
+                             required="_priors") if as_of is None else None
+    if as_of is None and not force and complete:
         try:
             age = time.time() - CACHE_PATH.stat().st_mtime
             if age < CACHE_TTL:
-                cached = json.loads(CACHE_PATH.read_text())
-                if (cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA
-                        and cached.get("_priors")):
-                    return cached
-                logger.info("Base-rate cache predates monthly ESPN history; rebuilding")
+                return complete
         except Exception:
             pass
+    if as_of is None and not allow_refresh:
+        return complete or {}
 
     if slugs is None:
         from leagues.espn_source import ESPN_CLUB_LEAGUES
         slugs = ESPN_CLUB_LEAGUES
 
-    try:
+    def refresh():
         rates = compute_base_rates(slugs, as_of=as_of)
         if rates:
             if as_of is None and rates.get("_failed_leagues"):
                 logger.warning("Base-rate refresh incomplete: %s leagues failed",
                                len(rates["_failed_leagues"]))
-                if CACHE_PATH.exists():
-                    try:
-                        cached = json.loads(CACHE_PATH.read_text())
-                        if cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA:
-                            return cached
-                    except Exception:
-                        pass
+                return complete or rates
             elif as_of is None:
-                CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-                CACHE_PATH.write_text(json.dumps(rates, indent=2))
+                replace_complete(CACHE_PATH, rates, HISTORY_CACHE_SCHEMA,
+                                 required="_priors")
                 logger.info(f"Base rates computed for {len(rates)} leagues")
             return rates
+        return complete or {}
+
+    try:
+        if as_of is not None:
+            return refresh()
+        with local_refresh_claim(CACHE_PATH) as acquired:
+            if not acquired:
+                return complete or {}
+            return refresh()
     except Exception as e:
         logger.error(f"Base-rate computation failed: {e}")
 
     # Fall back to whatever is cached, even if stale
-    if as_of is None and CACHE_PATH.exists():
-        try:
-            cached = json.loads(CACHE_PATH.read_text())
-            if cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA:
-                return cached
-        except Exception:
-            pass
-    return {}
+    return complete or {}
 
 
 # Strength of the pull toward global averages, in "virtual matches". A league

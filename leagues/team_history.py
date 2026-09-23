@@ -118,42 +118,43 @@ def build(slugs: dict[str, str] | None = None, *,
             "_cache_schema": HISTORY_CACHE_SCHEMA}
 
 
-def load(force: bool = False, *, as_of: datetime | None = None) -> dict:
+def load(force: bool = False, *, as_of: datetime | None = None,
+         allow_refresh: bool = True) -> dict:
     """Cached history, rebuilt when stale."""
-    if as_of is None and not force and CACHE_PATH.exists():
+    from leagues.history_cache_io import (local_refresh_claim, read_complete,
+                                          replace_complete)
+    complete = read_complete(CACHE_PATH, HISTORY_CACHE_SCHEMA,
+                             required="matches") if as_of is None else None
+    if as_of is None and not force and complete:
         try:
             if time.time() - CACHE_PATH.stat().st_mtime < CACHE_TTL:
-                cached = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-                if cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA:
-                    return cached
+                return complete
         except Exception:
             pass
-    try:
+    if as_of is None and not allow_refresh:
+        return complete or {"matches": []}
+
+    def refresh():
         data = build(as_of=as_of)
         if data.get("failed_leagues") and as_of is None:
             logger.warning("Team-history refresh incomplete: %s leagues failed",
                            len(data["failed_leagues"]))
-            if CACHE_PATH.exists():
-                try:
-                    cached = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-                    if cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA:
-                        return cached
-                except Exception:
-                    pass
-        elif data.get("matches") and as_of is None:
-            CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return complete or data
+        if data.get("matches") and as_of is None:
+            replace_complete(CACHE_PATH, data, HISTORY_CACHE_SCHEMA,
+                             required="matches")
         return data
+
+    try:
+        if as_of is not None:
+            return refresh()
+        with local_refresh_claim(CACHE_PATH) as acquired:
+            if not acquired:
+                return complete or {"matches": []}
+            return refresh()
     except Exception as e:
         logger.warning(f"team history build failed: {e}")
-        if as_of is None and CACHE_PATH.exists():
-            try:
-                cached = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-                if cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA:
-                    return cached
-            except Exception:
-                pass
-        return {"matches": []}
+        return complete or {"matches": []}
 
 
 class HistoryIndex:

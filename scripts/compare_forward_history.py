@@ -1,7 +1,8 @@
 """Offline control/fixed comparison on one frozen, unstarted fixture board.
 
 No database writes, published cards, booking calls, or settlement. This is a
-research shadow; local empty calibration and shared no-Elo state are labelled.
+research shadow using the frozen production calibration fit. Elo is held
+absent in both arms, so its cards are diagnostic rather than production-exact.
 """
 
 import argparse

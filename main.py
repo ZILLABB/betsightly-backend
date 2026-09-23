@@ -392,13 +392,17 @@ def _start_daily_generation_loop():
     def _run():
         _time.sleep(5)  # let the server finish booting first
         try:
-            from leagues.engine import start_prepared_board_refresh
+            from leagues.engine import (start_prepared_board_refresh,
+                                        start_history_prewarm)
+            start_history_prewarm()
             start_prepared_board_refresh(days_ahead=7, force=False)
         except Exception as e:
             logger.error(f"Weekly board prewarm failed to start: {e}")
         last_published = None
         while True:
             try:
+                from leagues.engine import start_history_prewarm
+                start_history_prewarm()
                 now = datetime.now(_tz.utc)
                 wat = now + _td(hours=1)
                 wat_day = wat.strftime("%Y-%m-%d")

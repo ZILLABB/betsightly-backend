@@ -219,6 +219,40 @@ def start_prepared_board_refresh(days_ahead: int = 7,
     return True
 
 
+_HISTORY_PREWARM_LOCK = threading.Lock()
+_HISTORY_PREWARMING = False
+
+
+def start_history_prewarm() -> bool:
+    """Refresh historical inputs off the publication and request paths.
+
+    Each artifact has a filesystem process claim. This is not a distributed
+    lease across separate Render instances; staging must verify topology.
+    """
+    global _HISTORY_PREWARMING
+    with _HISTORY_PREWARM_LOCK:
+        if _HISTORY_PREWARMING:
+            return False
+        _HISTORY_PREWARMING = True
+
+    def _work():
+        global _HISTORY_PREWARMING
+        try:
+            from leagues.base_rates import get_base_rates
+            from leagues.team_history import load
+            get_base_rates()
+            load()
+        except Exception as exc:
+            logger.warning("history prewarm failed: %s", exc, exc_info=True)
+        finally:
+            with _HISTORY_PREWARM_LOCK:
+                _HISTORY_PREWARMING = False
+
+    threading.Thread(target=_work, daemon=True,
+                     name="history-prewarm").start()
+    return True
+
+
 def _elo_for(fixture: dict, ratings: dict | None = None):
     """Competition-aware ELO opinion, isolated by club/national team type."""
     try:
@@ -272,7 +306,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     except Exception as e:
         logger.warning(f"SportyBet pricing unavailable: {e}")
 
-    cached_rates = get_base_rates(ESPN_CLUB_LEAGUES)
+    # Requests and the 08:00 publication path only consume completed history.
+    # Cold ESPN refresh runs independently in start_history_prewarm().
+    cached_rates = get_base_rates(ESPN_CLUB_LEAGUES, allow_refresh=False)
     try:
         from leagues.elo_engine import get_ratings
         ratings = get_ratings(ESPN_CLUB_LEAGUES)
@@ -287,7 +323,8 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     # on each pick and evaluated against results, and does not move a published
     # number. Built once per run because the history index is a 15s fetch.
     try:
-        history = HistoryIndex()
+        from leagues.team_history import load as load_team_history
+        history = HistoryIndex(load_team_history(allow_refresh=False))
     except Exception as e:
         logger.warning(f"team history unavailable, ML second opinion off: {e}")
         history = None
