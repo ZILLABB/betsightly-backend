@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 CACHE_PATH = cache_path(Path(__file__).parent / "data" / "team_history.json")
 CACHE_TTL = 12 * 3600
 LOOKBACK_DAYS = 120
+HISTORY_CACHE_SCHEMA = 2  # ESPN monthly queries; schema 1 used rejected date ranges
 
 # Neutral fallbacks, used for a team with no recorded history. These are the
 # global averages measured in base_rates, so an unknown side looks like an
@@ -46,10 +47,11 @@ NEUTRAL = {
 }
 
 
-def _fetch_finished(slug: str, start: str, end: str) -> list[dict]:
+def _fetch_finished(slug: str, start: str, end: str, *,
+                    as_of: datetime | None = None) -> list[dict]:
     """Finished matches for a league over supported monthly queries."""
     from leagues.espn_history_fetch import finished_events
-    events = finished_events(slug, start, end, limit=900)
+    events = finished_events(slug, start, end, limit=900, as_of=as_of)
 
     out = []
     for ev in events:
@@ -76,19 +78,24 @@ def _fetch_finished(slug: str, start: str, end: str) -> list[dict]:
     return out
 
 
-def build(slugs: dict[str, str] | None = None) -> dict:
+def build(slugs: dict[str, str] | None = None, *,
+          as_of: datetime | None = None) -> dict:
     """Fetch and index results. Returns {"matches": [...], "built_at": ...}."""
     if slugs is None:
         from leagues.espn_source import ESPN_CLUB_LEAGUES
         slugs = ESPN_CLUB_LEAGUES
 
-    now = datetime.now(timezone.utc)
+    now = as_of or datetime.now(timezone.utc)
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("as_of must be timezone-aware")
+    now = now.astimezone(timezone.utc)
     start = (now - timedelta(days=LOOKBACK_DAYS)).strftime("%Y%m%d")
     end = now.strftime("%Y%m%d")
 
     matches: list[dict] = []
     with ThreadPoolExecutor(max_workers=12) as pool:
-        futures = {pool.submit(_fetch_finished, s, start, end): s for s in slugs}
+        futures = {pool.submit(_fetch_finished, s, start, end,
+                               as_of=as_of): s for s in slugs}
         for fut in as_completed(futures):
             try:
                 matches.extend(fut.result())
@@ -97,28 +104,33 @@ def build(slugs: dict[str, str] | None = None) -> dict:
 
     matches.sort(key=lambda m: m["date"])
     logger.info(f"team history: {len(matches)} finished matches over {LOOKBACK_DAYS} days")
-    return {"matches": matches, "built_at": now.isoformat()}
+    return {"matches": matches, "built_at": now.isoformat(),
+            "_cache_schema": HISTORY_CACHE_SCHEMA}
 
 
-def load(force: bool = False) -> dict:
+def load(force: bool = False, *, as_of: datetime | None = None) -> dict:
     """Cached history, rebuilt when stale."""
-    if not force and CACHE_PATH.exists():
+    if as_of is None and not force and CACHE_PATH.exists():
         try:
             if time.time() - CACHE_PATH.stat().st_mtime < CACHE_TTL:
-                return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+                cached = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+                if cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA:
+                    return cached
         except Exception:
             pass
     try:
-        data = build()
-        if data.get("matches"):
+        data = build(as_of=as_of)
+        if data.get("matches") and as_of is None:
             CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
             CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         return data
     except Exception as e:
         logger.warning(f"team history build failed: {e}")
-        if CACHE_PATH.exists():
+        if as_of is None and CACHE_PATH.exists():
             try:
-                return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+                cached = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+                if cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA:
+                    return cached
             except Exception:
                 pass
         return {"matches": []}

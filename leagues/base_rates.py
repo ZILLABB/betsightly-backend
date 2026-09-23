@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 CACHE_PATH = cache_path(Path(__file__).parent / "data" / "league_base_rates.json")
 CACHE_TTL = 7 * 24 * 3600          # recompute weekly
+HISTORY_CACHE_SCHEMA = 2  # ESPN monthly queries; schema 1 used rejected date ranges
 LOOKBACK_DAYS = 45                 # sample window
 MIN_SAMPLE = 10                    # below this, use global defaults
 MIN_PRIOR_SAMPLE = 20
@@ -81,10 +82,11 @@ def _as_rates(sample: dict) -> dict:
     }
 
 
-def _fetch_finished_range(slug: str, start: str, end: str) -> list[tuple[int, int]]:
+def _fetch_finished_range(slug: str, start: str, end: str, *,
+                          as_of: datetime | None = None) -> list[tuple[int, int]]:
     """Finished (home, away) scores from supported monthly ESPN queries."""
     from leagues.espn_history_fetch import finished_events
-    events = finished_events(slug, start, end)
+    events = finished_events(slug, start, end, as_of=as_of)
 
     out = []
     for ev in events:
@@ -103,15 +105,20 @@ def _fetch_finished_range(slug: str, start: str, end: str) -> list[tuple[int, in
     return out
 
 
-def compute_base_rates(slugs: dict[str, str]) -> dict:
+def compute_base_rates(slugs: dict[str, str], *,
+                       as_of: datetime | None = None) -> dict:
     """Measure base rates for each league slug. Leagues run in parallel."""
-    now = datetime.now(timezone.utc)
+    now = as_of or datetime.now(timezone.utc)
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("as_of must be timezone-aware")
+    now = now.astimezone(timezone.utc)
     start = (now - timedelta(days=LOOKBACK_DAYS)).strftime("%Y%m%d")
     end = (now - timedelta(days=1)).strftime("%Y%m%d")
 
     raw = {}
     with ThreadPoolExecutor(max_workers=12) as pool:
-        futures = {pool.submit(_fetch_finished_range, slug, start, end): slug for slug in slugs}
+        futures = {pool.submit(_fetch_finished_range, slug, start, end,
+                               as_of=as_of): slug for slug in slugs}
         for fut in as_completed(futures):
             slug = futures[fut]
             try:
@@ -162,19 +169,22 @@ def compute_base_rates(slugs: dict[str, str]) -> dict:
         for key in keys:
             _merge(prior_samples[key], sample)
     rates["_priors"] = {key: _as_rates(sample) for key, sample in prior_samples.items()}
+    rates["_cache_schema"] = HISTORY_CACHE_SCHEMA
     return rates
 
 
-def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False) -> dict:
+def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False,
+                   *, as_of: datetime | None = None) -> dict:
     """Cached per-league base rates. Recomputed weekly."""
-    if not force and CACHE_PATH.exists():
+    if as_of is None and not force and CACHE_PATH.exists():
         try:
             age = time.time() - CACHE_PATH.stat().st_mtime
             if age < CACHE_TTL:
                 cached = json.loads(CACHE_PATH.read_text())
-                if cached.get("_priors"):
+                if (cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA
+                        and cached.get("_priors")):
                     return cached
-                logger.info("Base-rate cache predates competition priors; rebuilding")
+                logger.info("Base-rate cache predates monthly ESPN history; rebuilding")
         except Exception:
             pass
 
@@ -183,19 +193,22 @@ def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False) -> 
         slugs = ESPN_CLUB_LEAGUES
 
     try:
-        rates = compute_base_rates(slugs)
+        rates = compute_base_rates(slugs, as_of=as_of)
         if rates:
-            CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            CACHE_PATH.write_text(json.dumps(rates, indent=2))
-            logger.info(f"Base rates computed for {len(rates)} leagues")
+            if as_of is None:
+                CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                CACHE_PATH.write_text(json.dumps(rates, indent=2))
+                logger.info(f"Base rates computed for {len(rates)} leagues")
             return rates
     except Exception as e:
         logger.error(f"Base-rate computation failed: {e}")
 
     # Fall back to whatever is cached, even if stale
-    if CACHE_PATH.exists():
+    if as_of is None and CACHE_PATH.exists():
         try:
-            return json.loads(CACHE_PATH.read_text())
+            cached = json.loads(CACHE_PATH.read_text())
+            if cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA:
+                return cached
         except Exception:
             pass
     return {}
