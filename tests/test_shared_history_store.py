@@ -8,10 +8,22 @@ from sqlalchemy import create_engine, text
 from leagues import shared_history_store as store
 
 
+def _create_schema(engine):
+    # Production uses the Alembic migration; isolated SQLite tests create its
+    # equivalent explicitly so no application request performs DDL.
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE history_artifacts ("
+                          "cache_key VARCHAR(120) PRIMARY KEY, "
+                          "schema_version INTEGER NOT NULL, payload TEXT, "
+                          "payload_sha256 VARCHAR(64), built_at FLOAT, "
+                          "lease_owner VARCHAR(36), lease_until FLOAT)"))
+
+
 def test_two_instances_share_only_promoted_complete_artifact(tmp_path):
     url = f"sqlite:///{(tmp_path / 'shared.db').as_posix()}"
     first = create_engine(url)
     second = create_engine(url)
+    _create_schema(first)
     payload = {"_cache_schema": 2, "_priors": {"global": {"matches": 42}}}
     with store.claim("base_rates", 2, engine=first) as owner:
         assert owner
@@ -38,6 +50,7 @@ def test_expired_claim_recovers_and_old_owner_cannot_promote(tmp_path):
     url = f"sqlite:///{(tmp_path / 'shared.db').as_posix()}"
     first = create_engine(url)
     second = create_engine(url)
+    _create_schema(first)
     with store.claim("team_history", 2, engine=first) as old_owner:
         assert old_owner
         with first.begin() as conn:

@@ -8,25 +8,10 @@ connection. Local SQLite engines can be injected for multi-instance tests.
 import hashlib
 import json
 import os
-import threading
-import time
 import uuid
 from contextlib import contextmanager
 
 from sqlalchemy import text
-
-_READY_ENGINES = set()
-_DDL_LOCK = threading.Lock()
-_DDL = """CREATE TABLE IF NOT EXISTS history_artifacts (
-    cache_key VARCHAR(120) PRIMARY KEY,
-    schema_version INTEGER NOT NULL,
-    payload TEXT,
-    payload_sha256 VARCHAR(64),
-    built_at DOUBLE PRECISION,
-    lease_owner VARCHAR(36),
-    lease_until DOUBLE PRECISION
-)"""
-
 
 def production_shared() -> bool:
     return os.getenv("ENVIRONMENT", "").lower() in {"production", "staging"}
@@ -39,20 +24,17 @@ def _engine(engine=None):
     return configured
 
 
-def _prepare(engine) -> None:
-    identity = id(engine)
-    if identity in _READY_ENGINES:
-        return
-    with _DDL_LOCK:
-        if identity not in _READY_ENGINES:
-            with engine.begin() as conn:
-                conn.execute(text(_DDL))
-            _READY_ENGINES.add(identity)
+def _db_epoch(engine) -> str:
+    """Use the database clock, not potentially skewed app-instance clocks."""
+    if engine.dialect.name == "postgresql":
+        return "EXTRACT(EPOCH FROM clock_timestamp())"
+    if engine.dialect.name == "sqlite":
+        return "CAST(strftime('%s', 'now') AS REAL)"
+    raise RuntimeError("unsupported history lease database")
 
 
 def read(cache_key: str, schema: int, *, required: str, engine=None):
     db = _engine(engine)
-    _prepare(db)
     with db.connect() as conn:
         row = conn.execute(text(
             "SELECT schema_version, payload, payload_sha256 FROM history_artifacts "
@@ -71,21 +53,21 @@ def read(cache_key: str, schema: int, *, required: str, engine=None):
 
 def lease_active(cache_key: str, *, engine=None) -> bool:
     db = _engine(engine)
-    _prepare(db)
+    now = _db_epoch(db)
     with db.connect() as conn:
         row = conn.execute(text(
-            "SELECT lease_until FROM history_artifacts WHERE cache_key = :key"),
+            "SELECT lease_until > " + now + " FROM history_artifacts "
+            "WHERE cache_key = :key"),
             {"key": cache_key}).first()
-    return bool(row and row[0] and float(row[0]) > time.time())
+    return bool(row and row[0])
 
 
 @contextmanager
 def claim(cache_key: str, schema: int, *, lease_seconds: int = 900,
           engine=None):
     db = _engine(engine)
-    _prepare(db)
     owner = str(uuid.uuid4())
-    now = time.time()
+    now = _db_epoch(db)
     with db.begin() as conn:
         conn.execute(text(
             "INSERT INTO history_artifacts (cache_key, schema_version) "
@@ -93,10 +75,11 @@ def claim(cache_key: str, schema: int, *, lease_seconds: int = 900,
             {"key": cache_key, "schema": schema})
         updated = conn.execute(text(
             "UPDATE history_artifacts SET lease_owner = :owner, "
-            "lease_until = :until WHERE cache_key = :key "
-            "AND (lease_until IS NULL OR lease_until < :now)"),
-            {"owner": owner, "until": now + lease_seconds,
-             "key": cache_key, "now": now})
+            "lease_until = " + now + " + :seconds WHERE cache_key = :key "
+            "AND schema_version = :schema "
+            "AND (lease_until IS NULL OR lease_until < " + now + ")"),
+            {"owner": owner, "seconds": lease_seconds,
+             "key": cache_key, "schema": schema})
         acquired = updated.rowcount == 1
     try:
         yield owner if acquired else None
@@ -120,13 +103,14 @@ def promote(cache_key: str, schema: int, data: dict, owner: str,
                          ensure_ascii=False)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     db = _engine(engine)
-    _prepare(db)
+    now = _db_epoch(db)
     with db.begin() as conn:
         changed = conn.execute(text(
             "UPDATE history_artifacts SET payload = :payload, "
             "payload_sha256 = :digest, schema_version = :schema, "
-            "built_at = :now WHERE cache_key = :key "
-            "AND lease_owner = :owner AND lease_until >= :now"),
+            "built_at = " + now + " WHERE cache_key = :key "
+            "AND lease_owner = :owner AND schema_version = :schema "
+            "AND lease_until >= " + now),
             {"payload": payload, "digest": digest, "schema": schema,
-             "now": time.time(), "key": cache_key, "owner": owner})
+             "key": cache_key, "owner": owner})
     return changed.rowcount == 1
