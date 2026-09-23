@@ -3,7 +3,9 @@ from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from leagues import base_rates, team_history
-from leagues.espn_history_fetch import finished_events
+import requests
+
+from leagues.espn_history_fetch import HistoryMonthUnavailable, finished_events
 
 
 def _event(event_id, date, home=2, away=1, completed=True):
@@ -112,3 +114,90 @@ def test_asof_never_reuses_current_history_cache(tmp_path, monkeypatch):
     with patch.object(team_history, "build", return_value={"matches": []}) as build:
         assert team_history.load(as_of=cutoff) == {"matches": []}
     build.assert_called_once_with(as_of=cutoff)
+
+
+def test_retryable_history_failure_never_returns_partial_months():
+    august = Mock(status_code=200)
+    august.json.return_value = {"events": [_event("aug", "2026-08-20T12:00Z")]}
+    rate_limited = Mock(status_code=429)
+    with patch("leagues.espn_history_fetch.requests.get",
+               side_effect=[august, rate_limited, rate_limited]) as get, \
+            patch("leagues.espn_history_fetch.time.sleep") as sleep:
+        try:
+            finished_events("bra.2", "20260801", "20260922")
+        except HistoryMonthUnavailable:
+            pass
+        else:
+            raise AssertionError("partial league history was accepted")
+    assert get.call_count == 3
+    sleep.assert_called_once()
+
+
+def test_timeout_retries_once_then_fails_closed():
+    with patch("leagues.espn_history_fetch.requests.get",
+               side_effect=requests.Timeout("offline")) as get, \
+            patch("leagues.espn_history_fetch.time.sleep"):
+        try:
+            finished_events("bra.2", "20260901", "20260922")
+        except HistoryMonthUnavailable:
+            pass
+        else:
+            raise AssertionError("timeout was treated as empty league")
+    assert get.call_count == 2
+
+
+def test_permanently_unsupported_league_is_distinct_from_retryable_failure():
+    unavailable = Mock(status_code=400)
+    with patch("leagues.espn_history_fetch.requests.get", return_value=unavailable) as get:
+        try:
+            finished_events("alg.1", "20260901", "20260922")
+        except HistoryMonthUnavailable as exc:
+            assert exc.permanent
+        else:
+            raise AssertionError("unsupported league treated as valid history")
+    get.assert_called_once()
+
+
+def test_permanent_unavailability_can_be_cached_with_valid_league_samples(
+        tmp_path, monkeypatch):
+    path = tmp_path / "base.json"
+    monkeypatch.setattr(base_rates, "CACHE_PATH", path)
+    measured = {"_cache_schema": base_rates.HISTORY_CACHE_SCHEMA,
+                "_priors": {"global": {"matches": 100}},
+                "_failed_leagues": [], "_unavailable_leagues": ["alg.1"]}
+    with patch.object(base_rates, "compute_base_rates", return_value=measured):
+        assert base_rates.get_base_rates(slugs={}) == measured
+    assert json.loads(path.read_text()) == measured
+
+    history_path = tmp_path / "history.json"
+    monkeypatch.setattr(team_history, "CACHE_PATH", history_path)
+    history = {"_cache_schema": team_history.HISTORY_CACHE_SCHEMA,
+               "matches": [{"home": "Measured"}],
+               "failed_leagues": [], "unavailable_leagues": ["alg.1"]}
+    with patch.object(team_history, "build", return_value=history):
+        assert team_history.load(force=True) == history
+    assert json.loads(history_path.read_text()) == history
+
+
+def test_incomplete_new_history_does_not_replace_last_complete_cache(tmp_path, monkeypatch):
+    base_path = tmp_path / "base.json"
+    complete = {"_cache_schema": base_rates.HISTORY_CACHE_SCHEMA,
+                "_priors": {"global": {"matches": 100}}}
+    base_path.write_text(json.dumps(complete))
+    monkeypatch.setattr(base_rates, "CACHE_PATH", base_path)
+    with patch.object(base_rates, "compute_base_rates", return_value={
+            "_cache_schema": base_rates.HISTORY_CACHE_SCHEMA,
+            "_failed_leagues": ["bra.2"], "_priors": {}}):
+        assert base_rates.get_base_rates(slugs={}, force=True) == complete
+    assert json.loads(base_path.read_text()) == complete
+
+    history_path = tmp_path / "history.json"
+    previous = {"_cache_schema": team_history.HISTORY_CACHE_SCHEMA,
+                "matches": [{"home": "Preserved"}]}
+    history_path.write_text(json.dumps(previous))
+    monkeypatch.setattr(team_history, "CACHE_PATH", history_path)
+    with patch.object(team_history, "build", return_value={
+            "_cache_schema": team_history.HISTORY_CACHE_SCHEMA,
+            "failed_leagues": ["bra.2"], "matches": []}):
+        assert team_history.load(force=True) == previous
+    assert json.loads(history_path.read_text()) == previous

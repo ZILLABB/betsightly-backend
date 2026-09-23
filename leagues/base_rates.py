@@ -115,7 +115,10 @@ def compute_base_rates(slugs: dict[str, str], *,
     start = (now - timedelta(days=LOOKBACK_DAYS)).strftime("%Y%m%d")
     end = (now - timedelta(days=1)).strftime("%Y%m%d")
 
+    from leagues.espn_history_fetch import HistoryMonthUnavailable
     raw = {}
+    failed_leagues = []
+    unavailable_leagues = []
     with ThreadPoolExecutor(max_workers=12) as pool:
         futures = {pool.submit(_fetch_finished_range, slug, start, end,
                                as_of=as_of): slug for slug in slugs}
@@ -123,7 +126,11 @@ def compute_base_rates(slugs: dict[str, str], *,
             slug = futures[fut]
             try:
                 results = fut.result()
+            except HistoryMonthUnavailable as exc:
+                (unavailable_leagues if exc.permanent else failed_leagues).append(slug)
+                continue
             except Exception:
+                failed_leagues.append(slug)
                 continue
             s = _empty()
             for hs, as_ in results:
@@ -170,6 +177,8 @@ def compute_base_rates(slugs: dict[str, str], *,
             _merge(prior_samples[key], sample)
     rates["_priors"] = {key: _as_rates(sample) for key, sample in prior_samples.items()}
     rates["_cache_schema"] = HISTORY_CACHE_SCHEMA
+    rates["_failed_leagues"] = sorted(failed_leagues)
+    rates["_unavailable_leagues"] = sorted(unavailable_leagues)
     return rates
 
 
@@ -195,7 +204,17 @@ def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False,
     try:
         rates = compute_base_rates(slugs, as_of=as_of)
         if rates:
-            if as_of is None:
+            if as_of is None and rates.get("_failed_leagues"):
+                logger.warning("Base-rate refresh incomplete: %s leagues failed",
+                               len(rates["_failed_leagues"]))
+                if CACHE_PATH.exists():
+                    try:
+                        cached = json.loads(CACHE_PATH.read_text())
+                        if cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA:
+                            return cached
+                    except Exception:
+                        pass
+            elif as_of is None:
                 CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
                 CACHE_PATH.write_text(json.dumps(rates, indent=2))
                 logger.info(f"Base rates computed for {len(rates)} leagues")

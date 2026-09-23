@@ -92,19 +92,29 @@ def build(slugs: dict[str, str] | None = None, *,
     start = (now - timedelta(days=LOOKBACK_DAYS)).strftime("%Y%m%d")
     end = now.strftime("%Y%m%d")
 
+    from leagues.espn_history_fetch import HistoryMonthUnavailable
     matches: list[dict] = []
+    failed_leagues = []
+    unavailable_leagues = []
     with ThreadPoolExecutor(max_workers=12) as pool:
         futures = {pool.submit(_fetch_finished, s, start, end,
                                as_of=as_of): s for s in slugs}
         for fut in as_completed(futures):
             try:
                 matches.extend(fut.result())
+            except HistoryMonthUnavailable as exc:
+                (unavailable_leagues if exc.permanent else failed_leagues).append(
+                    futures[fut])
+                continue
             except Exception:
+                failed_leagues.append(futures[fut])
                 continue
 
     matches.sort(key=lambda m: m["date"])
     logger.info(f"team history: {len(matches)} finished matches over {LOOKBACK_DAYS} days")
     return {"matches": matches, "built_at": now.isoformat(),
+            "failed_leagues": sorted(failed_leagues),
+            "unavailable_leagues": sorted(unavailable_leagues),
             "_cache_schema": HISTORY_CACHE_SCHEMA}
 
 
@@ -120,7 +130,17 @@ def load(force: bool = False, *, as_of: datetime | None = None) -> dict:
             pass
     try:
         data = build(as_of=as_of)
-        if data.get("matches") and as_of is None:
+        if data.get("failed_leagues") and as_of is None:
+            logger.warning("Team-history refresh incomplete: %s leagues failed",
+                           len(data["failed_leagues"]))
+            if CACHE_PATH.exists():
+                try:
+                    cached = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+                    if cached.get("_cache_schema") == HISTORY_CACHE_SCHEMA:
+                        return cached
+                except Exception:
+                    pass
+        elif data.get("matches") and as_of is None:
             CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
             CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         return data
