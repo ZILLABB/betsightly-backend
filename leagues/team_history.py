@@ -50,32 +50,9 @@ NEUTRAL = {
 def _fetch_finished(slug: str, start: str, end: str, *,
                     as_of: datetime | None = None) -> list[dict]:
     """Finished matches for a league over supported monthly queries."""
-    from leagues.espn_history_fetch import finished_events
-    events = finished_events(slug, start, end, limit=900, as_of=as_of)
-
-    out = []
-    for ev in events:
-        comp = (ev.get("competitions") or [{}])[0]
-        if not comp.get("status", {}).get("type", {}).get("completed"):
-            continue
-        teams = comp.get("competitors", []) or []
-        home = next((t for t in teams if t.get("homeAway") == "home"), None)
-        away = next((t for t in teams if t.get("homeAway") == "away"), None)
-        if not home or not away:
-            continue
-        score = regulation_score(comp)
-        if not score:
-            continue
-        hs, as_ = score["home_score"], score["away_score"]
-        meta = competition_for(slug)
-        out.append({
-            "date": ev.get("date", "")[:10],
-            "home": (home.get("team") or {}).get("displayName", ""),
-            "away": (away.get("team") or {}).get("displayName", ""),
-            "hs": hs, "as": as_,
-            "team_type": meta.team_type if meta else "CLUB",
-        })
-    return out
+    from leagues.history_months import finished_matches
+    return [{key: row[key] for key in ("date", "home", "away", "hs", "as", "team_type")}
+            for row in finished_matches(slug, start, end, as_of=as_of)]
 
 
 def build(slugs: dict[str, str] | None = None, *,
@@ -123,24 +100,39 @@ def load(force: bool = False, *, as_of: datetime | None = None,
     """Cached history, rebuilt when stale."""
     from leagues.history_cache_io import (local_refresh_claim, read_complete,
                                           replace_complete)
+    from leagues import shared_history_store
     complete = read_complete(CACHE_PATH, HISTORY_CACHE_SCHEMA,
                              required="matches") if as_of is None else None
+    if as_of is None and shared_history_store.production_shared():
+        try:
+            complete = (shared_history_store.read("team_history", HISTORY_CACHE_SCHEMA,
+                                                  required="matches") or complete)
+        except Exception as exc:
+            logger.warning("Shared team-history cache unavailable: %s", exc)
     if as_of is None and not force and complete:
         try:
-            if time.time() - CACHE_PATH.stat().st_mtime < CACHE_TTL:
+            built = complete.get("built_at")
+            age = (time.time() - datetime.fromisoformat(built).timestamp()
+                   if built else time.time() - CACHE_PATH.stat().st_mtime)
+            if age < CACHE_TTL:
                 return complete
         except Exception:
             pass
     if as_of is None and not allow_refresh:
         return complete or {"matches": []}
 
-    def refresh():
+    def refresh(owner=None):
         data = build(as_of=as_of)
         if data.get("failed_leagues") and as_of is None:
             logger.warning("Team-history refresh incomplete: %s leagues failed",
                            len(data["failed_leagues"]))
             return complete or data
         if data.get("matches") and as_of is None:
+            if owner:
+                if not shared_history_store.promote(
+                        "team_history", HISTORY_CACHE_SCHEMA, data, owner,
+                        required="matches"):
+                    return complete or {"matches": []}
             replace_complete(CACHE_PATH, data, HISTORY_CACHE_SCHEMA,
                              required="matches")
         return data
@@ -148,6 +140,9 @@ def load(force: bool = False, *, as_of: datetime | None = None,
     try:
         if as_of is not None:
             return refresh()
+        if shared_history_store.production_shared():
+            with shared_history_store.claim("team_history", HISTORY_CACHE_SCHEMA) as owner:
+                return refresh(owner) if owner else complete or {"matches": []}
         with local_refresh_claim(CACHE_PATH) as acquired:
             if not acquired:
                 return complete or {"matches": []}

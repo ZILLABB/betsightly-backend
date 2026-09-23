@@ -39,12 +39,16 @@ def test_historical_fetch_uses_months_and_filters_dates_and_duplicates():
     assert [call.kwargs["params"]["dates"] for call in get.call_args_list] == ["202608", "202609"]
 
 
-def test_base_rates_and_team_history_share_supported_fetch():
+def test_base_rates_and_team_history_share_supported_fetch(tmp_path, monkeypatch):
+    from leagues import history_months
+    monkeypatch.setattr(history_months, "MONTH_DIR", tmp_path)
+    monkeypatch.setattr(history_months.shared_history_store,
+                        "production_shared", lambda: False)
     event = _event("match", "2026-09-20T12:00Z")
-    with patch("leagues.espn_history_fetch.finished_events", return_value=[event]) as fetch:
+    with patch("leagues.history_months.finished_events", return_value=[event]) as fetch:
         assert base_rates._fetch_finished_range("bra.2", "20260901", "20260922") == [(2, 1)]
         assert team_history._fetch_finished("bra.2", "20260901", "20260922")[0]["hs"] == 2
-    assert fetch.call_count == 2
+    assert fetch.call_count == 1
 
 
 def test_broken_range_cache_is_not_reused_even_as_failure_fallback(tmp_path, monkeypatch):

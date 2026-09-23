@@ -120,11 +120,11 @@ def _select_tier(picks: list, target: float, max_picks: int,
     )
 
 
-def build_daily_accumulators(force: bool = False) -> dict:
+def build_daily_accumulators(force: bool = False, *, preview: dict | None = None) -> dict:
     """Category picks + rollover chain for the next actionable match day."""
     import time as _time
     now_ts = _time.time()
-    if not force and _accum_cache["result"] and (now_ts - _accum_cache["ts"]) < _ACCUM_CACHE_TTL:
+    if preview is None and not force and _accum_cache["result"] and (now_ts - _accum_cache["ts"]) < _ACCUM_CACHE_TTL:
         return _accum_cache["result"]
 
     from leagues.engine import run_pipeline, picks_for_date
@@ -133,14 +133,16 @@ def build_daily_accumulators(force: bool = False) -> dict:
         ESTIMATE_MARGIN, MIN_CANDIDATE_CONFIDENCE, MIN_PUBLISHABLE_CONFIDENCE,
         to_game)
 
-    now = datetime.now(timezone.utc)
-    publish_date = _publish_date()
-    existing_card = _load_locked(publish_date)
+    now = (datetime.fromisoformat(preview["captured_at"])
+           if preview is not None else datetime.now(timezone.utc))
+    publish_date = (preview["target_wat_date"]
+                    if preview is not None else _publish_date())
+    existing_card = None if preview is not None else _load_locked(publish_date)
 
     # Serve the locked card if today's has already been published. Re-selecting
     # through the day would quietly swap picks out from under anyone who booked
     # off the morning card.
-    if not force:
+    if preview is None and not force:
         locked = existing_card
         if locked:
             # Refresh statuses from the persisted chain without rerunning the
@@ -175,7 +177,10 @@ def build_daily_accumulators(force: bool = False) -> dict:
             _accum_cache.update({"result": result, "ts": now_ts})
             return result
 
-    all_picks, fixtures = run_pipeline(days_ahead=4, force=force)
+    if preview is None:
+        all_picks, fixtures = run_pipeline(days_ahead=4, force=force)
+    else:
+        all_picks, fixtures = preview["picks"], preview["fixtures"]
     if not all_picks:
         return None
 
@@ -232,7 +237,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # had already consumed its fixtures.  Portfolio diversity is a second
     # decision and is only accepted when the alternative sits inside the
     # independent slip's measured uncertainty interval.
-    rollover = _build_rollover(all_picks, today)
+    rollover = _build_rollover(all_picks, today, preview=preview is not None)
 
     safe_picks = [p for p in day_picks if p.get("safe_tier_eligible")]
     independent_banker = select_banker(safe_picks, canonicalize=False)
@@ -518,7 +523,7 @@ def build_daily_accumulators(force: bool = False) -> dict:
     # supply a fully validated quality-equivalent replacement; only that FULL
     # rebuilt set is promoted.  Force builds are simulations/repairs and never
     # create booking side effects here.
-    if not existing_card and not force:
+    if preview is None and not existing_card and not force:
         try:
             from leagues.booking import finalize_prepublication_card
             result["prepublication_booking"] = finalize_prepublication_card(
@@ -530,30 +535,31 @@ def build_daily_accumulators(force: bool = False) -> dict:
 
     # Preserve both the independent counterfactual and the actual version
     # that will be locked, including any validated pre-publication replacement.
-    try:
-        from leagues.decision_archive import record_daily
-        snapshot_id = next((p.get("_board_snapshot_id") for p in day_picks
-                            if p.get("_board_snapshot_id")), None)
-        record_daily(
-            snapshot_id, publish_date,
-            {"banker": independent_banker, "2_odds": independent_two,
-             "5_odds": independent_five, "10_odds": independent_ten},
-            result["accumulators"], portfolio_diagnostics,
-        )
-        result["decision_snapshot_id"] = snapshot_id
-    except Exception as exc:
-        logger.warning("daily decision archive skipped: %s", exc,
-                       exc_info=True)
+    if preview is None:
+        try:
+            from leagues.decision_archive import record_daily
+            snapshot_id = next((p.get("_board_snapshot_id") for p in day_picks
+                                if p.get("_board_snapshot_id")), None)
+            record_daily(
+                snapshot_id, publish_date,
+                {"banker": independent_banker, "2_odds": independent_two,
+                 "5_odds": independent_five, "10_odds": independent_ten},
+                result["accumulators"], portfolio_diagnostics,
+            )
+            result["decision_snapshot_id"] = snapshot_id
+        except Exception as exc:
+            logger.warning("daily decision archive skipped: %s", exc,
+                           exc_info=True)
 
     # Archive and lock by the audience-facing publication day even when a
     # thin late board deliberately draws from the next fixture day. Kickoff
     # remains on every leg; the card's immutable identity must not drift.
-    if not existing_card:
+    if preview is None and not existing_card:
         _archive(publish_date, result["accumulators"])
 
     # Lock the publication exactly once. A force-build beside an existing
     # card is an unpublished comparison and must never overwrite or relabel it.
-    if not existing_card:
+    if preview is None and not existing_card:
         try:
             from leagues.picks_db import save_card
             result["locked"] = bool(
@@ -569,7 +575,8 @@ def build_daily_accumulators(force: bool = False) -> dict:
         # still the exact code that belongs beside this official card.
         result["accumulators"] = _attach_bookings(
             publish_date, result["accumulators"], now)
-    _accum_cache.update({"result": result, "ts": now_ts})
+    if preview is None:
+        _accum_cache.update({"result": result, "ts": now_ts})
     return result
 
 
@@ -861,7 +868,7 @@ def _archive(date: str, accumulators: dict) -> None:
 
 # ── Rollover chain ─────────────────────────────────────────
 
-def _build_rollover(all_picks: list, today: str) -> dict:
+def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> dict:
     """Short chain, one slot per match day, persisted to Postgres."""
     from leagues.engine import kickoff_wat_date, picks_for_date
     from leagues.selection import select_rollover_day
@@ -873,13 +880,15 @@ def _build_rollover(all_picks: list, today: str) -> dict:
             append_day as _db_append,
             reset_chain as _db_reset,
         )
-        db_available = True
+        db_available = not preview
     except Exception:
         db_available = False
         _db_load = _db_append = _db_reset = None  # type: ignore
 
     chain_path = DATA_DIR / "rollover_chain.json"
-    if db_available:
+    if preview:
+        chain = {"start_date": today, "days": [], "status": "active"}
+    elif db_available:
         chain = _db_load(today)
     elif chain_path.exists():
         chain = json.loads(chain_path.read_text(encoding="utf-8"))
@@ -1001,7 +1010,9 @@ def _build_rollover(all_picks: list, today: str) -> dict:
         chain["days"].append(new_day)
         needed -= 1
 
-        if db_available:
+        if preview:
+            pass
+        elif db_available:
             if not _db_append(chain["start_date"], new_day):
                 logger.error(f"Rollover day {new_day['date']} not persisted")
                 _save("rollover_chain.json", chain)

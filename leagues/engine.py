@@ -17,6 +17,7 @@ league is fetched in one ranged request.
 """
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -242,6 +243,9 @@ def start_history_prewarm() -> bool:
             from leagues.team_history import load
             get_base_rates()
             load()
+            from leagues.history_readiness import status
+            if status()["usable"] and not prepared_board_status(days_ahead=7).get("ready"):
+                start_prepared_board_refresh(days_ahead=7, force=False)
         except Exception as exc:
             logger.warning("history prewarm failed: %s", exc, exc_info=True)
         finally:
@@ -283,6 +287,10 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
 
 def _build_pipeline(days_ahead: int, force: bool, now: float,
                     now_dt: datetime) -> tuple[list[dict], list[dict]]:
+    from leagues.history_readiness import HistoryNotReady, status
+    if not status()["usable"] and os.getenv(
+            "ENVIRONMENT", "").lower() in {"production", "staging"}:
+        raise HistoryNotReady("historical evidence is not ready")
     from leagues.espn_source import (
         ESPN_CLUB_LEAGUES, cache_metadata as espn_cache_metadata,
         get_fixtures,

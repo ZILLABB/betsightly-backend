@@ -255,6 +255,15 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
         }
 
     _step(report, "card", _publish_card, run_date)
+    if report["steps"]["card"]["status"] == "failed":
+        # A cold history cache is a retryable publication prerequisite. Do
+        # not turn a failed card into a booking/notification/distribution run.
+        report["status"] = "partial"
+        report["finished_at"] = _now()
+        _finish(run_date, report)
+        log_pool_status("daily_job_end", run_date=run_date,
+                        status="partial", failed=report["failed"])
+        return report
 
     # 3. Book the tiers. After the lock, so a code always describes the card
     #    that was actually published, and before distribution, so the Telegram

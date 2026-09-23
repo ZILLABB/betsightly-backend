@@ -388,6 +388,10 @@ def test_prepared_horizons_share_source_but_filter_independently(monkeypatch):
 
 def test_cold_builder_click_returns_controlled_refresh_state(monkeypatch):
     from leagues import api, slip_builder
+    from leagues import history_readiness
+
+    monkeypatch.setattr(history_readiness, "status",
+                        lambda: {"state": "READY", "usable": True})
 
     monkeypatch.setattr(
         engine, "prepared_board_status",

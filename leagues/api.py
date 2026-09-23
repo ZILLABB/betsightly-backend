@@ -51,6 +51,7 @@ async def replay_decision_snapshot(snapshot_id: str,
 @router.get("/daily-accumulators")
 def get_daily_accumulators():
     """Daily accumulator picks (2 odds / 5 odds / 10 odds / over 1.5 / rollover)."""
+    from leagues.history_readiness import HistoryNotReady
     try:
         from leagues.daily_feed import build_daily_accumulators
         result = build_daily_accumulators()
@@ -59,9 +60,19 @@ def get_daily_accumulators():
         return result
     except HTTPException:
         raise
+    except HistoryNotReady:
+        from leagues.history_readiness import status
+        raise HTTPException(503, {"reason": "history_not_ready", "history": status()})
     except Exception as e:
         logger.error(f"Error building daily accumulators: {e}", exc_info=True)
         raise HTTPException(500, str(e))
+
+
+@router.get("/history-readiness")
+def get_history_readiness():
+    """Credential-free evidence readiness, without provider or database URLs."""
+    from leagues.history_readiness import status
+    return status()
 
 
 @router.get("/ml-shadow")
@@ -498,6 +509,17 @@ async def slip_builder_generate(target: float, horizon: str = "week",
 
     board = prepared_board_status(days_ahead=7)
     if not board.get("ready"):
+        from leagues.history_readiness import status as history_status
+        from leagues.engine import start_history_prewarm
+        history = history_status()
+        if not history["usable"]:
+            start_history_prewarm()
+            return {
+                "status": "unavailable", "reason": "history_not_ready",
+                "retryable": True, "history": history,
+                "requested_target": round(float(target), 2),
+                "horizon": horizon, "builder_run_id": builder_run_id,
+            }
         refresh_started = start_prepared_board_refresh(
             days_ahead=7, force=True
         )

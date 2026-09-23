@@ -9,9 +9,11 @@ import requests
 class HistoryMonthUnavailable(RuntimeError):
     """A league-month could not be read; partial history must not be cached."""
 
-    def __init__(self, message: str, *, permanent: bool = False):
+    def __init__(self, message: str, *, permanent: bool = False,
+                 status_code: int | None = None):
         super().__init__(message)
         self.permanent = permanent
+        self.status_code = status_code
 
 
 def finished_events(slug: str, start: str, end: str, *, limit: int = 500,
@@ -54,6 +56,7 @@ def finished_events(slug: str, start: str, end: str, *, limit: int = 500,
             raise HistoryMonthUnavailable(
                 f"{slug} {month_key} unavailable",
                 permanent=response is not None and response.status_code in {400, 404},
+                status_code=response.status_code if response is not None else None,
             )
         try:
             for event in response.json().get("events", []) or []:

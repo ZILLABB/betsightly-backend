@@ -39,12 +39,13 @@ def _verified_board(path):
     return board
 
 
-def _run_path(fixtures, rates, history, fit):
+def _run_path(fixtures, rates, history, fit, ratings=None):
     from leagues.base_rates import rates_for
     from leagues.fixture_ranker import canonical_fixture_recommendations
     from leagues.ml_models import predict_fixture
     from leagues.picks import MIN_CANDIDATE_CONFIDENCE, build_picks
     from leagues.predictor import predict
+    from leagues.engine import _elo_for
 
     candidates = []
     models = {}
@@ -62,7 +63,7 @@ def _run_path(fixtures, rates, history, fit):
         history_counts["home"] += bool(history.by_team.get((team_type, home)))
         history_counts["away"] += bool(history.by_team.get((team_type, away)))
         history_counts["h2h"] += bool(history.h2h.get((team_type, *sorted((home, away)))))
-        model = predict(fixture, base, None)  # Elo held identically absent in both arms.
+        model = predict(fixture, base, _elo_for(fixture, ratings or {}))
         model["ml"] = predict_fixture(fixture, history)
         history_counts["ml"] += bool(model["ml"])
         fixture["_model"] = model
@@ -228,19 +229,28 @@ def compare(board_path: Path, output: Path):
             count["requests"] += 1
         return original_get(*args, **kwargs)
 
-    with patch("leagues.espn_history_fetch.requests.get", side_effect=counted_get):
-        t0 = time.monotonic()
-        fixed_rates = base_rates.compute_base_rates(ESPN_CLUB_LEAGUES)
-        base_seconds = time.monotonic() - t0
-        base_requests = count["requests"]
-        t0 = time.monotonic()
-        history_data = team_history.build(ESPN_CLUB_LEAGUES)
-        history_seconds = time.monotonic() - t0
-        history_requests = count["requests"] - base_requests
+    if board.get("schema") == 2:
+        frozen = board["historical_inputs"]
+        fixed_rates = frozen["base_rates"]
+        history_data = frozen["team_history"]
+        ratings = frozen["elo_ratings"]
+        base_seconds = history_seconds = 0.0
+        base_requests = history_requests = 0
+    else:
+        ratings = {}
+        with patch("leagues.espn_history_fetch.requests.get", side_effect=counted_get):
+            t0 = time.monotonic()
+            fixed_rates = base_rates.compute_base_rates(ESPN_CLUB_LEAGUES)
+            base_seconds = time.monotonic() - t0
+            base_requests = count["requests"]
+            t0 = time.monotonic()
+            history_data = team_history.build(ESPN_CLUB_LEAGUES)
+            history_seconds = time.monotonic() - t0
+            history_requests = count["requests"] - base_requests
     fixed_history = team_history.HistoryIndex(history_data)
     control_history = team_history.HistoryIndex({"matches": []})
-    control = _run_path(board["fixtures"], {}, control_history, fit)
-    fixed = _run_path(board["fixtures"], fixed_rates, fixed_history, fit)
+    control = _run_path(board["fixtures"], {}, control_history, fit, ratings)
+    fixed = _run_path(board["fixtures"], fixed_rates, fixed_history, fit, ratings)
     records = _forward_records(fixed, board, fit, fixed_history)
     old = {(p["match_id"], p["market"]): p for p in control["canonical"]}
     new = {(p["match_id"], p["market"]): p for p in fixed["canonical"]}
@@ -259,11 +269,70 @@ def compare(board_path: Path, output: Path):
                 "control_rank": a.get("public_rank") if a else None,
                 "fixed_rank": b.get("public_rank") if b else None,
             })
+    actual_cards = None
+    exact_selector_diagnostics = None
+    selected_leg_diagnostics = []
+    if board.get("schema") == 2:
+        from leagues.daily_feed import build_daily_accumulators
+        from leagues.engine import kickoff_wat_date
+        from leagues.fixture_ranker import canonical_fixture_recommendations
+        from leagues.selection_quality import price_quality, selection_probability
+        from scripts.diagnose_daily_selector import diagnose
+        actual_cards = build_daily_accumulators(preview={
+            "captured_at": board["captured_at"],
+            "target_wat_date": board["target_wat_date"],
+            "picks": fixed["candidates"], "fixtures": board["fixtures"],
+        })
+        day = canonical_fixture_recommendations([
+            p for p in fixed["candidates"]
+            if kickoff_wat_date(p["_fixture"].get("commence_time"))
+            == board["target_wat_date"]
+        ])
+        exact_selector_diagnostics = diagnose(day)
+        by_leg = {(p["match_id"], p["market"]): p for p in day}
+        for product, card in ((actual_cards or {}).get("accumulators") or {}).items():
+            if product.startswith("_") or not isinstance(card, dict):
+                continue
+            for game in card.get("games") or []:
+                fixture_id = game.get("match_id")
+                pick = by_leg.get((fixture_id, game.get("market")))
+                if not pick:
+                    continue
+                fx = pick["_fixture"]
+                source = (board.get("model_inputs") or {}).get(fixture_id) or {}
+                price = price_quality(pick)
+                selected_leg_diagnostics.append({
+                    "product": product, "fixture_id": fixture_id,
+                    "fixture": f"{fx['home']['name']} v {fx['away']['name']}",
+                    "market": pick["market"], "odds": pick["odds"],
+                    "calibrated_probability": pick["confidence"],
+                    "conservative_probability": selection_probability(pick),
+                    "real_odds": bool(pick.get("odds_are_real")),
+                    "bookable": bool(pick.get("bookable")),
+                    "competition_sample": fx.get("competition_historical_sample"),
+                    "base_rate_source": fx.get("base_rate_source"),
+                    "home_history_count": source.get("home_history_count"),
+                    "away_history_count": source.get("away_history_count"),
+                    "h2h_count": source.get("h2h_count", len(
+                        fixed_history.h2h.get((
+                            fx.get("team_type") or "CLUB",
+                            *sorted((fx["home"]["name"], fx["away"]["name"]))
+                        )) or [])),
+                    "ml_probability": pick.get("ml_confidence"),
+                    "elo": source.get("elo"),
+                    "trust_grade": (pick.get("trust") or {}).get("trust_grade"),
+                    "market_trust_state": pick.get("market_trust_state"),
+                    "bookmaker_break_even_probability": price.get("raw_break_even_probability"),
+                    "risk_adjusted_return": price.get("risk_adjusted_return"),
+                    "price_quality_state": (price.get("price_quality_reason_codes") or [None])[-1],
+                    "price_quality": price,
+                })
     result = {
         "schema": 1, "snapshot_id": board["snapshot_id"],
         "captured_at": board["captured_at"], "fixture_count": len(board["fixtures"]),
-        "limitations": ["Elo identically omitted",
-                        "research shadow, not published cards"],
+        "limitations": (["research shadow, not published cards"]
+                        if board.get("schema") == 2 else
+                        ["Elo identically omitted", "research shadow, not published cards"]),
         "calibration_observed_at": board["calibration_observed_at"],
         "calibration_sample": fit["n"],
         "model_fingerprint": board["model_fingerprint"],
@@ -279,6 +348,9 @@ def compare(board_path: Path, output: Path):
         "target_wat_date": target_date,
         "control": _summary(control, target_date),
         "fixed": _summary(fixed, target_date),
+        "production_code_preview": actual_cards,
+        "exact_selector_diagnostics": exact_selector_diagnostics,
+        "selected_leg_diagnostics": selected_leg_diagnostics,
         "changed_canonical": changes,
         "shadow_record_count": len(records),
         "shadow_records": records,

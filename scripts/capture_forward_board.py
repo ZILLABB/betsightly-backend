@@ -26,9 +26,39 @@ def model_fingerprint() -> str:
     return digest.hexdigest()
 
 
-def capture(output: Path, days: int = 4) -> dict:
+def capture(output: Path, days: int = 4, *, complete: bool = False) -> dict:
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
     from leagues import espn_source, sportybet
+
+    frozen_history = None
+    if complete:
+        from leagues import base_rates, elo_engine, ml_models, team_history
+        from leagues.espn_source import ESPN_CLUB_LEAGUES
+        from leagues.picks import (MIN_CANDIDATE_CONFIDENCE,
+                                   MIN_PUBLISHABLE_CONFIDENCE)
+        from leagues import selection
+        rates = base_rates.compute_base_rates(ESPN_CLUB_LEAGUES)
+        history_data = team_history.build(ESPN_CLUB_LEAGUES)
+        ratings = elo_engine.get_ratings(ESPN_CLUB_LEAGUES)
+        if rates.get("_failed_leagues") or history_data.get("failed_leagues"):
+            raise ValueError("complete capture requires complete historical inputs")
+        frozen_history = {
+            "base_rates": rates, "team_history": history_data,
+            "elo_ratings": ratings,
+            "elo_cache_observed_at": datetime.now(timezone.utc).isoformat(),
+            "selection_policy": {
+                "min_candidate_confidence": MIN_CANDIDATE_CONFIDENCE,
+                "min_publishable_confidence": MIN_PUBLISHABLE_CONFIDENCE,
+                "min_useful_odds": selection.MIN_USEFUL_ODDS,
+                "market_cap": selection.MARKET_CAP,
+                "team_to_score_cap": selection.TEAM_TO_SCORE_CAP,
+                "under_cap": selection.UNDER_CAP,
+                "per_band": selection._PER_BAND,
+                "per_band_group": selection._PER_BAND_GROUP,
+                "max_search_candidates": selection._MAX_SEARCH_CANDIDATES,
+                "price_bands": selection._PRICE_BANDS,
+            },
+        }
 
     started = datetime.now(timezone.utc)
     calibration_response = requests.get(
@@ -51,12 +81,14 @@ def capture(output: Path, days: int = 4) -> dict:
     board = sportybet.fetch_board(force=True)
     fixtures = copy.deepcopy(fixtures)
     matched = sportybet.apply_to_fixtures(fixtures, board=board)
-    cutoff = started + timedelta(minutes=30)
+    captured_at = datetime.now(timezone.utc)
+    cutoff = captured_at + timedelta(minutes=30)
     fixtures = [fixture for fixture in fixtures if datetime.fromisoformat(
         fixture["commence_time"].replace("Z", "+00:00")) > cutoff]
     fixtures.sort(key=lambda f: (f["commence_time"], f["match_id"]))
     payload = {
-        "schema": 1, "captured_at": started.isoformat(),
+        "schema": 2 if complete else 1,
+        "captured_at": captured_at.isoformat(),
         "minimum_kickoff": cutoff.isoformat(),
         "provider": provider,
         "calibration": calibration,
@@ -66,6 +98,38 @@ def capture(output: Path, days: int = 4) -> dict:
         "sportybet_matched_before_kickoff_filter": matched,
         "fixtures": fixtures,
     }
+    if complete:
+        from leagues import base_rates, ml_models, team_history
+        from leagues.engine import _elo_for
+        from leagues.predictor import predict
+        from leagues.espn_source import ESPN_CLUB_LEAGUES
+        index = team_history.HistoryIndex(frozen_history["team_history"])
+        model_inputs = {}
+        for fixture in fixtures:
+            base = base_rates.rates_for(fixture["league_slug"],
+                                        frozen_history["base_rates"])
+            elo = _elo_for(fixture, frozen_history["elo_ratings"])
+            model = predict(fixture, base, elo)
+            model_inputs[fixture["match_id"]] = {
+                "base": base, "elo": elo,
+                "ml_features": ml_models.build_features(fixture, index),
+                "ml_output": ml_models.predict_fixture(fixture, index),
+                "raw_model": model,
+                "home_history_count": len(index.by_team.get((
+                    fixture.get("team_type") or "CLUB", fixture["home"]["name"])) or []),
+                "away_history_count": len(index.by_team.get((
+                    fixture.get("team_type") or "CLUB", fixture["away"]["name"])) or []),
+                "h2h_count": len(index.h2h.get((
+                    fixture.get("team_type") or "CLUB",
+                    *sorted((fixture["home"]["name"], fixture["away"]["name"]))
+                )) or []),
+            }
+        payload["historical_inputs"] = frozen_history
+        payload["model_inputs"] = model_inputs
+        payload["sportybet_board"] = board
+        payload["target_wat_date"] = (
+            captured_at.astimezone(timezone(timedelta(hours=1))).date()
+            + timedelta(days=1)).isoformat()
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"),
                      ensure_ascii=False).encode("utf-8")
     payload["snapshot_id"] = hashlib.sha256(raw).hexdigest()
@@ -89,5 +153,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("output", type=Path)
     parser.add_argument("--days", type=int, default=4)
+    parser.add_argument("--complete", action="store_true")
     arguments = parser.parse_args()
-    print(json.dumps(capture(arguments.output, arguments.days), sort_keys=True))
+    print(json.dumps(capture(arguments.output, arguments.days,
+                             complete=arguments.complete), sort_keys=True))

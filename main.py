@@ -392,10 +392,8 @@ def _start_daily_generation_loop():
     def _run():
         _time.sleep(5)  # let the server finish booting first
         try:
-            from leagues.engine import (start_prepared_board_refresh,
-                                        start_history_prewarm)
+            from leagues.engine import start_history_prewarm
             start_history_prewarm()
-            start_prepared_board_refresh(days_ahead=7, force=False)
         except Exception as e:
             logger.error(f"Weekly board prewarm failed to start: {e}")
         last_published = None
@@ -434,7 +432,15 @@ def _start_daily_generation_loop():
                             logger.info(
                                 f"Daily run for {wat_day}: {report.get('status')} "
                                 f"(failed: {report.get('failed') or 'none'})")
-                        if not skipped_in_flight:
+                        # A partial run whose card step failed because history
+                        # was absent must be retried after prewarm completes.
+                        # The DB claim accepts a retry of partial runs; this
+                        # in-process shortcut must not suppress it all day.
+                        card_complete = bool(
+                            (report.get("steps") or {}).get("card", {}).get("ok")
+                        )
+                        if not skipped_in_flight and (
+                                report.get("status") == "skipped" or card_complete):
                             last_published = wat_day
                     except Exception as e:
                         logger.error(f"Daily run failed: {e}")

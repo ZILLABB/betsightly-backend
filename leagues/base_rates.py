@@ -85,24 +85,9 @@ def _as_rates(sample: dict) -> dict:
 def _fetch_finished_range(slug: str, start: str, end: str, *,
                           as_of: datetime | None = None) -> list[tuple[int, int]]:
     """Finished (home, away) scores from supported monthly ESPN queries."""
-    from leagues.espn_history_fetch import finished_events
-    events = finished_events(slug, start, end, as_of=as_of)
-
-    out = []
-    for ev in events:
-        comp = (ev.get("competitions") or [{}])[0]
-        if not comp.get("status", {}).get("type", {}).get("completed"):
-            continue
-        teams = comp.get("competitors", [])
-        home = next((t for t in teams if t.get("homeAway") == "home"), None)
-        away = next((t for t in teams if t.get("homeAway") == "away"), None)
-        if not home or not away:
-            continue
-        score = regulation_score(comp)
-        if not score:
-            continue
-        out.append((score["home_score"], score["away_score"]))
-    return out
+    from leagues.history_months import finished_matches
+    return [(row["hs"], row["as"]) for row in finished_matches(
+        slug, start, end, as_of=as_of)]
 
 
 def compute_base_rates(slugs: dict[str, str], *,
@@ -177,6 +162,7 @@ def compute_base_rates(slugs: dict[str, str], *,
             _merge(prior_samples[key], sample)
     rates["_priors"] = {key: _as_rates(sample) for key, sample in prior_samples.items()}
     rates["_cache_schema"] = HISTORY_CACHE_SCHEMA
+    rates["_built_at"] = now.isoformat()
     rates["_failed_leagues"] = sorted(failed_leagues)
     rates["_unavailable_leagues"] = sorted(unavailable_leagues)
     return rates
@@ -188,11 +174,20 @@ def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False,
     """Cached per-league base rates. Recomputed weekly."""
     from leagues.history_cache_io import (local_refresh_claim, read_complete,
                                           replace_complete)
+    from leagues import shared_history_store
     complete = read_complete(CACHE_PATH, HISTORY_CACHE_SCHEMA,
                              required="_priors") if as_of is None else None
+    if as_of is None and shared_history_store.production_shared():
+        try:
+            complete = (shared_history_store.read("base_rates", HISTORY_CACHE_SCHEMA,
+                                                  required="_priors") or complete)
+        except Exception as exc:
+            logger.warning("Shared base-rate cache unavailable: %s", exc)
     if as_of is None and not force and complete:
         try:
-            age = time.time() - CACHE_PATH.stat().st_mtime
+            built = complete.get("_built_at")
+            age = (time.time() - datetime.fromisoformat(built).timestamp()
+                   if built else time.time() - CACHE_PATH.stat().st_mtime)
             if age < CACHE_TTL:
                 return complete
         except Exception:
@@ -204,7 +199,7 @@ def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False,
         from leagues.espn_source import ESPN_CLUB_LEAGUES
         slugs = ESPN_CLUB_LEAGUES
 
-    def refresh():
+    def refresh(owner=None):
         rates = compute_base_rates(slugs, as_of=as_of)
         if rates:
             if as_of is None and rates.get("_failed_leagues"):
@@ -212,6 +207,11 @@ def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False,
                                len(rates["_failed_leagues"]))
                 return complete or rates
             elif as_of is None:
+                if owner:
+                    if not shared_history_store.promote(
+                            "base_rates", HISTORY_CACHE_SCHEMA, rates, owner,
+                            required="_priors"):
+                        return complete or {}
                 replace_complete(CACHE_PATH, rates, HISTORY_CACHE_SCHEMA,
                                  required="_priors")
                 logger.info(f"Base rates computed for {len(rates)} leagues")
@@ -221,6 +221,9 @@ def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False,
     try:
         if as_of is not None:
             return refresh()
+        if shared_history_store.production_shared():
+            with shared_history_store.claim("base_rates", HISTORY_CACHE_SCHEMA) as owner:
+                return refresh(owner) if owner else complete or {}
         with local_refresh_claim(CACHE_PATH) as acquired:
             if not acquired:
                 return complete or {}
