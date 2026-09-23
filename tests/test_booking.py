@@ -612,7 +612,10 @@ def test_booking_drops_the_served_card_cache(monkeypatch):
                                          "failed": []})
     monkeypatch.setattr("leagues.results_checker.check_all_pending", lambda: {})
     monkeypatch.setattr("leagues.results_checker.settle_published_slips", lambda: {})
+    monkeypatch.setattr("leagues.results_checker.settle_builder_predictions", lambda: {})
     monkeypatch.setattr("leagues.calibrator.fit_calibration", lambda **k: {"n": 0})
+    monkeypatch.setattr("leagues.engine.run_pipeline", lambda **k: {})
+    monkeypatch.setattr("leagues.engine.prepared_board_status", lambda **k: {"ready": True})
     monkeypatch.setattr("services.push_notification_service.notify_predictions_ready",
                         lambda **k: None)
 

@@ -25,7 +25,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
 from leagues.competition_registry import regulation_score
 from leagues.cache_paths import cache_path
 
@@ -83,22 +82,9 @@ def _as_rates(sample: dict) -> dict:
 
 
 def _fetch_finished_range(slug: str, start: str, end: str) -> list[tuple[int, int]]:
-    """Finished (home, away) scores for a whole date range in one request.
-
-    ESPN accepts dates=YYYYMMDD-YYYYMMDD, so a 45-day window costs one call
-    per league instead of 45 — the difference between a ~35-minute refresh
-    and a few seconds.
-    """
-    try:
-        resp = requests.get(
-            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
-            params={"dates": f"{start}-{end}", "limit": 500}, timeout=25,
-        )
-        if resp.status_code != 200:
-            return []
-        events = resp.json().get("events", [])
-    except Exception:
-        return []
+    """Finished (home, away) scores from supported monthly ESPN queries."""
+    from leagues.espn_history_fetch import finished_events
+    events = finished_events(slug, start, end)
 
     out = []
     for ev in events:

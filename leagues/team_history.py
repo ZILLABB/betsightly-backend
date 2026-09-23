@@ -8,8 +8,8 @@ away-only splits, previous meetings — and ESPN hands us none of that directly.
 The scoreboard carries a five-character form string ("WWLLD") and nothing about
 goals, so the history has to be assembled from finished matches.
 
-Same source and the same ranged-fetch trick as base_rates: one request per
-league covering the whole window, run in parallel, cached on disk. The window
+Same source and the same monthly-fetch path as base_rates, run in parallel and
+cached on disk. The window
 is longer here because a team needs its own last ten matches, not a league
 average, and a side playing weekly needs about three months to accumulate them.
 
@@ -27,7 +27,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
 from leagues.cache_paths import cache_path
 from leagues.competition_registry import competition_for, regulation_score
 
@@ -36,7 +35,6 @@ logger = logging.getLogger(__name__)
 CACHE_PATH = cache_path(Path(__file__).parent / "data" / "team_history.json")
 CACHE_TTL = 12 * 3600
 LOOKBACK_DAYS = 120
-SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard"
 
 # Neutral fallbacks, used for a team with no recorded history. These are the
 # global averages measured in base_rates, so an unknown side looks like an
@@ -49,16 +47,9 @@ NEUTRAL = {
 
 
 def _fetch_finished(slug: str, start: str, end: str) -> list[dict]:
-    """Finished matches for a league over a date range, in one request."""
-    try:
-        resp = requests.get(SCOREBOARD.format(slug=slug),
-                            params={"dates": f"{start}-{end}", "limit": 900},
-                            timeout=25)
-        if resp.status_code != 200:
-            return []
-        events = resp.json().get("events", []) or []
-    except Exception:
-        return []
+    """Finished matches for a league over supported monthly queries."""
+    from leagues.espn_history_fetch import finished_events
+    events = finished_events(slug, start, end, limit=900)
 
     out = []
     for ev in events:

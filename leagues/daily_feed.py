@@ -115,8 +115,8 @@ def _select_tier(picks: list, target: float, max_picks: int,
             f"That is too thin to put our name on, so we are sitting it out."
         )
     return sel, (
-        f"Not enough matches today to reach {target:g}x safely — "
-        f"check back tomorrow."
+        f"No combination met today's prediction, price and slip-quality "
+        f"rules for {target:g}x. Check the next board for new options."
     )
 
 
