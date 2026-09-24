@@ -54,7 +54,7 @@ def get_daily_accumulators():
     from leagues.history_readiness import HistoryNotReady
     try:
         from leagues.daily_feed import build_daily_accumulators
-        result = build_daily_accumulators()
+        result = build_daily_accumulators(allow_generation=False)
         if not result:
             raise HTTPException(404, "No predictions available")
         return result
@@ -197,11 +197,15 @@ def get_bookable_now():
     """
     try:
         from leagues.daily_feed import build_bookable_now
-        result = build_bookable_now()
+        picks, _, board = _public_prepared_board(2)
+        result = build_bookable_now(all_picks=picks)
         if not result:
             return {"status": "success", "available": False,
-                    "reason": "No fixtures left to bet on today."}
-        return {"status": "success", "available": True, **result}
+                    "reason": "No fixtures left to bet on today.", "board": board}
+        return {"status": "success", "available": True, **result,
+                "board": board}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Bookable-now build failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
@@ -270,7 +274,7 @@ async def trigger_tier_booking(force: bool = False):
     try:
         from leagues.booking import book_card
         from leagues.daily_feed import build_daily_accumulators, _publish_date
-        card = build_daily_accumulators()
+        card = build_daily_accumulators(allow_generation=False)
         if not card:
             raise HTTPException(404, "no card to book")
         result = book_card(_publish_date(), card.get("accumulators") or {}, force=force)
@@ -300,7 +304,7 @@ async def get_bookings(date: str | None = None):
     # from either endpoint alone.
     attach: dict = {}
     try:
-        card = build_daily_accumulators() or {}
+        card = build_daily_accumulators(allow_generation=False) or {}
         accs = card.get("accumulators") or {}
         attach = {
             "card_date": card.get("date"),
@@ -631,19 +635,46 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     return response
 
 
+def _public_prepared_board(horizon: int) -> tuple[list[dict], list[dict], dict]:
+    """A public read never starts provider/model work on its request thread."""
+    from leagues.engine import (prepared_board, start_history_prewarm,
+                                start_prepared_board_refresh)
+
+    picks, fixtures, board = prepared_board(horizon)
+    if board.get("ready") and fixtures:
+        if board.get("stale"):
+            board["refresh_started"] = start_prepared_board_refresh(
+                days_ahead=horizon, force=True)
+        return picks, fixtures, board
+
+    from leagues.history_readiness import status as history_status
+    history = history_status()
+    if not history["usable"]:
+        started = start_history_prewarm()
+        reason = "history_not_ready"
+    else:
+        started = start_prepared_board_refresh(days_ahead=horizon, force=True)
+        reason = "board_refreshing"
+    raise HTTPException(503, {
+        "reason": reason, "retryable": True, "refresh_started": started,
+        "board": board, "history": history,
+    })
+
+
 @router.get("/recommendations")
 def get_fixture_recommendations(date: str | None = None,
                                       days_ahead: int = 3):
     """One ranked football opinion per analysed fixture on a WAT date."""
     try:
-        from leagues.engine import prepared_board_status, run_pipeline
         from leagues.recommendation_board import build_recommendation_board
 
         horizon = max(1, min(7, days_ahead))
-        picks, fixtures = run_pipeline(days_ahead=horizon)
+        picks, fixtures, board = _public_prepared_board(horizon)
         result = build_recommendation_board(picks, fixtures, date=date)
-        result["board"] = prepared_board_status(horizon)
+        result["board"] = board
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Fixture recommendation board failed: %s", e,
                      exc_info=True)
@@ -655,13 +686,16 @@ def get_fixture_recommendations(date: str | None = None,
 async def recommendation_diagnostics(date: str | None = None):
     """Internal board and Daily portfolio explanation without raw model data."""
     try:
-        from leagues.daily_feed import build_daily_accumulators
-        from leagues.engine import run_pipeline
+        from leagues.daily_feed import build_daily_accumulators, _publish_date
         from leagues.recommendation_board import build_recommendation_board
 
-        picks, fixtures = run_pipeline(days_ahead=4)
+        picks, fixtures, prepared = _public_prepared_board(4)
         board = build_recommendation_board(picks, fixtures, date=date)
-        daily = build_daily_accumulators()
+        daily = build_daily_accumulators(preview={
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "target_wat_date": date or _publish_date(),
+            "picks": picks, "fixtures": fixtures,
+        })
         accumulators = (daily or {}).get("accumulators") or {}
         tiers = {}
         for name in ("banker", "2_odds", "5_odds", "10_odds", "rollover"):
@@ -679,9 +713,12 @@ async def recommendation_diagnostics(date: str | None = None):
             "date": board["date"],
             "board_summary": board["summary"],
             "market_distribution": board["market_distribution"],
+            "board": prepared,
             "daily_tiers": tiers,
             "portfolio": accumulators.get("_portfolio") or {},
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Recommendation diagnostics failed: %s", e,
                      exc_info=True)
@@ -1221,9 +1258,8 @@ async def odds_shop_status():
 async def get_fixtures_list(days_ahead: int = 3):
     """Upcoming fixtures with prices and the leagues currently in play."""
     try:
-        from leagues.engine import run_pipeline
-
-        _, fixtures = run_pipeline(days_ahead=days_ahead)
+        horizon = max(1, min(days_ahead, 7))
+        _, fixtures, board = _public_prepared_board(horizon)
         leagues: dict[str, dict] = {}
         for f in fixtures:
             entry = leagues.setdefault(
@@ -1234,7 +1270,10 @@ async def get_fixtures_list(days_ahead: int = 3):
             "status": "success",
             "total": len(fixtures),
             "leagues": sorted(leagues.values(), key=lambda x: -x["count"]),
+            "board": board,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Fixtures fetch failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
@@ -1251,11 +1290,15 @@ async def competition_coverage(days_ahead: int = 7, refresh: bool = False):
         )
         from leagues.engine import run_pipeline
         from leagues.espn_source import fetch_health
-        from leagues.elo_engine import get_ratings
+        from leagues.elo_engine import cached_ratings, get_ratings
 
-        _, fixtures = run_pipeline(days_ahead=max(1, min(days_ahead, 14)), force=refresh)
-        base_rates = get_base_rates()
-        ratings = get_ratings()
+        horizon = max(1, min(days_ahead, 14))
+        if refresh:
+            _, fixtures = run_pipeline(days_ahead=horizon, force=True)
+        else:
+            _, fixtures, _ = _public_prepared_board(horizon)
+        base_rates = get_base_rates(allow_refresh=refresh)
+        ratings = get_ratings(force=True) if refresh else cached_ratings()
         provider_health = fetch_health()
         by_slug: dict[str, list[dict]] = {}
         for fixture in fixtures:
@@ -1299,6 +1342,8 @@ async def competition_coverage(days_ahead: int = 7, refresh: bool = False):
                 "last_successful_fetch": None, "error": reason,
             })
         return {"status": "success", "competitions": rows}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"competition coverage failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))

@@ -351,10 +351,9 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
         _, fixtures = run_pipeline(days_ahead=POOL_DAYS, force=True)
     else:
         _, fixtures = prepared_pipeline(days_ahead=POOL_DAYS)
-        if not fixtures:
-            # Direct/admin callers retain a safe fallback. The public API
-            # checks board readiness first and never reaches this cold path.
-            _, fixtures = run_pipeline(days_ahead=POOL_DAYS, force=False)
+        # No implicit cold fallback: a concurrent board expiry must not turn
+        # an interactive edit/build into provider fan-out. Explicit force is
+        # reserved for trusted preparation callers above.
 
     fit = fit_calibration()
     picks = []

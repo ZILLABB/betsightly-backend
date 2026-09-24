@@ -120,11 +120,14 @@ def _select_tier(picks: list, target: float, max_picks: int,
     )
 
 
-def build_daily_accumulators(force: bool = False, *, preview: dict | None = None) -> dict:
+def build_daily_accumulators(force: bool = False, *, preview: dict | None = None,
+                             allow_generation: bool = True) -> dict:
     """Category picks + rollover chain for the next actionable match day."""
     import time as _time
     now_ts = _time.time()
-    if preview is None and not force and _accum_cache["result"] and (now_ts - _accum_cache["ts"]) < _ACCUM_CACHE_TTL:
+    if (preview is None and not force and _accum_cache["result"]
+            and _accum_cache["result"].get("publication_date") == _publish_date()
+            and (now_ts - _accum_cache["ts"]) < _ACCUM_CACHE_TTL):
         return _accum_cache["result"]
 
     from leagues.engine import run_pipeline, picks_for_date
@@ -177,8 +180,16 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
             _accum_cache.update({"result": result, "ts": now_ts})
             return result
 
+    if preview is None and not allow_generation:
+        return None
+
     if preview is None:
-        all_picks, fixtures = run_pipeline(days_ahead=4, force=force)
+        from leagues.engine import prepared_board
+        prepared_picks, prepared_fixtures, board = prepared_board(4)
+        if not force and board.get("ready") and not board.get("stale"):
+            all_picks, fixtures = prepared_picks, prepared_fixtures
+        else:
+            all_picks, fixtures = run_pipeline(days_ahead=4, force=force)
     else:
         all_picks, fixtures = preview["picks"], preview["fixtures"]
     if not all_picks:
@@ -643,7 +654,7 @@ def _attach_live_bookings(accumulators: dict, board: dict) -> dict:
     return accumulators
 
 
-def build_bookable_now() -> dict | None:
+def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
     """A slip built only from fixtures that have not kicked off yet.
 
     Answers the problem the lock creates. The morning card must not change —
@@ -659,12 +670,13 @@ def build_bookable_now() -> dict | None:
     fixed identity to score — counting it would let the record quietly reroll
     its losers, which is the exact failure the lock exists to prevent.
     """
-    from leagues.engine import kickoff_wat_date, run_pipeline
+    from leagues.engine import kickoff_wat_date, prepared_pipeline
     from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
     from leagues.selection import select_banker
 
     now = datetime.now(timezone.utc)
-    all_picks, _ = run_pipeline(days_ahead=2)
+    if all_picks is None:
+        all_picks, _ = prepared_pipeline(days_ahead=2)
     if not all_picks:
         return None
 

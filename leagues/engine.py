@@ -90,13 +90,14 @@ def _covering_entry(days_ahead: int, now_ts: float,
                       "complete", True))]
     if not valid:
         return None
-    # Prefer a healthy board while it remains within the explicit stale-safe
-    # window. Within the same health class, newest wins; requested horizon is
-    # only the final tie-breaker. This prevents a smaller, older degraded board
-    # from masking a newer complete covering board.
+    # Prefer a fresh evaluated board over a stale one. Within the same
+    # freshness class, retain a recent complete board when a temporary
+    # degraded refresh arrives. Otherwise an old stale complete board could
+    # mask a fresh useful degraded board and trigger refresh on every read.
     return max(
         valid,
         key=lambda item: (
+            now_ts - item["ts"] < _TTL,
             bool((item["metadata"].get("provider") or {}).get(
                 "complete", True
             )),
@@ -140,6 +141,11 @@ def prepared_board_status(days_ahead: int = 7) -> dict:
     """
     now = time.time()
     entry = _covering_entry(days_ahead, now, allow_stale=True)
+    return _status_for_entry(entry, days_ahead, now)
+
+
+def _status_for_entry(entry: dict | None, days_ahead: int, now: float) -> dict:
+    """Describe the exact entry whose evaluated picks a caller receives."""
     if not entry:
         return {"ready": False, "requested_days": days_ahead}
     provider = entry["metadata"].get("provider") or {}
@@ -182,8 +188,14 @@ def prepared_pipeline(days_ahead: int = 7) -> tuple[list[dict], list[dict]]:
     says it is ready. Normal pipeline calls still require complete provider
     coverage and therefore retry partial ESPN caches on scheduled refreshes.
     """
+    picks, fixtures, _ = prepared_board(days_ahead)
+    return picks, fixtures
+
+
+def prepared_board(days_ahead: int = 7) -> tuple[list[dict], list[dict], dict]:
+    """One no-network evaluated snapshot and its matching provenance."""
     now = time.time()
-    now_dt = datetime.now(timezone.utc)
+    now_dt = datetime.fromtimestamp(now, timezone.utc)
     # Interactive requests may safely keep using the last evaluated board
     # while its replacement is prepared. Kickoff filtering below removes games
     # that have since started; selection policy and bookability are re-applied.
@@ -191,8 +203,9 @@ def prepared_pipeline(days_ahead: int = 7) -> tuple[list[dict], list[dict]]:
         days_ahead, now, require_complete=False, allow_stale=True,
     )
     if not entry:
-        return [], []
-    return _filter_cached(entry, days_ahead, now_dt)
+        return [], [], _status_for_entry(None, days_ahead, now)
+    picks, fixtures = _filter_cached(entry, days_ahead, now_dt)
+    return picks, fixtures, _status_for_entry(entry, days_ahead, now)
 
 
 def start_prepared_board_refresh(days_ahead: int = 7,
@@ -282,7 +295,22 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
                 days_ahead, now, require_complete=True)):
             return _filter_cached(cached, days_ahead, now_dt)
 
-        return _build_pipeline(days_ahead, force, now, now_dt)
+        from utils.runtime_metrics import log_runtime_memory
+        started = time.perf_counter()
+        log_runtime_memory("prediction_board_start", horizon=days_ahead,
+                           forced=force)
+        try:
+            picks, fixtures = _build_pipeline(days_ahead, force, now, now_dt)
+        except Exception:
+            log_runtime_memory("prediction_board_error", level=logging.ERROR,
+                               horizon=days_ahead, forced=force,
+                               elapsed_ms=round((time.perf_counter() - started) * 1000))
+            raise
+        log_runtime_memory("prediction_board_end", horizon=days_ahead,
+                           forced=force, fixture_count=len(fixtures),
+                           pick_count=len(picks),
+                           elapsed_ms=round((time.perf_counter() - started) * 1000))
+        return picks, fixtures
 
 
 def _build_pipeline(days_ahead: int, force: bool, now: float,
@@ -389,9 +417,7 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     return all_picks, fixtures
 
 
-def picks_for_date(date_str: str, all_picks: list[dict] | None = None) -> list[dict]:
-    """Picks whose fixture kicks off on the WAT calendar `date_str`."""
-    if all_picks is None:
-        all_picks, _ = run_pipeline()
+def picks_for_date(date_str: str, all_picks: list[dict]) -> list[dict]:
+    """Filter an explicit evaluated board by WAT day; never fetch implicitly."""
     return [p for p in all_picks
             if kickoff_wat_date(p["_fixture"].get("commence_time")) == date_str]

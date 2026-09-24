@@ -347,6 +347,26 @@ def test_expired_complete_board_yields_to_new_degraded_board(monkeypatch):
     assert [pick["match_id"] for pick in picks] == ["degraded"]
 
 
+def test_stale_complete_board_yields_to_fresh_actionable_degraded_board(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    engine._store_cache_entry(
+        7, [{"match_id": "old"}], [_fixture(now, 2, "old")],
+        time.time() - engine._TTL - 10, now, {"complete": True},
+        decision_snapshot_id="old-id",
+    )
+    engine._store_cache_entry(
+        7, [{"match_id": "new"}], [_fixture(now, 3, "new")],
+        time.time(), now, {"complete": False},
+        decision_snapshot_id="new-id",
+    )
+    picks, _, board = engine.prepared_board(7)
+    assert board["board_snapshot_id"] == "new-id"
+    assert board["degraded"] is True
+    assert board["stale"] is False
+    assert [pick["match_id"] for pick in picks] == ["new"]
+
+
 def test_started_complete_board_does_not_mask_actionable_degraded_board(monkeypatch):
     now = datetime.now(timezone.utc)
     monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
