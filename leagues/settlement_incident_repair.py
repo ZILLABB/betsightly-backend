@@ -50,8 +50,30 @@ def build_plan():
 def _load_rows(conn, pids, bids):
     from leagues.picks_db import PublishedSlip
     from leagues.builder_runs import builder_predictions
-    p = {r["id"]: dict(r) for r in conn.execute(select(PublishedSlip.__table__).where(PublishedSlip.id.in_(pids))).mappings()} if pids else {}
-    b = {r["selection_fingerprint"]: dict(r) for r in conn.execute(select(builder_predictions).where(builder_predictions.c.selection_fingerprint.in_(bids))).mappings()} if bids else {}
+
+    p = {}
+    if pids:
+        published_stmt = (
+            select(PublishedSlip.__table__)
+            .where(PublishedSlip.id.in_(pids))
+            .with_for_update()
+        )
+        p = {
+            r["id"]: dict(r)
+            for r in conn.execute(published_stmt).mappings()
+        }
+
+    b = {}
+    if bids:
+        builder_stmt = (
+            select(builder_predictions)
+            .where(builder_predictions.c.selection_fingerprint.in_(bids))
+            .with_for_update()
+        )
+        b = {
+            r["selection_fingerprint"]: dict(r)
+            for r in conn.execute(builder_stmt).mappings()
+        }
     return p, b
 
 def _snapshot(row): return {k: _iso(v) for k, v in row.items()}
