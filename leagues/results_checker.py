@@ -1106,6 +1106,182 @@ def settle_published_slips() -> Dict[str, int]:
     return {"slips_checked": len(slips), "won": won, "lost": lost, "still_pending": still}
 
 
+def _proposed_published_slip_status(picks: list[dict], outcomes: list[str],
+                                    presentation: str) -> str:
+    """Mirror the published-slip status policy without touching an ORM row.
+
+    Reconciliation must be able to compare an old archived verdict with the
+    verdict the current canonical evaluator would produce.  Keeping this
+    calculation side-effect free is intentional: this report is not a hidden
+    backfill path.
+    """
+    if (presentation or "accumulator") == "singles":
+        if not outcomes or any(outcome == "pending" for outcome in outcomes):
+            return "pending"
+        staked = sum(1 for outcome in outcomes if outcome in ("won", "lost"))
+        returned = sum(
+            float(pick.get("odds") or 0)
+            for pick, outcome in zip(picks, outcomes) if outcome == "won"
+        )
+        return "won" if returned > staked else "lost"
+    if any(outcome == "lost" for outcome in outcomes):
+        return "lost"
+    if outcomes and all(outcome == "void" for outcome in outcomes):
+        return "void"
+    if outcomes and all(outcome in ("won", "void") for outcome in outcomes):
+        return "won"
+    return "pending"
+
+
+def reconcile_published_slips(*, start_date: str = "2026-09-15",
+                              end_date: str = "2026-09-24",
+                              dry_run: bool = True) -> dict:
+    """Read-only, bounded comparison of archived slips against final scores.
+
+    This is deliberately separate from normal settlement.  It reads every
+    archived slip in the requested range, including already decided slips,
+    then re-evaluates copied leg dictionaries through ``_settlement_detail``.
+    It neither assigns ORM attributes nor commits a transaction.  Callers may
+    use the report to review apparent historical false voids or losses before
+    any separately authorised repair is considered.
+    """
+    if not dry_run:
+        raise ValueError("published-slip reconciliation is strictly read-only; dry_run must be true")
+    try:
+        start = datetime.fromisoformat(start_date).date()
+        end = datetime.fromisoformat(end_date).date()
+    except (TypeError, ValueError) as exc:
+        raise ValueError("start_date and end_date must be ISO dates") from exc
+    today = datetime.now(timezone.utc).date()
+    if start > end or end > today or (end - start).days > 31:
+        raise ValueError("reconciliation window must be ordered, past-or-present, and at most 32 days")
+
+    from database import SessionLocal
+    from leagues.picks_db import PublishedSlip
+
+    report = {
+        "dry_run": True,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "slips_scanned": 0,
+        "legs_scanned": 0,
+        "score_source": "none",
+        "slips": [],
+        "likely_historical_false_voids": [],
+        "likely_incorrect_losses": [],
+        "unresolved_legs": [],
+    }
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(PublishedSlip)
+            .filter(PublishedSlip.date >= start.isoformat())
+            .filter(PublishedSlip.date <= end.isoformat())
+            .order_by(PublishedSlip.date.asc(), PublishedSlip.id.asc())
+            .all()
+        )
+        # Detach the data from the ORM before evaluation.  In particular, do
+        # not let score evidence or a proposed leg outcome mutate the archive.
+        archived = []
+        for row in rows:
+            try:
+                picks = json.loads(row.picks or "[]")
+            except (TypeError, ValueError):
+                picks = []
+            archived.append({
+                "id": row.id, "date": row.date, "category": row.category,
+                "status": row.status or "pending",
+                "presentation": row.presentation or "accumulator",
+                "picks": picks if isinstance(picks, list) else [],
+            })
+    finally:
+        db.close()
+
+    score_picks = [
+        {**pick, "date": pick.get("date") or row["date"]}
+        for row in archived for pick in row["picks"]
+    ]
+    scores, source = _collect_scores_for_picks(score_picks)
+    report["score_source"] = source
+    current = datetime.now(timezone.utc)
+
+    for row in archived:
+        leg_reports = []
+        outcomes = []
+        for index, original_pick in enumerate(row["picks"]):
+            # Nested mutable evidence is copied too, even though the evaluator
+            # currently only reads the pick.  This keeps the read-only
+            # contract obvious if its implementation grows later.
+            pick = json.loads(json.dumps(original_pick))
+            match_date = (pick.get("commence_time") or pick.get("date") or
+                          row["date"] or "")[:10]
+            match = _lookup_settlement_score(
+                scores, pick.get("home_team", ""), pick.get("away_team", ""),
+                match_date,
+            )
+            proposed, detail = _settlement_detail(pick, match, current)
+            stored = pick.get("status") or "pending"
+            evidence = detail.get("settlement_evidence")
+            unresolved_reason = detail.get("settlement_pending_reason")
+            leg = {
+                "index": index,
+                "fixture": {
+                    "home_team": pick.get("home_team"),
+                    "away_team": pick.get("away_team"),
+                    "date": match_date,
+                },
+                "market": pick.get("market") or pick.get("market_key"),
+                "prediction": pick.get("prediction"),
+                "stored_outcome": stored,
+                "proposed_outcome": proposed,
+                "stored_evidence": pick.get("settlement_evidence"),
+                "score_evidence": evidence,
+                "unresolved_reason": unresolved_reason,
+            }
+            leg_reports.append(leg)
+            outcomes.append(proposed)
+            report["legs_scanned"] += 1
+            if proposed == "pending":
+                report["unresolved_legs"].append({
+                    "slip_id": row["id"], "category": row["category"], **leg,
+                })
+            if stored == "void" and proposed in ("won", "lost"):
+                report["likely_historical_false_voids"].append({
+                    "slip_id": row["id"], "category": row["category"], **leg,
+                })
+            if stored == "lost" and proposed in ("won", "void"):
+                report["likely_incorrect_losses"].append({
+                    "slip_id": row["id"], "category": row["category"], **leg,
+                })
+
+        proposed_status = _proposed_published_slip_status(
+            row["picks"], outcomes, row["presentation"])
+        slip_report = {
+            "slip_id": row["id"], "date": row["date"],
+            "category": row["category"], "stored_status": row["status"],
+            "proposed_status": proposed_status, "presentation": row["presentation"],
+            "legs": leg_reports,
+        }
+        report["slips"].append(slip_report)
+        report["slips_scanned"] += 1
+        if row["status"] == "void" and proposed_status in ("won", "lost"):
+            report["likely_historical_false_voids"].append({
+                "slip_id": row["id"], "category": row["category"],
+                "level": "slip", "stored_status": row["status"],
+                "proposed_status": proposed_status,
+            })
+        if row["status"] == "lost" and proposed_status in ("won", "void"):
+            report["likely_incorrect_losses"].append({
+                "slip_id": row["id"], "category": row["category"],
+                "level": "slip", "stored_status": row["status"],
+                "proposed_status": proposed_status,
+            })
+    logger.info("Published-slip reconciliation read %s slips / %s legs (%s to %s)",
+                report["slips_scanned"], report["legs_scanned"],
+                report["start_date"], report["end_date"])
+    return report
+
+
 def settle_builder_predictions(scores: dict | None = None,
                                now: datetime | None = None) -> Dict[str, int]:
     """Settle unique Builder prediction sets with the canonical evaluator."""

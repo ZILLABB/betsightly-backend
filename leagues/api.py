@@ -933,6 +933,24 @@ async def trigger_leg_backfill(days: int = 30, dry_run: bool = True,
         raise HTTPException(500, str(e))
 
 
+@router.post("/reconcile-published-slips", dependencies=[Depends(require_api_key)])
+async def reconcile_historical_published_slips(
+        start_date: str = "2026-09-15", end_date: str = "2026-09-24",
+        dry_run: bool = True):
+    """Read-only historical settlement comparison for staging/admin review."""
+    if not dry_run:
+        raise HTTPException(400, "published-slip reconciliation is read-only; dry_run must be true")
+    try:
+        from leagues.results_checker import reconcile_published_slips
+        return {"status": "success", **reconcile_published_slips(
+            start_date=start_date, end_date=end_date, dry_run=True)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("Published-slip reconciliation failed: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
 @router.get("/calibration")
 async def get_calibration(days: int = 180):
     """Predicted confidence against measured hit rate, by confidence band.

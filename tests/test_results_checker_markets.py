@@ -186,6 +186,91 @@ def test_missing_published_score_does_not_become_an_age_based_void(monkeypatch):
     assert observed == [["pending"]]
 
 
+def test_published_slip_reconciliation_is_read_only_and_reports_conflicts(monkeypatch):
+    """Historical review must never become an accidental settlement backfill."""
+    from sqlalchemy import create_engine, event
+    from sqlalchemy.orm import sessionmaker
+    from leagues import results_checker
+    from leagues.picks_db import PublishedSlip
+
+    engine = create_engine("sqlite:///:memory:")
+    PublishedSlip.__table__.create(engine)
+    session = sessionmaker(bind=engine)
+    original_void = [{
+        "home_team": "Alpha", "away_team": "Beta", "market": "home_win",
+        "commence_time": "2026-09-15T18:00:00Z", "status": "void",
+    }]
+    original_loss = [{
+        "home_team": "Gamma", "away_team": "Delta", "market": "over_1_5",
+        "commence_time": "2026-09-16T18:00:00Z", "status": "lost", "odds": 1.5,
+    }]
+    original_missing = [{
+        "home_team": "Missing", "away_team": "Result", "market": "over_1_5",
+        "commence_time": "2026-09-17T18:00:00Z", "status": "pending",
+    }]
+    with session() as db:
+        db.add_all([
+            PublishedSlip(date="2026-09-15", category="banker",
+                          picks=json.dumps(original_void), total_odds=1.4,
+                          presentation="accumulator", status="void"),
+            PublishedSlip(date="2026-09-16", category="2_odds",
+                          picks=json.dumps(original_loss), total_odds=1.5,
+                          presentation="accumulator", status="lost"),
+            PublishedSlip(date="2026-09-17", category="5_odds",
+                          picks=json.dumps(original_missing), total_odds=1.6,
+                          presentation="accumulator", status="pending"),
+        ])
+        db.commit()
+
+    monkeypatch.setattr("database.SessionLocal", session)
+    monkeypatch.setattr(results_checker, "_collect_scores_for_picks", lambda picks: ({
+        "alpha|beta|2026-09-15": {
+            "home_score": 2, "away_score": 0, "provider": "espn",
+            "provider_event_id": "espn-alpha", "match_status": "STATUS_FINAL",
+        },
+        "gamma|delta|2026-09-16": {
+            "home_score": 1, "away_score": 1, "provider": "api-football",
+            "provider_event_id": "api-gamma", "match_status": "FT",
+        },
+    }, "espn+api-football"))
+
+    writes = []
+
+    def observe_write(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
+            writes.append(statement)
+
+    event.listen(engine, "before_cursor_execute", observe_write)
+    try:
+        report = results_checker.reconcile_published_slips(
+            start_date="2026-09-15", end_date="2026-09-24")
+    finally:
+        event.remove(engine, "before_cursor_execute", observe_write)
+
+    assert report["dry_run"] is True
+    assert report["score_source"] == "espn+api-football"
+    assert report["slips_scanned"] == 3
+    assert report["legs_scanned"] == 3
+    assert writes == []
+    assert report["slips"][0]["proposed_status"] == "won"
+    assert report["slips"][0]["legs"][0]["score_evidence"]["provider"] == "espn"
+    assert report["likely_historical_false_voids"]
+    assert report["likely_incorrect_losses"]
+    assert report["unresolved_legs"][0]["unresolved_reason"] == "FINAL_SCORE_UNVERIFIED"
+    with session() as db:
+        rows = db.query(PublishedSlip).order_by(PublishedSlip.id).all()
+        assert [row.status for row in rows] == ["void", "lost", "pending"]
+        assert [json.loads(row.picks) for row in rows] == [
+            original_void, original_loss, original_missing,
+        ]
+
+
+def test_published_slip_reconciliation_rejects_apply_mode():
+    from leagues.results_checker import reconcile_published_slips
+    with pytest.raises(ValueError, match="strictly read-only"):
+        reconcile_published_slips(dry_run=False)
+
+
 def test_chain_sync_never_generates_predictions(monkeypatch):
     from leagues.results_checker import _sync_chain_to_db
     observed = []
