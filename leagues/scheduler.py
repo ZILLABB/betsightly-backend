@@ -26,6 +26,8 @@ is the bug that once burned a month of odds credits in an afternoon.
 """
 
 import logging
+import os
+import threading
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -33,7 +35,12 @@ logger = logging.getLogger(__name__)
 # How long a claimed-but-unfinished run is trusted before another attempt may
 # take it over. Long enough that a slow pipeline is never cut off, short enough
 # that a process killed mid-run does not block the day.
-STALE_CLAIM_HOURS = 1.5
+# A live worker renews its lease at each durable progress update.  A process
+# killed by Gunicorn cannot renew it, so the next scheduler/manual trigger can
+# safely recover the day without guessing that an old ``running`` row is done.
+# Keep the default comfortably above a normal provider/model pass while still
+# making a killed process recover on the same day.
+STALE_CLAIM_MINUTES = max(10, int(os.getenv("DAILY_RUN_STALE_MINUTES", "20")))
 
 
 def _ensure_table(conn) -> None:
@@ -43,8 +50,15 @@ def _ensure_table(conn) -> None:
         "  run_date VARCHAR(10) PRIMARY KEY,"
         "  status VARCHAR(16) NOT NULL,"
         "  started_at VARCHAR(32),"
+        "  heartbeat_at VARCHAR(32),"
         "  finished_at VARCHAR(32),"
         "  report TEXT)"))
+    # ``daily_runs`` pre-dates the lease.  This is deliberately additive and
+    # idempotent for both the local SQLite test database and PostgreSQL.
+    from sqlalchemy import inspect, text
+    columns = {column["name"] for column in inspect(conn).get_columns("daily_runs")}
+    if "heartbeat_at" not in columns:
+        conn.execute(text("ALTER TABLE daily_runs ADD COLUMN heartbeat_at VARCHAR(32)"))
 
 
 def _now() -> str:
@@ -63,30 +77,31 @@ def _claim(run_date: str, force: bool) -> tuple[bool, str]:
     with engine.begin() as conn:
         _ensure_table(conn)
         row = conn.execute(
-            text("SELECT status, started_at FROM daily_runs WHERE run_date = :d"),
+            text("SELECT status, started_at, heartbeat_at FROM daily_runs WHERE run_date = :d"),
             {"d": run_date}).fetchone()
 
         if row is not None:
-            status, started = row[0], row[1]
+            status, started, heartbeat = row[0], row[1], row[2]
             if status == "complete" and not force:
                 return False, "already completed today"
             if status == "running" and not force:
                 try:
-                    age = datetime.now(timezone.utc) - datetime.fromisoformat(started)
-                    if age < timedelta(hours=STALE_CLAIM_HOURS):
+                    lease_at = heartbeat or started
+                    age = datetime.now(timezone.utc) - datetime.fromisoformat(lease_at)
+                    if age < timedelta(minutes=STALE_CLAIM_MINUTES):
                         return False, f"already running (started {started})"
                 except (TypeError, ValueError):
                     pass
             conn.execute(
                 text("UPDATE daily_runs SET status = 'running', started_at = :t,"
-                     " finished_at = NULL WHERE run_date = :d"),
+                     " heartbeat_at = :t, finished_at = NULL WHERE run_date = :d"),
                 {"d": run_date, "t": _now()})
             return True, ""
 
         try:
             conn.execute(
-                text("INSERT INTO daily_runs (run_date, status, started_at)"
-                     " VALUES (:d, 'running', :t)"),
+            text("INSERT INTO daily_runs (run_date, status, started_at, heartbeat_at)"
+                 " VALUES (:d, 'running', :t, :t)"),
                 {"d": run_date, "t": _now()})
         except Exception:
             # Lost the race. The other worker owns the day.
@@ -102,7 +117,7 @@ def _finish(run_date: str, report: dict) -> None:
         with engine.begin() as conn:
             _ensure_table(conn)
             conn.execute(
-                text("UPDATE daily_runs SET status = :s, finished_at = :t,"
+                text("UPDATE daily_runs SET status = :s, heartbeat_at = :t, finished_at = :t,"
                      " report = :r WHERE run_date = :d"),
                 {"d": run_date, "s": report.get("status", "complete"),
                  "t": _now(), "r": json.dumps(report)[:8000]})
@@ -119,8 +134,9 @@ def _persist_progress(run_date: str, report: dict) -> None:
         with engine.begin() as conn:
             _ensure_table(conn)
             conn.execute(text(
-                "UPDATE daily_runs SET status = 'running', report = :r WHERE run_date = :d"),
-                {"d": run_date, "r": json.dumps(report)[:8000]})
+                "UPDATE daily_runs SET status = 'running', heartbeat_at = :t, report = :r "
+                "WHERE run_date = :d"),
+                {"d": run_date, "t": _now(), "r": json.dumps(report)[:8000]})
     except Exception as exc:
         logger.warning(f"daily run progress bookkeeping failed: {exc}")
 
@@ -171,12 +187,55 @@ def _step(report: dict, name: str, fn, run_date: str | None = None):
         return None
 
 
-def run_daily_job(force: bool = False, publish: bool = True) -> dict:
+def start_daily_job(force: bool = False, publish: bool = True) -> dict:
+    """Claim then detach a daily run from an HTTP request worker.
+
+    Preparing a seven-day evaluated board fans out to providers and loads the
+    model stack.  It is valid work for the scheduler, but it must not keep the
+    one Gunicorn request worker inside a long-running POST.  Claim before
+    starting the daemon so concurrent callers retain the same first-wins
+    behaviour as the synchronous scheduler path.
+    """
+    from leagues.daily_feed import _publish_date
+
+    run_date = _publish_date()
+    claimed, why = _claim(run_date, force)
+    if not claimed:
+        return {
+            "run_date": run_date, "status": "skipped", "reason": why,
+            "queued": False,
+        }
+
+    def _work():
+        try:
+            run_daily_job(force=force, publish=publish, _claimed_run_date=run_date)
+        except Exception as exc:
+            # Step failures are isolated inside ``run_daily_job``.  This is
+            # only the last-resort path for an unexpected failure before it
+            # can write its normal report, so the claim never wedges the day.
+            logger.error("detached daily run %s crashed: %s", run_date, exc,
+                         exc_info=True)
+            _finish(run_date, {
+                "run_date": run_date, "status": "failed", "steps": {},
+                "failed": ["unhandled"], "error": type(exc).__name__,
+                "finished_at": _now(),
+            })
+
+    threading.Thread(target=_work, daemon=True,
+                     name=f"daily-run-{run_date}").start()
+    return {
+        "run_date": run_date, "status": "accepted", "queued": True,
+        "message": "daily generation is running in the background",
+    }
+
+
+def run_daily_job(force: bool = False, publish: bool = True,
+                  _claimed_run_date: str | None = None) -> dict:
     """The whole day, once. Safe to call repeatedly."""
     from database import log_pool_exception, log_pool_status
     from leagues.daily_feed import _publish_date
 
-    run_date = _publish_date()
+    run_date = _claimed_run_date or _publish_date()
     report: dict = {
         "run_date": run_date, "status": "complete",
         "steps": {}, "failed": [], "started_at": _now(),
@@ -186,22 +245,23 @@ def run_daily_job(force: bool = False, publish: bool = True) -> dict:
         "daily_job_start", run_date=run_date,
         force=bool(force), publish=bool(publish),
     )
-    try:
-        claimed, why = _claim(run_date, force)
-    except Exception as exc:
-        log_pool_exception("daily_job_pool_timeout", exc, step="claim")
-        log_pool_status(
-            "daily_job_error", level=logging.ERROR, run_date=run_date,
-            step="claim", error_type=type(exc).__name__,
-        )
-        raise
-    if not claimed:
-        logger.info(f"daily run {run_date}: skipped — {why}")
-        log_pool_status(
-            "daily_job_end", run_date=run_date,
-            status="skipped", reason=why,
-        )
-        return {**report, "status": "skipped", "reason": why}
+    if _claimed_run_date is None:
+        try:
+            claimed, why = _claim(run_date, force)
+        except Exception as exc:
+            log_pool_exception("daily_job_pool_timeout", exc, step="claim")
+            log_pool_status(
+                "daily_job_error", level=logging.ERROR, run_date=run_date,
+                step="claim", error_type=type(exc).__name__,
+            )
+            raise
+        if not claimed:
+            logger.info(f"daily run {run_date}: skipped — {why}")
+            log_pool_status(
+                "daily_job_end", run_date=run_date,
+                status="skipped", reason=why,
+            )
+            return {**report, "status": "skipped", "reason": why}
 
     logger.info(f"daily run {run_date}: starting")
 

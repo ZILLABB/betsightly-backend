@@ -247,8 +247,8 @@ async def trigger_daily_run(force: bool = False, publish: bool = True):
     returns `skipped` rather than repeating the work.
     """
     try:
-        from leagues.scheduler import run_daily_job
-        return run_daily_job(force=force, publish=publish)
+        from leagues.scheduler import start_daily_job
+        return start_daily_job(force=force, publish=publish)
     except Exception as e:
         logger.error(f"Daily run failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
