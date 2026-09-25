@@ -15,6 +15,7 @@ Public entry points:
 
 import os
 import json
+import hashlib
 import logging
 import re
 import time
@@ -1192,6 +1193,9 @@ def reconcile_published_slips(*, start_date: str = "2026-09-15",
                 "id": row.id, "date": row.date, "category": row.category,
                 "status": row.status or "pending",
                 "presentation": row.presentation or "accumulator",
+                "stored_picks_hash": hashlib.sha256(
+                    (row.picks or "").encode()
+                ).hexdigest(),
                 "picks": picks if isinstance(picks, list) else [],
             })
     finally:
@@ -1235,6 +1239,7 @@ def reconcile_published_slips(*, start_date: str = "2026-09-15",
                 "stored_outcome": stored,
                 "proposed_outcome": proposed,
                 "stored_evidence": pick.get("settlement_evidence"),
+                "stored_pending_reason": pick.get("settlement_pending_reason"),
                 "score_evidence": evidence,
                 "unresolved_reason": unresolved_reason,
             }
@@ -1260,6 +1265,7 @@ def reconcile_published_slips(*, start_date: str = "2026-09-15",
             "slip_id": row["id"], "date": row["date"],
             "category": row["category"], "stored_status": row["status"],
             "proposed_status": proposed_status, "presentation": row["presentation"],
+            "stored_picks_hash": row["stored_picks_hash"],
             "legs": leg_reports,
         }
         report["slips"].append(slip_report)

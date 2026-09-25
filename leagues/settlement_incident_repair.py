@@ -21,10 +21,16 @@ def _core_evidence(v):
     if not v: return None
     return {k: v.get(k) for k in ("provider", "provider_event_id", "home_score", "away_score", "score_90", "match_status")}
 def _needs(leg):
-    if leg["stored_outcome"] != leg["proposed_outcome"]: return True
+    if leg["stored_outcome"] != leg["proposed_outcome"]:
+        return True
     if leg["proposed_outcome"] != "pending":
-        return _core_evidence(leg.get("stored_evidence")) != _core_evidence(leg.get("score_evidence"))
-    return bool(leg.get("stored_evidence")) or leg.get("unresolved_reason") is not None
+        return _core_evidence(leg.get("stored_evidence")) != _core_evidence(
+            leg.get("score_evidence")
+        )
+    return (
+        bool(leg.get("stored_evidence"))
+        or leg.get("stored_pending_reason") != leg.get("unresolved_reason")
+    )
 
 def _reports():
     from leagues.results_checker import reconcile_published_slips
@@ -56,14 +62,25 @@ def _validate(plan, p_rows, b_rows):
         r=p_rows.get(s["slip_id"])
         if not r or (r["date"],r["category"],r["status"] or "pending") != (s["date"],s["category"],s["stored_status"]):
             raise RepairPreconditionError(f"published slip {s['slip_id']} changed after reconciliation")
-        if not START_DATE <= r["date"] <= END_DATE: raise RepairPreconditionError("published slip outside scope")
+        if not START_DATE <= r["date"] <= END_DATE:
+            raise RepairPreconditionError("published slip outside scope")
+        if _hash(r["picks"] or "") != s.get("stored_picks_hash"):
+            raise RepairPreconditionError(
+                f"published slip {s['slip_id']} picks changed after reconciliation"
+            )
     for s in plan["builder_targets"]:
         r=b_rows.get(s["selection_fingerprint"])
         if not r or (r["final_status"] or "pending") != s["stored_final_status"]:
             raise RepairPreconditionError(f"builder prediction {s['selection_fingerprint']} changed after reconciliation")
-        if len(json.loads(r["picks"] or "[]")) != len(s["legs"]): raise RepairPreconditionError("builder leg count changed")
+        if len(json.loads(r["picks"] or "[]")) != len(s["legs"]):
+            raise RepairPreconditionError("builder leg count changed")
+        if _hash(r["picks"] or "") != s.get("stored_picks_hash"):
+            raise RepairPreconditionError(
+                f"builder prediction {s['selection_fingerprint']} picks changed after reconciliation"
+            )
         created=_iso(r["created_at"]) or ""
-        if not START_DATE <= created[:10] <= END_DATE: raise RepairPreconditionError("builder row outside scope")
+        if not START_DATE <= created[:10] <= END_DATE:
+            raise RepairPreconditionError("builder row outside scope")
 
 def _repaired_picks(raw, legs):
     picks=json.loads(raw or "[]")
@@ -72,9 +89,18 @@ def _repaired_picks(raw, legs):
         pick["status"]=leg["proposed_outcome"]
         if leg["proposed_outcome"] == "pending":
             pick.pop("settlement_evidence", None)
-            if leg.get("unresolved_reason"): pick["settlement_pending_reason"]=leg["unresolved_reason"]
+            if leg.get("unresolved_reason"):
+                pick["settlement_pending_reason"] = leg["unresolved_reason"]
+            else:
+                pick.pop("settlement_pending_reason", None)
         else:
-            pick.pop("settlement_pending_reason", None); pick["settlement_evidence"]=leg["score_evidence"]
+            pick.pop("settlement_pending_reason", None)
+            evidence = leg.get("score_evidence")
+            if not evidence:
+                raise RepairPreconditionError(
+                    "final proposal is missing verified score evidence"
+                )
+            pick["settlement_evidence"] = evidence
     return picks
 
 def _builder_values(row, target):
@@ -100,7 +126,55 @@ def run(*, apply=False, confirmation="", backup_dir="maintenance_backups", verif
         unresolved_ok=all(s["proposed_status"]=="pending" for s in plan["published"]["slips"] if any(l["proposed_outcome"]=="pending" for l in s["legs"])) and all(s["proposed_final_status"]=="pending" for s in plan["builder"]["predictions"] if any(l["proposed_outcome"]=="pending" for l in s["legs"]))
         return {"verification_clean":not plan["published_targets"] and not plan["builder_targets"] and unresolved_ok,"published_remaining":len(plan["published_targets"]),"builder_remaining":len(plan["builder_targets"]),"unresolved_ok":unresolved_ok}
     if not apply:
-        return {"dry_run":True,"published":{"rows_targeted":len(plan["published_targets"]),"legs_targeted":sum(sum(_needs(l) for l in s["legs"]) for s in plan["published_targets"]),"final_status_changes":plan["published"]["likely_historical_false_voids"],"unresolved_legs":plan["published"]["unresolved_legs"]},"builder":{"rows_targeted":len(plan["builder_targets"]),"legs_targeted":sum(sum(_needs(l) for l in s["legs"]) for s in plan["builder_targets"]),"final_status_changes":plan["builder"]["final_status_changes"],"unresolved_legs":plan["builder"]["unresolved_builder_legs"],"proposed_totals":{x:sum(s["proposed_final_status"]==x for s in plan["builder"]["predictions"]) for x in ("won","lost","pending","void")}},"evidence_providers":[plan["published"]["score_source"],plan["builder"]["score_source"]]}
+        published_status_changes = [
+            {
+                "slip_id": s["slip_id"],
+                "date": s["date"],
+                "category": s["category"],
+                "before": s["stored_status"],
+                "after": s["proposed_status"],
+            }
+            for s in plan["published"]["slips"]
+            if s["stored_status"] != s["proposed_status"]
+        ]
+        return {
+            "dry_run": True,
+            "published": {
+                "rows_targeted": len(plan["published_targets"]),
+                "legs_targeted": sum(
+                    sum(_needs(l) for l in s["legs"])
+                    for s in plan["published_targets"]
+                ),
+                "final_status_changes": published_status_changes,
+                "likely_historical_false_voids": plan["published"][
+                    "likely_historical_false_voids"
+                ],
+                "likely_incorrect_losses": plan["published"][
+                    "likely_incorrect_losses"
+                ],
+                "unresolved_legs": plan["published"]["unresolved_legs"],
+            },
+            "builder": {
+                "rows_targeted": len(plan["builder_targets"]),
+                "legs_targeted": sum(
+                    sum(_needs(l) for l in s["legs"])
+                    for s in plan["builder_targets"]
+                ),
+                "final_status_changes": plan["builder"]["final_status_changes"],
+                "unresolved_legs": plan["builder"]["unresolved_builder_legs"],
+                "proposed_totals": {
+                    x: sum(
+                        s["proposed_final_status"] == x
+                        for s in plan["builder"]["predictions"]
+                    )
+                    for x in ("won", "lost", "pending", "void")
+                },
+            },
+            "evidence_providers": [
+                plan["published"]["score_source"],
+                plan["builder"]["score_source"],
+            ],
+        }
     if confirmation != CONFIRM_TOKEN: raise RepairPreconditionError("confirmation token did not match")
     from database import engine
     from leagues.picks_db import PublishedSlip

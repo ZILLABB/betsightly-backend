@@ -6,6 +6,7 @@ solely to inspect the historical incident before any repair is authorised.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -74,7 +75,14 @@ def reconcile_builder_predictions() -> dict[str, Any]:
         except (TypeError, ValueError) as exc:
             picks = []
             payload_error = type(exc).__name__
-        archived.append({**row, "parsed_picks": picks, "payload_error": payload_error})
+        archived.append({
+            **row,
+            "parsed_picks": picks,
+            "payload_error": payload_error,
+            "stored_picks_hash": hashlib.sha256(
+                str(row.get("picks") or "").encode()
+            ).hexdigest(),
+        })
 
     score_picks = [
         json.loads(json.dumps(pick))
@@ -141,6 +149,7 @@ def reconcile_builder_predictions() -> dict[str, Any]:
                 "stored_outcome": stored,
                 "proposed_outcome": proposed,
                 "stored_evidence": pick.get("settlement_evidence"),
+                "stored_pending_reason": pick.get("settlement_pending_reason"),
                 "score_evidence": evidence,
                 "unresolved_reason": unresolved_reason,
             }
@@ -181,6 +190,7 @@ def reconcile_builder_predictions() -> dict[str, Any]:
             "horizon": row.get("horizon"),
             "stored_final_status": row.get("final_status") or "pending",
             "proposed_final_status": proposed_status,
+            "stored_picks_hash": row["stored_picks_hash"],
             "proposed_actual_settled_return": proposed_return,
             "proposed_profit": proposed_profit,
             "proposed_all_win": proposed_all_win,
