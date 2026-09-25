@@ -3,19 +3,24 @@ from __future__ import annotations
 
 import math
 import os
+from leagues.market_registry import MARKETS
 
 RANKING_POLICY_VERSION = "fixture-ranked-v1.2"
 SELECTOR_VERSION = "canonical-recommendations-v1.2"
 MARKET_POLICY_VERSION = "market-trust-v1.1"
 
-TRUSTED_MARKETS = {"over_1_5", "under_3_5", "under_4_5", "home_or_draw",
-                   "away_or_draw", "dnb_home", "dnb_away"}
-EVIDENCE_ELIGIBLE_WINS = {"home_win", "away_win"}
-DEVELOPING_MARKETS = {"over_2_5", "home_over_0_5", "away_over_0_5"}
-RESTRICTED_MARKETS = {"under_2_5", "draw", "btts_yes", "btts_no",
-                      "home_over_1_5", "away_over_1_5"}
-DISABLED_PUBLIC_MARKETS = {"under_1_5", "over_3_5", "home_or_away"}
-TEAM_TO_SCORE = {"home_over_0_5", "away_over_0_5"}
+TRUSTED_MARKETS = {key for key, spec in MARKETS.items()
+                   if spec.public_policy == "TRUSTED"}
+EVIDENCE_ELIGIBLE_WINS = {key for key, spec in MARKETS.items()
+                          if spec.public_policy == "EVIDENCE_ELIGIBLE"}
+DEVELOPING_MARKETS = {key for key, spec in MARKETS.items()
+                      if spec.public_policy == "DEVELOPING"}
+RESTRICTED_MARKETS = {key for key, spec in MARKETS.items()
+                      if spec.public_policy == "RESTRICTED"}
+DISABLED_PUBLIC_MARKETS = {key for key, spec in MARKETS.items()
+                           if spec.public_policy == "DISABLED"}
+TEAM_TO_SCORE = {key for key, spec in MARKETS.items()
+                 if spec.exposure == "team_to_score" and spec.activation == "ACTIVE"}
 
 
 def _evidence(pick: dict) -> dict:

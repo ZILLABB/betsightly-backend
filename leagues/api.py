@@ -919,11 +919,15 @@ async def get_builder_performance(days: int = 90):
 
 
 @router.post("/backfill-legs", dependencies=[Depends(require_api_key)])
-async def trigger_leg_backfill(days: int = 120):
-    """Recover per-leg outcomes on chain days settled before we recorded them."""
+async def trigger_leg_backfill(days: int = 30, dry_run: bool = True,
+                               start_date: str | None = None,
+                               end_date: str | None = None):
+    """Review a bounded historical window; only an explicit apply writes legs."""
     try:
         from leagues.results_checker import backfill_leg_status
-        return {"status": "success", **backfill_leg_status(limit_days=days)}
+        return {"status": "success", **backfill_leg_status(
+            limit_days=days, dry_run=dry_run,
+            start_date=start_date, end_date=end_date)}
     except Exception as e:
         logger.error(f"Leg backfill failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))

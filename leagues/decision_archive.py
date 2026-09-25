@@ -98,6 +98,36 @@ def _iso(value):
     return value
 
 
+def _model_diagnostics(pick: dict) -> dict:
+    """Compact per-market observations; unsupported model families stay absent."""
+    from leagues.ml_models import market_probability
+
+    market = str(pick.get("market") or "")
+    model = pick.get("_model") or {}
+    odds = ((pick.get("_fixture") or {}).get("odds") or {})
+    family = (model.get("ml") or {}).get("family_probabilities") or {}
+    bookmaker = (odds.get("implied") or {}).get(market)
+    if market == "over_2_5":
+        bookmaker = odds.get("implied_over")
+    elif market == "under_2_5":
+        bookmaker = odds.get("implied_under")
+    values = {
+        "base_model": (model.get("probabilities") or {}).get(market),
+        "elo": market_probability(model.get("elo_probabilities"), market),
+        "xgboost": market_probability(family.get("xgb"), market),
+        "lightgbm": market_probability(family.get("lgbm"), market),
+        "catboost": market_probability(family.get("catboost"), market),
+        "neural": market_probability(family.get("nn"), market),
+        "ml_blend": pick.get("ml_confidence"),
+        "bookmaker_no_vig": bookmaker,
+        "calibrated": pick.get("confidence"),
+        "evidence_adjusted": pick.get("evidence_adjusted_probability"),
+        "conservative": pick.get("selection_probability"),
+    }
+    return {key: round(float(value), 4) for key, value in values.items()
+            if value is not None}
+
+
 def _compact_candidate(pick: dict) -> dict:
     fixture = pick.get("_fixture") or {}
     model = pick.get("_model") or {}
@@ -155,6 +185,7 @@ def _compact_candidate(pick: dict) -> dict:
         "bookmaker_implied_probability": pick.get("market_implied_probability"),
         "model_bookmaker_gap": trust.get("model_market_disagreement"),
         "ml_probability": pick.get("ml_confidence"),
+        "model_probabilities": _model_diagnostics(pick),
         "bookable": bool(pick.get("bookable")),
         "sportybet_mapping_state": availability.get("status"),
         "sportybet_snapshot_id": availability.get("board_snapshot_id"),
@@ -227,6 +258,8 @@ def archive_board(picks: list[dict], fixtures: list[dict], *, horizon: int,
         provider = provider or {}
         provider_state = "complete" if provider.get("complete", True) else "degraded"
         from leagues.selection import TEAM_TO_SCORE_CAP, UNDER_CAP
+        from leagues.market_registry import REGISTRY_VERSION
+        from leagues.model_policy import POLICY_VERSION as MODEL_POLICY_VERSION
         from leagues.slip_builder import (
             MAX_LEGS, MIN_BUILDER_EXPECTED_RETURN,
         )
@@ -241,6 +274,8 @@ def archive_board(picks: list[dict], fixtures: list[dict], *, horizon: int,
                 "policy_version": PUBLISHED_SELECTION_POLICY_VERSION,
                 "calibration_version": (calibration or {}).get("version"),
                 "evidence_version": "fixture-ranked-evidence-v1",
+                "market_registry_version": REGISTRY_VERSION,
+                "model_policy_version": MODEL_POLICY_VERSION,
                 "provider_snapshot_id": (
                     provider.get("snapshot_id") or provider.get("version")
                 ),

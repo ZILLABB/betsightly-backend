@@ -406,3 +406,24 @@ def test_kickoff_and_league_diagnostics_are_explicit():
                               "2026-08-24T19:00:00Z", "La Liga")
     assert league["status"] == "MATCHED"
     assert league["league_diagnostic"] == "LEAGUE_MISMATCH"
+
+
+def test_stored_event_id_reuses_fixture_after_display_name_change():
+    board = _availability_board()
+    result = sb.availability_for(
+        board, "Renamed Home", "Renamed Away", "2026-08-24T19:00:00Z",
+        "Premier League", "over_1_5", event_id="e1")
+    assert result["status"] == "BOOKABLE"
+    assert result["fixture_match_method"] == "stored_event_id"
+
+
+def test_stored_event_id_cannot_override_kickoff_or_squad_identity():
+    board = _availability_board()
+    wrong_time = sb.availability_for(
+        board, "Home FC", "Away FC", "2026-08-24T22:00:00Z",
+        "Premier League", "over_1_5", event_id="e1")
+    assert wrong_time["status"] == "FIXTURE_MAPPING_FAILED"
+    youth = sb.availability_for(
+        board, "Home FC U19", "Away FC", "2026-08-24T19:00:00Z",
+        "Premier League", "over_1_5", event_id="e1")
+    assert youth["status"] == "FIXTURE_MAPPING_FAILED"

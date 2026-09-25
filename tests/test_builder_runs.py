@@ -125,6 +125,34 @@ def test_builder_prediction_settlement_and_push_accounting(
         assert row["sportybet_settled_return"] is None
 
 
+def test_lost_builder_keeps_settling_other_legs_without_rewriting_verdict(monkeypatch):
+    db = _memory_engine(monkeypatch)
+    games = [_game("m1"), _game("m2")]
+    assert runs.record_prediction(2, "today", _success(games))
+    fingerprint = leg_fingerprint(games)
+    first_evidence = {"provider": "espn", "home_score": 0, "away_score": 0}
+    assert runs.settle_prediction(
+        fingerprint, ["lost", "pending"],
+        [{"settlement_evidence": first_evidence},
+         {"settlement_pending_reason": "FINAL_SCORE_UNVERIFIED"}],
+    ) == "lost"
+    assert len(runs.pending_predictions()) == 1
+    assert runs.settle_prediction(
+        fingerprint, ["won", "won"],
+        [{"settlement_evidence": {"provider": "untrusted"}},
+         {"settlement_evidence": {"provider": "espn", "home_score": 2,
+                                   "away_score": 1}}],
+    ) == "lost"
+    with db.begin() as conn:
+        row = conn.execute(select(runs.builder_predictions)).mappings().one()
+    picks = json.loads(row["picks"])
+    assert [pick["status"] for pick in picks] == ["lost", "won"]
+    assert picks[0]["settlement_evidence"] == first_evidence
+    assert picks[1]["settlement_evidence"]["provider"] == "espn"
+    assert "settlement_pending_reason" not in picks[1]
+    assert row["actual_settled_return"] == 0.0
+
+
 def test_builder_performance_uses_unique_predictions_and_reports_calibration(monkeypatch):
     _memory_engine(monkeypatch)
     first = _success([_game("m1", 1.5), _game("m2", 1.4)], actual_odds=2.2)

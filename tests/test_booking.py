@@ -52,6 +52,8 @@ def clean_bookings():
             B._ensure_table(conn)
             conn.execute(text("DELETE FROM tier_bookings WHERE publish_date = :d"),
                          {"d": DAY})
+            conn.execute(text("DELETE FROM tier_booking_editions WHERE publish_date = :d"),
+                         {"d": DAY})
     _clear()
     yield
     _clear()
@@ -452,6 +454,83 @@ def test_booking_the_card_is_idempotent(monkeypatch):
     second = B.book_card(DAY, card)
     assert second["booked"] == [] and len(second["skipped"]) == 1
     assert len(posts) == 1, "a held code must not be re-minted"
+
+
+def test_background_booking_refresh_uses_locked_card_only(monkeypatch):
+    original = [_game("Fulham", "Chelsea", "over_1_5")]
+    seen = []
+    monkeypatch.setattr(D, "_publish_date", lambda: DAY)
+    monkeypatch.setattr(D, "build_daily_accumulators", lambda **kwargs:
+                        seen.append(kwargs) or {"date": DAY,
+                            "accumulators": {"banker": {"games": original}}})
+    monkeypatch.setattr(B, "bookings_for", lambda day: {})
+    monkeypatch.setattr(B, "book_card", lambda day, card:
+                        seen.append((day, card)) or {"booked": ["banker"]})
+    result = B.refresh_due_bookings()
+    assert result["status"] == "refreshed"
+    assert seen[0] == {"allow_generation": False}
+    assert seen[1][0] == DAY
+
+
+def test_due_booking_revalidates_held_code_without_minting(monkeypatch):
+    games = [_game("Fulham", "Chelsea", "over_1_5")]
+    old = _active_record(games, checked_at="2020-01-01T00:00:00+00:00",
+                         final_booked_legs=games)
+    B._store(DAY, "banker", old)
+    monkeypatch.setattr("leagues.sportybet.fetch_board", lambda **kwargs: _board())
+    monkeypatch.setattr(B, "validate_code_details",
+                        lambda code, selections: (True, "ok", 1.23))
+    monkeypatch.setattr(B, "_post_share",
+                        lambda selections: pytest.fail("held code was reminted"))
+
+    report = B.book_card(DAY, {"banker": {"games": games}})
+
+    assert report["booked"] == []
+    assert report["skipped"]
+    saved = B.bookings_for(DAY)["banker"]
+    assert saved["share_code"] == "HELD42"
+    assert saved["actual_sportybet_odds"] == 1.23
+    assert saved["checked_at"] != old["checked_at"]
+    assert len(B.booking_editions_for(DAY, "banker")) == 1
+
+
+def test_booking_editions_append_only_on_real_variant_change():
+    original = [_game("Fulham", "Chelsea", "over_1_5")]
+    replacement = [_game("Arsenal", "Spurs", "home_win")]
+    first = _active_record(original, final_booked_legs=original,
+                           original_legs=original)
+    B._store(DAY, "banker", first)
+    B._store(DAY, "banker", {**first, "checked_at": "2099-01-01T00:00:00Z",
+                             "actual_sportybet_odds": 1.24})
+    second = _active_record(original, code="REBUILT7",
+                            booking_status="REBUILT_FULL",
+                            original_legs=original,
+                            final_booked_legs=replacement,
+                            replacements=replacement)
+    B._store(DAY, "banker", second)
+    editions = B.booking_editions_for(DAY, "banker")
+    assert [edition["booking_version"] for edition in editions] == [1, 2]
+    assert editions[1]["previous_booking_version"] == 1
+    assert editions[0]["code"] == "HELD42"
+    assert editions[1]["code"] == "REBUILT7"
+    assert editions[0]["booked_legs"] == original
+    assert editions[1]["original_legs"] == original
+    assert editions[1]["replacements"] == replacement
+    assert B.bookings_for(DAY)["banker"]["booking_version"] == 2
+
+
+def test_rebuilt_code_survives_started_original_but_not_started_replacement():
+    original = [_game("Old", "Opponent", "home_win",
+                      "2020-08-24T19:00:00Z"),
+                _game("Fulham", "Chelsea", "over_1_5")]
+    variant = [_game("Arsenal", "Spurs", "home_win"), original[1]]
+    record = _active_record(original, booking_status="REBUILT_FULL",
+                            final_booked_legs=variant)
+    assert B.booking_lifecycle(record, original)["actionable"] is True
+    variant[0] = _game("Arsenal", "Spurs", "home_win",
+                       "2020-08-24T19:00:00Z")
+    record["final_booked_legs"] = variant
+    assert B.booking_lifecycle(record, original)["actionable"] is False
 
 
 def test_force_rebooks(monkeypatch):

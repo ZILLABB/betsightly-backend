@@ -238,6 +238,7 @@ def predict_fixture(fixture: dict, index) -> dict | None:
         return None
 
     out: dict = {}
+    family_vectors: dict[str, dict[str, list[float]]] = {}
     for target, family_models in state["models"].items():
         spec = state["calibrators"].get(target) or {}
         # The ensemble weights fitted at training time. They cover six families
@@ -246,12 +247,18 @@ def predict_fixture(fixture: dict, index) -> dict | None:
         trained_w = spec.get("weights") or {}
 
         preds, wts = [], []
+        target_vectors: dict[str, list[float]] = {}
         for fam, model in family_models:
             try:
                 p = model.predict_proba(X)[0]
             except Exception:
                 continue
-            preds.append([float(x) for x in p])
+            vector = [float(x) for x in p]
+            if not vector or not all(math.isfinite(x) and 0 <= x <= 1
+                                     for x in vector):
+                continue
+            preds.append(vector)
+            target_vectors[fam] = vector
             wts.append(float(trained_w.get(fam, 1.0)))
         if not preds:
             continue
@@ -262,11 +269,13 @@ def predict_fixture(fixture: dict, index) -> dict | None:
             for i in range(len(preds[0]))
         ]
         out[target] = _apply_calibrator(spec, target, blended)
+        family_vectors[target] = target_vectors
 
     if not out:
         return None
 
     result: dict = {"families": len(FAMILIES)}
+    individual: dict[str, dict[str, float]] = {}
 
     if "match_result" in out:
         # meta stores this as {"0": "Away Win", "1": "Draw", "2": "Home Win"} —
@@ -284,10 +293,19 @@ def predict_fixture(fixture: dict, index) -> dict | None:
         for label, p in zip(labels, out["match_result"]):
             result[key_for.get(str(label).strip().lower(),
                                str(label).strip().lower().replace(" ", "_"))] = round(float(p), 4)
+        for family, values in family_vectors.get("match_result", {}).items():
+            for label, probability in zip(labels, values):
+                key = key_for.get(str(label).strip().lower())
+                if key:
+                    individual.setdefault(family, {})[key] = round(probability, 4)
 
     for target in ("over_1_5", "over_2_5"):
         if target in out:
             result[target] = round(float(out[target][1]), 4)
+            for family, values in family_vectors.get(target, {}).items():
+                if len(values) > 1:
+                    individual.setdefault(family, {})[target] = round(values[1], 4)
+    result["family_probabilities"] = individual
     return result
 
 

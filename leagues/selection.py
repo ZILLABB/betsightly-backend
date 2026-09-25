@@ -34,6 +34,7 @@ seven points hot.
 import itertools
 import logging
 import math
+from leagues.market_registry import MARKETS
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,8 @@ MARKET_CAP = 3
 # Home-team and away-team goal markets are separate calibration groups, but
 # to a bettor they are the same exposure: "this team scores". Counting the
 # two groups separately allowed as many as six of those legs on one ticket.
-TEAM_TO_SCORE_GROUPS = {"team_goals_home", "team_goals_away"}
+TEAM_TO_SCORE_GROUPS = {spec.group for spec in MARKETS.values()
+                        if spec.exposure == "team_to_score"}
 TEAM_TO_SCORE_CAP = 2
 # Replay validates Under 3.5 and Under 4.5 independently but contains no
 # evidence that a third Grade-A Under is worse than a weaker market inserted

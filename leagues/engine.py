@@ -376,6 +376,7 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         if elo:
             with_elo += 1
         model = predict(fx, base, elo)
+        model["elo_probabilities"] = elo
         if history is not None:
             try:
                 model["ml"] = ml_models.predict_fixture(fx, history)

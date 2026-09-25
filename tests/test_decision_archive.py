@@ -40,6 +40,27 @@ def _db(monkeypatch):
     return db
 
 
+def test_compact_archive_records_only_supported_family_probabilities():
+    pick = _pick()
+    pick["ml_confidence"] = .73
+    pick["_fixture"]["odds"] = {"implied_over": .68}
+    pick["_model"].update({
+        "probabilities": {"over_1_5": .77},
+        "elo_probabilities": {"home_win": .5, "draw": .2, "away_win": .3},
+        "ml": {"over_1_5": .73, "family_probabilities": {
+            "xgb": {"over_1_5": .72}, "lgbm": {"over_1_5": .75}}},
+    })
+    observed = decision_archive._compact_candidate(pick)["model_probabilities"]
+    assert observed["base_model"] == .77
+    assert observed["xgboost"] == .72
+    assert observed["lightgbm"] == .75
+    assert observed["ml_blend"] == .73
+    assert observed["calibrated"] == .75
+    assert observed["conservative"] == .72
+    assert "neural" not in observed and "elo" not in observed
+    assert "bookmaker_no_vig" not in observed  # over 1.5 was not quoted
+
+
 def test_snapshot_is_idempotent_immutable_and_retains_decision_facts(monkeypatch):
     db = _db(monkeypatch)
     monkeypatch.setattr(

@@ -344,6 +344,19 @@ def _ensure_today_generated():
             step="accumulator_feed", error_type=type(e).__name__,
         )
 
+    # Booking editions can expire independently of the locked prediction
+    # card. Recheck in this background loop, never in a public GET.
+    try:
+        from leagues.booking import refresh_due_bookings
+        booking_refresh = refresh_due_bookings()
+        if booking_refresh.get("status") == "refreshed":
+            logger.info("Live booking refresh booked=%s failed=%s skipped=%s",
+                        len(booking_refresh.get("booked") or []),
+                        len(booking_refresh.get("failed") or []),
+                        len(booking_refresh.get("skipped") or []))
+    except Exception as e:
+        logger.error("Daily loop: live booking refresh failed: %s", e)
+
     # Subscriber alerts used to fire from here, guarded by a dict held in
     # process memory. That dict is empty in a new process, so every deploy and
     # every restart announced the day again — one notification per push, and

@@ -172,13 +172,14 @@ def record_prediction(target: float, horizon: str, result: dict) -> bool:
 def pending_predictions() -> list[dict]:
     ensure_table()
     with engine.begin() as conn:
-        rows = conn.execute(select(builder_predictions).where(
-            builder_predictions.c.final_status == "pending"
-        )).mappings().all()
-    return [dict(row) for row in rows]
+        rows = conn.execute(select(builder_predictions)).mappings().all()
+    return [dict(row) for row in rows if row["final_status"] == "pending" or
+            any(pick.get("status") in (None, "pending")
+                for pick in json.loads(row["picks"] or "[]"))]
 
 
-def settle_prediction(fingerprint: str, outcomes: list[str]) -> str | None:
+def settle_prediction(fingerprint: str, outcomes: list[str],
+                      details: list[dict] | None = None) -> str | None:
     """Apply market-aware leg results already evaluated by results_checker."""
     ensure_table()
     with engine.begin() as conn:
@@ -188,19 +189,34 @@ def settle_prediction(fingerprint: str, outcomes: list[str]) -> str | None:
         if not row:
             return None
         picks = json.loads(row["picks"] or "[]")
-        for pick, outcome in zip(picks, outcomes):
+        outcomes = list(outcomes)
+        for index, (pick, outcome) in enumerate(zip(picks, outcomes)):
+            detail = (details or [])[index] if index < len(details or []) else {}
+            if pick.get("status") in ("won", "lost", "void"):
+                outcomes[index] = pick["status"]
+                continue
             pick["status"] = outcome
-        if not outcomes or any(outcome == "pending" for outcome in outcomes):
-            status = "pending"
+            if outcome == "pending":
+                if detail.get("settlement_pending_reason"):
+                    pick["settlement_pending_reason"] = detail["settlement_pending_reason"]
+            else:
+                pick.pop("settlement_pending_reason", None)
+                if detail.get("settlement_evidence") and not pick.get("settlement_evidence"):
+                    pick["settlement_evidence"] = detail["settlement_evidence"]
+        already_decided = row["final_status"] in ("won", "lost", "void")
+        if already_decided:
+            status = row["final_status"]
         elif any(outcome == "lost" for outcome in outcomes):
             status = "lost"
+        elif not outcomes or any(outcome == "pending" for outcome in outcomes):
+            status = "pending"
         elif all(outcome == "void" for outcome in outcomes):
             status = "void"
         else:
             status = "won"
 
         values = {"picks": json.dumps(picks)}
-        if status != "pending":
+        if status != "pending" and not already_decided:
             from leagues.picks_db import settled_accumulator_return
             settled_return, _ = settled_accumulator_return({
                 "status": status,

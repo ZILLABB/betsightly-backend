@@ -91,7 +91,10 @@ MAX_BUILDER_MARKET_CAP = 7
 _COST_TIE_BAND = 0.02
 
 
-DNB_MARKETS = {"dnb_home", "dnb_away"}
+from leagues.market_registry import MARKETS as MARKET_REGISTRY
+
+DNB_MARKETS = {key for key, spec in MARKET_REGISTRY.items()
+               if spec.can_void and spec.group == "dnb"}
 
 
 def _selection_id(pick: dict) -> str:

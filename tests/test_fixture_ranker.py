@@ -81,7 +81,10 @@ def test_under_lines_are_independent_and_restricted_line_cannot_block_public_ran
         _pick("under_2_5", .92, 1.25), _pick("under_3_5", .84, 1.3),
         _pick("under_4_5", .81, 1.4),
     ])
-    assert ranked[0]["market"] == "under_3_5"
+    # The registry keeps Under 3.5 in shadow until line-specific live or
+    # bookmaker evidence justifies promotion; synthetic SUPPORTED metadata
+    # cannot override the market-wide activation policy.
+    assert ranked[0]["market"] == "under_4_5"
     assert ranked[0]["public_rank"] == 1
     assert ranked[0]["model_rank"] > 1
 

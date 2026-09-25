@@ -36,6 +36,8 @@ import os
 import time
 import unicodedata
 import urllib.request
+from leagues.market_registry import (MARKET_TO_SPORTYBET, FIXED_SPORTYBET,
+                                     OVER_UNDER_SPORTYBET)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,8 @@ OPER_ID = os.getenv("SPORTYBET_OPER_ID", "2")  # Nigeria
 
 # Markets worth pulling. Each costs nothing extra — they arrive on the same
 # response — but every one widens how many picks can carry a real price.
-_MARKET_IDS = "1,18,10,29,11,19,20"
+_MARKET_IDS = ",".join(dict.fromkeys(
+    mapping[0] for mapping in MARKET_TO_SPORTYBET.values()))
 
 _PAGE_SIZE = 100
 _MAX_PAGES = 40
@@ -57,68 +60,12 @@ except ValueError:
     KICKOFF_TOLERANCE_MINUTES = 45.0
 
 
-# One canonical mapping used by pricing, candidate availability and booking.
-# Keeping these identifiers in two modules allowed the parser to say a market
-# existed while booking constructed a different selection tuple.
-MARKET_TO_SPORTYBET = {
-    "home_win":     ("1", "", "1"),
-    "draw":         ("1", "", "2"),
-    "away_win":     ("1", "", "3"),
-    "home_or_draw": ("10", "", "9"),
-    "home_or_away": ("10", "", "10"),
-    "away_or_draw": ("10", "", "11"),
-    "over_1_5":     ("18", "total=1.5", "12"),
-    "under_1_5":    ("18", "total=1.5", "13"),
-    "over_2_5":     ("18", "total=2.5", "12"),
-    "under_2_5":    ("18", "total=2.5", "13"),
-    "over_3_5":     ("18", "total=3.5", "12"),
-    "under_3_5":    ("18", "total=3.5", "13"),
-    "over_4_5":     ("18", "total=4.5", "12"),
-    "under_4_5":    ("18", "total=4.5", "13"),
-    "btts_yes":     ("29", "", "74"),
-    "btts_no":      ("29", "", "76"),
-    "dnb_home":     ("11", "", "4"),
-    "dnb_away":     ("11", "", "5"),
-    "home_over_0_5": ("19", "total=0.5", "12"),
-    "home_under_0_5": ("19", "total=0.5", "13"),
-    "home_over_1_5": ("19", "total=1.5", "12"),
-    "home_under_1_5": ("19", "total=1.5", "13"),
-    "away_over_0_5": ("20", "total=0.5", "12"),
-    "away_under_0_5": ("20", "total=0.5", "13"),
-    "away_over_1_5": ("20", "total=1.5", "12"),
-    "away_under_1_5": ("20", "total=1.5", "13"),
-}
-
-
 # ── Market vocabulary ──────────────────────────────────────
 # Verified against the live board: outcome ids are stable per market, and the
 # Over/Under market is distinguished by its `specifier` rather than its id.
 
-_FIXED = {
-    "1": {"1": "home_win", "2": "draw", "3": "away_win"},
-    "10": {"9": "home_or_draw", "10": "home_or_away", "11": "away_or_draw"},
-    "29": {"74": "btts_yes", "76": "btts_no"},
-    "11": {"4": "dnb_home", "5": "dnb_away"},
-}
-
-# Market 18 is the match total; 19 and 20 are the same structure per team, so
-# outcome ids repeat across all three and only the market id separates them.
-_OVER_UNDER = {
-    "18": {
-        "total=1.5": ("over_1_5", "under_1_5"),
-        "total=2.5": ("over_2_5", "under_2_5"),
-        "total=3.5": ("over_3_5", "under_3_5"),
-        "total=4.5": ("over_4_5", "under_4_5"),
-    },
-    "19": {
-        "total=0.5": ("home_over_0_5", "home_under_0_5"),
-        "total=1.5": ("home_over_1_5", "home_under_1_5"),
-    },
-    "20": {
-        "total=0.5": ("away_over_0_5", "away_under_0_5"),
-        "total=1.5": ("away_over_1_5", "away_under_1_5"),
-    },
-}
+_FIXED = FIXED_SPORTYBET
+_OVER_UNDER = OVER_UNDER_SPORTYBET
 
 # Double chance quotes three outcomes that each cover two of three results, so
 # the book's implied probabilities sum to 2.0 rather than 1.0 when the margin
@@ -658,7 +605,7 @@ def _tournament_name(value: str) -> bool:
 
 
 def match_fixture(board: dict, home: str, away: str, commence: str = "",
-                  league: str = "") -> dict:
+                  league: str = "", event_id: str | None = None) -> dict:
     """Resolve one provider fixture with explicit failure diagnostics."""
     meta = board_metadata(board)
     base = {"entry": None, "snapshot_id": meta.get("snapshot_id"),
@@ -670,6 +617,27 @@ def match_fixture(board: dict, home: str, away: str, commence: str = "",
 
     h, a = _norm(home), _norm(away)
     hs, as_ = _squad(home), _squad(away)
+    if event_id:
+        identified = [entry for _, entry in _board_entries(board)
+                      if str(entry.get("event_id") or "") == str(event_id)]
+        if len(identified) > 1:
+            return {**base, "status": "FIXTURE_MAPPING_FAILED",
+                    "failure_reason": "SportyBet event ID is ambiguous on the board"}
+        if identified:
+            entry = identified[0]
+            delta = _kickoff_delta_minutes(entry, commence)
+            if (entry.get("home_squad", "") != hs or
+                    entry.get("away_squad", "") != as_ or
+                    delta is None or delta > KICKOFF_TOLERANCE_MINUTES):
+                return {**base, "status": "FIXTURE_MAPPING_FAILED",
+                        "failure_reason": "stored SportyBet event ID conflicts with fixture identity"}
+            league_score = _league_score(league, entry.get("competition") or "")
+            if league and league_score == 0 and _tournament_name(league):
+                return {**base, "status": "FIXTURE_MAPPING_FAILED",
+                        "failure_reason": "stored SportyBet event ID conflicts with competition"}
+            return {**base, "status": "MATCHED", "entry": entry,
+                    "fixture_match_method": "stored_event_id",
+                    "fixture_match_confidence": 1.0}
     exact_key = f"{h}|{a}"
     exact_values = board.get(exact_key) or []
     if isinstance(exact_values, dict):
@@ -760,9 +728,10 @@ def match_fixture(board: dict, home: str, away: str, commence: str = "",
 
 
 def availability_for(board: dict, home: str, away: str, commence: str,
-                     league: str, market: str) -> dict:
+                     league: str, market: str,
+                     event_id: str | None = None) -> dict:
     """Exact fixture + market + outcome + active odds availability."""
-    matched = match_fixture(board, home, away, commence, league)
+    matched = match_fixture(board, home, away, commence, league, event_id)
     base = {
         "status": matched["status"], "sportybet_available": False,
         "event_id": None, "market_id": None, "outcome_id": None,

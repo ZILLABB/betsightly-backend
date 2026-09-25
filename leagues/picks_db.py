@@ -277,7 +277,8 @@ def pending_slips(before_date: str) -> list[Any]:
         return []
 
 
-def settle_slip(slip_id: int, pick_results: list[str]) -> Optional[str]:
+def settle_slip(slip_id: int, pick_results: list[str],
+                details: list[dict] | None = None) -> Optional[str]:
     """Apply per-leg outcomes and set the slip status.
 
     An accumulator wins only when every leg wins, and is lost the moment any
@@ -300,8 +301,21 @@ def settle_slip(slip_id: int, pick_results: list[str]) -> Optional[str]:
             if not slip:
                 return None
             picks = json.loads(slip.picks or "[]")
-            for pick, outcome in zip(picks, pick_results):
+            pick_results = list(pick_results)
+            for index, (pick, outcome) in enumerate(zip(picks, pick_results)):
+                detail = (details or [])[index] if index < len(details or []) else {}
+                if pick.get("status") in ("won", "lost", "void"):
+                    # Never rewrite a previously verified historical leg.
+                    pick_results[index] = pick["status"]
+                    continue
                 pick["status"] = outcome
+                if outcome == "pending":
+                    if detail.get("settlement_pending_reason"):
+                        pick["settlement_pending_reason"] = detail["settlement_pending_reason"]
+                else:
+                    pick.pop("settlement_pending_reason", None)
+                    if detail.get("settlement_evidence") and not pick.get("settlement_evidence"):
+                        pick["settlement_evidence"] = detail["settlement_evidence"]
 
             already_decided = slip.status in ("won", "lost", "void")
 
