@@ -135,7 +135,7 @@ def test_builder_settlement_routes_through_canonical_market_evaluator(monkeypatc
     )
     settled = {}
 
-    def capture(fingerprint, outcomes):
+    def capture(fingerprint, outcomes, details=None):
         settled.update(fingerprint=fingerprint, outcomes=outcomes)
         return "won"
 
