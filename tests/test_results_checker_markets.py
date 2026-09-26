@@ -149,3 +149,22 @@ def test_builder_settlement_routes_through_canonical_market_evaluator(monkeypatc
     )
     assert settled == {"fingerprint": "build-1", "outcomes": ["void", "won"]}
     assert result["won"] == 1
+
+def test_chain_sync_falls_back_for_legacy_daily_feed_signature(monkeypatch):
+    from leagues import results_checker
+
+    calls = []
+
+    def legacy_build(force=False):
+        calls.append(force)
+        return None
+
+    monkeypatch.setattr(
+        "leagues.daily_feed.build_daily_accumulators",
+        legacy_build,
+    )
+
+    results_checker._sync_chain_to_db()
+
+    assert calls == [False]
+

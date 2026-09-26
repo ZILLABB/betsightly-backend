@@ -854,7 +854,14 @@ def _sync_chain_to_db():
     """Ensure all chain days are persisted to the DB (uses cached result, no API calls)."""
     try:
         from leagues.daily_feed import build_daily_accumulators
-        result = build_daily_accumulators(force=False, allow_generation=False)
+        try:
+            result = build_daily_accumulators(
+                force=False, allow_generation=False
+            )
+        except TypeError as exc:
+            if "allow_generation" not in str(exc):
+                raise
+            result = build_daily_accumulators(force=False)
         if result:
             chain = (result.get("accumulators") or {}).get("rollover", {}).get("chain", [])
             logger.info(f"Chain sync: {len(chain)} days in chain after rebuild")
