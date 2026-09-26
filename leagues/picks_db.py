@@ -297,7 +297,12 @@ def settle_slip(slip_id: int, pick_results: list[str],
     try:
         db = SessionLocal()
         try:
-            slip = db.query(PublishedSlip).filter(PublishedSlip.id == slip_id).first()
+            slip = (
+                db.query(PublishedSlip)
+                .filter(PublishedSlip.id == slip_id)
+                .with_for_update()
+                .first()
+            )
             if not slip:
                 return None
             picks = json.loads(slip.picks or "[]")

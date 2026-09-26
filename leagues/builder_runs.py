@@ -183,9 +183,13 @@ def settle_prediction(fingerprint: str, outcomes: list[str],
     """Apply market-aware leg results already evaluated by results_checker."""
     ensure_table()
     with engine.begin() as conn:
-        row = conn.execute(select(builder_predictions).where(
-            builder_predictions.c.selection_fingerprint == fingerprint
-        )).mappings().first()
+        row = conn.execute(
+            select(builder_predictions)
+            .where(
+                builder_predictions.c.selection_fingerprint == fingerprint
+            )
+            .with_for_update()
+        ).mappings().first()
         if not row:
             return None
         picks = json.loads(row["picks"] or "[]")
