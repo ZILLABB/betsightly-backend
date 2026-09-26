@@ -19,7 +19,7 @@ REVIEWED_SCOPE = {
     "published_scanned": 35,
     "published_legs": 157,
     "published_targets": 35,
-    "published_status_changes": 29,
+    "published_status_changes": 30,
     "published_unresolved": 6,
     "builder_scanned": 14,
     "builder_legs": 148,
