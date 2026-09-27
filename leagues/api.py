@@ -337,6 +337,35 @@ class BuilderRevisionRequest(BaseModel):
     target: float | None = None
 
 
+
+class BuilderV2Filters(BaseModel):
+    horizon: str = "7_days"
+    markets: list[str] = Field(default_factory=list)
+    min_odds: float | None = None
+    max_odds: float | None = None
+    min_probability: float | None = Field(default=None, ge=0, le=1)
+    min_trust_grade: str = "B"
+    include_leagues: list[str] = Field(default_factory=list)
+    exclude_leagues: list[str] = Field(default_factory=list)
+    exclude_fixture_ids: list[str] = Field(default_factory=list)
+    exclude_team_ids: list[str] = Field(default_factory=list)
+    require_bookable: bool = True
+
+
+class BuilderV2Request(BuilderV2Filters):
+    mode: str
+    target_odds: float | None = None
+    game_count: int | None = None
+    max_games: int | None = None
+
+
+class BuilderV2ManualRequest(BuilderV2Filters):
+    selection_ids: list[str] = Field(default_factory=list)
+
+
+def _builder_v2_payload(model: BaseModel) -> dict:
+    return model.model_dump() if hasattr(model, "model_dump") else model.dict()
+
 def _start_builder_revision(target: float, horizon: str, result: dict) -> dict:
     try:
         from leagues.engine import prepared_board_status
@@ -433,6 +462,55 @@ async def slip_builder_targets():
                  "multiplied by the displayed odds. It is an estimate, not a guarantee."),
     }
 
+
+@router.post("/slip-builder/v2/candidates")
+async def slip_builder_v2_candidates(request: BuilderV2Filters):
+    """Browse the current approved V2 candidate board without rebuilding providers."""
+    import asyncio
+    from leagues.builder_v2 import list_candidates
+
+    return await asyncio.to_thread(
+        list_candidates,
+        _builder_v2_payload(request),
+    )
+
+
+@router.post("/slip-builder/v2/generate")
+async def slip_builder_v2_generate(request: BuilderV2Request):
+    """Build target/count/strongest V2 slips from the prepared trusted board."""
+    import asyncio
+    from leagues.builder_v2 import generate_v2
+
+    request_id = str(uuid.uuid4())
+    result = await asyncio.to_thread(
+        generate_v2,
+        _builder_v2_payload(request),
+    )
+    if (request.mode == "target_odds"
+            and result.get("status") == "success"
+            and result.get("games")):
+        result = _start_builder_revision(
+            float(request.target_odds or result.get("odds") or 2),
+            request.horizon,
+            result,
+        )
+    result["request_id"] = request_id
+    return result
+
+
+@router.post("/slip-builder/v2/manual")
+async def slip_builder_v2_manual(request: BuilderV2ManualRequest):
+    """Book only the exact approved selection IDs chosen by the user."""
+    import asyncio
+    from leagues.builder_v2 import manual_build
+
+    request_id = str(uuid.uuid4())
+    result = await asyncio.to_thread(
+        manual_build,
+        _builder_v2_payload(request),
+    )
+    result["request_id"] = request_id
+    return result
 
 @router.post("/slip-builder/generate")
 async def slip_builder_generate(target: float, horizon: str = "week",

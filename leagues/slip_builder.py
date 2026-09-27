@@ -418,7 +418,8 @@ def _horizon_end(now_dt: datetime, horizon: str) -> datetime:
     """
     if now_dt.tzinfo is None:
         now_dt = now_dt.replace(tzinfo=timezone.utc)
-    days = HORIZONS.get(horizon, POOL_DAYS)
+    v2_days = {"3_days": 3, "7_days": 7}
+    days = HORIZONS.get(horizon, v2_days.get(horizon, POOL_DAYS))
     wat_date = now_dt.astimezone(WAT).date() + timedelta(days=days - 1)
     return datetime.combine(wat_date, time.max, tzinfo=WAT).astimezone(timezone.utc)
 
