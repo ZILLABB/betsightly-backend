@@ -29,6 +29,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Leagues"])
 
 
+@router.get(
+    "/slip-builder/v2/shadow-board-status",
+    dependencies=[Depends(require_api_key)],
+)
+async def sportybet_first_shadow_board_status():
+    """Read-only SportyBet-first shadow inventory health.
+
+    This endpoint never refreshes providers and the shadow inventory cannot
+    publish, book, settle, or replace the production prepared board.
+    """
+    from leagues.sportybet_inventory import status
+
+    return status()
+
+
 @router.get("/decision-quality", dependencies=[Depends(require_api_key)])
 async def decision_quality_report(days: int = 30):
     """Admin-gated, read-only readiness and decision-memory report."""
