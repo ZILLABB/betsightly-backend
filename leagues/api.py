@@ -44,6 +44,17 @@ async def sportybet_first_shadow_board_status():
     return status()
 
 
+@router.get(
+    "/slip-builder/v2/shadow-board-compare",
+    dependencies=[Depends(require_api_key)],
+)
+async def sportybet_first_shadow_board_compare():
+    """Cache-only SportyBet-first coverage/support comparison."""
+    from leagues.sportybet_shadow_compare import status
+
+    return status()
+
+
 @router.get("/decision-quality", dependencies=[Depends(require_api_key)])
 async def decision_quality_report(days: int = 30):
     """Admin-gated, read-only readiness and decision-memory report."""
