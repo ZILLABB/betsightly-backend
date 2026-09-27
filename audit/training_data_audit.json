@@ -1,0 +1,807 @@
+{
+  "schema": 1,
+  "generated_at": "2026-09-27T10:51:48.608388+00:00",
+  "read_only": true,
+  "input": {
+    "path": "C:\\Users\\ZILLAB\\Desktop\\betsightly-training-data-audit-20260927\\data\\api-football\\matches.csv",
+    "size_bytes": 6130576,
+    "sha256": "4b66f1e69b8c78eaf2f31daceb6b2ad3279590fedf3095d746114714b8e9b98b"
+  },
+  "rows": {
+    "raw": 66699,
+    "valid_finished": 66699,
+    "invalid_training_rows": 0,
+    "derived_trainable_samples_after_5_game_warmup": 64218
+  },
+  "date_range": {
+    "min": "2019-02-22",
+    "max": "2026-06-01",
+    "invalid_dates": 0
+  },
+  "scores": {
+    "invalid_home": 0,
+    "invalid_away": 0,
+    "negative_rows": 0,
+    "extreme_gt_15_rows": 0
+  },
+  "columns": [
+    "home_team",
+    "away_team",
+    "date",
+    "home_score",
+    "away_score",
+    "ht_home_score",
+    "ht_away_score",
+    "league_id",
+    "league_name",
+    "country",
+    "league_tier",
+    "season",
+    "home_team_id",
+    "away_team_id",
+    "avg_odds_home",
+    "avg_odds_draw",
+    "avg_odds_away",
+    "avg_odds_over25",
+    "avg_odds_under25"
+  ],
+  "missingness": {
+    "home_team": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "away_team": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "date": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "home_score": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "away_score": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "ht_home_score": {
+      "count": 27986,
+      "pct": 41.9587
+    },
+    "ht_away_score": {
+      "count": 27986,
+      "pct": 41.9587
+    },
+    "league_id": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "league_name": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "country": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "league_tier": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "season": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "home_team_id": {
+      "count": 66699,
+      "pct": 100.0
+    },
+    "away_team_id": {
+      "count": 66699,
+      "pct": 100.0
+    },
+    "avg_odds_home": {
+      "count": 38,
+      "pct": 0.057
+    },
+    "avg_odds_draw": {
+      "count": 38,
+      "pct": 0.057
+    },
+    "avg_odds_away": {
+      "count": 38,
+      "pct": 0.057
+    },
+    "avg_odds_over25": {
+      "count": 27976,
+      "pct": 41.9437
+    },
+    "avg_odds_under25": {
+      "count": 27976,
+      "pct": 41.9437
+    }
+  },
+  "odds": {
+    "columns": {
+      "avg_odds_home": {
+        "present": true,
+        "nonempty": 66661,
+        "valid_decimal": 66661,
+        "invalid_nonempty": 0,
+        "coverage_pct": 99.943
+      },
+      "avg_odds_draw": {
+        "present": true,
+        "nonempty": 66661,
+        "valid_decimal": 66661,
+        "invalid_nonempty": 0,
+        "coverage_pct": 99.943
+      },
+      "avg_odds_away": {
+        "present": true,
+        "nonempty": 66661,
+        "valid_decimal": 66661,
+        "invalid_nonempty": 0,
+        "coverage_pct": 99.943
+      },
+      "avg_odds_over25": {
+        "present": true,
+        "nonempty": 38723,
+        "valid_decimal": 38723,
+        "invalid_nonempty": 0,
+        "coverage_pct": 58.0563
+      },
+      "avg_odds_under25": {
+        "present": true,
+        "nonempty": 38723,
+        "valid_decimal": 38723,
+        "invalid_nonempty": 0,
+        "coverage_pct": 58.0563
+      }
+    },
+    "complete_1x2_rows": 66661,
+    "complete_1x2_pct": 99.943,
+    "complete_ou25_rows": 38723,
+    "complete_ou25_pct": 58.0563
+  },
+  "duplicates": {
+    "duplicate_rows": 0,
+    "duplicate_keys": 0,
+    "conflicting_score_keys": 0,
+    "conflicting_examples": [],
+    "examples": []
+  },
+  "team_country_collisions": [],
+  "league_name_country_collisions": [
+    {
+      "normalized_league": "bundesliga",
+      "countries": [
+        "Austria",
+        "Germany"
+      ],
+      "country_count": 2
+    },
+    {
+      "normalized_league": "serie a",
+      "countries": [
+        "Brazil",
+        "Italy"
+      ],
+      "country_count": 2
+    },
+    {
+      "normalized_league": "super league",
+      "countries": [
+        "China",
+        "Greece"
+      ],
+      "country_count": 2
+    }
+  ],
+  "coverage": {
+    "countries": [
+      {
+        "country": "England",
+        "rows": 6524
+      },
+      {
+        "country": "Spain",
+        "rows": 5894
+      },
+      {
+        "country": "Italy",
+        "rows": 5320
+      },
+      {
+        "country": "France",
+        "rows": 4746
+      },
+      {
+        "country": "Germany",
+        "rows": 4284
+      },
+      {
+        "country": "USA",
+        "rows": 3507
+      },
+      {
+        "country": "Argentina",
+        "rows": 3419
+      },
+      {
+        "country": "Brazil",
+        "rows": 2837
+      },
+      {
+        "country": "Turkey",
+        "rows": 2476
+      },
+      {
+        "country": "Japan",
+        "rows": 2372
+      },
+      {
+        "country": "Mexico",
+        "rows": 2317
+      },
+      {
+        "country": "Romania",
+        "rows": 2181
+      },
+      {
+        "country": "Portugal",
+        "rows": 2142
+      },
+      {
+        "country": "Belgium",
+        "rows": 2085
+      },
+      {
+        "country": "Netherlands",
+        "rows": 2068
+      },
+      {
+        "country": "Poland",
+        "rows": 2066
+      },
+      {
+        "country": "Norway",
+        "rows": 1778
+      },
+      {
+        "country": "Sweden",
+        "rows": 1771
+      },
+      {
+        "country": "China",
+        "rows": 1728
+      },
+      {
+        "country": "Greece",
+        "rows": 1669
+      },
+      {
+        "country": "Scotland",
+        "rows": 1547
+      },
+      {
+        "country": "Denmark",
+        "rows": 1399
+      },
+      {
+        "country": "Austria",
+        "rows": 1361
+      },
+      {
+        "country": "Finland",
+        "rows": 1208
+      }
+    ],
+    "leagues": [
+      {
+        "league_id": 40,
+        "league_name": "Championship",
+        "country": "England",
+        "rows": 3864
+      },
+      {
+        "league_id": 253,
+        "league_name": "MLS",
+        "country": "USA",
+        "rows": 3507
+      },
+      {
+        "league_id": 128,
+        "league_name": "Primera Division",
+        "country": "Argentina",
+        "rows": 3419
+      },
+      {
+        "league_id": 141,
+        "league_name": "Segunda Division",
+        "country": "Spain",
+        "rows": 3234
+      },
+      {
+        "league_id": 71,
+        "league_name": "Serie A",
+        "country": "Brazil",
+        "rows": 2837
+      },
+      {
+        "league_id": 136,
+        "league_name": "Serie B",
+        "country": "Italy",
+        "rows": 2660
+      },
+      {
+        "league_id": 39,
+        "league_name": "Premier League",
+        "country": "England",
+        "rows": 2660
+      },
+      {
+        "league_id": 135,
+        "league_name": "Serie A",
+        "country": "Italy",
+        "rows": 2660
+      },
+      {
+        "league_id": 140,
+        "league_name": "La Liga",
+        "country": "Spain",
+        "rows": 2660
+      },
+      {
+        "league_id": 203,
+        "league_name": "Super Lig",
+        "country": "Turkey",
+        "rows": 2476
+      },
+      {
+        "league_id": 62,
+        "league_name": "Ligue 2",
+        "country": "France",
+        "rows": 2410
+      },
+      {
+        "league_id": 98,
+        "league_name": "J1 League",
+        "country": "Japan",
+        "rows": 2372
+      },
+      {
+        "league_id": 61,
+        "league_name": "Ligue 1",
+        "country": "France",
+        "rows": 2336
+      },
+      {
+        "league_id": 262,
+        "league_name": "Liga MX",
+        "country": "Mexico",
+        "rows": 2317
+      },
+      {
+        "league_id": 283,
+        "league_name": "Liga I",
+        "country": "Romania",
+        "rows": 2181
+      },
+      {
+        "league_id": 78,
+        "league_name": "Bundesliga",
+        "country": "Germany",
+        "rows": 2142
+      },
+      {
+        "league_id": 94,
+        "league_name": "Primeira Liga",
+        "country": "Portugal",
+        "rows": 2142
+      },
+      {
+        "league_id": 79,
+        "league_name": "2. Bundesliga",
+        "country": "Germany",
+        "rows": 2142
+      },
+      {
+        "league_id": 144,
+        "league_name": "Pro League",
+        "country": "Belgium",
+        "rows": 2085
+      },
+      {
+        "league_id": 88,
+        "league_name": "Eredivisie",
+        "country": "Netherlands",
+        "rows": 2068
+      },
+      {
+        "league_id": 106,
+        "league_name": "Ekstraklasa",
+        "country": "Poland",
+        "rows": 2066
+      },
+      {
+        "league_id": 103,
+        "league_name": "Eliteserien",
+        "country": "Norway",
+        "rows": 1778
+      },
+      {
+        "league_id": 113,
+        "league_name": "Allsvenskan",
+        "country": "Sweden",
+        "rows": 1771
+      },
+      {
+        "league_id": 169,
+        "league_name": "Super League",
+        "country": "China",
+        "rows": 1728
+      },
+      {
+        "league_id": 197,
+        "league_name": "Super League",
+        "country": "Greece",
+        "rows": 1669
+      },
+      {
+        "league_id": 179,
+        "league_name": "Premiership",
+        "country": "Scotland",
+        "rows": 1547
+      },
+      {
+        "league_id": 119,
+        "league_name": "Superliga",
+        "country": "Denmark",
+        "rows": 1399
+      },
+      {
+        "league_id": 218,
+        "league_name": "Bundesliga",
+        "country": "Austria",
+        "rows": 1361
+      },
+      {
+        "league_id": 244,
+        "league_name": "Veikkausliiga",
+        "country": "Finland",
+        "rows": 1208
+      }
+    ],
+    "seasons": [
+      {
+        "season": "2019",
+        "rows": 8751
+      },
+      {
+        "season": "2020",
+        "rows": 8927
+      },
+      {
+        "season": "2021",
+        "rows": 9588
+      },
+      {
+        "season": "2022",
+        "rows": 9711
+      },
+      {
+        "season": "2023",
+        "rows": 9636
+      },
+      {
+        "season": "2024",
+        "rows": 9586
+      },
+      {
+        "season": "2025",
+        "rows": 9503
+      },
+      {
+        "season": "2026",
+        "rows": 997
+      }
+    ],
+    "dataset_league_ids": [
+      39,
+      40,
+      61,
+      62,
+      71,
+      78,
+      79,
+      88,
+      94,
+      98,
+      103,
+      106,
+      113,
+      119,
+      128,
+      135,
+      136,
+      140,
+      141,
+      144,
+      169,
+      179,
+      197,
+      203,
+      218,
+      244,
+      253,
+      262,
+      283
+    ],
+    "configured_live_api_football_league_ids": [
+      1,
+      2,
+      3,
+      11,
+      13,
+      39,
+      40,
+      61,
+      62,
+      71,
+      78,
+      79,
+      88,
+      94,
+      98,
+      103,
+      113,
+      119,
+      128,
+      135,
+      136,
+      140,
+      141,
+      144,
+      179,
+      203,
+      244,
+      253,
+      262,
+      265,
+      292,
+      307,
+      848
+    ],
+    "configured_live_ids_missing_from_dataset": [
+      1,
+      2,
+      3,
+      11,
+      13,
+      265,
+      292,
+      307,
+      848
+    ],
+    "dataset_ids_not_in_live_target_registry": [
+      106,
+      169,
+      197,
+      218,
+      283
+    ]
+  },
+  "provenance": {
+    "present_fields": [],
+    "missing_fields": [
+      "source",
+      "source_url",
+      "source_file",
+      "source_row_id",
+      "odds_source",
+      "odds_snapshot_type",
+      "odds_captured_at"
+    ],
+    "fetcher_contract": {
+      "present": true,
+      "declared_output": "data/api-football/matches.csv",
+      "actual_source": "football-data.co.uk",
+      "main_season_start": 2019,
+      "main_season_end": 2025,
+      "configured_main_seasons": {
+        "1920": 2019,
+        "2021": 2020,
+        "2122": 2021,
+        "2223": 2022,
+        "2324": 2023,
+        "2425": 2024,
+        "2526": 2025
+      },
+      "configured_recent_seasons": {
+        "2223": 2022,
+        "2324": 2023,
+        "2425": 2024,
+        "2526": 2025
+      },
+      "main_league_count": 16,
+      "extra_league_count": 14,
+      "docs_claim_2012": true,
+      "odds_comment_claims_closing": true,
+      "avg_price_checked_before_avg_closing": true
+    }
+  },
+  "training_contract": {
+    "model_meta_path": "C:\\Users\\ZILLAB\\Desktop\\betsightly-training-data-audit-20260927\\models\\api_football\\meta.json",
+    "model_trained_at": "2026-06-11T00:20:27.113640",
+    "meta_n_samples": 64218,
+    "meta_split": {
+      "train": 44952,
+      "calib": 9633,
+      "test": 9633
+    },
+    "feature_columns": [
+      "home_win_rate_5",
+      "home_win_rate_10",
+      "home_draw_rate_5",
+      "home_goals_scored_5",
+      "home_goals_conceded_5",
+      "home_home_win_rate_5",
+      "home_home_goals_5",
+      "away_win_rate_5",
+      "away_win_rate_10",
+      "away_draw_rate_5",
+      "away_goals_scored_5",
+      "away_goals_conceded_5",
+      "away_away_win_rate_5",
+      "away_away_goals_5",
+      "h2h_home_win_rate",
+      "h2h_avg_goals",
+      "h2h_btts_rate",
+      "h2h_meetings",
+      "league_tier",
+      "mkt_prob_home",
+      "mkt_prob_draw",
+      "mkt_prob_away",
+      "mkt_has_odds",
+      "mkt_prob_over25",
+      "mkt_ou_has"
+    ],
+    "market_feature_columns": [
+      "mkt_prob_home",
+      "mkt_prob_draw",
+      "mkt_prob_away",
+      "mkt_has_odds",
+      "mkt_prob_over25",
+      "mkt_ou_has"
+    ],
+    "direct_outcome_columns_in_features": [],
+    "derived_split": {
+      "derived_samples": 64218,
+      "train": 44952,
+      "calib": 9633,
+      "test": 9633,
+      "train_start": "2019-04-05",
+      "train_end": "2024-05-15",
+      "calib_start": "2024-05-15",
+      "calib_end": "2025-05-17",
+      "test_start": "2025-05-17",
+      "test_end": "2026-06-01",
+      "train_calib_same_date_boundary": true,
+      "calib_test_same_date_boundary": true
+    },
+    "supported_team_types_declared": null
+  },
+  "findings": [
+    {
+      "severity": "HIGH",
+      "code": "MISLEADING_SOURCE_PATH",
+      "message": "The training CSV path says api-football although the active free fetcher writes football-data.co.uk rows there.",
+      "evidence": {
+        "path": "C:\\Users\\ZILLAB\\Desktop\\betsightly-training-data-audit-20260927\\data\\api-football\\matches.csv",
+        "fetcher_source": "football-data.co.uk"
+      }
+    },
+    {
+      "severity": "HIGH",
+      "code": "ROW_PROVENANCE_ABSENT",
+      "message": "Rows do not carry source/source-file/odds-source/timestamp provenance, so price timing and origin cannot be proven row by row.",
+      "evidence": {
+        "missing_fields": [
+          "source",
+          "source_url",
+          "source_file",
+          "source_row_id",
+          "odds_source",
+          "odds_snapshot_type",
+          "odds_captured_at"
+        ]
+      }
+    },
+    {
+      "severity": "HIGH",
+      "code": "ODDS_TIMING_SEMANTICS_AMBIGUOUS",
+      "message": "Fetcher labels odds as average closing odds but checks AvgH/AvgD/AvgA before AvgCH/AvgCD/AvgCA.",
+      "evidence": {
+        "avg_before_closing": true
+      }
+    },
+    {
+      "severity": "MEDIUM",
+      "code": "FETCHER_WINDOW_DOC_MISMATCH",
+      "message": "Fetcher documentation claims data from 2012, but the configured main-league season window begins later.",
+      "evidence": {
+        "docs_claim": 2012,
+        "configured_start": 2019,
+        "configured_end": 2025
+      }
+    },
+    {
+      "severity": "MEDIUM",
+      "code": "SPLIT_BOUNDARY_SHARES_CALENDAR_DATE",
+      "message": "Row-count splits can place fixtures from one calendar date on both sides of a train/calibration or calibration/test boundary.",
+      "evidence": {
+        "derived_samples": 64218,
+        "train": 44952,
+        "calib": 9633,
+        "test": 9633,
+        "train_start": "2019-04-05",
+        "train_end": "2024-05-15",
+        "calib_start": "2024-05-15",
+        "calib_end": "2025-05-17",
+        "test_start": "2025-05-17",
+        "test_end": "2026-06-01",
+        "train_calib_same_date_boundary": true,
+        "calib_test_same_date_boundary": true
+      }
+    },
+    {
+      "severity": "PASS",
+      "code": "NO_DIRECT_TARGET_COLUMNS",
+      "message": "The current model feature list contains no direct final-score/result columns.",
+      "evidence": {
+        "feature_count": 25,
+        "market_feature_count": 6
+      }
+    },
+    {
+      "severity": "HIGH",
+      "code": "LIVE_LEAGUES_WITHOUT_CURRENT_DATASET_ID",
+      "message": "Some API-Football live target leagues have no matching league_id in the current training CSV.",
+      "evidence": {
+        "league_ids": [
+          1,
+          2,
+          3,
+          11,
+          13,
+          265,
+          292,
+          307,
+          848
+        ],
+        "count": 9
+      }
+    },
+    {
+      "severity": "MEDIUM",
+      "code": "MARKET_ODDS_NOT_UNIVERSAL",
+      "message": "1X2 bookmaker features are missing for part of the corpus; model behavior therefore spans priced and default-filled rows.",
+      "evidence": {
+        "complete_rows": 66661,
+        "coverage_pct": 99.943
+      }
+    },
+    {
+      "severity": "MEDIUM",
+      "code": "OU25_ODDS_SPARSE",
+      "message": "O/U 2.5 price features are not available across the full corpus.",
+      "evidence": {
+        "complete_rows": 38723,
+        "coverage_pct": 58.0563
+      }
+    }
+  ]
+}
