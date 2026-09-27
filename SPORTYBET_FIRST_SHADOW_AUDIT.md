@@ -89,3 +89,20 @@ boards and verify that SportyBet-first improves usable fixture coverage without
 increasing wrong fixture mappings, stale mappings, memory pressure, or booking
 mismatches. The production ESPN-first pipeline remains authoritative until that
 separate evidence review is explicitly approved.
+
+## Canonical mapping persistence
+
+Verified identity is not rediscovered on every run. The explicit shadow
+maintenance layer can seed canonical identities from the already-prepared
+production board and persist verified provider mappings.
+
+Important constraints:
+
+- Public/admin status endpoints never write mappings.
+- `reconcile_snapshot(...)` is an explicit maintenance operation only.
+- Existing verified provider fixture mappings are reused first (`EXACT_ID`).
+- Only `EXACT_ALIAS`, `TEAM_KICKOFF`, and `FUZZY_VERIFIED` successes may be
+  persisted automatically by the explicit maintenance operation.
+- `AMBIGUOUS` and `UNMATCHED` are never persisted as verified mappings.
+- SportyBet event IDs map to canonical fixture IDs; SportyBet team IDs are not
+  fabricated when the provider payload does not expose them.
