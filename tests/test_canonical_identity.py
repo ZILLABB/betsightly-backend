@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from leagues import canonical_identity as ci
 
 
@@ -150,6 +152,73 @@ def test_unmatched_fixture_is_not_forced():
     result = ci.resolve_fixture(
         provider("sp-1", "Completely Different", "Unknown Club"),
         [canonical("fx-1", "Arsenal", "Chelsea")],
+    )
+
+    assert result["state"] == ci.UNMATCHED
+    assert result["canonical_fixture_id"] is None
+
+@pytest.mark.parametrize(
+    ("provider_competition", "canonical_competition"),
+    [
+        ("LALIGA HYPERMOTION", "LaLiga 2"),
+        ("League Two", "EFL League Two"),
+        ("Brasileiro Serie B", "Brasileirão Série B"),
+        ("Liga DIMAYOR", "Categoría Primera A"),
+        ("Primera Division", "Primera División Uruguay"),
+        ("Int. Friendly Games", "International Friendly"),
+        ("Primera LPF", "Liga Profesional Argentina"),
+        ("League One", "EFL League One"),
+        ("National Womens Soccer League", "NWSL"),
+        ("Championship", "Scottish Championship"),
+        ("Brasileiro Serie A", "Brasileirão Série A"),
+        ("Division de Honor", "División Profesional Paraguay"),
+        ("Liga Nacional", "Liga Nacional Guatemala"),
+        ("Primera Division", "Primera División El Salvador"),
+        ("Liga 1", "Liga 1 Perú"),
+        ("Primera Division", "Primera División Chile"),
+    ],
+)
+def test_verified_live_competition_name_equivalences(
+    provider_competition,
+    canonical_competition,
+):
+    result = ci.resolve_fixture(
+        provider(
+            "sp-1",
+            "Example United",
+            "Example City",
+            competition=provider_competition,
+        ),
+        [
+            canonical(
+                "fx-1",
+                "Example United",
+                "Example City",
+                competition=canonical_competition,
+            )
+        ],
+    )
+
+    assert result["state"] == ci.TEAM_KICKOFF
+    assert result["canonical_fixture_id"] == "fx-1"
+
+
+def test_generic_competition_label_is_not_a_wildcard():
+    result = ci.resolve_fixture(
+        provider(
+            "sp-1",
+            "Example United",
+            "Example City",
+            competition="Primera Division",
+        ),
+        [
+            canonical(
+                "fx-1",
+                "Example United",
+                "Example City",
+                competition="Primera B Chile",
+            )
+        ],
     )
 
     assert result["state"] == ci.UNMATCHED

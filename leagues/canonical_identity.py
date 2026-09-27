@@ -48,8 +48,38 @@ def normalize_team(name: str) -> str:
 
 
 def normalize_competition(name: str) -> str:
-    value = sportybet._norm(name or "")
-    return sportybet._COMPETITION_ALIASES.get(value, value)
+    """Competition-specific normalization shared with the mature matcher.
+
+    Team normalization intentionally removes club-noise words; competition
+    normalization must not do that because words such as "league", "division",
+    and country qualifiers carry identity.
+    """
+    return sportybet._norm_competition(name or "")
+
+
+# Verified provider-name equivalences observed on the live SportyBet/ESPN
+# shadow parity audit. These are deliberately pair-specific rather than broad
+# aliases: generic labels such as "Primera Division", "Championship", and
+# "Liga Nacional" remain valid only against the exact verified competition
+# names below, while team/squad/kickoff guards still have to pass.
+_COMPETITION_EQUIVALENT_PAIRS = {
+    frozenset(("laliga 2", "laliga hypermotion")),
+    frozenset(("efl league two", "league two")),
+    frozenset(("brasileirao serie b", "brasileiro serie b")),
+    frozenset(("categoria primera a", "liga dimayor")),
+    frozenset(("primera division uruguay", "primera division")),
+    frozenset(("international friendly", "int friendly games")),
+    frozenset(("liga profesional argentina", "primera lpf")),
+    frozenset(("efl league one", "league one")),
+    frozenset(("nwsl", "national womens soccer league")),
+    frozenset(("scottish championship", "championship")),
+    frozenset(("brasileirao serie a", "brasileiro serie a")),
+    frozenset(("division profesional paraguay", "division de honor")),
+    frozenset(("liga nacional guatemala", "liga nacional")),
+    frozenset(("primera division el salvador", "primera division")),
+    frozenset(("liga 1 peru", "liga 1")),
+    frozenset(("primera division chile", "primera division")),
+}
 
 
 def _kickoff(value) -> datetime | None:
@@ -94,7 +124,9 @@ def _team_score(provider_name: str, canonical_name: str) -> float:
 def _competition_matches(provider_name: str, canonical_name: str) -> bool:
     left = normalize_competition(provider_name)
     right = normalize_competition(canonical_name)
-    return not left or not right or left == right
+    if not left or not right or left == right:
+        return True
+    return frozenset((left, right)) in _COMPETITION_EQUIVALENT_PAIRS
 
 
 def _fixture_score(provider_fixture: dict, canonical_fixture: dict) -> tuple[float, str] | None:
