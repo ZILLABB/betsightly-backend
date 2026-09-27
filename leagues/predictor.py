@@ -184,7 +184,25 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
     # ── Derived markets ────────────────────────────────────
     total_lam = home_lam + away_lam
     p_o15 = _p_over(1.5, total_lam)
-    p_o25 = odds.get("implied_over") or _p_over(2.5, total_lam)
+
+    # `implied_over` belongs to whatever total line the provider supplied.
+    # It is an Over 2.5 probability only when that quoted line is exactly 2.5.
+    # For any other line, use the total-goals mean inferred from that quote
+    # and derive P(Over 2.5) from the same Poisson distribution.
+    try:
+        quoted_ou_line = float(ou_line)
+    except (TypeError, ValueError):
+        quoted_ou_line = 2.5
+
+    p_o25 = (
+        float(market_over)
+        if (
+            market_over is not None
+            and abs(quoted_ou_line - 2.5) < 1e-9
+        )
+        else _p_over(2.5, total_lam)
+    )
+
     p_o35 = _p_over(3.5, total_lam)
     p_btts = (1.0 - math.exp(-home_lam)) * (1.0 - math.exp(-away_lam))
 
