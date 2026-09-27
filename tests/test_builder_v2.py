@@ -830,3 +830,111 @@ def test_strongest_remains_quality_first_with_multiple_markets(monkeypatch):
         "over_1_5": 10,
     }
     assert "market_balance" not in result
+
+def test_game_count_explicit_markets_request_all_eligible_candidates(monkeypatch):
+    picks = [
+        _pick(
+            1,
+            market="over_1_5",
+            probability=.82,
+            fixture="fixture-a",
+        ),
+        _pick(
+            2,
+            market="over_2_5",
+            probability=.70,
+            fixture="fixture-b",
+        ),
+    ]
+
+    _wire(monkeypatch, picks)
+
+    from leagues import slip_builder
+
+    seen = {}
+
+    def approved(
+        pool,
+        require_bookable=True,
+        include_all_eligible=False,
+    ):
+        seen["include_all_eligible"] = include_all_eligible
+
+        # Reproduce canonical behaviour:
+        # the secondary market disappears unless the caller explicitly asks
+        # for every eligible selection.
+        if include_all_eligible:
+            return list(pool), collections.Counter()
+
+        return [
+            pick
+            for pick in pool
+            if pick["market"] == "over_1_5"
+        ], collections.Counter()
+
+    monkeypatch.setattr(
+        slip_builder,
+        "approved_builder_candidates",
+        approved,
+    )
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 2,
+        "horizon": "7_days",
+        "markets": ["over_1_5", "over_2_5"],
+    })
+
+    assert seen["include_all_eligible"] is True
+    assert result["status"] == "success"
+    assert result["market_distribution"] == {
+        "over_1_5": 1,
+        "over_2_5": 1,
+    }
+
+
+def test_strongest_does_not_request_all_eligible_candidates(monkeypatch):
+    picks = [
+        _pick(
+            1,
+            market="over_1_5",
+            probability=.90,
+            fixture="fixture-a",
+        ),
+        _pick(
+            2,
+            market="over_2_5",
+            probability=.70,
+            fixture="fixture-b",
+        ),
+    ]
+
+    _wire(monkeypatch, picks)
+
+    from leagues import slip_builder
+
+    seen = {}
+
+    def approved(
+        pool,
+        require_bookable=True,
+        include_all_eligible=False,
+    ):
+        seen["include_all_eligible"] = include_all_eligible
+        return list(pool), collections.Counter()
+
+    monkeypatch.setattr(
+        slip_builder,
+        "approved_builder_candidates",
+        approved,
+    )
+
+    result = builder_v2.generate_v2({
+        "mode": "strongest",
+        "max_games": 2,
+        "horizon": "7_days",
+        "markets": ["over_1_5", "over_2_5"],
+    })
+
+    assert result["status"] == "success"
+    assert seen["include_all_eligible"] is False

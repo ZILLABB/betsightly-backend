@@ -590,8 +590,30 @@ def generate_v2(options: dict) -> dict:
     if mode not in {"target_odds", "game_count", "strongest"}:
         return {"status": "error", "reason": "mode must be target_odds, game_count, or strongest."}
 
+    # Game Count with explicit markets is structure-driven:
+    # the user chooses the allowed market mix while BetSightly still
+    # enforces probability, trust, capability and exact bookability.
+    #
+    # Strongest remains canonical quality-first. But Game Count must see
+    # every otherwise-approved candidate from the user's selected markets
+    # before balancing, or canonical fixture ranking can silently remove
+    # a valid secondary market.
+    requested_markets = [
+        str(value).strip()
+        for value in (options.get("markets") or [])
+        if str(value).strip()
+    ]
+
+    use_all_eligible = (
+        mode == "game_count"
+        and bool(requested_markets)
+    )
+
     try:
-        board, pool, diagnostics = _candidate_pool(options)
+        board, pool, diagnostics = _candidate_pool(
+            options,
+            include_all_eligible=use_all_eligible,
+        )
     except BuilderV2BoardUnavailable as exc:
         return exc.response(mode)
     except ValueError as exc:
