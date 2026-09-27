@@ -1,0 +1,143 @@
+{
+  "schema": 1,
+  "generated_at": "2026-09-27T11:07:14.760048+00:00",
+  "read_only": true,
+  "training_csv": "C:\\Users\\ZILLAB\\Desktop\\betsightly-training-data-audit-20260927\\data\\api-football\\matches.csv",
+  "github_history_csv": "C:\\Users\\ZILLAB\\Desktop\\betsightly-training-data-audit-20260927\\data\\github-football\\Matches.csv",
+  "live_target_ids": [
+    1,
+    2,
+    3,
+    11,
+    13,
+    39,
+    40,
+    61,
+    62,
+    71,
+    78,
+    79,
+    88,
+    94,
+    98,
+    103,
+    113,
+    119,
+    128,
+    135,
+    136,
+    140,
+    141,
+    144,
+    179,
+    203,
+    244,
+    253,
+    262,
+    265,
+    292,
+    307,
+    848
+  ],
+  "training_ids": [
+    39,
+    40,
+    61,
+    62,
+    71,
+    78,
+    79,
+    88,
+    94,
+    98,
+    103,
+    106,
+    113,
+    119,
+    128,
+    135,
+    136,
+    140,
+    141,
+    144,
+    169,
+    179,
+    197,
+    203,
+    218,
+    244,
+    253,
+    262,
+    283
+  ],
+  "missing_live_target_ids": [
+    1,
+    2,
+    3,
+    11,
+    13,
+    265,
+    292,
+    307,
+    848
+  ],
+  "github_history_available": true,
+  "github_history_rows": 228377,
+  "github_history_divisions": 38,
+  "targets": {
+    "1": {
+      "name": "FIFA World Cup",
+      "current_training_covered": false,
+      "existing_github_source_status": "NO_LOCAL_CANDIDATE",
+      "candidates": []
+    },
+    "2": {
+      "name": "UEFA Champions League",
+      "current_training_covered": false,
+      "existing_github_source_status": "NO_LOCAL_CANDIDATE",
+      "candidates": []
+    },
+    "3": {
+      "name": "UEFA Europa League",
+      "current_training_covered": false,
+      "existing_github_source_status": "NO_LOCAL_CANDIDATE",
+      "candidates": []
+    },
+    "11": {
+      "name": "Copa Sudamericana",
+      "current_training_covered": false,
+      "existing_github_source_status": "NO_LOCAL_CANDIDATE",
+      "candidates": []
+    },
+    "13": {
+      "name": "Copa Libertadores",
+      "current_training_covered": false,
+      "existing_github_source_status": "NO_LOCAL_CANDIDATE",
+      "candidates": []
+    },
+    "265": {
+      "name": "Chilean Primera Division",
+      "current_training_covered": false,
+      "existing_github_source_status": "NO_LOCAL_CANDIDATE",
+      "candidates": []
+    },
+    "292": {
+      "name": "K League 1",
+      "current_training_covered": false,
+      "existing_github_source_status": "NO_LOCAL_CANDIDATE",
+      "candidates": []
+    },
+    "307": {
+      "name": "Saudi Pro League",
+      "current_training_covered": false,
+      "existing_github_source_status": "NO_LOCAL_CANDIDATE",
+      "candidates": []
+    },
+    "848": {
+      "name": "UEFA Conference League",
+      "current_training_covered": false,
+      "existing_github_source_status": "NO_LOCAL_CANDIDATE",
+      "candidates": []
+    }
+  }
+}
