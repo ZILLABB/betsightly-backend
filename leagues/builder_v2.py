@@ -354,6 +354,143 @@ def _select_unique(pool: list[dict], limit: int) -> list[dict]:
     return selected
 
 
+def _select_market_balanced(
+    pool: list[dict],
+    limit: int,
+    requested_markets: list[str] | None,
+) -> tuple[list[dict], dict]:
+    """Select Game Count picks while respecting the user's requested market mix.
+
+    Every candidate has already passed BetSightly's quality, trust and exact
+    SportyBet-bookability gates. When multiple markets are explicitly selected,
+    Game Count mode tries to distribute slots evenly across them. If one market
+    cannot supply its share, remaining slots are filled by the strongest
+    qualifying picks from the other requested markets. Quality floors are never
+    lowered to manufacture the requested mix.
+    """
+    markets: list[str] = []
+    for value in requested_markets or []:
+        market = str(value or "").strip()
+        if market and market not in markets:
+            markets.append(market)
+
+    # No explicit multi-market request: preserve the mature quality-first path.
+    if len(markets) <= 1:
+        selected = _select_unique(pool, limit)
+        delivered = collections.Counter(
+            str(pick.get("market") or "unknown") for pick in selected
+        )
+        targets = {markets[0]: limit} if markets else {}
+        shortfalls = {
+            market: max(0, target - int(delivered.get(market, 0)))
+            for market, target in targets.items()
+            if target > int(delivered.get(market, 0))
+        }
+        return selected, {
+            "applied": False,
+            "requested_markets": markets,
+            "target_distribution": targets,
+            "delivered_distribution": dict(delivered),
+            "shortfalls": shortfalls,
+            "quality_floor_preserved": True,
+            "strategy": "quality_first",
+        }
+
+    base, remainder = divmod(limit, len(markets))
+    targets = {
+        market: base + (1 if index < remainder else 0)
+        for index, market in enumerate(markets)
+    }
+
+    ranked = sorted(pool, key=_rank_key)
+    buckets = {
+        market: [
+            pick for pick in ranked
+            if str(pick.get("market") or "") == market
+        ]
+        for market in markets
+    }
+    positions = {market: 0 for market in markets}
+
+    selected: list[dict] = []
+    seen_fixtures: set[str] = set()
+    seen_teams: set[str] = set()
+    delivered: collections.Counter[str] = collections.Counter()
+
+    def add_if_available(pick: dict) -> bool:
+        fixture_id = str(pick.get("match_id") or "")
+        teams = _fixture_teams(pick)
+
+        if fixture_id in seen_fixtures:
+            return False
+        if teams and teams & seen_teams:
+            return False
+
+        selected.append(pick)
+        seen_fixtures.add(fixture_id)
+        seen_teams.update(teams)
+        delivered[str(pick.get("market") or "unknown")] += 1
+        return True
+
+    # First pass: round-robin toward the requested even market allocation.
+    while len(selected) < limit:
+        progressed = False
+
+        for market in markets:
+            if len(selected) >= limit:
+                break
+            if delivered[market] >= targets[market]:
+                continue
+
+            bucket = buckets[market]
+            while positions[market] < len(bucket):
+                pick = bucket[positions[market]]
+                positions[market] += 1
+                if add_if_available(pick):
+                    progressed = True
+                    break
+
+        if not progressed:
+            break
+
+    # Second pass: if a market could not fill its requested share, backfill
+    # with the strongest remaining candidate from the user's other markets.
+    if len(selected) < limit:
+        selected_ids = {
+            str(pick.get("selection_id") or "") for pick in selected
+        }
+
+        for pick in ranked:
+            if len(selected) >= limit:
+                break
+            selection_id = str(pick.get("selection_id") or "")
+            if selection_id in selected_ids:
+                continue
+            if add_if_available(pick):
+                selected_ids.add(selection_id)
+
+    selected.sort(key=_rank_key)
+
+    shortfalls = {
+        market: max(0, targets[market] - int(delivered.get(market, 0)))
+        for market in markets
+        if targets[market] > int(delivered.get(market, 0))
+    }
+
+    return selected, {
+        "applied": True,
+        "requested_markets": markets,
+        "target_distribution": targets,
+        "delivered_distribution": {
+            market: int(delivered.get(market, 0))
+            for market in markets
+        },
+        "shortfalls": shortfalls,
+        "quality_floor_preserved": True,
+        "strategy": "even_requested_markets_then_quality_backfill",
+    }
+
+
 def _booking_is_exact(booking: dict) -> bool:
     return bool(
         booking.get("status") == "active"
@@ -508,8 +645,22 @@ def generate_v2(options: dict) -> dict:
                 "mode": mode,
                 "reason": f"game_count must be between 1 and {MAX_GAME_COUNT}.",
             }
-        selected = _select_unique(pool, requested)
-        return _selected_response(mode, options, selected, board, diagnostics, requested)
+
+        selected, market_balance = _select_market_balanced(
+            pool,
+            requested,
+            list(options.get("markets") or []),
+        )
+        result = _selected_response(
+            mode,
+            options,
+            selected,
+            board,
+            diagnostics,
+            requested,
+        )
+        result["market_balance"] = market_balance
+        return result
 
     max_games = int(options.get("max_games") or 10)
     if not (1 <= max_games <= MAX_GAME_COUNT):

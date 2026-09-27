@@ -699,3 +699,134 @@ def test_target_v2_scrubs_nonvalidated_booking_at_public_boundary(monkeypatch):
     assert result["booking"]["share_code"] is None
     assert result["booking"]["share_url"] is None
     assert result["booking"]["actionable"] is False
+
+def test_game_count_balances_two_explicit_markets(monkeypatch):
+    picks = (
+        [
+            _pick(
+                i,
+                market="over_1_5",
+                probability=.90,
+                fixture=f"o15-{i}",
+            )
+            for i in range(30)
+        ]
+        +
+        [
+            _pick(
+                100 + i,
+                market="over_2_5",
+                probability=.72,
+                fixture=f"o25-{i}",
+            )
+            for i in range(30)
+        ]
+    )
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 20,
+        "horizon": "7_days",
+        "markets": ["over_1_5", "over_2_5"],
+    })
+
+    assert result["status"] == "success"
+    assert result["delivered_game_count"] == 20
+    assert result["market_distribution"] == {
+        "over_1_5": 10,
+        "over_2_5": 10,
+    }
+    assert result["market_balance"]["applied"] is True
+    assert result["market_balance"]["target_distribution"] == {
+        "over_1_5": 10,
+        "over_2_5": 10,
+    }
+    assert result["market_balance"]["shortfalls"] == {}
+    assert result["market_balance"]["quality_floor_preserved"] is True
+
+
+def test_game_count_backfills_when_one_requested_market_is_short(monkeypatch):
+    picks = (
+        [
+            _pick(
+                i,
+                market="over_1_5",
+                probability=.82,
+                fixture=f"o15-{i}",
+            )
+            for i in range(30)
+        ]
+        +
+        [
+            _pick(
+                100 + i,
+                market="over_2_5",
+                probability=.72,
+                fixture=f"o25-{i}",
+            )
+            for i in range(4)
+        ]
+    )
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 20,
+        "horizon": "7_days",
+        "markets": ["over_1_5", "over_2_5"],
+    })
+
+    assert result["status"] == "success"
+    assert result["delivered_game_count"] == 20
+    assert result["market_distribution"] == {
+        "over_1_5": 16,
+        "over_2_5": 4,
+    }
+    assert result["market_balance"]["target_distribution"] == {
+        "over_1_5": 10,
+        "over_2_5": 10,
+    }
+    assert result["market_balance"]["shortfalls"] == {
+        "over_2_5": 6,
+    }
+    assert result["market_balance"]["quality_floor_preserved"] is True
+
+
+def test_strongest_remains_quality_first_with_multiple_markets(monkeypatch):
+    picks = (
+        [
+            _pick(
+                i,
+                market="over_1_5",
+                probability=.90,
+                fixture=f"strong-o15-{i}",
+            )
+            for i in range(10)
+        ]
+        +
+        [
+            _pick(
+                100 + i,
+                market="over_2_5",
+                probability=.70,
+                fixture=f"strong-o25-{i}",
+            )
+            for i in range(10)
+        ]
+    )
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "strongest",
+        "max_games": 10,
+        "horizon": "7_days",
+        "markets": ["over_1_5", "over_2_5"],
+    })
+
+    assert result["status"] == "success"
+    assert result["legs"] == 10
+    assert result["market_distribution"] == {
+        "over_1_5": 10,
+    }
+    assert "market_balance" not in result
