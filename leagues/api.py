@@ -324,6 +324,8 @@ async def get_bookings(date: str | None = None):
 _SLIP_CACHE: dict = {}
 _SLIP_TTL = 1800
 _SLIP_LOCKS: dict = {}
+_V2_TARGET_CACHE: dict = {}
+_V2_TARGET_LOCKS: dict = {}
 _BUILDER_REVISION_LOCKS: dict = {}
 
 
@@ -479,21 +481,74 @@ async def slip_builder_v2_candidates(request: BuilderV2Filters):
 async def slip_builder_v2_generate(request: BuilderV2Request):
     """Build target/count/strongest V2 slips from the prepared trusted board."""
     import asyncio
+    import json
+    import time as _t
+
     from leagues.builder_v2 import generate_v2
 
     request_id = str(uuid.uuid4())
-    result = await asyncio.to_thread(
-        generate_v2,
-        _builder_v2_payload(request),
-    )
-    if (request.mode == "target_odds"
-            and result.get("status") == "success"
-            and result.get("games")):
+    payload = _builder_v2_payload(request)
+
+    if request.mode == "target_odds":
+        from leagues.daily_feed import _publish_date
+
+        cache_key = (
+            json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+            _publish_date(),
+        )
+        hit = _V2_TARGET_CACHE.get(cache_key)
+        if (
+            hit
+            and (_t.time() - hit["ts"]) < _SLIP_TTL
+            and _cached_slip_is_placeable(hit["result"])
+        ):
+            result = {**hit["result"], "cached": True}
+        else:
+            lock = _V2_TARGET_LOCKS.setdefault(
+                cache_key,
+                asyncio.Lock(),
+            )
+            async with lock:
+                hit = _V2_TARGET_CACHE.get(cache_key)
+                if (
+                    hit
+                    and (_t.time() - hit["ts"]) < _SLIP_TTL
+                    and _cached_slip_is_placeable(hit["result"])
+                ):
+                    result = {**hit["result"], "cached": True}
+                else:
+                    result = await asyncio.to_thread(
+                        generate_v2,
+                        payload,
+                    )
+                    if result.get("status") == "success":
+                        _V2_TARGET_CACHE[cache_key] = {
+                            "result": result,
+                            "ts": _t.time(),
+                        }
+                    result = {**result, "cached": False}
+    else:
+        result = await asyncio.to_thread(
+            generate_v2,
+            payload,
+        )
+
+    if (
+        request.mode == "target_odds"
+        and result.get("status") == "success"
+        and result.get("games")
+    ):
         result = _start_builder_revision(
             float(request.target_odds or result.get("odds") or 2),
             request.horizon,
             result,
         )
+
     result["request_id"] = request_id
     return result
 

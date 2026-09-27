@@ -362,3 +362,176 @@ def test_manual_browsing_requests_all_eligible_markets(monkeypatch):
     assert seen["include_all_eligible"] is True
     assert len(result["candidates"]) == 2
     assert sum(bool(item["recommended_for_fixture"]) for item in result["candidates"]) == 1
+def test_target_mode_accepts_all_v2_horizons(monkeypatch):
+    picks = [_pick(i) for i in range(5)]
+    _wire(monkeypatch, picks)
+    from leagues import slip_builder
+
+    horizons = []
+
+    def prepared(horizon, force=False, refresh_sportybet=False):
+        horizons.append(horizon)
+        return (
+            {"__meta__": {"snapshot_id": "sporty-snap"}},
+            list(picks),
+            {"candidate_retrieval": 1},
+        )
+
+    monkeypatch.setattr(slip_builder, "prepared_bookable_pool", prepared)
+    monkeypatch.setattr(
+        slip_builder,
+        "build_slip",
+        lambda target, **kwargs: {
+            "ok": False,
+            "best_reachable": 1.5,
+            "reason": "test",
+        },
+    )
+    monkeypatch.setattr(
+        slip_builder,
+        "_public_result_from_build",
+        lambda target, horizon, built, board: {
+            "status": "unavailable",
+            "target": target,
+            "best_reachable": built["best_reachable"],
+            "reason": built["reason"],
+            "games": [],
+        },
+    )
+
+    for horizon in ("today", "3_days", "7_days"):
+        result = builder_v2.generate_v2({
+            "mode": "target_odds",
+            "target_odds": 50,
+            "horizon": horizon,
+        })
+        assert result["requested_target"] == 50
+
+    assert horizons == ["today", "3_days", "7_days"]
+
+
+def test_manual_started_selection_fails_without_code(monkeypatch):
+    picks = [_pick(1)]
+    _wire(monkeypatch, picks)
+    from leagues import booking
+
+    monkeypatch.setattr(
+        booking,
+        "create_booking",
+        lambda *args, **kwargs: {
+            "status": "started",
+            "booking_status": "UNAVAILABLE",
+            "share_code": None,
+            "failure_category": "FIXTURE_STARTED",
+            "reason": "fixture started",
+        },
+    )
+
+    result = builder_v2.manual_build({
+        "selection_ids": ["s1-over_1_5"],
+        "horizon": "7_days",
+    })
+
+    assert result["status"] == "SELECTIONS_CHANGED"
+    assert not (result.get("booking") or {}).get("share_code")
+
+
+def test_manual_suspended_selection_fails_without_code(monkeypatch):
+    picks = [_pick(1)]
+    _wire(monkeypatch, picks)
+    from leagues import booking
+
+    monkeypatch.setattr(
+        booking,
+        "create_booking",
+        lambda *args, **kwargs: {
+            "status": "unavailable",
+            "booking_status": "UNAVAILABLE",
+            "share_code": None,
+            "failure_category": "OUTCOME_SUSPENDED",
+            "reason": "selection suspended",
+        },
+    )
+
+    result = builder_v2.manual_build({
+        "selection_ids": ["s1-over_1_5"],
+        "horizon": "7_days",
+    })
+
+    assert result["status"] == "SELECTIONS_CHANGED"
+    assert not (result.get("booking") or {}).get("share_code")
+
+
+def test_manual_ignores_spoofed_client_price(monkeypatch):
+    picks = [_pick(1, odds=1.5)]
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.manual_build({
+        "selection_ids": ["s1-over_1_5"],
+        "horizon": "7_days",
+        "odds": 99.0,
+        "confidence": 0.99,
+        "home_team": "Spoofed",
+    })
+
+    assert result["status"] == "success"
+    assert result["odds"] == 1.5
+    assert result["games"][0]["odds"] == 1.5
+
+
+def test_v2_target_api_reuses_cached_generation(monkeypatch):
+    import asyncio
+
+    from leagues import api, builder_v2, daily_feed
+
+    api._V2_TARGET_CACHE.clear()
+    api._V2_TARGET_LOCKS.clear()
+    calls = []
+
+    monkeypatch.setattr(
+        builder_v2,
+        "generate_v2",
+        lambda payload: calls.append(payload) or {
+            "status": "success",
+            "mode": "target_odds",
+            "target": 10,
+            "odds": 10.2,
+            "games": [{"match_id": "m1"}],
+            "booking": {
+                "status": "active",
+                "share_code": "CODE",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        api,
+        "_start_builder_revision",
+        lambda target, horizon, result: {
+            **result,
+            "builder_run_id": "run",
+            "revision": 1,
+            "edit_token": "token",
+        },
+    )
+    monkeypatch.setattr(
+        api,
+        "_cached_slip_is_placeable",
+        lambda result: True,
+    )
+    monkeypatch.setattr(
+        daily_feed,
+        "_publish_date",
+        lambda: "2099-01-01",
+    )
+
+    request = api.BuilderV2Request(
+        mode="target_odds",
+        target_odds=10,
+        horizon="7_days",
+    )
+    first = asyncio.run(api.slip_builder_v2_generate(request))
+    second = asyncio.run(api.slip_builder_v2_generate(request))
+
+    assert first["cached"] is False
+    assert second["cached"] is True
+    assert len(calls) == 1
