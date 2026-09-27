@@ -55,6 +55,17 @@ async def sportybet_first_shadow_board_compare():
     return status()
 
 
+@router.get(
+    "/slip-builder/v2/shadow-prediction-board-status",
+    dependencies=[Depends(require_api_key)],
+)
+async def sportybet_first_shadow_prediction_board_status():
+    """Read-only current-engine overlap on the SportyBet-first shadow board."""
+    from leagues.sportybet_shadow_board import status
+
+    return status()
+
+
 @router.get("/decision-quality", dependencies=[Depends(require_api_key)])
 async def decision_quality_report(days: int = 30):
     """Admin-gated, read-only readiness and decision-memory report."""
