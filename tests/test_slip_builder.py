@@ -536,6 +536,8 @@ def test_generate_reuses_availability_from_same_board_snapshot(monkeypatch):
         "leagues.booking.create_or_reuse_generated_booking",
         lambda *a, **k: {
             "status": "active",
+            "booking_status": "FULL",
+            "readback_validation": "PASSED",
             "share_code": "ABC123",
             "timing_ms": {"validation_readback": 4},
         },
@@ -632,7 +634,7 @@ def test_progressive_ladder_returns_and_books_cap_seven_best_available(monkeypat
         "leagues.booking.create_or_reuse_generated_booking",
         lambda games, board, **kwargs: {
             "status": "active", "booking_status": "FULL",
-            "validation_status": "PASSED", "share_code": "BEST121",
+            "readback_validation": "PASSED", "share_code": "BEST121",
         },
     )
 
@@ -644,7 +646,7 @@ def test_progressive_ladder_returns_and_books_cap_seven_best_available(monkeypat
     assert result["odds"] == pytest.approx(121)
     assert result["market_cap_used"] == 7
     assert result["booking"]["share_code"] == "BEST121"
-    assert result["booking"]["validation_status"] == "PASSED"
+    assert result["booking"]["readback_validation"] == "PASSED"
 
 
 def test_capped_generate_exposes_safe_game_diagnostics_not_internal_picks(

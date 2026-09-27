@@ -1463,9 +1463,23 @@ def _public_result_from_build(
     try:
         from leagues.booking import create_or_reuse_generated_booking
 
-        out["booking"] = create_or_reuse_generated_booking(
+        booking = create_or_reuse_generated_booking(
             games, board, predicted_odds=built["odds"], force=force_booking
         )
+        exact_booking = bool(
+            booking.get("status") == "active"
+            and booking.get("booking_status") in {"FULL", "REBUILT_FULL"}
+            and str(booking.get("readback_validation") or "").upper() == "PASSED"
+            and booking.get("share_code")
+        )
+        if not exact_booking:
+            booking = {
+                **booking,
+                "share_code": None,
+                "share_url": None,
+                "actionable": False,
+            }
+        out["booking"] = booking
     except Exception as exc:
         logger.warning("slip booking failed: %s", exc)
         out["booking"] = {

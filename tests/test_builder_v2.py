@@ -535,3 +535,165 @@ def test_v2_target_api_reuses_cached_generation(monkeypatch):
     assert first["cached"] is False
     assert second["cached"] is True
     assert len(calls) == 1
+
+
+def test_real_approval_rejects_sparse_extreme_live_price():
+    from leagues.slip_builder import approved_builder_candidates
+
+    pick = _pick(901, probability=.90, odds=4.90)
+    pick.update({
+        "calibration_sample": 500,
+        "competition_historical_sample": 0,
+        "base_rate_source": "global_default",
+        "sportybet_availability": {
+            "sportybet_available": True,
+            "status": "BOOKABLE",
+            "sportybet_odds": 4.90,
+            "board_snapshot_id": "real-gate-snapshot",
+        },
+    })
+
+    approved, rejections = approved_builder_candidates(
+        [pick],
+        require_bookable=True,
+        include_all_eligible=True,
+    )
+
+    assert approved == []
+    assert (
+        rejections["sparse_competition_evidence"]
+        or rejections["large_model_market_disagreement"]
+        or rejections["SPARSE_COMPETITION_EVIDENCE"]
+        or rejections["EXTREME_PRICE_MODEL_DISAGREEMENT"]
+    )
+
+
+def test_require_bookable_false_cannot_weaken_v2_server_gate(monkeypatch):
+    from leagues import engine, slip_builder, sportybet
+
+    unbookable = _pick(902)
+    unbookable["bookable"] = False
+    unbookable["sportybet_availability"] = {
+        "sportybet_available": False,
+        "status": "MARKET_NOT_FOUND",
+    }
+
+    monkeypatch.setattr(
+        engine,
+        "prepared_board_status",
+        lambda **kwargs: {
+            "ready": True,
+            "stale": False,
+            "board_snapshot_id": "prepared-snap",
+        },
+    )
+    monkeypatch.setattr(
+        slip_builder,
+        "prepared_bookable_pool",
+        lambda horizon, force=False, refresh_sportybet=False: (
+            {"__meta__": {"snapshot_id": "sporty-snap"}},
+            [unbookable],
+            {"candidate_retrieval": 1},
+        ),
+    )
+    monkeypatch.setattr(
+        sportybet,
+        "board_metadata",
+        lambda board: {
+            "snapshot_id": "sporty-snap",
+            "is_complete": True,
+            "generated_at": "2099-01-01T00:00:00Z",
+        },
+    )
+
+    result = builder_v2.list_candidates({
+        "horizon": "7_days",
+        "require_bookable": False,
+        "min_trust_grade": "D",
+        "min_probability": 0,
+    })
+
+    assert result["status"] == "success"
+    assert result["candidate_count"] == 0
+    assert result["candidates"] == []
+    assert result["selection_diagnostics"]["require_bookable_effective"] is True
+    assert (
+        result["selection_diagnostics"]["trust_rejection_reasons"]
+        .get("sportybet_selection_not_exactly_bookable", 0)
+        == 1
+    )
+
+
+def test_automatic_v2_modes_scrub_failed_readback_code(monkeypatch):
+    picks = [_pick(903)]
+    _wire(monkeypatch, picks)
+
+    from leagues import booking
+    monkeypatch.setattr(
+        booking,
+        "create_booking",
+        lambda *args, **kwargs: {
+            "status": "invalid",
+            "booking_status": "VALIDATION_FAILED",
+            "readback_validation": "FAILED",
+            "share_code": "SHOULD_NOT_LEAK",
+            "share_url": "https://unsafe.example",
+            "failure_category": "READBACK_MISMATCH",
+        },
+    )
+
+    for payload in (
+        {"mode": "game_count", "game_count": 1, "horizon": "7_days"},
+        {"mode": "strongest", "max_games": 1, "horizon": "7_days"},
+    ):
+        result = builder_v2.generate_v2(payload)
+        assert result["status"] == "success"
+        assert result["booking"]["share_code"] is None
+        assert result["booking"]["share_url"] is None
+        assert result["booking"]["actionable"] is False
+
+
+def test_target_v2_scrubs_nonvalidated_booking_at_public_boundary(monkeypatch):
+    picks = [_pick(904)]
+    _wire(monkeypatch, picks)
+
+    from leagues import booking, slip_builder
+
+    monkeypatch.setattr(
+        slip_builder,
+        "build_slip",
+        lambda target, **kwargs: {
+            "ok": True,
+            "result_status": "TARGET_REACHED",
+            "optimization_status": "OPTIMAL",
+            "picks": [picks[0]],
+            "odds": 1.5,
+            "legs": 1,
+            "hit_probability": .75,
+            "expected_return": 1.125,
+            "avg_confidence": .75,
+        },
+    )
+    monkeypatch.setattr(
+        booking,
+        "create_or_reuse_generated_booking",
+        lambda *args, **kwargs: {
+            "status": "invalid",
+            "booking_status": "VALIDATION_FAILED",
+            "readback_validation": "FAILED",
+            "share_code": "SHOULD_NOT_LEAK",
+            "share_url": "https://unsafe.example",
+            "failure_category": "READBACK_MISMATCH",
+        },
+    )
+
+    result = builder_v2.generate_v2({
+        "mode": "target_odds",
+        "target_odds": 2,
+        "horizon": "7_days",
+    })
+
+    assert result["status"] == "success"
+    assert result["booking"]["share_code"] is None
+    assert result["booking"]["share_url"] is None
+    assert result["booking"]["actionable"] is False
