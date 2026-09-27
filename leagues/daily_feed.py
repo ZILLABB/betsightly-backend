@@ -573,6 +573,66 @@ def build_daily_accumulators(force: bool = False) -> dict:
     return result
 
 
+def recover_today_empty_tiers() -> dict:
+    """Fill eligible empty tiers from the already prepared board only.
+
+    This is a future scheduler entry point, deliberately not enabled by the
+    scheduler.  It never calls ``run_pipeline`` and therefore cannot turn a
+    maintenance action into an ESPN/history/ELO rebuild.
+    """
+    from leagues.engine import kickoff_wat_date, prepared_board_status, prepared_pipeline
+    from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
+    from leagues.selection import select_banker
+    from leagues.booking import create_booking
+    from leagues import sportybet
+    from leagues.empty_tier_recovery import recover_empty_tier
+
+    publish_date = _publish_date()
+    card = _load_locked(publish_date)
+    if not card:
+        return {"status": "NO_CARD", "tiers": {}}
+    board_status = prepared_board_status(days_ahead=7)
+    if not board_status.get("ready"):
+        return {"status": "BOARD_UNAVAILABLE", "tiers": {}, "board": board_status}
+    picks, _ = prepared_pipeline(days_ahead=7)
+    target_day = card.get("_fixture_target_date") or publish_date
+    now = datetime.now(timezone.utc)
+    bookable_from = (now + BOOKING_BUFFER).isoformat().replace("+00:00", "Z")
+    day = [p for p in picks if kickoff_wat_date(p.get("_fixture", {}).get("commence_time")) == target_day
+           and p.get("_fixture", {}).get("commence_time", "") >= bookable_from]
+    rules = {
+        "banker": (None, 1, MIN_PUBLISHABLE_CONFIDENCE, 0.0, 0.80),
+        "2_odds": (2.0, 4, MIN_PUBLISHABLE_CONFIDENCE, .82, .92),
+        "5_odds": (5.0, 8, MIN_PUBLISHABLE_CONFIDENCE, .72, .80),
+        "10_odds": (10.0, 10, MIN_PUBLISHABLE_CONFIDENCE, .63, .80),
+    }
+    out = {}
+    board = None
+    for tier, rule in rules.items():
+        if isinstance(card.get(tier), dict) and card[tier].get("selected") and card[tier].get("games"):
+            continue
+        if tier == "banker":
+            selected, odds, probability = select_banker(day)
+            reason = "No safe banker is available on the prepared board."
+        else:
+            selected, reason = _select_tier(day, *rule)
+            selected, odds, probability = selected
+        if not selected:
+            out[tier] = {"status": "UNREACHABLE", "reason": reason,
+                         "best_reachable": 0.0, "binding_constraint": "QUALITY_POLICY"}
+            continue
+        candidate = {"selected": True, "games": _by_kickoff([to_game(p) for p in selected]),
+                     "total_odds": round(odds, 2), "hit_probability": round(probability, 4),
+                     "presentation": "accumulator"}
+        board = board or sportybet.fetch_board()
+        booking = create_booking(candidate["games"], board, booking_status="FULL",
+                                 original_games=candidate["games"], predicted_odds=candidate["total_odds"])
+        out[tier] = recover_empty_tier(
+            publish_date=publish_date, tier=tier, candidate=candidate, booking=booking,
+            decision_snapshot_id=board_status.get("board_snapshot_id"))
+    return {"status": "COMPLETE", "tiers": out, "board": board_status}
+
+
 def _by_kickoff(games: list[dict]) -> list[dict]:
     """Order games by kick-off, earliest first."""
     return sorted(games, key=lambda g: (g.get("kickoff") or g.get("date") or "9999"))

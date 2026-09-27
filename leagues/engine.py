@@ -90,15 +90,26 @@ def _covering_entry(days_ahead: int, now_ts: float,
     if not valid:
         return None
     # Prefer a healthy board while it remains within the explicit stale-safe
-    # window. Within the same health class, newest wins; requested horizon is
-    # only the final tie-breaker. This prevents a smaller, older degraded board
-    # from masking a newer complete covering board.
+    # window.  A degraded refresh is not automatically better merely because
+    # it is newer: replacing 99/116 working leagues with a 48/116 response
+    # makes the Builder materially worse.  Coverage wins within the degraded
+    # class, then freshness decides between equally useful boards.
+    def board_quality(item: dict) -> tuple[float, int]:
+        provider = item["metadata"].get("provider") or {}
+        requested = int(provider.get("requested_league_count")
+                        or len(provider.get("leagues_requested") or []) or 0)
+        successful = int(provider.get("successful_league_count")
+                         or len(provider.get("successful_leagues") or []) or 0)
+        coverage = successful / requested if requested else 0.0
+        return coverage, int(item["metadata"].get("fixture_count") or 0)
+
     return max(
         valid,
         key=lambda item: (
             bool((item["metadata"].get("provider") or {}).get(
                 "complete", True
             )),
+            *board_quality(item),
             float(item["ts"]),
             -int(item["metadata"]["requested_days"]),
         ),

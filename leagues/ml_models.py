@@ -175,6 +175,28 @@ def build_features(fixture: dict, index) -> list[float] | None:
     return [float(values.get(col, 0.0)) for col in meta["feature_columns"]]
 
 
+def feature_provenance(fixture: dict, index) -> str:
+    """State how much real fixture history supported the ML feature vector.
+
+    A vector can be syntactically valid while almost every football feature is
+    the neutral value.  That is not an independent model opinion and must not
+    be used to corroborate a pick.
+    """
+    try:
+        team_type = fixture.get("team_type") or "CLUB"
+        home = fixture["home"]["name"]
+        away = fixture["away"]["name"]
+        home_n = len(index.by_team.get((team_type, home)) or [])
+        away_n = len(index.by_team.get((team_type, away)) or [])
+    except (AttributeError, KeyError, TypeError):
+        return "UNAVAILABLE"
+    if home_n >= 3 and away_n >= 3:
+        return "REAL"
+    if home_n or away_n:
+        return "PARTIAL"
+    return "NEUTRAL_FALLBACK"
+
+
 # Whether the isotonic layer actually helped, per target, measured on held-out
 # data at training time (model_weights.json):
 #
@@ -266,7 +288,10 @@ def predict_fixture(fixture: dict, index) -> dict | None:
     if not out:
         return None
 
-    result: dict = {"families": len(FAMILIES)}
+    result: dict = {
+        "families": len(FAMILIES),
+        "provenance": feature_provenance(fixture, index),
+    }
 
     if "match_result" in out:
         # meta stores this as {"0": "Away Win", "1": "Draw", "2": "Home Win"} —

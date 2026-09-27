@@ -442,10 +442,12 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     from database import log_pool_exception, log_pool_status
     from utils.runtime_metrics import log_runtime_memory
 
-    builder_run_id = str(uuid.uuid4())
+    # Audit/request identity is deliberately distinct from the persisted
+    # revision-chain ID returned by ``create_initial_run``.
+    request_id = str(uuid.uuid4())
 
     log_pool_status(
-        "builder_start", builder_run_id=builder_run_id,
+        "builder_start", request_id=request_id,
         target=round(float(target), 2),
         horizon=horizon,
         refresh=bool(refresh),
@@ -478,14 +480,14 @@ async def slip_builder_generate(target: float, horizon: str = "week",
         response = _start_builder_revision(
             target, horizon, {**hit["result"], "cached": True}
         )
-        response["builder_run_id"] = builder_run_id
+        response["request_id"] = request_id
         try:
             from leagues.builder_runs import record_run
             record_run(target, horizon, refresh, response, cached=True,
-                       request_id=builder_run_id)
+                       request_id=request_id)
         except Exception as exc:
             logger.warning(f"Builder run audit failed: {exc}")
-        _log_builder_board(builder_run_id, target, horizon, response)
+        _log_builder_board(response.get("builder_run_id", request_id), target, horizon, response)
         log_pool_status(
             "builder_end", target=key[0], horizon=horizon,
             status=response.get("status"), cached=True,
@@ -509,7 +511,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             "board": board,
             "requested_target": round(float(target), 2),
             "horizon": horizon,
-            "builder_run_id": builder_run_id,
+            "request_id": request_id,
         }
         log_pool_status(
             "builder_end", target=key[0], horizon=horizon,
@@ -519,7 +521,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             "builder_end", target=key[0], horizon=horizon,
             status="board_refreshing", cached=False,
         )
-        _log_builder_board(builder_run_id, target, horizon, response)
+        _log_builder_board(request_id, target, horizon, response)
         return response
     if board.get("stale"):
         # Keep serving the last safe evaluated board while a single background
@@ -540,14 +542,14 @@ async def slip_builder_generate(target: float, horizon: str = "week",
                 result = _start_builder_revision(
                     target, horizon, {**hit["result"], "cached": True}
                 )
-                result["builder_run_id"] = builder_run_id
+                result["request_id"] = request_id
                 try:
                     from leagues.builder_runs import record_run
                     record_run(target, horizon, refresh, result, cached=True,
-                               request_id=builder_run_id)
+                               request_id=request_id)
                 except Exception as exc:
                     logger.warning(f"Builder run audit failed: {exc}")
-                _log_builder_board(builder_run_id, target, horizon, result)
+                _log_builder_board(result.get("builder_run_id", request_id), target, horizon, result)
                 log_pool_status(
                     "builder_end", target=key[0], horizon=horizon,
                     status=result.get("status"), cached=True,
@@ -582,7 +584,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             from leagues.builder_runs import record_run
             record_run(target, horizon, refresh,
                        {"status": "error", "reason": type(e).__name__},
-                       request_id=builder_run_id)
+                       request_id=request_id)
         except Exception as exc:
             logger.warning(f"Builder run audit failed: {exc}")
         raise HTTPException(500, str(e))
@@ -590,14 +592,14 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     response = _start_builder_revision(
         target, horizon, {**result, "cached": False}
     )
-    response["builder_run_id"] = builder_run_id
+    response["request_id"] = request_id
     try:
         from leagues.builder_runs import record_run
         record_run(target, horizon, refresh, response,
-                   request_id=builder_run_id)
+                   request_id=request_id)
     except Exception as exc:
         logger.warning(f"Builder run audit failed: {exc}")
-    _log_builder_board(builder_run_id, target, horizon, response)
+    _log_builder_board(response.get("builder_run_id", request_id), target, horizon, response)
     log_pool_status(
         "builder_end", target=key[0], horizon=horizon,
         status=response.get("status"), cached=False,
@@ -1076,36 +1078,23 @@ async def rebuild_rollover():
 
 @router.post("/repair-card", dependencies=[Depends(require_api_key)])
 async def repair_card():
-    """Fill tiers today's locked card left empty, without touching the rest.
+    """Safely recover genuinely empty tiers from the prepared board.
 
-    A tier can be published empty for two quite different reasons — the day
-    genuinely could not reach the target, or the value gate rejected the only
-    slip available. When a gate turns out to have been mis-set, the tier stays
-    blank until the next 08:00 WAT publish even though a perfectly good slip
-    exists for fixtures that have not kicked off.
-
-    This rebuilds the card and copies across only the tiers that are currently
-    empty. Anything already published is left untouched, so the guarantee that
-    matters — a slip you booked this morning is still the slip on the site —
-    holds exactly as before.
+    This endpoint intentionally does not force a prediction rebuild or use the
+    legacy payload-only fill helper.  Recovery is transactional: card, slip,
+    booking and provenance either all commit together or none do.
     """
     try:
         from leagues import daily_feed
-        from leagues.picks_db import fill_empty_card_tiers
-
-        fresh = daily_feed.build_daily_accumulators(force=True)
-        if not fresh:
-            raise HTTPException(404, "Could not rebuild the card")
-
-        publish_date = daily_feed._publish_date()
-        filled = fill_empty_card_tiers(publish_date, fresh.get("accumulators", {}))
-
-        # Rebuilding with force=True leaves the *unlocked* card in the response
-        # cache, which would serve freshly-reselected picks past the lock until
-        # the TTL expired. Drop it so the next read comes off the repaired card.
-        daily_feed._accum_cache.update({"result": None, "ts": 0.0})
-
-        return {"status": "success", "publish_date": publish_date, "filled": filled}
+        result = daily_feed.recover_today_empty_tiers()
+        if result.get("status") == "COMPLETE":
+            # Only discard the response cache after a transactional recovery
+            # succeeded; a failed booking must leave the locked card untouched.
+            if any(value.get("status") == "RECOVERED"
+                   for value in result.get("tiers", {}).values()):
+                daily_feed._accum_cache.update({"result": None, "ts": 0.0})
+            return {"status": "success", "publish_date": daily_feed._publish_date(), **result}
+        return {"status": "unavailable", **result}
     except HTTPException:
         raise
     except Exception as e:

@@ -346,6 +346,17 @@ def get_fixtures(days_ahead: int = 3, force: bool = False,
     days_ahead = max(1, min(14, int(days_ahead)))
     now = now or _utcnow()
     requested_end = now + timedelta(days=days_ahead)
+    # Keep the prior provider snapshot available for selective recovery.  A
+    # forced refresh is allowed to be partial, but a failed competition must
+    # not erase still-upcoming fixtures we had previously verified.
+    previous_payload = None
+    if CACHE_PATH.exists():
+        try:
+            candidate = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+            if isinstance(candidate, dict) and isinstance(candidate.get("fixtures"), list):
+                previous_payload = candidate
+        except Exception:
+            previous_payload = None
     if not force and CACHE_PATH.exists():
         try:
             if time.time() - CACHE_PATH.stat().st_mtime < CACHE_TTL:
@@ -415,6 +426,22 @@ def get_fixtures(days_ahead: int = 3, force: bool = False,
         if (_FETCH_HEALTH.get(slug) or {}).get("request_succeeded")
     )
     failed = sorted(slug for slug in ESPN_CLUB_LEAGUES if slug not in successful)
+    recovered_leagues: list[str] = []
+    if failed and previous_payload:
+        recovered = [fixture for fixture in previous_payload.get("fixtures") or []
+                     if fixture.get("league_slug") in set(failed)]
+        recovered = _filter_window(recovered, now, requested_end)
+        if recovered:
+            fixtures.extend(recovered)
+            recovered_leagues = sorted({str(f.get("league_slug")) for f in recovered})
+
+            unique = {}
+            for fixture in fixtures:
+                key = (str((fixture.get("home") or {}).get("name") or "").casefold(),
+                       str((fixture.get("away") or {}).get("name") or "").casefold(),
+                       str(fixture.get("commence_time") or ""))
+                unique.setdefault(key, fixture)
+            fixtures = list(unique.values())
     metadata = {
         "generated_at": _utcnow().isoformat(),
         "requested_days": days_ahead,
@@ -428,6 +455,7 @@ def get_fixtures(days_ahead: int = 3, force: bool = False,
         "successful_league_count": len(successful),
         "requested_league_count": len(ESPN_CLUB_LEAGUES),
         "failed_league_count": len(failed),
+        "recovered_leagues": recovered_leagues,
         "registry_version": _registry_version(),
         "cache_hit": False,
         "returned_fixture_count": len(fixtures),

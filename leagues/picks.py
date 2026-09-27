@@ -510,6 +510,8 @@ def build_picks(
                 # severe disagreement above, but never boosts the published
                 # confidence. Null means it had no compatible opinion.
                 "ml_confidence": ml_prob,
+                "ml_provenance": ((model.get("ml") or {}).get("provenance")
+                                  if ml_prob is not None else "UNAVAILABLE"),
                 "market_implied_probability": round(1.0 / price, 4)
                 if is_real
                 else None,

@@ -648,7 +648,7 @@ def approved_builder_candidates(
 ) -> tuple[list[dict], collections.Counter]:
     """Apply the shared trust and canonical-ranking policy exactly once."""
     from leagues.fixture_ranker import builder_fixture_candidates
-    from leagues.leg_trust import evaluate_leg_trust
+    from leagues.leg_trust import evaluate_leg_trust, reprice_for_live_sportybet
     from leagues.selection_quality import attach_selection_quality
 
     rejections: collections.Counter = collections.Counter()
@@ -659,6 +659,9 @@ def approved_builder_candidates(
             continue
         pick = dict(source)
         pick["selection_id"] = _selection_id(pick)
+        # Exact SportyBet price is a trust input, never a late display-only
+        # decoration. Reprice before trust, quality and optimizer admission.
+        reprice_for_live_sportybet(pick)
         decision = evaluate_leg_trust(pick)
         pick["trust"] = decision
         pick["evidence_adjusted_probability"] = decision[
