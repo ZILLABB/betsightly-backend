@@ -52,7 +52,9 @@ def _wire(monkeypatch, picks):
     monkeypatch.setattr(
         slip_builder,
         "approved_builder_candidates",
-        lambda pool, require_bookable=True: (list(pool), collections.Counter()),
+        lambda pool, require_bookable=True, include_all_eligible=False: (
+            list(pool), collections.Counter()
+        ),
     )
     monkeypatch.setattr(
         picks_module,
@@ -252,3 +254,111 @@ def test_target_mode_keeps_existing_max_legs(monkeypatch):
     })
     assert seen["max_legs"] == slip_builder.MAX_LEGS == 16
     assert result["requested_target"] == 50
+
+
+def test_game_count_50_can_deliver_50(monkeypatch):
+    picks = [_pick(i) for i in range(50)]
+    _wire(monkeypatch, picks)
+    result = builder_v2.generate_v2({
+        "mode": "game_count", "game_count": 50, "horizon": "7_days",
+    })
+    assert result["status"] == "success"
+    assert result["delivered_game_count"] == 50
+    assert result["legs"] == 50
+
+
+def test_manual_accepts_50_approved_selections(monkeypatch):
+    picks = [_pick(i) for i in range(50)]
+    _wire(monkeypatch, picks)
+    result = builder_v2.manual_build({
+        "selection_ids": [pick["selection_id"] for pick in picks],
+        "horizon": "7_days",
+    })
+    assert result["status"] == "success"
+    assert result["legs"] == 50
+    assert result["booking"]["readback_validation"] == "PASSED"
+
+
+def test_cold_prepared_board_does_not_fall_through_to_pool(monkeypatch):
+    from leagues import engine, slip_builder
+
+    called = {"pool": False}
+    monkeypatch.setattr(
+        engine,
+        "prepared_board_status",
+        lambda **kwargs: {"ready": False, "stale": False},
+    )
+    monkeypatch.setattr(
+        engine,
+        "start_prepared_board_refresh",
+        lambda **kwargs: True,
+    )
+
+    def forbidden_pool(*args, **kwargs):
+        called["pool"] = True
+        raise AssertionError("interactive V2 must not cold-start the pipeline")
+
+    monkeypatch.setattr(slip_builder, "prepared_bookable_pool", forbidden_pool)
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count", "game_count": 5, "horizon": "7_days",
+    })
+
+    assert result["status"] == "unavailable"
+    assert result["reason"] == "board_refreshing"
+    assert result["refresh_started"] is True
+    assert called["pool"] is False
+
+
+def test_stale_prepared_board_serves_last_safe_board(monkeypatch):
+    picks = [_pick(1)]
+    _wire(monkeypatch, picks)
+    from leagues import engine
+
+    refreshes = []
+    monkeypatch.setattr(
+        engine,
+        "prepared_board_status",
+        lambda **kwargs: {
+            "ready": True,
+            "stale": True,
+            "board_snapshot_id": "old-safe-board",
+        },
+    )
+    monkeypatch.setattr(
+        engine,
+        "start_prepared_board_refresh",
+        lambda **kwargs: refreshes.append(kwargs) or True,
+    )
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count", "game_count": 1, "horizon": "today",
+    })
+
+    assert result["status"] == "success"
+    assert refreshes
+    assert result["selection_diagnostics"]["prepared_board_stale"] is True
+
+
+def test_manual_browsing_requests_all_eligible_markets(monkeypatch):
+    picks = [
+        _pick(1, market="over_1_5", fixture="same"),
+        _pick(2, market="over_2_5", fixture="same"),
+    ]
+    _wire(monkeypatch, picks)
+    from leagues import slip_builder
+
+    seen = {}
+
+    def approved(pool, require_bookable=True, include_all_eligible=False):
+        seen["include_all_eligible"] = include_all_eligible
+        return list(pool), collections.Counter()
+
+    monkeypatch.setattr(slip_builder, "approved_builder_candidates", approved)
+
+    result = builder_v2.list_candidates({"horizon": "today"})
+
+    assert result["status"] == "success"
+    assert seen["include_all_eligible"] is True
+    assert len(result["candidates"]) == 2
+    assert sum(bool(item["recommended_for_fixture"]) for item in result["candidates"]) == 1

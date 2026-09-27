@@ -646,9 +646,10 @@ def _constraint_counterfactuals(candidates: list[dict], target: float,
 
 def approved_builder_candidates(
     pool: list[dict], *, require_bookable: bool = True,
+    include_all_eligible: bool = False,
 ) -> tuple[list[dict], collections.Counter]:
-    """Apply the shared trust and canonical-ranking policy exactly once."""
-    from leagues.fixture_ranker import builder_fixture_candidates
+    """Apply shared trust and canonical ranking exactly once."""
+    from leagues.fixture_ranker import canonical_fixture_recommendations
     from leagues.leg_trust import evaluate_leg_trust, reprice_for_live_sportybet
     from leagues.selection_quality import attach_selection_quality
 
@@ -681,7 +682,10 @@ def approved_builder_candidates(
             rejections.update(
                 decision["rejection_reasons"] or ["trust_grade_below_b"]
             )
-    return builder_fixture_candidates(trusted), rejections
+    return canonical_fixture_recommendations(
+        trusted,
+        include_all_eligible=include_all_eligible,
+    ), rejections
 
 
 def build_slip(

@@ -17,6 +17,44 @@ V2_MODES = {"target_odds", "game_count", "strongest", "manual"}
 TRUST_ORDER = {"D": 0, "C": 1, "B": 2, "A": 3}
 
 
+class BuilderV2BoardUnavailable(RuntimeError):
+    def __init__(self, board: dict, refresh_started: bool):
+        super().__init__("board_refreshing")
+        self.board = dict(board or {})
+        self.refresh_started = bool(refresh_started)
+
+    def response(self, mode: str | None = None) -> dict:
+        payload = {
+            "status": "unavailable",
+            "reason": "board_refreshing",
+            "retryable": True,
+            "refresh_started": self.refresh_started,
+            "board": self.board,
+        }
+        if mode:
+            payload["mode"] = mode
+        return payload
+
+
+def _require_prepared_board() -> dict:
+    from leagues.engine import prepared_board_status, start_prepared_board_refresh
+
+    state = prepared_board_status(days_ahead=7)
+    if not state.get("ready"):
+        raise BuilderV2BoardUnavailable(
+            state,
+            start_prepared_board_refresh(days_ahead=7, force=True),
+        )
+    if state.get("stale"):
+        state = {
+            **state,
+            "refresh_started": start_prepared_board_refresh(
+                days_ahead=7, force=True
+            ),
+        }
+    return state
+
+
 def _number(value: Any, fallback: float | None = None) -> float | None:
     try:
         parsed = float(value)
@@ -151,7 +189,10 @@ def _raw_filter(pool: list[dict], options: dict) -> list[dict]:
     return out
 
 
-def _candidate_pool(options: dict, *, refresh_sportybet: bool = False) -> tuple[dict, list[dict], dict]:
+def _candidate_pool(
+    options: dict, *, refresh_sportybet: bool = False,
+    include_all_eligible: bool = False,
+) -> tuple[dict, list[dict], dict]:
     from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE
     from leagues.slip_builder import approved_builder_candidates, prepared_bookable_pool
 
@@ -159,6 +200,7 @@ def _candidate_pool(options: dict, *, refresh_sportybet: bool = False) -> tuple[
     if error:
         raise ValueError(error)
 
+    prepared_state = _require_prepared_board()
     horizon = str(options.get("horizon") or "7_days")
     board, raw, timings = prepared_bookable_pool(
         horizon,
@@ -169,6 +211,7 @@ def _candidate_pool(options: dict, *, refresh_sportybet: bool = False) -> tuple[
     approved, trust_rejections = approved_builder_candidates(
         filtered_raw,
         require_bookable=True,
+        include_all_eligible=include_all_eligible,
     )
 
     requested_floor = _number(options.get("min_probability"), 0.0) or 0.0
@@ -202,6 +245,8 @@ def _candidate_pool(options: dict, *, refresh_sportybet: bool = False) -> tuple[
         "trust_rejection_reasons": dict(trust_rejections),
         "timing_ms": timings,
         "require_bookable_effective": True,
+        "prepared_board_snapshot_id": prepared_state.get("board_snapshot_id"),
+        "prepared_board_stale": bool(prepared_state.get("stale")),
     }
     return board, final, diagnostics
 
@@ -251,7 +296,11 @@ def _public_candidate(pick: dict, *, recommended: bool, board_context: dict) -> 
 
 def list_candidates(options: dict) -> dict:
     try:
-        board, pool, diagnostics = _candidate_pool(options)
+        board, pool, diagnostics = _candidate_pool(
+            options, include_all_eligible=True
+        )
+    except BuilderV2BoardUnavailable as exc:
+        return {**exc.response("manual"), "candidates": []}
     except ValueError as exc:
         return {"status": "error", "reason": str(exc), "candidates": []}
 
@@ -406,6 +455,8 @@ def generate_v2(options: dict) -> dict:
 
     try:
         board, pool, diagnostics = _candidate_pool(options)
+    except BuilderV2BoardUnavailable as exc:
+        return exc.response(mode)
     except ValueError as exc:
         return {"status": "error", "mode": mode, "reason": str(exc)}
 
@@ -490,7 +541,13 @@ def manual_build(options: dict) -> dict:
         }
 
     try:
-        board, pool, diagnostics = _candidate_pool(options, refresh_sportybet=True)
+        board, pool, diagnostics = _candidate_pool(
+            options,
+            refresh_sportybet=True,
+            include_all_eligible=True,
+        )
+    except BuilderV2BoardUnavailable as exc:
+        return exc.response("manual")
     except ValueError as exc:
         return {"status": "error", "mode": "manual", "reason": str(exc)}
 
