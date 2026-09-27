@@ -481,6 +481,7 @@ def generate_v2(options: dict) -> dict:
             max_legs=MAX_LEGS,
             horizon=str(options.get("horizon") or "7_days"),
             require_bookable=True,
+            preapproved_pool=True,
         )
         out = _public_result_from_build(
             target,

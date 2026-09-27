@@ -116,6 +116,44 @@ def test_slip_builder_requires_exact_sportybet_bookability():
     assert "SportyBet-bookable" in built["reason"]
 
 
+def test_preapproved_v2_pool_is_not_approved_twice(monkeypatch):
+    pick = _pick("preapproved", odds=2.0, confidence=.80)
+    pick.update({
+        "selection_id": "preapproved-over15",
+        "selection_probability": .80,
+        "evidence_adjusted_probability": .80,
+        "risk_adjusted_return": 1.60,
+        "quality_score": 80.0,
+        "market_trust_state": "TRUSTED",
+        "price_quality_reason_codes": ["PRICE_NEGATIVE"],
+        "trust": {
+            "trust_grade": "A",
+            "trust_score": 90,
+            "evidence_adjusted_probability": .80,
+            "lower_reliability_bound": .76,
+            "evidence_strength": .9,
+        },
+    })
+
+    monkeypatch.setattr(
+        slip_builder,
+        "approved_builder_candidates",
+        lambda *args, **kwargs: pytest.fail(
+            "preapproved V2 pool must not be approved twice"
+        ),
+    )
+
+    built = build_slip(
+        2.0,
+        pool=[pick],
+        market_cap=10,
+        preapproved_pool=True,
+    )
+
+    assert built["ok"], built
+    assert built["odds"] >= 2.0
+
+
 def test_builder_caps_actual_home_and_away_team_goal_picks_together(monkeypatch):
     monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
     team_goals = [

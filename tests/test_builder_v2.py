@@ -235,6 +235,7 @@ def test_target_mode_keeps_existing_max_legs(monkeypatch):
 
     def fake_build(target, **kwargs):
         seen["max_legs"] = kwargs["max_legs"]
+        seen["preapproved_pool"] = kwargs["preapproved_pool"]
         return {"ok": False, "best_reachable": 1.5, "reason": "test"}
 
     monkeypatch.setattr(slip_builder, "build_slip", fake_build)
@@ -253,6 +254,7 @@ def test_target_mode_keeps_existing_max_legs(monkeypatch):
         "mode": "target_odds", "target_odds": 50, "horizon": "7_days",
     })
     assert seen["max_legs"] == slip_builder.MAX_LEGS == 16
+    assert seen["preapproved_pool"] is True
     assert result["requested_target"] == 50
 
 

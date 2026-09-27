@@ -696,6 +696,7 @@ def build_slip(
     team_to_score_cap: int | None = None,
     horizon: str = DEFAULT_HORIZON,
     require_bookable: bool = True,
+    preapproved_pool: bool = False,
     locked_selection_ids: set[str] | None = None,
     excluded_fixture_ids: set[str] | None = None,
     excluded_selection_ids: set[str] | None = None,
@@ -761,9 +762,17 @@ def build_slip(
     diagnostics["after_bookability"] = len(pool)
     diagnostics["market_distribution_after_bookability"] = _market_distribution(pool)
 
-    canonical_candidates, trust_rejections = approved_builder_candidates(
-        pool, require_bookable=require_bookable
-    )
+    if preapproved_pool:
+        # Builder V2 has already applied live SportyBet repricing, trust,
+        # capability, probability and canonical fixture ranking. Re-running
+        # approval here can reinterpret informational quality reason codes as
+        # fresh trust rejections and incorrectly empty a valid V2 pool.
+        canonical_candidates = [dict(pick) for pick in pool]
+        trust_rejections = collections.Counter()
+    else:
+        canonical_candidates, trust_rejections = approved_builder_candidates(
+            pool, require_bookable=require_bookable
+        )
     diagnostics["after_trust"] = len(canonical_candidates)
     diagnostics["market_distribution_after_trust"] = _market_distribution(
         canonical_candidates
