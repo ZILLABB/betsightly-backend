@@ -1,9 +1,9 @@
 {
   "tracked_gap_count": 9,
-  "results_history_covered_count": 5,
+  "results_history_covered_count": 6,
   "odds_backed_covered_count": 0,
   "current_market_model_eligible_count": 0,
-  "unresolved_count": 4,
+  "unresolved_count": 3,
   "sources": [
     {
       "league_id": 1,
@@ -78,15 +78,15 @@
     {
       "league_id": 11,
       "competition": "Copa Sudamericana",
-      "provider": "UNRESOLVED",
-      "dataset": "unresolved",
-      "source_class": "UNRESOLVED",
-      "verification": "REVIEW_REQUIRED",
-      "license": null,
-      "results_history": false,
+      "provider": "OpenFootball",
+      "dataset": "south-america/copa-libertadores",
+      "source_class": "RESULTS_ONLY",
+      "verification": "VERIFIED",
+      "license": "CC0-1.0 / public domain",
+      "results_history": true,
       "bookmaker_odds_history": false,
-      "source_root": null,
-      "notes": "No verified ingestion source selected yet.",
+      "source_root": "openfootball/south-america",
+      "notes": "Verified Copa Sudamericana fixtures/results are stored in copa-libertadores/*_copas.txt; no bookmaker-price provenance.",
       "current_market_model_eligible": false
     },
     {

@@ -24,9 +24,9 @@
       848
     ],
     "missing_live_target_count": 9,
-    "verified_results_history_sources": 5,
+    "verified_results_history_sources": 6,
     "verified_odds_backed_gap_sources": 0,
-    "unresolved_gap_sources": 4
+    "unresolved_gap_sources": 3
   },
   "decisions": [
     {
@@ -58,9 +58,9 @@
     {
       "use_case": "football_history_expansion_for_form_elo_replay",
       "status": "CONDITIONAL",
-      "reason": "Verified free results-history sources exist for 5 of 9 currently missing live competitions. They can improve football history without pretending bookmaker odds exist.",
+      "reason": "Verified free results-history sources exist for 6 of 9 currently missing live competitions. They can improve football history without pretending bookmaker odds exist.",
       "blockers": [
-        "4_live_competitions_still_unresolved"
+        "3_live_competitions_still_unresolved"
       ],
       "next_action": "Ingest the verified results-only sources into a separate football_history dataset and keep unresolved competitions fail-closed."
     },
@@ -70,11 +70,11 @@
       "reason": "A football-first challenger can use verified results/form/ELO history without requiring bookmaker odds, but the new sources have not yet been ingested and validated.",
       "blockers": [
         "results_sources_not_yet_ingested",
-        "4_competitions_unresolved"
+        "3_competitions_unresolved"
       ],
       "next_action": "After results-only ingestion, train an isolated challenger with league-aware chronological evaluation; never overwrite production models."
     }
   ],
-  "generated_at": "2026-09-27T11:15:34.270853+00:00",
+  "generated_at": "2026-09-27T11:58:23.005334+00:00",
   "overall_status": "CONDITIONAL"
 }

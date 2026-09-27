@@ -1,6 +1,6 @@
 # BetSightly Training Readiness Report
 
-Generated: `2026-09-27T11:15:34.270853+00:00`
+Generated: `2026-09-27T11:58:23.005334+00:00`
 
 Overall expansion status: **CONDITIONAL**
 
@@ -20,9 +20,9 @@ Overall expansion status: **CONDITIONAL**
 
 - Missing live competitions: **9**
 - IDs: `[1, 2, 3, 11, 13, 265, 292, 307, 848]`
-- Verified free results-history sources: **5**
+- Verified free results-history sources: **6**
 - Verified odds-backed sources for those gaps: **0**
-- Still unresolved: **4**
+- Still unresolved: **3**
 
 ## Readiness by use case
 
@@ -52,10 +52,10 @@ Next action: Build an odds-backed market_training dataset with explicit source/s
 
 ### CONDITIONAL — football_history_expansion_for_form_elo_replay
 
-Verified free results-history sources exist for 5 of 9 currently missing live competitions. They can improve football history without pretending bookmaker odds exist.
+Verified free results-history sources exist for 6 of 9 currently missing live competitions. They can improve football history without pretending bookmaker odds exist.
 
 Blockers:
-- `4_live_competitions_still_unresolved`
+- `3_live_competitions_still_unresolved`
 
 Next action: Ingest the verified results-only sources into a separate football_history dataset and keep unresolved competitions fail-closed.
 
@@ -65,7 +65,7 @@ A football-first challenger can use verified results/form/ELO history without re
 
 Blockers:
 - `results_sources_not_yet_ingested`
-- `4_competitions_unresolved`
+- `3_competitions_unresolved`
 
 Next action: After results-only ingestion, train an isolated challenger with league-aware chronological evaluation; never overwrite production models.
 
