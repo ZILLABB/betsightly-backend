@@ -11,6 +11,7 @@ import json
 import math
 import re
 import runpy
+import sys
 import unicodedata
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -19,6 +20,11 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from leagues.chronological_split import describe_whole_date_split
+
 DEFAULT_INPUT = ROOT / "data" / "api-football" / "matches.csv"
 DEFAULT_META = ROOT / "models" / "api_football" / "meta.json"
 DEFAULT_JSON = ROOT / "audit" / "training_data_audit.json"
@@ -344,31 +350,10 @@ def build_audit(input_path: Path, meta_path: Path) -> dict:
     direct_outcome_features = sorted(set(feature_columns) & OUTCOME_FIELDS)
     market_features = [f for f in feature_columns if f.startswith("mkt_")]
 
-    i_tr = int(n_samples * 0.70)
-    i_ca = int(n_samples * 0.85)
-
-    def date_at(index):
-        if not eligible_dates or index < 0 or index >= len(eligible_dates):
-            return None
-        return eligible_dates[index].date().isoformat()
-
-    split = {
-        "derived_samples": n_samples,
-        "train": i_tr,
-        "calib": max(0, i_ca - i_tr),
-        "test": max(0, n_samples - i_ca),
-        "train_start": date_at(0),
-        "train_end": date_at(i_tr - 1),
-        "calib_start": date_at(i_tr),
-        "calib_end": date_at(i_ca - 1),
-        "test_start": date_at(i_ca),
-        "test_end": date_at(n_samples - 1),
-    }
-    split["train_calib_same_date_boundary"] = bool(
-        split["train_end"] and split["train_end"] == split["calib_start"]
-    )
-    split["calib_test_same_date_boundary"] = bool(
-        split["calib_end"] and split["calib_end"] == split["test_start"]
+    split = describe_whole_date_split(
+        eligible_dates,
+        train_frac=0.70,
+        calib_frac=0.15,
     )
 
     missing = {}

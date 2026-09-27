@@ -1,6 +1,6 @@
 # BetSightly Training Data Provenance Audit
 
-Generated: `2026-09-27T10:51:48.608388+00:00`
+Generated: `2026-09-27T12:30:20.536260+00:00`
 
 This is a read-only audit. It does not retrain models or rewrite the dataset.
 
@@ -20,10 +20,10 @@ This is a read-only audit. It does not retrain models or rewrite the dataset.
 
 - Model metadata samples: **64218**
 - Current derived samples: **64,218**
-- Current derived split: train **44,952**, calibration **9,633**, test **9,633**
+- Current derived split: train **44,966**, calibration **9,630**, test **9,622**
 - Train range: **2019-04-05 → 2024-05-15**
-- Calibration range: **2024-05-15 → 2025-05-17**
-- Test range: **2025-05-17 → 2026-06-01**
+- Calibration range: **2024-05-16 → 2025-05-17**
+- Test range: **2025-05-18 → 2026-06-01**
 
 ## Provenance
 
@@ -73,16 +73,6 @@ The training CSV path says api-football although the active free fetcher writes 
 }
 ```
 
-### HIGH — ODDS_TIMING_SEMANTICS_AMBIGUOUS
-
-Fetcher labels odds as average closing odds but checks AvgH/AvgD/AvgA before AvgCH/AvgCD/AvgCA.
-
-```json
-{
-  "avg_before_closing": true
-}
-```
-
 ### HIGH — ROW_PROVENANCE_ABSENT
 
 Rows do not carry source/source-file/odds-source/timestamp provenance, so price timing and origin cannot be proven row by row.
@@ -98,18 +88,6 @@ Rows do not carry source/source-file/odds-source/timestamp provenance, so price 
     "odds_snapshot_type",
     "odds_captured_at"
   ]
-}
-```
-
-### MEDIUM — FETCHER_WINDOW_DOC_MISMATCH
-
-Fetcher documentation claims data from 2012, but the configured main-league season window begins later.
-
-```json
-{
-  "docs_claim": 2012,
-  "configured_start": 2019,
-  "configured_end": 2025
 }
 ```
 
@@ -132,27 +110,6 @@ O/U 2.5 price features are not available across the full corpus.
 {
   "complete_rows": 38723,
   "coverage_pct": 58.0563
-}
-```
-
-### MEDIUM — SPLIT_BOUNDARY_SHARES_CALENDAR_DATE
-
-Row-count splits can place fixtures from one calendar date on both sides of a train/calibration or calibration/test boundary.
-
-```json
-{
-  "derived_samples": 64218,
-  "train": 44952,
-  "calib": 9633,
-  "test": 9633,
-  "train_start": "2019-04-05",
-  "train_end": "2024-05-15",
-  "calib_start": "2024-05-15",
-  "calib_end": "2025-05-17",
-  "test_start": "2025-05-17",
-  "test_end": "2026-06-01",
-  "train_calib_same_date_boundary": true,
-  "calib_test_same_date_boundary": true
 }
 ```
 

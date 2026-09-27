@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "baseline": {
     "raw_rows": 66699,
     "valid_finished_rows": 66699,
@@ -9,7 +9,26 @@
     "complete_1x2_pct": 99.943,
     "complete_ou25_pct": 58.0563,
     "duplicate_fixture_keys": 0,
-    "conflicting_fixture_keys": 0
+    "conflicting_fixture_keys": 0,
+    "whole_date_split_ready": true
+  },
+  "football_history": {
+    "validated": true,
+    "unique_matches": 7775,
+    "covered_league_ids": [
+      1,
+      2,
+      3,
+      11,
+      13,
+      848
+    ],
+    "covered_competitions": 6,
+    "source_file_count": 65,
+    "historical_cutoff_date": "2026-09-26",
+    "conflicting_duplicates": 0,
+    "market_training_eligible": false,
+    "output_sha256": "36831c08c34d0ebd53dd8de70979e5d54a810b3575f0c75b5b11f200e2c1d40f"
   },
   "coverage": {
     "missing_live_target_ids": [
@@ -58,23 +77,22 @@
     {
       "use_case": "football_history_expansion_for_form_elo_replay",
       "status": "CONDITIONAL",
-      "reason": "Verified free results-history sources exist for 6 of 9 currently missing live competitions. They can improve football history without pretending bookmaker odds exist.",
+      "reason": "The isolated football_history dataset is validated with 7,775 unique results across 6 missing live competitions. It contains no bookmaker-odds claim and remains isolated from the production market-feature corpus.",
       "blockers": [
         "3_live_competitions_still_unresolved"
       ],
-      "next_action": "Ingest the verified results-only sources into a separate football_history dataset and keep unresolved competitions fail-closed."
+      "next_action": "Use football_history for form/Elo/replay experiments; keep the three unresolved competitions fail-closed until verified sources exist."
     },
     {
       "use_case": "football_first_challenger_model",
       "status": "CONDITIONAL",
-      "reason": "A football-first challenger can use verified results/form/ELO history without requiring bookmaker odds, but the new sources have not yet been ingested and validated.",
+      "reason": "The results-only football_history dataset is validated and the evaluation split is aligned to whole calendar dates. An isolated football-first challenger experiment can now be prepared without overwriting production models.",
       "blockers": [
-        "results_sources_not_yet_ingested",
         "3_competitions_unresolved"
       ],
-      "next_action": "After results-only ingestion, train an isolated challenger with league-aware chronological evaluation; never overwrite production models."
+      "next_action": "Prepare the football-first challenger dataset and offline experiment; keep production frozen and compare only on chronological holdouts."
     }
   ],
-  "generated_at": "2026-09-27T11:58:23.005334+00:00",
+  "generated_at": "2026-09-27T12:30:20.758867+00:00",
   "overall_status": "CONDITIONAL"
 }

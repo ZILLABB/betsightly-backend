@@ -48,6 +48,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from leagues.chronological_split import describe_whole_date_split
+
 # ---------------------------------------------------------------------------
 MATCHES_CSV = Path("data/api-football/matches.csv")
 MODELS_DIR  = Path("models/api_football")
@@ -140,7 +142,7 @@ def _stats_from(games, default):
             "goals_scored": gs/n, "goals_conceded": gc/n}
 
 
-def build_dataset_fast(df: pd.DataFrame):
+def build_dataset_fast(df: pd.DataFrame, *, return_dates: bool = False):
     """Incremental O(n) feature build. Mirrors compute_features exactly.
 
     Processes matches grouped by date: features for a date use only strictly
@@ -156,6 +158,7 @@ def build_dataset_fast(df: pd.DataFrame):
     team_count   = defaultdict(int)
 
     X, y_result, y_o15, y_o25, y_btts = [], [], [], [], []
+    sample_dates = []
     skipped = 0
 
     DEF_TEAM = {"win_rate": 0.5, "draw_rate": 0.25, "goals_scored": 1.2, "goals_conceded": 1.2}
@@ -237,6 +240,7 @@ def build_dataset_fast(df: pd.DataFrame):
             ]
             hg, ag = r["home_score"], r["away_score"]
             X.append(feats)
+            sample_dates.append(pd.Timestamp(day))
             y_result.append(2 if hg > ag else (1 if hg == ag else 0))
             y_o15.append(1 if hg + ag > 1 else 0)
             y_o25.append(1 if hg + ag > 2 else 0)
@@ -258,8 +262,16 @@ def build_dataset_fast(df: pd.DataFrame):
         i = j
 
     print(f"  Built {len(X):,} samples (skipped {skipped:,} with <5 games of history)")
-    return (np.array(X, dtype=float),
-            np.array(y_result), np.array(y_o15), np.array(y_o25), np.array(y_btts))
+    result = (
+        np.array(X, dtype=float),
+        np.array(y_result),
+        np.array(y_o15),
+        np.array(y_o25),
+        np.array(y_btts),
+    )
+    if return_dates:
+        return (*result, sample_dates)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -484,18 +496,28 @@ def main():
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     df = load_data()
-    X, y_result, y_o15, y_o25, y_btts = build_dataset_fast(df)
+    X, y_result, y_o15, y_o25, y_btts, sample_dates = build_dataset_fast(
+        df, return_dates=True
+    )
 
     n = len(X)
-    # Chronological split (X is already in date order from the build)
-    i_tr = int(n * TRAIN_FRAC)
-    i_ca = int(n * (TRAIN_FRAC + CALIB_FRAC))
+    split_plan = describe_whole_date_split(
+        sample_dates,
+        train_frac=TRAIN_FRAC,
+        calib_frac=CALIB_FRAC,
+    )
+    i_tr = split_plan["train_end_index"]
+    i_ca = split_plan["calib_end_index"]
     idx_tr = np.arange(0, i_tr)
     idx_ca = np.arange(i_tr, i_ca)
     idx_te = np.arange(i_ca, n)
 
-    print(f"\nTime-based split: train[0:{i_tr:,}]  calib[{i_tr:,}:{i_ca:,}]  test[{i_ca:,}:{n:,}]")
-    print(f"  (oldest matches train the model; newest test it — honest holdout)")
+    print(f"\nWhole-date chronological split: train[0:{i_tr:,}]  calib[{i_tr:,}:{i_ca:,}]  test[{i_ca:,}:{n:,}]")
+    print(
+        f"  train {split_plan['train_start']}..{split_plan['train_end']} | "
+        f"calib {split_plan['calib_start']}..{split_plan['calib_end']} | "
+        f"test {split_plan['test_start']}..{split_plan['test_end']}"
+    )
 
     print(f"\nClass balance (full):")
     print(f"  Home/Draw/Away: {(y_result==2).mean():.1%}/{(y_result==1).mean():.1%}/{(y_result==0).mean():.1%}")
@@ -549,7 +571,18 @@ def main():
         "form_window": FORM_WINDOW, "h2h_window": H2H_WINDOW,
         "trained_at": datetime.utcnow().isoformat(),
         "n_samples": int(n),
-        "split": {"train": int(i_tr), "calib": int(i_ca - i_tr), "test": int(n - i_ca)},
+        "split": {
+            "strategy": "whole_calendar_date",
+            "train": int(i_tr),
+            "calib": int(i_ca - i_tr),
+            "test": int(n - i_ca),
+            "train_start": split_plan["train_start"],
+            "train_end": split_plan["train_end"],
+            "calib_start": split_plan["calib_start"],
+            "calib_end": split_plan["calib_end"],
+            "test_start": split_plan["test_start"],
+            "test_end": split_plan["test_end"],
+        },
         "models": sorted(all_acc.keys()),
         "model_types": [t for t, _ in TRAINERS],
         "targets": ["match_result", "over_1_5", "over_2_5", "btts"],

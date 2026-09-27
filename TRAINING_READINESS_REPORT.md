@@ -1,6 +1,6 @@
 # BetSightly Training Readiness Report
 
-Generated: `2026-09-27T11:58:23.005334+00:00`
+Generated: `2026-09-27T12:30:20.758867+00:00`
 
 Overall expansion status: **CONDITIONAL**
 
@@ -11,10 +11,23 @@ Overall expansion status: **CONDITIONAL**
 - Trainable samples: **64,218**
 - Deployed model metadata samples: **64,218**
 - Baseline reproducible: **True**
+- Whole-calendar-date split contract ready: **True**
 - Complete 1X2 odds coverage: **99.94%**
 - Complete O/U 2.5 odds coverage: **58.06%**
 - Duplicate fixture keys: **0**
 - Conflicting fixture keys: **0**
+
+## Football-history ingestion
+
+- Validated: **True**
+- Unique matches: **7,775**
+- Covered missing-live competitions: **6**
+- League IDs: `[1, 2, 3, 11, 13, 848]`
+- Source files: **65**
+- Historical cutoff: **2026-09-26**
+- Conflicting duplicates: **0**
+- Market-training eligible: **False**
+- Dataset SHA-256: `36831c08c34d0ebd53dd8de70979e5d54a810b3575f0c75b5b11f200e2c1d40f`
 
 ## Expansion coverage
 
@@ -52,27 +65,26 @@ Next action: Build an odds-backed market_training dataset with explicit source/s
 
 ### CONDITIONAL — football_history_expansion_for_form_elo_replay
 
-Verified free results-history sources exist for 6 of 9 currently missing live competitions. They can improve football history without pretending bookmaker odds exist.
+The isolated football_history dataset is validated with 7,775 unique results across 6 missing live competitions. It contains no bookmaker-odds claim and remains isolated from the production market-feature corpus.
 
 Blockers:
 - `3_live_competitions_still_unresolved`
 
-Next action: Ingest the verified results-only sources into a separate football_history dataset and keep unresolved competitions fail-closed.
+Next action: Use football_history for form/Elo/replay experiments; keep the three unresolved competitions fail-closed until verified sources exist.
 
 ### CONDITIONAL — football_first_challenger_model
 
-A football-first challenger can use verified results/form/ELO history without requiring bookmaker odds, but the new sources have not yet been ingested and validated.
+The results-only football_history dataset is validated and the evaluation split is aligned to whole calendar dates. An isolated football-first challenger experiment can now be prepared without overwriting production models.
 
 Blockers:
-- `results_sources_not_yet_ingested`
 - `3_competitions_unresolved`
 
-Next action: After results-only ingestion, train an isolated challenger with league-aware chronological evaluation; never overwrite production models.
+Next action: Prepare the football-first challenger dataset and offline experiment; keep production frozen and compare only on chronological holdouts.
 
 ## Decision
 
 Do **not** retrain or overwrite the deployed 25-feature ensemble yet.
 
-The current model remains the frozen benchmark. The next implementation phase should ingest verified results-only sources into a separate `football_history` dataset, while a separate `market_training` dataset remains restricted to rows with explicit bookmaker-price provenance.
+The current market-feature model remains the frozen benchmark. The results-only `football_history` dataset may be used only for isolated form/Elo/replay and football-first challenger experiments.
 
-Only after those datasets are validated should BetSightly train isolated challenger models and compare them against the current baseline on chronological holdouts and live shadow performance.
+The expanded market-aware model remains blocked until bookmaker-price provenance and market coverage are independently verified.

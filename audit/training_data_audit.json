@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_at": "2026-09-27T10:51:48.608388+00:00",
+  "generated_at": "2026-09-27T12:30:20.536260+00:00",
   "read_only": true,
   "input": {
     "path": "C:\\Users\\ZILLAB\\Desktop\\betsightly-training-data-audit-20260927\\data\\api-football\\matches.csv",
@@ -628,9 +628,9 @@
       },
       "main_league_count": 16,
       "extra_league_count": 14,
-      "docs_claim_2012": true,
-      "odds_comment_claims_closing": true,
-      "avg_price_checked_before_avg_closing": true
+      "docs_claim_2012": false,
+      "odds_comment_claims_closing": false,
+      "avg_price_checked_before_avg_closing": false
     }
   },
   "training_contract": {
@@ -679,18 +679,21 @@
     ],
     "direct_outcome_columns_in_features": [],
     "derived_split": {
+      "strategy": "whole_calendar_date",
       "derived_samples": 64218,
-      "train": 44952,
-      "calib": 9633,
-      "test": 9633,
+      "train": 44966,
+      "calib": 9630,
+      "test": 9622,
+      "train_end_index": 44966,
+      "calib_end_index": 54596,
       "train_start": "2019-04-05",
       "train_end": "2024-05-15",
-      "calib_start": "2024-05-15",
+      "calib_start": "2024-05-16",
       "calib_end": "2025-05-17",
-      "test_start": "2025-05-17",
+      "test_start": "2025-05-18",
       "test_end": "2026-06-01",
-      "train_calib_same_date_boundary": true,
-      "calib_test_same_date_boundary": true
+      "train_calib_same_date_boundary": false,
+      "calib_test_same_date_boundary": false
     },
     "supported_team_types_declared": null
   },
@@ -718,43 +721,6 @@
           "odds_snapshot_type",
           "odds_captured_at"
         ]
-      }
-    },
-    {
-      "severity": "HIGH",
-      "code": "ODDS_TIMING_SEMANTICS_AMBIGUOUS",
-      "message": "Fetcher labels odds as average closing odds but checks AvgH/AvgD/AvgA before AvgCH/AvgCD/AvgCA.",
-      "evidence": {
-        "avg_before_closing": true
-      }
-    },
-    {
-      "severity": "MEDIUM",
-      "code": "FETCHER_WINDOW_DOC_MISMATCH",
-      "message": "Fetcher documentation claims data from 2012, but the configured main-league season window begins later.",
-      "evidence": {
-        "docs_claim": 2012,
-        "configured_start": 2019,
-        "configured_end": 2025
-      }
-    },
-    {
-      "severity": "MEDIUM",
-      "code": "SPLIT_BOUNDARY_SHARES_CALENDAR_DATE",
-      "message": "Row-count splits can place fixtures from one calendar date on both sides of a train/calibration or calibration/test boundary.",
-      "evidence": {
-        "derived_samples": 64218,
-        "train": 44952,
-        "calib": 9633,
-        "test": 9633,
-        "train_start": "2019-04-05",
-        "train_end": "2024-05-15",
-        "calib_start": "2024-05-15",
-        "calib_end": "2025-05-17",
-        "test_start": "2025-05-17",
-        "test_end": "2026-06-01",
-        "train_calib_same_date_boundary": true,
-        "calib_test_same_date_boundary": true
       }
     },
     {

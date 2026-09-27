@@ -78,3 +78,45 @@ def test_results_history_can_move_forward_conditionally():
     assert football["status"] == CONDITIONAL
     assert challenger["status"] == CONDITIONAL
     assert overall_status(report) == CONDITIONAL
+
+
+def test_ingested_history_and_whole_date_split_remove_stale_blockers():
+    training, coverage, sources = fixtures()
+    sources["results_history_covered_count"] = 6
+    sources["unresolved_count"] = 3
+    training["training_contract"]["derived_split"] = {
+        "strategy": "whole_calendar_date",
+        "train_calib_same_date_boundary": False,
+        "calib_test_same_date_boundary": False,
+    }
+    manifest = {
+        "dataset": "football_history",
+        "source_class": "RESULTS_ONLY",
+        "source_file_count": 65,
+        "historical_cutoff_date": "2026-09-26",
+        "market_training_eligible": False,
+        "output_sha256": "abc123",
+        "deduplication": {
+            "unique_matches": 7775,
+            "conflicting_duplicates": 0,
+        },
+        "coverage": [
+            {"league_id": 1, "rows": 174},
+            {"league_id": 2, "rows": 2022},
+            {"league_id": 3, "rows": 935},
+            {"league_id": 11, "rows": 1481},
+            {"league_id": 13, "rows": 2150},
+            {"league_id": 848, "rows": 1013},
+        ],
+    }
+
+    report = derive(training, coverage, sources, manifest)
+    by_name = {item["use_case"]: item for item in report["decisions"]}
+
+    assert report["football_history"]["validated"] is True
+    assert report["football_history"]["unique_matches"] == 7775
+    assert report["baseline"]["whole_date_split_ready"] is True
+    challenger = by_name["football_first_challenger_model"]
+    assert "results_sources_not_yet_ingested" not in challenger["blockers"]
+    assert "chronological_split_contract_pending" not in challenger["blockers"]
+    assert "3_competitions_unresolved" in challenger["blockers"]

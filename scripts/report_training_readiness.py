@@ -1,4 +1,4 @@
-"""Create Prompt 4's final training-readiness report."""
+"""Create BetSightly's model training-readiness report."""
 from __future__ import annotations
 
 import argparse
@@ -16,6 +16,7 @@ from leagues.training_readiness import derive, load_json, overall_status
 DEFAULT_TRAINING = ROOT / "audit" / "training_data_audit.json"
 DEFAULT_COVERAGE = ROOT / "audit" / "historical_coverage_gap_audit.json"
 DEFAULT_SOURCES = ROOT / "audit" / "historical_source_registry.json"
+DEFAULT_HISTORY = ROOT / "data" / "football_history" / "manifest.json"
 DEFAULT_JSON = ROOT / "audit" / "training_readiness_report.json"
 DEFAULT_MD = ROOT / "TRAINING_READINESS_REPORT.md"
 
@@ -23,6 +24,7 @@ DEFAULT_MD = ROOT / "TRAINING_READINESS_REPORT.md"
 def render(report: dict) -> str:
     baseline = report["baseline"]
     coverage = report["coverage"]
+    history = report["football_history"]
     lines = [
         "# BetSightly Training Readiness Report",
         "",
@@ -37,10 +39,23 @@ def render(report: dict) -> str:
         f"- Trainable samples: **{baseline['trainable_samples']:,}**",
         f"- Deployed model metadata samples: **{baseline['model_meta_samples']:,}**",
         f"- Baseline reproducible: **{baseline['baseline_reproducible']}**",
+        f"- Whole-calendar-date split contract ready: **{baseline['whole_date_split_ready']}**",
         f"- Complete 1X2 odds coverage: **{baseline['complete_1x2_pct']:.2f}%**",
         f"- Complete O/U 2.5 odds coverage: **{baseline['complete_ou25_pct']:.2f}%**",
         f"- Duplicate fixture keys: **{baseline['duplicate_fixture_keys']}**",
         f"- Conflicting fixture keys: **{baseline['conflicting_fixture_keys']}**",
+        "",
+        "## Football-history ingestion",
+        "",
+        f"- Validated: **{history['validated']}**",
+        f"- Unique matches: **{history['unique_matches']:,}**",
+        f"- Covered missing-live competitions: **{history['covered_competitions']}**",
+        f"- League IDs: `{history['covered_league_ids']}`",
+        f"- Source files: **{history['source_file_count']}**",
+        f"- Historical cutoff: **{history['historical_cutoff_date']}**",
+        f"- Conflicting duplicates: **{history['conflicting_duplicates']}**",
+        f"- Market-training eligible: **{history['market_training_eligible']}**",
+        f"- Dataset SHA-256: `{history['output_sha256']}`",
         "",
         "## Expansion coverage",
         "",
@@ -76,14 +91,12 @@ def render(report: dict) -> str:
         "",
         "Do **not** retrain or overwrite the deployed 25-feature ensemble yet.",
         "",
-        "The current model remains the frozen benchmark. The next implementation "
-        "phase should ingest verified results-only sources into a separate "
-        "`football_history` dataset, while a separate `market_training` dataset "
-        "remains restricted to rows with explicit bookmaker-price provenance.",
+        "The current market-feature model remains the frozen benchmark. "
+        "The results-only `football_history` dataset may be used only for "
+        "isolated form/Elo/replay and football-first challenger experiments.",
         "",
-        "Only after those datasets are validated should BetSightly train isolated "
-        "challenger models and compare them against the current baseline on "
-        "chronological holdouts and live shadow performance.",
+        "The expanded market-aware model remains blocked until bookmaker-price "
+        "provenance and market coverage are independently verified.",
         "",
     ]
     return "\n".join(lines)
@@ -94,14 +107,25 @@ def main() -> int:
     parser.add_argument("--training", type=Path, default=DEFAULT_TRAINING)
     parser.add_argument("--coverage", type=Path, default=DEFAULT_COVERAGE)
     parser.add_argument("--sources", type=Path, default=DEFAULT_SOURCES)
+    parser.add_argument(
+        "--football-history-manifest",
+        type=Path,
+        default=DEFAULT_HISTORY,
+    )
     parser.add_argument("--json-out", type=Path, default=DEFAULT_JSON)
     parser.add_argument("--md-out", type=Path, default=DEFAULT_MD)
     args = parser.parse_args()
+
+    history = {}
+    history_path = args.football_history_manifest.resolve()
+    if history_path.exists():
+        history = load_json(history_path)
 
     report = derive(
         load_json(args.training.resolve()),
         load_json(args.coverage.resolve()),
         load_json(args.sources.resolve()),
+        history,
     )
     report["generated_at"] = datetime.now(timezone.utc).isoformat()
     report["overall_status"] = overall_status(report)
@@ -116,7 +140,14 @@ def main() -> int:
         "baseline: "
         f"trainable={report['baseline']['trainable_samples']:,} "
         f"meta={report['baseline']['model_meta_samples']:,} "
-        f"reproducible={report['baseline']['baseline_reproducible']}"
+        f"reproducible={report['baseline']['baseline_reproducible']} "
+        f"whole_date_split={report['baseline']['whole_date_split_ready']}"
+    )
+    print(
+        "football_history: "
+        f"validated={report['football_history']['validated']} "
+        f"rows={report['football_history']['unique_matches']:,} "
+        f"competitions={report['football_history']['covered_competitions']}"
     )
     print(
         "coverage: "
