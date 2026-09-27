@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "baseline": {
+    "raw_rows": 66699,
+    "valid_finished_rows": 66699,
+    "trainable_samples": 64218,
+    "model_meta_samples": 64218,
+    "baseline_reproducible": true,
+    "complete_1x2_pct": 99.943,
+    "complete_ou25_pct": 58.0563,
+    "duplicate_fixture_keys": 0,
+    "conflicting_fixture_keys": 0
+  },
+  "coverage": {
+    "missing_live_target_ids": [
+      1,
+      2,
+      3,
+      11,
+      13,
+      265,
+      292,
+      307,
+      848
+    ],
+    "missing_live_target_count": 9,
+    "verified_results_history_sources": 5,
+    "verified_odds_backed_gap_sources": 0,
+    "unresolved_gap_sources": 4
+  },
+  "decisions": [
+    {
+      "use_case": "current_deployed_ensemble_baseline",
+      "status": "READY",
+      "reason": "The current 66,699-row corpus reproduces the deployed 64,218 trainable samples exactly and has no duplicate/conflicting fixture keys or direct outcome columns in the feature list.",
+      "blockers": [],
+      "next_action": "Keep as the frozen benchmark; do not overwrite it while expanding data."
+    },
+    {
+      "use_case": "immediate_same_corpus_retrain",
+      "status": "NOT_NEEDED",
+      "reason": "Retraining the same unchanged corpus would not address the identified coverage or provenance gaps.",
+      "blockers": [],
+      "next_action": "Do not spend compute retraining the same 64,218 samples."
+    },
+    {
+      "use_case": "expanded_current_25_feature_market_ensemble",
+      "status": "BLOCKED",
+      "reason": "The current ensemble depends on bookmaker-price features. The expanded competitions do not yet have verified odds-backed history, and the legacy corpus cannot prove row-level price timing/source.",
+      "blockers": [
+        "legacy_rows_lack_exact_row_level_provenance",
+        "ou25_price_coverage_is_partial",
+        "no_new_gap_source_has_verified_bookmaker_odds",
+        "live_competition_coverage_gap"
+      ],
+      "next_action": "Build an odds-backed market_training dataset with explicit source/snapshot provenance before any expanded retrain."
+    },
+    {
+      "use_case": "football_history_expansion_for_form_elo_replay",
+      "status": "CONDITIONAL",
+      "reason": "Verified free results-history sources exist for 5 of 9 currently missing live competitions. They can improve football history without pretending bookmaker odds exist.",
+      "blockers": [
+        "4_live_competitions_still_unresolved"
+      ],
+      "next_action": "Ingest the verified results-only sources into a separate football_history dataset and keep unresolved competitions fail-closed."
+    },
+    {
+      "use_case": "football_first_challenger_model",
+      "status": "CONDITIONAL",
+      "reason": "A football-first challenger can use verified results/form/ELO history without requiring bookmaker odds, but the new sources have not yet been ingested and validated.",
+      "blockers": [
+        "results_sources_not_yet_ingested",
+        "4_competitions_unresolved"
+      ],
+      "next_action": "After results-only ingestion, train an isolated challenger with league-aware chronological evaluation; never overwrite production models."
+    }
+  ],
+  "generated_at": "2026-09-27T11:15:34.270853+00:00",
+  "overall_status": "CONDITIONAL"
+}
