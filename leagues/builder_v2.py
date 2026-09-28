@@ -840,6 +840,7 @@ def generate_v2(options: dict) -> dict:
             "markets_requested": list(options.get("markets") or []),
             "probability_assumption": "approximate_independence",
             "selection_diagnostics_v2": diagnostics,
+            "board": _board_context(board),
         })
         return out
 
