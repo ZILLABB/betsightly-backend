@@ -248,8 +248,21 @@ def canonical_fixture_recommendations(
             else:
                 rejected.append({"market": pick.get("market"), "model_rank": pick["model_rank"],
                                  "quality_score": pick["quality_score"], "reason": reason})
-        eligible, dominated = _remove_dominated(eligible)
-        rejected.extend(dominated)
+        # Normal public surfaces keep Pareto dominance pruning so a safer,
+        # equally-good expression represents the fixture.
+        #
+        # Explicit Builder structure is different. include_all_eligible means
+        # every market that independently passed evidence, policy and trust
+        # must remain available to the downstream selector. Otherwise a valid
+        # user-requested Home Win can disappear merely because Over 1.5 on the
+        # same fixture is safer, before Game Count gets a chance to honour the
+        # requested market structure.
+        if include_all_eligible:
+            dominated = []
+        else:
+            eligible, dominated = _remove_dominated(eligible)
+            rejected.extend(dominated)
+
         eligible.sort(key=lambda p: (-round(p["quality_score"] * 2) / 2,
                                      not bool(p.get("bookable")), -p["quality_score"]))
         if not eligible:

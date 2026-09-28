@@ -111,3 +111,29 @@ def test_feature_flag_preserves_old_selector(monkeypatch):
     original = [_pick("under_2_5", .90, 1.3)]
     monkeypatch.setenv("FIXTURE_RANKED_SELECTOR", "0")
     assert canonical_fixture_recommendations(original) is original
+
+
+def test_include_all_eligible_preserves_dominated_public_market():
+    picks = [
+        _pick("over_1_5", .82, 1.35),
+        _pick("under_4_5", .76, 1.20),
+    ]
+
+    canonical = canonical_fixture_recommendations(picks)
+
+    assert [pick["market"] for pick in canonical] == [
+        "over_1_5",
+    ]
+
+    expanded = canonical_fixture_recommendations(
+        picks,
+        include_all_eligible=True,
+    )
+
+    assert {
+        pick["market"]
+        for pick in expanded
+    } == {
+        "over_1_5",
+        "under_4_5",
+    }

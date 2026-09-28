@@ -243,6 +243,20 @@ def _candidate_pool(
         "approved_count": len(final),
         "effective_min_probability": effective_floor,
         "trust_rejection_reasons": dict(trust_rejections),
+        "market_counts": {
+            "after_user_raw_filters": dict(collections.Counter(
+                str(pick.get("market") or "unknown")
+                for pick in filtered_raw
+            )),
+            "after_trust_and_policy": dict(collections.Counter(
+                str(pick.get("market") or "unknown")
+                for pick in approved
+            )),
+            "approved": dict(collections.Counter(
+                str(pick.get("market") or "unknown")
+                for pick in final
+            )),
+        },
         "timing_ms": timings,
         "require_bookable_effective": True,
         "prepared_board_snapshot_id": prepared_state.get("board_snapshot_id"),
@@ -412,6 +426,26 @@ def _select_market_balanced(
     }
     positions = {market: 0 for market in markets}
 
+    # A plentiful market must not consume the only fixture/team available to
+    # a scarce requested market. Allocate the most supply-constrained markets
+    # first, while preserving the same quality ranking inside each market.
+    #
+    # Example: if O1.5 has 30 candidates and Home Win has one candidate on a
+    # fixture that also has O1.5, Home Win gets first access to that fixture
+    # and O1.5 can use one of its many alternatives.
+    market_position = {
+        market: index
+        for index, market in enumerate(markets)
+    }
+    market_order = sorted(
+        markets,
+        key=lambda market: (
+            len(buckets[market]) / max(1, targets[market]),
+            len(buckets[market]),
+            market_position[market],
+        ),
+    )
+
     selected: list[dict] = []
     seen_fixtures: set[str] = set()
     seen_teams: set[str] = set()
@@ -436,7 +470,7 @@ def _select_market_balanced(
     while len(selected) < limit:
         progressed = False
 
-        for market in markets:
+        for market in market_order:
             if len(selected) >= limit:
                 break
             if delivered[market] >= targets[market]:
@@ -489,6 +523,55 @@ def _select_market_balanced(
         "quality_floor_preserved": True,
         "strategy": "even_requested_markets_then_quality_backfill",
     }
+
+
+def _market_availability(
+    diagnostics: dict,
+    market_balance: dict,
+) -> dict[str, dict]:
+    """Explain each requested Game Count market without weakening its gates."""
+    stage_counts = diagnostics.get("market_counts") or {}
+    raw_counts = stage_counts.get("after_user_raw_filters") or {}
+    trusted_counts = stage_counts.get("after_trust_and_policy") or {}
+    approved_counts = stage_counts.get("approved") or {}
+
+    targets = market_balance.get("target_distribution") or {}
+    delivered = market_balance.get("delivered_distribution") or {}
+
+    out: dict[str, dict] = {}
+
+    for market in market_balance.get("requested_markets") or []:
+        target = int(targets.get(market, 0) or 0)
+        raw = int(raw_counts.get(market, 0) or 0)
+        after_trust = int(trusted_counts.get(market, 0) or 0)
+        approved = int(approved_counts.get(market, 0) or 0)
+        selected = int(delivered.get(market, 0) or 0)
+        shortfall = max(0, target - selected)
+
+        if shortfall == 0:
+            reason = "TARGET_SHARE_FILLED"
+        elif raw == 0:
+            reason = "NO_RAW_CANDIDATES"
+        elif after_trust == 0:
+            reason = "TRUST_OR_MARKET_POLICY_REJECTED"
+        elif approved == 0:
+            reason = "BELOW_FINAL_BUILDER_GATES"
+        elif selected < min(target, approved):
+            reason = "FIXTURE_OR_TEAM_DIVERSITY"
+        else:
+            reason = "INSUFFICIENT_APPROVED_SELECTIONS"
+
+        out[market] = {
+            "target": target,
+            "raw": raw,
+            "after_trust_and_policy": after_trust,
+            "approved": approved,
+            "selected": selected,
+            "shortfall": shortfall,
+            "primary_reason": reason,
+        }
+
+    return out
 
 
 def _booking_is_exact(booking: dict) -> bool:
@@ -682,6 +765,10 @@ def generate_v2(options: dict) -> dict:
             requested,
         )
         result["market_balance"] = market_balance
+        result["market_availability"] = _market_availability(
+            diagnostics,
+            market_balance,
+        )
         return result
 
     max_games = int(options.get("max_games") or 10)

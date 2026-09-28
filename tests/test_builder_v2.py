@@ -938,3 +938,152 @@ def test_strongest_does_not_request_all_eligible_candidates(monkeypatch):
 
     assert result["status"] == "success"
     assert seen["include_all_eligible"] is False
+
+
+def test_game_count_protects_scarce_requested_market_from_abundant_fixture_conflict(
+    monkeypatch,
+):
+    picks = [
+        # Strongest Over 1.5 shares the only Home Win fixture.
+        _pick(
+            1,
+            market="over_1_5",
+            probability=.90,
+            fixture="shared",
+        ),
+        # Alternative Over 1.5 can satisfy the O1.5 share.
+        _pick(
+            2,
+            market="over_1_5",
+            probability=.84,
+            fixture="o15-alternative",
+        ),
+        # Only qualifying Home Win.
+        _pick(
+            3,
+            market="home_win",
+            probability=.74,
+            odds=1.28,
+            fixture="shared",
+        ),
+    ]
+
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 2,
+        "horizon": "7_days",
+        "markets": ["over_1_5", "home_win"],
+    })
+
+    assert result["status"] == "success"
+    assert result["delivered_game_count"] == 2
+    assert result["market_distribution"] == {
+        "over_1_5": 1,
+        "home_win": 1,
+    }
+
+    assert result["market_balance"]["target_distribution"] == {
+        "over_1_5": 1,
+        "home_win": 1,
+    }
+
+    assert result["market_balance"]["shortfalls"] == {}
+    assert result["market_balance"]["quality_floor_preserved"] is True
+
+
+def test_game_count_reports_zero_candidate_market_reason(monkeypatch):
+    picks = [
+        _pick(
+            1,
+            market="over_1_5",
+            probability=.80,
+            fixture="o15-only",
+        ),
+    ]
+
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 2,
+        "horizon": "7_days",
+        "markets": ["over_1_5", "away_win"],
+    })
+
+    availability = result["market_availability"]
+
+    assert availability["over_1_5"]["approved"] == 1
+    assert availability["over_1_5"]["selected"] == 1
+
+    assert availability["away_win"] == {
+        "target": 1,
+        "raw": 0,
+        "after_trust_and_policy": 0,
+        "approved": 0,
+        "selected": 0,
+        "shortfall": 1,
+        "primary_reason": "NO_RAW_CANDIDATES",
+    }
+
+
+def test_game_count_reports_policy_rejected_market_reason(monkeypatch):
+    picks = [
+        _pick(
+            1,
+            market="over_1_5",
+            probability=.80,
+            fixture="o15",
+        ),
+        _pick(
+            2,
+            market="under_3_5",
+            probability=.80,
+            fixture="u35",
+        ),
+    ]
+
+    _wire(monkeypatch, picks)
+
+    from leagues import slip_builder
+
+    def approved(
+        pool,
+        require_bookable=True,
+        include_all_eligible=False,
+    ):
+        return (
+            [
+                pick
+                for pick in pool
+                if pick["market"] != "under_3_5"
+            ],
+            collections.Counter({
+                "insufficient_market_evidence": 1,
+                "market_evidence_restricted": 1,
+            }),
+        )
+
+    monkeypatch.setattr(
+        slip_builder,
+        "approved_builder_candidates",
+        approved,
+    )
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 2,
+        "horizon": "7_days",
+        "markets": ["over_1_5", "under_3_5"],
+    })
+
+    availability = result["market_availability"]
+
+    assert availability["under_3_5"]["raw"] == 1
+    assert availability["under_3_5"]["after_trust_and_policy"] == 0
+    assert availability["under_3_5"]["approved"] == 0
+    assert availability["under_3_5"]["selected"] == 0
+    assert availability["under_3_5"]["primary_reason"] == (
+        "TRUST_OR_MARKET_POLICY_REJECTED"
+    )
