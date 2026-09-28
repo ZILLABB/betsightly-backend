@@ -488,6 +488,48 @@ def test_saturated_leg_ceiling_is_not_called_causal_without_counterfactual_gain(
     assert "strongest verified combination" in built["reason"]
 
 
+
+
+def test_noncausal_market_saturation_is_not_reported_as_binding(monkeypatch):
+    monkeypatch.setattr(
+        "leagues.leg_trust.evaluate_leg_trust",
+        _accept_trust,
+    )
+
+    picks = [
+        _pick(
+            f"thin-goals-{i}",
+            odds=1.20,
+            confidence=.80,
+            market="over_1_5",
+            market_group="goals",
+        )
+        for i in range(3)
+    ]
+
+    built = build_slip(
+        2.0,
+        pool=picks,
+        max_legs=16,
+    )
+
+    assert not built["ok"]
+    assert built["best_reachable"] == pytest.approx(1.73)
+    assert built["result_status"] == "QUALITY_CAPPED"
+
+    # Three selected legs mechanically fill the original cap, but widening
+    # that cap cannot add a fourth candidate and therefore changes nothing.
+    assert "market_group:goals" in built["saturated_constraints"]
+    assert "market_group:goals" not in built["binding_constraints"]
+
+    attempts = built["selection_diagnostics"]["market_cap_attempts"]
+    assert [attempt["market_cap"] for attempt in attempts] == [3, 4, 5, 6, 7]
+    assert {
+        attempt["best_reachable"]
+        for attempt in attempts
+    } == {1.73}
+
+
 def test_tier_selector_cannot_bypass_team_goal_cap_by_switching_sides():
     team_goals = [
         _pick(

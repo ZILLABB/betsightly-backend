@@ -613,6 +613,89 @@ def test_v2_target_api_reuses_cached_generation(monkeypatch):
     assert len(calls) == 1
 
 
+
+
+def test_v2_target_cache_invalidates_when_prepared_snapshot_changes(monkeypatch):
+    import asyncio
+
+    from leagues import api, builder_v2, daily_feed, engine
+
+    api._V2_TARGET_CACHE.clear()
+    api._V2_TARGET_LOCKS.clear()
+
+    snapshot = {"id": "prepared-a"}
+    calls = []
+
+    monkeypatch.setattr(
+        engine,
+        "prepared_board_status",
+        lambda **kwargs: {
+            "ready": True,
+            "board_snapshot_id": snapshot["id"],
+            "generated_at": f"{snapshot['id']}-generated",
+            "evaluated_fixture_count": 100,
+        },
+    )
+
+    def fake_generate(payload):
+        calls.append(snapshot["id"])
+        return {
+            "status": "success",
+            "mode": "target_odds",
+            "target": 10,
+            "odds": 10.2 if snapshot["id"] == "prepared-a" else 10.4,
+            "games": [{"match_id": snapshot["id"]}],
+            "booking": {
+                "status": "active",
+                "share_code": f"CODE-{snapshot['id']}",
+            },
+        }
+
+    monkeypatch.setattr(builder_v2, "generate_v2", fake_generate)
+    monkeypatch.setattr(
+        api,
+        "_start_builder_revision",
+        lambda target, horizon, result: {
+            **result,
+            "builder_run_id": f"run-{result['games'][0]['match_id']}",
+            "revision": 1,
+            "edit_token": "token",
+        },
+    )
+    monkeypatch.setattr(
+        api,
+        "_cached_slip_is_placeable",
+        lambda result: True,
+    )
+    monkeypatch.setattr(
+        daily_feed,
+        "_publish_date",
+        lambda: "2099-01-01",
+    )
+
+    request = api.BuilderV2Request(
+        mode="target_odds",
+        target_odds=10,
+        horizon="7_days",
+    )
+
+    first = asyncio.run(api.slip_builder_v2_generate(request))
+    same_board = asyncio.run(api.slip_builder_v2_generate(request))
+
+    assert first["cached"] is False
+    assert same_board["cached"] is True
+    assert calls == ["prepared-a"]
+
+    snapshot["id"] = "prepared-b"
+
+    refreshed_board = asyncio.run(api.slip_builder_v2_generate(request))
+
+    assert refreshed_board["cached"] is False
+    assert refreshed_board["odds"] == 10.4
+    assert refreshed_board["games"][0]["match_id"] == "prepared-b"
+    assert calls == ["prepared-a", "prepared-b"]
+
+
 def test_real_approval_rejects_sparse_extreme_live_price():
     from leagues.slip_builder import approved_builder_candidates
 

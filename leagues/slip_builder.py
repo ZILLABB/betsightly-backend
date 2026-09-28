@@ -793,6 +793,11 @@ def build_slip(
     candidates = [p for p in canonical_candidates
                   if (float(p.get("odds") or 0) >= MIN_USEFUL_ODDS
                       or _selection_id(p) in required_selection_ids)]
+    diagnostics["min_useful_odds"] = MIN_USEFUL_ODDS
+    diagnostics["below_min_useful_odds_count"] = max(
+        0,
+        len(canonical_candidates) - len(candidates),
+    )
     diagnostics["after_min_useful_odds"] = len(candidates)
     diagnostics["after_policy"] = len(candidates)
     diagnostics["optimizer_candidate_count"] = len(candidates)
@@ -1113,9 +1118,36 @@ def build_slip(
         diagnostics["saturated_constraints"].append(
             "same_team_fixture_diversity"
         )
-    diagnostics["binding_constraints"] = list(
-        diagnostics["saturated_constraints"]
-    )
+    # "Saturated" is descriptive; "binding" must be causal. A market
+    # group can be full at the chosen cap without preventing a better result.
+    # We already solved progressively through wider market caps above, so use
+    # those actual counterfactual outcomes before blaming market concentration.
+    binding_constraints = list(diagnostics["saturated_constraints"])
+
+    market_saturation = [
+        item
+        for item in binding_constraints
+        if item.startswith("market_group:")
+    ]
+
+    if market_saturation and len(market_cap_attempts) > 1:
+        baseline_reachable = float(
+            market_cap_attempts[0].get("best_reachable") or 0.0
+        )
+        wider_cap_helped = any(
+            float(attempt.get("best_reachable") or 0.0)
+            > baseline_reachable + 1e-9
+            for attempt in market_cap_attempts[1:]
+        )
+
+        if not wider_cap_helped:
+            binding_constraints = [
+                item
+                for item in binding_constraints
+                if not item.startswith("market_group:")
+            ]
+
+    diagnostics["binding_constraints"] = binding_constraints
 
     # Calculate the full positive-payout distribution before classifying a
     # miss: a best-available ticket is publishable only when it passes the same
@@ -1158,10 +1190,10 @@ def build_slip(
         }
         result_status = status_by_primary.get(
             primary,
-            "CURRENT_CONSTRAINTS_CAPPED" if diagnostics["saturated_constraints"]
+            "CURRENT_CONSTRAINTS_CAPPED" if diagnostics["binding_constraints"]
             else "QUALITY_CAPPED",
         )
-        binding = diagnostics["saturated_constraints"]
+        binding = diagnostics["binding_constraints"]
         description = ("The strongest verified combination" if verified
                        else "The current search found a qualifying combination")
         if result_status in {
@@ -1208,7 +1240,9 @@ def build_slip(
             "fixture_count": diagnostics.get("fixture_count", 0),
             "market_distribution": diagnostics.get("market_distribution_after_canonical_ranking", {}),
             "binding_constraints": binding,
-            "saturated_constraints": binding,
+            "saturated_constraints": list(
+                diagnostics["saturated_constraints"]
+            ),
             "primary_binding_constraint": primary,
             "secondary_binding_constraints": (
                 (counterfactuals or {}).get("secondary_binding_constraints", [])

@@ -529,6 +529,19 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
 
     if request.mode == "target_odds":
         from leagues.daily_feed import _publish_date
+        from leagues.engine import prepared_board_status
+
+        # Target Odds is cached because its optimizer is more expensive than
+        # the structural Builder modes. The prepared-board identity must be
+        # part of that cache key, though: after a board refresh we must never
+        # keep serving a combination selected from the previous fixture/price
+        # snapshot merely because the request payload and WAT date are equal.
+        cache_board = prepared_board_status(days_ahead=7)
+        cache_board_identity = (
+            cache_board.get("board_snapshot_id"),
+            cache_board.get("generated_at"),
+            int(cache_board.get("evaluated_fixture_count") or 0),
+        )
 
         cache_key = (
             json.dumps(
@@ -538,6 +551,7 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
                 default=str,
             ),
             _publish_date(),
+            cache_board_identity,
         )
         hit = _V2_TARGET_CACHE.get(cache_key)
         if (
