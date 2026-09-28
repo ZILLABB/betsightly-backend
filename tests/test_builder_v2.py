@@ -142,6 +142,80 @@ def test_market_filter_is_exact(monkeypatch):
     assert {game["market"] for game in result["games"]} == {"over_1_5"}
 
 
+
+
+def test_original_v2_advanced_league_fixture_team_and_odds_filters(monkeypatch):
+    premier = _pick(101, odds=1.20, fixture="fixture-premier")
+    premier["_fixture"]["league"] = "Premier League"
+    premier["_fixture"]["league_slug"] = "premier-league"
+    premier["_fixture"]["home"] = {"id": "team-arsenal", "name": "Arsenal"}
+    premier["_fixture"]["away"] = {"id": "team-everton", "name": "Everton"}
+
+    laliga = _pick(102, odds=1.55, fixture="fixture-laliga")
+    laliga["_fixture"]["league"] = "LaLiga"
+    laliga["_fixture"]["league_slug"] = "laliga"
+    laliga["_fixture"]["home"] = {"id": "team-barcelona", "name": "Barcelona"}
+    laliga["_fixture"]["away"] = {"id": "team-sevilla", "name": "Sevilla"}
+
+    serie_a = _pick(103, odds=2.10, fixture="fixture-serie-a")
+    serie_a["_fixture"]["league"] = "Serie A"
+    serie_a["_fixture"]["league_slug"] = "serie-a"
+    serie_a["_fixture"]["home"] = {"id": "team-milan", "name": "Milan"}
+    serie_a["_fixture"]["away"] = {"id": "team-roma", "name": "Roma"}
+
+    picks = [premier, laliga, serie_a]
+    _wire(monkeypatch, picks)
+
+    included = builder_v2.list_candidates({
+        "horizon": "7_days",
+        "include_leagues": ["premier-league"],
+    })
+    assert [item["selection_id"] for item in included["candidates"]] == [
+        premier["selection_id"]
+    ]
+
+    league_excluded = builder_v2.list_candidates({
+        "horizon": "7_days",
+        "exclude_leagues": ["LaLiga"],
+    })
+    assert laliga["selection_id"] not in {
+        item["selection_id"] for item in league_excluded["candidates"]
+    }
+
+    fixture_excluded = builder_v2.list_candidates({
+        "horizon": "7_days",
+        "exclude_fixture_ids": ["fixture-serie-a"],
+    })
+    assert serie_a["selection_id"] not in {
+        item["selection_id"] for item in fixture_excluded["candidates"]
+    }
+
+    team_name_excluded = builder_v2.list_candidates({
+        "horizon": "7_days",
+        "exclude_team_ids": ["Arsenal"],
+    })
+    assert premier["selection_id"] not in {
+        item["selection_id"] for item in team_name_excluded["candidates"]
+    }
+
+    team_id_excluded = builder_v2.list_candidates({
+        "horizon": "7_days",
+        "exclude_team_ids": ["team-barcelona"],
+    })
+    assert laliga["selection_id"] not in {
+        item["selection_id"] for item in team_id_excluded["candidates"]
+    }
+
+    odds_window = builder_v2.list_candidates({
+        "horizon": "7_days",
+        "min_odds": 1.40,
+        "max_odds": 1.80,
+    })
+    assert [item["selection_id"] for item in odds_window["candidates"]] == [
+        laliga["selection_id"]
+    ]
+
+
 def test_user_probability_filter_cannot_lower_system_floor(monkeypatch):
     picks = [_pick(1, probability=.60), _pick(2, probability=.70)]
     _wire(monkeypatch, picks)
