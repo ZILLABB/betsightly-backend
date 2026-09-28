@@ -918,9 +918,17 @@ def manual_build(options: dict) -> dict:
         }
 
     try:
+        # Manual booking starts from the currently prepared/bookable snapshot.
+        # Do not force a complete SportyBet catalogue crawl here: that can take
+        # minutes and makes a user-facing "Generate Code" action time out.
+        #
+        # Exact safety is still enforced downstream by create_booking():
+        # SportyBet creates the requested ticket and the returned code is read
+        # back and checked for the exact event/market/outcome set, availability
+        # and bookmaker-returned odds before any share code is exposed.
         board, pool, diagnostics = _candidate_pool(
             options,
-            refresh_sportybet=True,
+            refresh_sportybet=False,
             include_all_eligible=True,
         )
     except BuilderV2BoardUnavailable as exc:

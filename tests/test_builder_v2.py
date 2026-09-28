@@ -486,6 +486,51 @@ def test_target_mode_accepts_all_v2_horizons(monkeypatch):
     assert horizons == ["today", "3_days", "7_days"]
 
 
+
+
+def test_manual_booking_does_not_force_full_sportybet_refresh(monkeypatch):
+    picks = [_pick(1)]
+    _wire(monkeypatch, picks)
+
+    from leagues import slip_builder
+
+    seen = {}
+
+    def prepared(
+        horizon,
+        force=False,
+        refresh_sportybet=False,
+    ):
+        seen["force"] = force
+        seen["refresh_sportybet"] = refresh_sportybet
+        return (
+            {"__meta__": {"snapshot_id": "sporty-snap"}},
+            list(picks),
+            {"candidate_retrieval": 1},
+        )
+
+    monkeypatch.setattr(
+        slip_builder,
+        "prepared_bookable_pool",
+        prepared,
+    )
+
+    result = builder_v2.manual_build({
+        "selection_ids": ["s1-over_1_5"],
+        "horizon": "7_days",
+    })
+
+    assert result["status"] == "success"
+    assert seen["force"] is False
+    assert seen["refresh_sportybet"] is False
+
+    # Removing the expensive full catalogue crawl must not weaken the
+    # exact-booking requirement.
+    assert result["booking"]["booking_status"] == "FULL"
+    assert result["booking"]["readback_validation"] == "PASSED"
+    assert result["booking"]["share_code"]
+
+
 def test_manual_started_selection_fails_without_code(monkeypatch):
     picks = [_pick(1)]
     _wire(monkeypatch, picks)
