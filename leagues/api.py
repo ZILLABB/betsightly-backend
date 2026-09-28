@@ -396,6 +396,7 @@ class BuilderV2Request(BuilderV2Filters):
     target_odds: float | None = None
     game_count: int | None = None
     max_games: int | None = None
+    fill_strategy: str = "strict_selected_markets"
 
 
 class BuilderV2ManualRequest(BuilderV2Filters):

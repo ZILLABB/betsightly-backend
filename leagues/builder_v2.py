@@ -265,6 +265,47 @@ def _candidate_pool(
     return board, final, diagnostics
 
 
+
+def _diagnostics_for_requested_markets(
+    diagnostics: dict,
+    requested_markets: list[str],
+) -> dict:
+    # Keep requested-market diagnostics truthful when broader fill uses
+    # one all-eligible approved snapshot.
+    markets: list[str] = []
+    for value in requested_markets:
+        market = str(value or "").strip()
+        if market and market not in markets:
+            markets.append(market)
+
+    out = dict(diagnostics)
+    stage_counts = diagnostics.get("market_counts") or {}
+    filtered_counts: dict[str, dict[str, int]] = {}
+
+    for stage in (
+        "after_user_raw_filters",
+        "after_trust_and_policy",
+        "approved",
+    ):
+        counts = stage_counts.get(stage) or {}
+        filtered_counts[stage] = {
+            market: int(counts.get(market, 0) or 0)
+            for market in markets
+        }
+
+    out["market_counts"] = filtered_counts
+    out["after_user_raw_filters"] = sum(
+        filtered_counts["after_user_raw_filters"].values()
+    )
+    out["after_trust_and_policy"] = sum(
+        filtered_counts["after_trust_and_policy"].values()
+    )
+    out["broader_fill_approved_count"] = int(
+        diagnostics.get("approved_count") or 0
+    )
+    out["approved_count"] = sum(filtered_counts["approved"].values())
+    return out
+
 def _board_context(board: dict) -> dict:
     out: dict[str, Any] = {}
     try:
@@ -372,6 +413,7 @@ def _select_market_balanced(
     pool: list[dict],
     limit: int,
     requested_markets: list[str] | None,
+    fallback_pool: list[dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """Select Game Count picks while respecting the user's requested market mix.
 
@@ -389,7 +431,7 @@ def _select_market_balanced(
             markets.append(market)
 
     # No explicit multi-market request: preserve the mature quality-first path.
-    if len(markets) <= 1:
+    if len(markets) <= 1 and not fallback_pool:
         selected = _select_unique(pool, limit)
         delivered = collections.Counter(
             str(pick.get("market") or "unknown") for pick in selected
@@ -408,6 +450,10 @@ def _select_market_balanced(
             "shortfalls": shortfalls,
             "quality_floor_preserved": True,
             "strategy": "quality_first",
+            "requested_market_leg_count": len(selected),
+            "fallback_market_leg_count": 0,
+            "fallback_market_distribution": {},
+            "fallback_markets_used": [],
         }
 
     base, remainder = divmod(limit, len(markets))
@@ -503,6 +549,24 @@ def _select_market_balanced(
             if add_if_available(pick):
                 selected_ids.add(selection_id)
 
+    requested_count = len(selected)
+    fallback_distribution: collections.Counter[str] = collections.Counter()
+    # Explicitly opt-in broader fill only. These candidates have already gone
+    # through the identical final Builder gates in _candidate_pool.
+    if len(selected) < limit and fallback_pool:
+        selected_ids = {str(pick.get("selection_id") or "") for pick in selected}
+        for pick in sorted(fallback_pool, key=_rank_key):
+            if len(selected) >= limit:
+                break
+            if str(pick.get("market") or "") in markets:
+                continue
+            selection_id = str(pick.get("selection_id") or "")
+            if selection_id in selected_ids:
+                continue
+            if add_if_available(pick):
+                selected_ids.add(selection_id)
+                fallback_distribution[str(pick.get("market") or "unknown")] += 1
+
     selected.sort(key=_rank_key)
 
     shortfalls = {
@@ -522,6 +586,10 @@ def _select_market_balanced(
         "shortfalls": shortfalls,
         "quality_floor_preserved": True,
         "strategy": "even_requested_markets_then_quality_backfill",
+        "requested_market_leg_count": requested_count,
+        "fallback_market_leg_count": sum(fallback_distribution.values()),
+        "fallback_market_distribution": dict(fallback_distribution),
+        "fallback_markets_used": sorted(fallback_distribution),
     }
 
 
@@ -686,17 +754,50 @@ def generate_v2(options: dict) -> dict:
         for value in (options.get("markets") or [])
         if str(value).strip()
     ]
+    fill_strategy = str(options.get("fill_strategy") or "strict_selected_markets")
+    if (
+        mode == "game_count"
+        and fill_strategy
+        not in {"strict_selected_markets", "selected_first_then_eligible"}
+    ):
+        return {"status": "error", "mode": mode, "reason": "invalid fill_strategy"}
 
     use_all_eligible = (
         mode == "game_count"
         and bool(requested_markets)
     )
+    broader_fill = bool(
+        mode == "game_count"
+        and requested_markets
+        and fill_strategy == "selected_first_then_eligible"
+    )
+    fallback_pool: list[dict] | None = None
 
     try:
-        board, pool, diagnostics = _candidate_pool(
-            options,
-            include_all_eligible=use_all_eligible,
-        )
+        if broader_fill:
+            # Build the wider approved universe once so requested and fallback
+            # legs come from the same prepared/SportyBet snapshot.
+            broader_options = {**options, "markets": []}
+            board, all_eligible_pool, broader_diagnostics = _candidate_pool(
+                broader_options,
+                include_all_eligible=True,
+            )
+            requested_set = set(requested_markets)
+            pool = [
+                pick
+                for pick in all_eligible_pool
+                if str(pick.get("market") or "") in requested_set
+            ]
+            diagnostics = _diagnostics_for_requested_markets(
+                broader_diagnostics,
+                requested_markets,
+            )
+            fallback_pool = all_eligible_pool
+        else:
+            board, pool, diagnostics = _candidate_pool(
+                options,
+                include_all_eligible=use_all_eligible,
+            )
     except BuilderV2BoardUnavailable as exc:
         return exc.response(mode)
     except ValueError as exc:
@@ -755,6 +856,7 @@ def generate_v2(options: dict) -> dict:
             pool,
             requested,
             list(options.get("markets") or []),
+            fallback_pool=fallback_pool,
         )
         result = _selected_response(
             mode,
@@ -765,6 +867,19 @@ def generate_v2(options: dict) -> dict:
             requested,
         )
         result["market_balance"] = market_balance
+        result["fill_strategy"] = fill_strategy
+        result["requested_market_leg_count"] = int(
+            market_balance.get("requested_market_leg_count") or 0
+        )
+        result["fallback_market_leg_count"] = int(
+            market_balance.get("fallback_market_leg_count") or 0
+        )
+        result["fallback_market_distribution"] = dict(
+            market_balance.get("fallback_market_distribution") or {}
+        )
+        result["fallback_markets_used"] = list(
+            market_balance.get("fallback_markets_used") or []
+        )
         result["market_availability"] = _market_availability(
             diagnostics,
             market_balance,

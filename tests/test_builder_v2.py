@@ -793,6 +793,55 @@ def test_game_count_backfills_when_one_requested_market_is_short(monkeypatch):
     assert result["market_balance"]["quality_floor_preserved"] is True
 
 
+def test_game_count_strict_is_default_and_never_uses_other_markets(monkeypatch):
+    picks = [_pick(i, market="over_1_5", fixture=f"requested-{i}") for i in range(2)] + [
+        _pick(50 + i, market="under_4_5", fixture=f"fallback-{i}") for i in range(8)
+    ]
+    _wire(monkeypatch, picks)
+    result = builder_v2.generate_v2({"mode": "game_count", "game_count": 10,
+                                      "horizon": "7_days", "markets": ["over_1_5"]})
+    assert result["delivered_game_count"] == 2
+    assert result["markets_used"] == ["over_1_5"]
+    assert result["fill_strategy"] == "strict_selected_markets"
+    assert result["market_balance"]["fallback_market_leg_count"] == 0
+    assert result["market_balance"]["fallback_market_distribution"] == {}
+
+
+def test_game_count_selected_first_then_eligible_uses_approved_fallback(monkeypatch):
+    picks = [_pick(i, market="over_1_5", fixture=f"requested-{i}") for i in range(2)] + [
+        _pick(50 + i, market="under_4_5", fixture=f"fallback-{i}") for i in range(8)
+    ]
+    _wire(monkeypatch, picks)
+    result = builder_v2.generate_v2({"mode": "game_count", "game_count": 10,
+                                      "horizon": "7_days", "markets": ["over_1_5"],
+                                      "fill_strategy": "selected_first_then_eligible"})
+    assert result["delivered_game_count"] == 10
+    balance = result["market_balance"]
+    assert balance["requested_market_leg_count"] == 2
+    assert balance["fallback_market_leg_count"] == 8
+    assert balance["fallback_market_distribution"] == {"under_4_5": 8}
+    assert balance["fallback_markets_used"] == ["under_4_5"]
+
+
+def test_game_count_partial_fallback_reports_honest_shortfall(monkeypatch):
+    picks = [_pick(i, market="home_win", fixture=f"requested-{i}") for i in range(14)] + [
+        _pick(100 + i, market="under_4_5", fixture=f"fallback-a-{i}") for i in range(3)
+    ] + [_pick(200 + i, market="home_or_draw", fixture=f"fallback-b-{i}") for i in range(5)]
+    _wire(monkeypatch, picks)
+    result = builder_v2.generate_v2({"mode": "game_count", "game_count": 50,
+                                      "horizon": "7_days", "markets": ["home_win"],
+                                      "fill_strategy": "selected_first_then_eligible"})
+    balance = result["market_balance"]
+    assert result["delivered_game_count"] == 22
+    assert result["shortfall"] == 28
+    assert balance["requested_market_leg_count"] == 14
+    assert balance["fallback_market_leg_count"] == 8
+    assert balance["fallback_market_distribution"] == {"home_or_draw": 5, "under_4_5": 3}
+    assert balance["fallback_markets_used"] == ["home_or_draw", "under_4_5"]
+    assert balance["requested_markets"] == ["home_win"]
+    assert balance["requested_market_leg_count"] + balance["fallback_market_leg_count"] == result["delivered_game_count"]
+
+
 def test_strongest_remains_quality_first_with_multiple_markets(monkeypatch):
     picks = (
         [
@@ -1087,3 +1136,316 @@ def test_game_count_reports_policy_rejected_market_reason(monkeypatch):
     assert availability["under_3_5"]["primary_reason"] == (
         "TRUST_OR_MARKET_POLICY_REJECTED"
     )
+
+
+def test_game_count_fallback_keeps_all_final_gates(monkeypatch):
+    requested = _pick(
+        1, market="over_1_5", probability=.80, fixture="requested"
+    )
+    low_probability = _pick(
+        2, market="under_4_5", probability=.60, fixture="low-probability"
+    )
+    low_trust = _pick(
+        3, market="under_4_5", probability=.80, fixture="low-trust"
+    )
+    low_trust["trust"]["trust_grade"] = "C"
+    not_bookable = _pick(
+        4, market="under_4_5", probability=.80, fixture="not-bookable"
+    )
+    not_bookable["bookable"] = False
+    disabled = _pick(
+        5, market="under_1_5", probability=.80, fixture="disabled"
+    )
+    restricted = _pick(
+        6, market="under_2_5", probability=.80, fixture="restricted"
+    )
+    evidence_rejected = _pick(
+        7, market="home_or_draw", probability=.80, fixture="evidence-rejected"
+    )
+    evidence_rejected["force_evidence_reject"] = True
+    valid_fallback = _pick(
+        8, market="home_or_draw", probability=.78, fixture="valid-fallback"
+    )
+
+    picks = [
+        requested,
+        low_probability,
+        low_trust,
+        not_bookable,
+        disabled,
+        restricted,
+        evidence_rejected,
+        valid_fallback,
+    ]
+    _wire(monkeypatch, picks)
+
+    from leagues import slip_builder
+
+    def approved(pool, require_bookable=True, include_all_eligible=False):
+        return (
+            [
+                pick
+                for pick in pool
+                if not pick.get("force_evidence_reject")
+            ],
+            collections.Counter(
+                {"insufficient_market_evidence": 1}
+            ),
+        )
+
+    monkeypatch.setattr(
+        slip_builder,
+        "approved_builder_candidates",
+        approved,
+    )
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 8,
+        "horizon": "7_days",
+        "markets": ["over_1_5"],
+        "fill_strategy": "selected_first_then_eligible",
+    })
+
+    assert result["status"] == "success"
+    assert result["delivered_game_count"] == 2
+    assert result["requested_market_leg_count"] == 1
+    assert result["fallback_market_leg_count"] == 1
+    assert result["fallback_market_distribution"] == {
+        "home_or_draw": 1,
+    }
+    assert {
+        game["selection_id"]
+        for game in result["games"]
+    } == {
+        requested["selection_id"],
+        valid_fallback["selection_id"],
+    }
+
+
+def test_game_count_requested_surplus_beats_stronger_fallback(monkeypatch):
+    picks = [
+        _pick(
+            1, market="over_1_5", probability=.80, fixture="o15-1"
+        ),
+        _pick(
+            2, market="over_1_5", probability=.79, fixture="o15-2"
+        ),
+        _pick(
+            3, market="over_1_5", probability=.78, fixture="o15-3"
+        ),
+        _pick(
+            10, market="home_win", probability=.74, fixture="home-win"
+        ),
+        _pick(
+            20, market="under_4_5", probability=.95, fixture="fallback"
+        ),
+    ]
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 4,
+        "horizon": "7_days",
+        "markets": ["over_1_5", "home_win"],
+        "fill_strategy": "selected_first_then_eligible",
+    })
+
+    assert result["delivered_game_count"] == 4
+    assert result["fallback_market_leg_count"] == 0
+    assert result["fallback_market_distribution"] == {}
+    assert result["market_distribution"] == {
+        "over_1_5": 3,
+        "home_win": 1,
+    }
+
+
+def test_game_count_fallback_preserves_fixture_and_team_diversity(monkeypatch):
+    requested = _pick(
+        1, market="over_1_5", probability=.82, fixture="shared-fixture"
+    )
+    duplicate_fixture = _pick(
+        2, market="under_4_5", probability=.90, fixture="shared-fixture"
+    )
+    duplicate_team = _pick(
+        3, market="under_4_5", probability=.88, fixture="other-fixture"
+    )
+    duplicate_team["_fixture"]["home"]["name"] = (
+        requested["_fixture"]["home"]["name"]
+    )
+    valid_fallback = _pick(
+        4, market="under_4_5", probability=.78, fixture="valid-fixture"
+    )
+
+    _wire(
+        monkeypatch,
+        [requested, duplicate_fixture, duplicate_team, valid_fallback],
+    )
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 3,
+        "horizon": "7_days",
+        "markets": ["over_1_5"],
+        "fill_strategy": "selected_first_then_eligible",
+    })
+
+    assert result["delivered_game_count"] == 2
+    assert [
+        game["selection_id"]
+        for game in result["games"]
+    ] == [
+        requested["selection_id"],
+        valid_fallback["selection_id"],
+    ]
+
+
+def test_game_count_fallback_keeps_requested_market_availability_truthful(
+    monkeypatch,
+):
+    picks = [
+        _pick(
+            1, market="home_win", probability=.76, fixture="requested"
+        ),
+        _pick(
+            10, market="under_4_5", probability=.80, fixture="fallback-1"
+        ),
+        _pick(
+            11, market="under_4_5", probability=.79, fixture="fallback-2"
+        ),
+        _pick(
+            12, market="home_or_draw", probability=.78, fixture="fallback-3"
+        ),
+    ]
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 4,
+        "horizon": "7_days",
+        "markets": ["home_win"],
+        "fill_strategy": "selected_first_then_eligible",
+    })
+
+    assert result["delivered_game_count"] == 4
+    assert result["requested_market_leg_count"] == 1
+    assert result["fallback_market_leg_count"] == 3
+    assert result["market_balance"]["requested_markets"] == ["home_win"]
+    assert result["market_balance"]["target_distribution"] == {
+        "home_win": 4,
+    }
+    assert result["market_availability"]["home_win"]["selected"] == 1
+    assert result["market_availability"]["home_win"]["target"] == 4
+    assert result["market_availability"]["home_win"]["shortfall"] == 3
+
+
+def test_game_count_booking_receives_exact_requested_plus_fallback_set(
+    monkeypatch,
+):
+    picks = [
+        _pick(
+            1, market="over_1_5", probability=.80, fixture="requested"
+        ),
+        _pick(
+            2, market="under_4_5", probability=.79, fixture="fallback-1"
+        ),
+        _pick(
+            3, market="home_or_draw", probability=.78, fixture="fallback-2"
+        ),
+    ]
+    _wire(monkeypatch, picks)
+
+    from leagues import booking
+
+    captured = {}
+
+    def create_booking(games, board, **kwargs):
+        captured["selection_ids"] = [
+            game["selection_id"]
+            for game in games
+        ]
+        return {
+            "status": "active",
+            "booking_status": "FULL",
+            "readback_validation": "PASSED",
+            "share_code": "CODE",
+            "share_url": "https://example.test",
+        }
+
+    monkeypatch.setattr(booking, "create_booking", create_booking)
+
+    result = builder_v2.generate_v2({
+        "mode": "game_count",
+        "game_count": 3,
+        "horizon": "7_days",
+        "markets": ["over_1_5"],
+        "fill_strategy": "selected_first_then_eligible",
+    })
+
+    assert captured["selection_ids"] == [
+        game["selection_id"]
+        for game in result["games"]
+    ]
+    assert result["requested_market_leg_count"] == 1
+    assert result["fallback_market_leg_count"] == 2
+
+
+def test_game_count_fallback_is_deterministic(monkeypatch):
+    picks = [
+        _pick(
+            1, market="over_1_5", probability=.80, fixture="requested"
+        ),
+        _pick(
+            2, market="under_4_5", probability=.79, fixture="fallback-1"
+        ),
+        _pick(
+            3, market="home_or_draw", probability=.78, fixture="fallback-2"
+        ),
+        _pick(
+            4, market="away_or_draw", probability=.77, fixture="fallback-3"
+        ),
+    ]
+    _wire(monkeypatch, picks)
+
+    options = {
+        "mode": "game_count",
+        "game_count": 4,
+        "horizon": "7_days",
+        "markets": ["over_1_5"],
+        "fill_strategy": "selected_first_then_eligible",
+    }
+
+    first = builder_v2.generate_v2(options)
+    second = builder_v2.generate_v2(options)
+
+    assert [
+        game["selection_id"]
+        for game in first["games"]
+    ] == [
+        game["selection_id"]
+        for game in second["games"]
+    ]
+    assert (
+        first["fallback_market_distribution"]
+        == second["fallback_market_distribution"]
+    )
+    assert first["fallback_markets_used"] == second["fallback_markets_used"]
+
+
+def test_fill_strategy_does_not_change_strongest_mode(monkeypatch):
+    picks = [
+        _pick(1, probability=.85, fixture="one"),
+        _pick(2, probability=.80, fixture="two"),
+    ]
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "strongest",
+        "max_games": 2,
+        "horizon": "7_days",
+        "fill_strategy": "not-a-game-count-strategy",
+    })
+
+    assert result["status"] == "success"
+    assert result["legs"] == 2
+    assert "market_balance" not in result
