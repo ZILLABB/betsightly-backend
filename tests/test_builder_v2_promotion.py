@@ -162,3 +162,87 @@ def test_real_migration_preserves_history_and_supports_non_target_rows(
         assert conn.execute(select(builder_runs.builder_runs)).mappings().one()["mode"] == "manual"
     command.upgrade(cfg, "add_builder_v2_context")
     db.dispose()
+
+
+def test_target_with_unavailable_booking_is_not_cached(monkeypatch):
+    """A transient SportyBet failure must be allowed to recover on retry."""
+    responses = [
+        {
+            "status": "success",
+            "games": [{
+                "match_id": "m1",
+                "market": "over_1_5",
+                "kickoff": "2099-01-01T12:00:00Z",
+            }],
+            "odds": 2.04,
+            "board": {"board_snapshot_id": "fixed"},
+            "booking": {
+                "status": "unavailable",
+                "booking_status": "UNAVAILABLE",
+                "share_code": None,
+            },
+        },
+        {
+            "status": "success",
+            "games": [{
+                "match_id": "m2",
+                "market": "over_1_5",
+                "kickoff": "2099-01-01T13:00:00Z",
+            }],
+            "odds": 2.07,
+            "board": {"board_snapshot_id": "fixed"},
+            "booking": {
+                "status": "active",
+                "booking_status": "FULL",
+                "readback_validation": "PASSED",
+                "share_code": "PRIVATE",
+                "leg_fingerprint": "ignored-by-test",
+                "expires_at": "2099-01-01T14:00:00+00:00",
+                "original_leg_count": 1,
+                "booked_leg_count": 1,
+            },
+        },
+    ]
+    calls = []
+
+    def generate(options):
+        calls.append(dict(options))
+        return dict(responses[len(calls) - 1])
+
+    monkeypatch.setattr(builder_v2, "generate_v2", generate)
+    monkeypatch.setattr(
+        engine,
+        "prepared_board_status",
+        lambda **kw: {
+            "board_snapshot_id": "fixed",
+            "generated_at": "2099-01-01T00:00:00Z",
+            "evaluated_fixture_count": 1,
+        },
+    )
+    monkeypatch.setattr(api, "_start_builder_revision", lambda t, h, r: r)
+    monkeypatch.setattr(api, "_record_v2_result", lambda *args, **kwargs: None)
+
+    # Keep this test focused on cache admission rather than lifecycle internals.
+    monkeypatch.setattr(
+        api,
+        "_cached_target_result_is_reusable",
+        lambda result, now=None: (
+            (result.get("booking") or {}).get("booking_status") == "FULL"
+            and (result.get("booking") or {}).get("readback_validation") == "PASSED"
+            and bool((result.get("booking") or {}).get("share_code"))
+        ),
+    )
+
+    request = api.BuilderV2Request(
+        mode="target_odds",
+        target_odds=2,
+        horizon="today",
+    )
+
+    first = asyncio.run(api.slip_builder_v2_generate(request))
+    second = asyncio.run(api.slip_builder_v2_generate(request))
+
+    assert first["booking"]["booking_status"] == "UNAVAILABLE"
+    assert second["booking"]["booking_status"] == "FULL"
+    assert len(calls) == 2
+    assert api._V2_TARGET_CACHE

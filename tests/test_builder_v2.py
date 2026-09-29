@@ -637,8 +637,8 @@ def test_v2_target_api_reuses_cached_generation(monkeypatch):
     )
     monkeypatch.setattr(
         api,
-        "_cached_slip_is_placeable",
-        lambda result: True,
+        "_cached_target_result_is_reusable",
+        lambda result, now=None: True,
     )
     monkeypatch.setattr(
         daily_feed,
@@ -710,8 +710,8 @@ def test_v2_target_cache_invalidates_when_prepared_snapshot_changes(monkeypatch)
     )
     monkeypatch.setattr(
         api,
-        "_cached_slip_is_placeable",
-        lambda result: True,
+        "_cached_target_result_is_reusable",
+        lambda result, now=None: True,
     )
     monkeypatch.setattr(
         daily_feed,

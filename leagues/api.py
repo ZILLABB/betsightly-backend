@@ -489,11 +489,34 @@ def _start_builder_revision(target: float, horizon: str, result: dict) -> dict:
 
 
 def _cached_slip_is_placeable(result: dict, now: datetime | None = None) -> bool:
-    """A cached code must still contain only matches a user can book."""
+    """A cached slip must still contain only matches a user can book."""
     from leagues.availability import all_games_actionable
 
     now = now or datetime.now(timezone.utc)
     return all_games_actionable(result.get("games") or [], now)
+
+
+def _cached_target_result_is_reusable(
+    result: dict, now: datetime | None = None
+) -> bool:
+    """V2 target cache may reuse only an exact active SportyBet booking."""
+    from leagues.booking import booking_lifecycle
+
+    now = now or datetime.now(timezone.utc)
+    games = result.get("games") or []
+
+    if not games or not _cached_slip_is_placeable(result, now):
+        return False
+
+    checked = booking_lifecycle(result.get("booking") or {}, games, now)
+
+    return bool(
+        checked
+        and checked.get("actionable")
+        and checked.get("booking_status") in {"FULL", "REBUILT_FULL"}
+        and str(checked.get("readback_validation") or "").upper() == "PASSED"
+        and checked.get("share_code")
+    )
 
 
 def _log_builder_board(builder_run_id: str, target: float, horizon: str,
@@ -626,7 +649,7 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
         if (
             hit and not request.refresh
             and (_t.time() - hit["ts"]) < _SLIP_TTL
-            and _cached_slip_is_placeable(hit["result"])
+            and _cached_target_result_is_reusable(hit["result"])
         ):
             result = {**hit["result"], "cached": True}
         else:
@@ -639,7 +662,7 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
                 if (
                     hit and not request.refresh
                     and (_t.time() - hit["ts"]) < _SLIP_TTL
-                    and _cached_slip_is_placeable(hit["result"])
+                    and _cached_target_result_is_reusable(hit["result"])
                 ):
                     result = {**hit["result"], "cached": True}
                 else:
@@ -647,7 +670,10 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
                         generate_v2,
                         payload,
                     )
-                    if result.get("status") == "success":
+                    if (
+                        result.get("status") == "success"
+                        and _cached_target_result_is_reusable(result)
+                    ):
                         _V2_TARGET_CACHE[cache_key] = {
                             "result": result,
                             "ts": _t.time(),

@@ -493,6 +493,8 @@ def test_builder_refresh_reuses_ready_board(monkeypatch):
 def test_builder_serves_stale_board_while_starting_background_refresh(monkeypatch):
     from leagues import api, builder_runs, slip_builder
 
+    monkeypatch.setenv("BUILDER_ENGINE", "legacy")
+
     async def run_inline(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
