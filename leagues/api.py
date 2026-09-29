@@ -419,6 +419,10 @@ def _record_v2_result(payload: dict, result: dict, started: float) -> None:
             payload.get("horizon", "7_days"), bool(payload.get("refresh")),
             result, cached=bool(result.get("cached")), request_id=result["request_id"],
             mode=payload.get("mode", "target_odds"),
+            fill_strategy=payload.get("fill_strategy") if payload.get("mode") == "game_count" else None,
+            requested_markets=payload.get("markets") or [],
+            requested_game_count=(payload.get("game_count")
+                                  if payload.get("mode") == "game_count" else None),
         )
     except Exception as exc:
         logger.error("builder_v2_persistence_failed request_id=%s error_type=%s",

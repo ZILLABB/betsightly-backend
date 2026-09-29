@@ -41,6 +41,25 @@ def test_builder_runs_categorizes_no_code(monkeypatch):
     assert result["failures"] == [{"category": "UNAVAILABLE", "count": 1}]
 
 
+def test_builder_run_persists_safe_v2_request_and_selected_market_provenance(monkeypatch):
+    db = create_engine("sqlite://", poolclass=StaticPool,
+                       connect_args={"check_same_thread": False})
+    monkeypatch.setattr(runs, "engine", db)
+    runs.record_run(
+        None, "7_days", False,
+        _success([_game("m1", market="home_win"), _game("m2", market="over_1_5")]),
+        mode="game_count", fill_strategy="selected_first_then_eligible",
+        requested_markets=["home_win", "home_win"], requested_game_count=20,
+    )
+    with db.connect() as conn:
+        stored = conn.execute(select(runs.builder_runs)).mappings().one()
+    assert stored["mode"] == "game_count"
+    assert stored["fill_strategy"] == "selected_first_then_eligible"
+    assert json.loads(stored["requested_markets"]) == ["home_win"]
+    assert json.loads(stored["selected_markets"]) == ["home_win", "over_1_5"]
+    assert stored["requested_game_count"] == 20
+
+
 def _game(match_id, odds=1.5, market="over_1_5"):
     return {
         "match_id": match_id, "home_team": f"Home {match_id}",

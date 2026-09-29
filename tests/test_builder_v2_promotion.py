@@ -77,16 +77,23 @@ def test_modes_archive_and_settle_without_fabricated_targets(monkeypatch, isolat
         result = asyncio.run(api.slip_builder_v2_manual(api.BuilderV2ManualRequest(selection_ids=["s1"])))
     else:
         result = asyncio.run(api.slip_builder_v2_generate(api.BuilderV2Request(
-            mode=mode, target_odds=2 if mode == "target_odds" else None, game_count=1)))
+            mode=mode, target_odds=2 if mode == "target_odds" else None, game_count=1,
+            markets=["over_1_5"],
+            fill_strategy="selected_first_then_eligible" if mode == "game_count" else "strict_selected_markets")))
     with isolated.connect() as conn:
         row = conn.execute(select(builder_runs.builder_predictions)).mappings().one()
-        assert conn.execute(select(builder_runs.builder_runs)).mappings().one()["request_id"] == result["request_id"]
+        run = conn.execute(select(builder_runs.builder_runs)).mappings().one()
+        assert run["request_id"] == result["request_id"]
     assert row["mode"] == mode
     assert row["target_odds"] == (2 if mode == "target_odds" else None)
     assert json.loads(row["picks"]) == [game]
     assert json.loads(row["board_context"])["board_snapshot_id"] == "fixed"
     assert row["hit_probability"] == .75
     assert "PRIVATE" not in str(dict(row))
+    assert json.loads(run["requested_markets"]) == (["over_1_5"] if mode != "manual" else [])
+    assert json.loads(run["selected_markets"]) == ["over_1_5"]
+    assert run["requested_game_count"] == (1 if mode == "game_count" else None)
+    assert run["fill_strategy"] == ("selected_first_then_eligible" if mode == "game_count" else None)
     assert builder_runs.settle_prediction(row["selection_fingerprint"], ["won"]) == "won"
     with isolated.connect() as conn:
         settled = conn.execute(select(builder_runs.builder_predictions)).mappings().one()
@@ -147,6 +154,7 @@ def test_real_migration_preserves_history_and_supports_non_target_rows(
     assert "ix_builder_predictions_created_at" in {
         index["name"] for index in inspector.get_indexes("builder_predictions")
     }
+    command.upgrade(cfg, "add_builder_run_request_context")
     monkeypatch.setattr(builder_runs, "engine", db)
     builder_runs.record_run(None, "7_days", False, {"status": "unavailable"}, mode="manual")
     if existing_predictions:
@@ -160,8 +168,29 @@ def test_real_migration_preserves_history_and_supports_non_target_rows(
     # Downgrade must not discard new-mode history or provenance.
     with db.connect() as conn:
         assert conn.execute(select(builder_runs.builder_runs)).mappings().one()["mode"] == "manual"
-    command.upgrade(cfg, "add_builder_v2_context")
+    command.upgrade(cfg, "add_builder_run_request_context")
     db.dispose()
+
+
+def test_builder_run_request_context_migration_is_additive(monkeypatch, tmp_path):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import inspect, text
+    import database
+    url = "sqlite:///" + str(tmp_path / "request-context.db")
+    monkeypatch.setattr(database, "DATABASE_URL", url)
+    cfg = Config("alembic.ini")
+    command.upgrade(cfg, "add_builder_v2_context")
+    db = create_engine(url)
+    with db.begin() as conn:
+        conn.execute(text("INSERT INTO builder_runs "
+                          "(request_id,requested_at,target_odds,horizon,refresh,result_status,ticket_produced,cached) "
+                          "VALUES ('historic','2026-09-16',2,'today',0,'success',0,0)"))
+    command.upgrade(cfg, "add_builder_run_request_context")
+    columns = {column["name"] for column in inspect(db).get_columns("builder_runs")}
+    assert {"fill_strategy", "requested_markets", "selected_markets", "requested_game_count"} <= columns
+    with db.connect() as conn:
+        assert conn.execute(text("SELECT request_id FROM builder_runs")).scalar_one() == "historic"
 
 
 def test_target_with_unavailable_booking_is_not_cached(monkeypatch):

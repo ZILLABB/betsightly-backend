@@ -28,6 +28,12 @@ builder_runs = Table(
     Column("target_odds", Float, nullable=True),
     Column("mode", String(24), nullable=False, server_default="target_odds"),
     Column("horizon", String(16), nullable=False),
+    # Request intent is operational provenance, not model input.  Keeping it
+    # alongside the produced market mix makes broader-fill runs auditable.
+    Column("fill_strategy", String(48)),
+    Column("requested_markets", Text),
+    Column("selected_markets", Text),
+    Column("requested_game_count", Integer),
     Column("refresh", Boolean, nullable=False, default=False),
     Column("result_status", String(24), nullable=False),
     Column("leg_count", Integer),
@@ -93,17 +99,25 @@ def _failure_category(result: dict) -> str | None:
 
 def record_run(target: float | None, horizon: str, refresh: bool, result: dict,
                *, cached: bool = False, request_id: str | None = None,
-               mode: str = "target_odds") -> str:
+               mode: str = "target_odds", fill_strategy: str | None = None,
+               requested_markets: list[str] | None = None,
+               requested_game_count: int | None = None) -> str:
     """Persist one request outcome. Raises only to its caller, which logs and continues."""
     ensure_table()
     booking = result.get("booking") or {}
     produced = bool(booking.get("status") == "active" and booking.get("share_code"))
     request_id = request_id or str(uuid.uuid4())
+    selected_markets = sorted({str(game.get("market")) for game in result.get("games") or []
+                               if game.get("market")})
     row = {
         "request_id": request_id,
         "requested_at": datetime.now(timezone.utc),
         "target_odds": float(target) if target is not None else None,
         "mode": mode, "horizon": str(horizon)[:16],
+        "fill_strategy": str(fill_strategy)[:48] if fill_strategy else None,
+        "requested_markets": json.dumps(sorted({str(m) for m in requested_markets or []})),
+        "selected_markets": json.dumps(selected_markets),
+        "requested_game_count": int(requested_game_count) if requested_game_count is not None else None,
         "refresh": bool(refresh), "result_status": str(result.get("status") or "error")[:24],
         "leg_count": result.get("legs"), "generated_odds": result.get("odds"),
         "ticket_produced": produced,
