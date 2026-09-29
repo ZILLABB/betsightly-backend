@@ -43,7 +43,7 @@ def _wire(monkeypatch, picks):
     monkeypatch.setattr(
         slip_builder,
         "prepared_bookable_pool",
-        lambda horizon, force=False, refresh_sportybet=False: (
+        lambda horizon, force=False, refresh_sportybet=False, **kwargs: (
             {"__meta__": {"snapshot_id": "sporty-snap"}},
             list(picks),
             {"candidate_retrieval": 1},
@@ -445,7 +445,7 @@ def test_target_mode_accepts_all_v2_horizons(monkeypatch):
 
     horizons = []
 
-    def prepared(horizon, force=False, refresh_sportybet=False):
+    def prepared(horizon, force=False, refresh_sportybet=False, **kwargs):
         horizons.append(horizon)
         return (
             {"__meta__": {"snapshot_id": "sporty-snap"}},
@@ -500,6 +500,7 @@ def test_manual_booking_does_not_force_full_sportybet_refresh(monkeypatch):
         horizon,
         force=False,
         refresh_sportybet=False,
+        **kwargs,
     ):
         seen["force"] = force
         seen["refresh_sportybet"] = refresh_sportybet
@@ -794,7 +795,7 @@ def test_require_bookable_false_cannot_weaken_v2_server_gate(monkeypatch):
     monkeypatch.setattr(
         slip_builder,
         "prepared_bookable_pool",
-        lambda horizon, force=False, refresh_sportybet=False: (
+        lambda horizon, force=False, refresh_sportybet=False, **kwargs: (
             {"__meta__": {"snapshot_id": "sporty-snap"}},
             [unbookable],
             {"candidate_retrieval": 1},
@@ -1651,3 +1652,27 @@ def test_fill_strategy_does_not_change_strongest_mode(monkeypatch):
     assert result["status"] == "success"
     assert result["legs"] == 2
     assert "market_balance" not in result
+
+
+def test_all_four_modes_share_frozen_board_and_exact_booking(monkeypatch):
+    from leagues import booking
+    picks = [_pick(i, probability=.92, odds=1.5) for i in range(8)]
+    _wire(monkeypatch, picks)
+    monkeypatch.setattr(booking, "create_or_reuse_generated_booking",
+                        lambda games, board, **kw: booking.create_booking(games, board))
+    ids = [pick["selection_id"] for pick in picks[:3]]
+    results = [
+        builder_v2.generate_v2({"mode": "target_odds", "target_odds": 2, "horizon": "7_days"}),
+        builder_v2.generate_v2({"mode": "game_count", "game_count": 3, "horizon": "7_days"}),
+        builder_v2.generate_v2({"mode": "strongest", "max_games": 3, "horizon": "7_days"}),
+        builder_v2.manual_build({"selection_ids": ids, "horizon": "7_days"}),
+    ]
+    for result in results:
+        assert result["status"] == "success", result
+        assert result["board"]["board_snapshot_id"] == "prepared-snap"
+        fixtures = [game["match_id"] for game in result["games"]]
+        assert len(fixtures) == len(set(fixtures))
+        assert set(fixtures) <= {p["match_id"] for p in picks if p["bookable"]}
+        assert result["booking"]["booking_status"] == "FULL"
+        assert result["booking"]["readback_validation"] == "PASSED"
+    assert [game["selection_id"] for game in results[-1]["games"]] == ids

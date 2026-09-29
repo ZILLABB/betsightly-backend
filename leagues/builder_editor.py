@@ -274,6 +274,7 @@ def revise(
     board, bookable_pool, timings = prepared_bookable_pool(
         state["horizon"], force=False,
         refresh_sportybet=action == "accept_best_reachable",
+        allow_pipeline_fallback=False,
     )
     timings["revision_board_lookup"] = round((time.perf_counter() - started) * 1000)
     from leagues.engine import prepared_board_status
@@ -482,7 +483,8 @@ def revise(
             break
         retries += 1
         retry_board, retry_pool, retry_timings = prepared_bookable_pool(
-            state["horizon"], force=False, refresh_sportybet=True
+            state["horizon"], force=False, refresh_sportybet=True,
+            allow_pipeline_fallback=False,
         )
         live_ids = {_selection_id(pick) for pick in retry_pool}
         vanished = {

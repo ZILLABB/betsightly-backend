@@ -330,7 +330,8 @@ def _order_key(pick: dict):
     return (round(_cost(pick) / _COST_TIE_BAND), not pick.get("bookable"), margin)
 
 
-def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
+def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False,
+          allow_pipeline_fallback: bool = True) -> list:
     """Every Builder-qualified pick within the requested horizon."""
     from leagues.calibrator import fit_calibration
     from leagues.engine import prepared_pipeline, run_pipeline
@@ -351,7 +352,7 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
         _, fixtures = run_pipeline(days_ahead=POOL_DAYS, force=True)
     else:
         _, fixtures = prepared_pipeline(days_ahead=POOL_DAYS)
-        if not fixtures:
+        if not fixtures and allow_pipeline_fallback:
             # Direct/admin callers retain a safe fallback. The public API
             # checks board readiness first and never reaches this cold path.
             _, fixtures = run_pipeline(days_ahead=POOL_DAYS, force=False)
@@ -1381,6 +1382,7 @@ def build_slip(
 def prepared_bookable_pool(
     horizon: str = DEFAULT_HORIZON, force: bool = False,
     refresh_sportybet: bool = False,
+    allow_pipeline_fallback: bool = True,
 ) -> tuple[dict, list[dict], dict[str, int]]:
     """Return the current approved-input board without refreshing ESPN.
 
@@ -1396,7 +1398,9 @@ def prepared_bookable_pool(
         return round((monotonic_time.perf_counter() - stage) * 1000)
 
     stage = monotonic_time.perf_counter()
-    qualified_pool = _pool(horizon, force=force)
+    qualified_pool = _pool(
+        horizon, force=force, allow_pipeline_fallback=allow_pipeline_fallback,
+    )
     timings = {"candidate_retrieval": elapsed_ms(stage)}
 
     stage = monotonic_time.perf_counter()

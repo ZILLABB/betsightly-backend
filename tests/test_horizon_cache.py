@@ -458,7 +458,7 @@ def test_cold_builder_click_returns_controlled_refresh_state(monkeypatch):
 
 
 def test_builder_refresh_reuses_ready_board(monkeypatch):
-    from leagues import api, builder_runs, slip_builder
+    from leagues import api, builder_runs, builder_v2
 
     async def run_inline(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -468,13 +468,10 @@ def test_builder_refresh_reuses_ready_board(monkeypatch):
         lambda days_ahead=7: {"ready": True, "requested_days": days_ahead},
     )
     calls = []
-    monkeypatch.setattr(
-        slip_builder, "generate",
-        lambda target, horizon="week", force=False: (
-            calls.append((target, horizon, force))
-            or {"status": "success", "games": [], "requested_target": target}
-        ),
-    )
+    monkeypatch.setattr(builder_v2, "generate_v2", lambda payload: (
+        calls.append(payload) or {"status": "success", "games": [],
+                                  "requested_target": payload["target_odds"]}
+    ))
     monkeypatch.setattr(builder_runs, "record_run", lambda *args, **kwargs: None)
     monkeypatch.setattr(asyncio, "to_thread", run_inline)
 
@@ -483,7 +480,14 @@ def test_builder_refresh_reuses_ready_board(monkeypatch):
     )
 
     assert result["status"] == "success"
-    assert calls == [(20, "week", False)]
+    assert calls == [{
+        "mode": "target_odds", "target_odds": 20, "horizon": "7_days",
+        "refresh": True, "markets": [], "min_odds": None, "max_odds": None,
+        "min_probability": None, "min_trust_grade": "B",
+        "include_leagues": [], "exclude_leagues": [], "exclude_fixture_ids": [],
+        "exclude_team_ids": [], "require_bookable": True, "game_count": None,
+        "max_games": None, "fill_strategy": "strict_selected_markets",
+    }]
 
 
 def test_builder_serves_stale_board_while_starting_background_refresh(monkeypatch):

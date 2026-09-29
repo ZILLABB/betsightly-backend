@@ -96,7 +96,12 @@ app = FastAPI(
 @app.middleware("http")
 async def trace_important_requests(request: Request, call_next):
     """Log arrival of expensive public requests without request credentials."""
-    if request.url.path == "/api/leagues/slip-builder/generate":
+    if request.url.path in {
+        "/api/leagues/slip-builder/generate",
+        "/api/leagues/slip-builder/v2/generate",
+        "/api/leagues/slip-builder/v2/manual",
+        "/api/leagues/slip-builder/v2/candidates",
+    }:
         raw_cf_ray = request.headers.get("cf-ray", "")
         cf_ray = "".join(
             char for char in raw_cf_ray[:128]

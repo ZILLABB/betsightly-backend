@@ -397,6 +397,7 @@ class BuilderV2Request(BuilderV2Filters):
     game_count: int | None = None
     max_games: int | None = None
     fill_strategy: str = "strict_selected_markets"
+    refresh: bool = False
 
 
 class BuilderV2ManualRequest(BuilderV2Filters):
@@ -406,7 +407,52 @@ class BuilderV2ManualRequest(BuilderV2Filters):
 def _builder_v2_payload(model: BaseModel) -> dict:
     return model.model_dump() if hasattr(model, "model_dump") else model.dict()
 
+def _record_v2_result(payload: dict, result: dict, started: float) -> None:
+    """Adapt V2 to the existing settlement archive; log only safe facts."""
+    import time
+    from leagues.builder_runs import record_run
+
+    persistence_started = time.perf_counter()
+    try:
+        record_run(
+            payload.get("target_odds") if payload.get("mode") == "target_odds" else None,
+            payload.get("horizon", "7_days"), bool(payload.get("refresh")),
+            result, cached=bool(result.get("cached")), request_id=result["request_id"],
+            mode=payload.get("mode", "target_odds"),
+        )
+    except Exception as exc:
+        logger.error("builder_v2_persistence_failed request_id=%s error_type=%s",
+                     result["request_id"], type(exc).__name__)
+    booking = result.get("booking") or {}
+    diagnostics = result.get("selection_diagnostics_v2") or result.get("selection_diagnostics") or {}
+    logger.info("builder_v2_result %s", {
+        "request_id": result["request_id"], "mode": payload.get("mode"),
+        "horizon": payload.get("horizon"),
+        "board_snapshot_id": (result.get("board") or {}).get("board_snapshot_id"),
+        "candidate_count": diagnostics.get("approved_count"),
+        "delivered": len(result.get("games") or []), "shortfall": result.get("shortfall"),
+        "booking_status": booking.get("booking_status"),
+        "readback_status": booking.get("readback_validation"), "status": result.get("status"),
+        "requested_target": payload.get("target_odds"), "achieved_odds": result.get("odds"),
+        "best_reachable": result.get("best_reachable"),
+        "binding_constraints": diagnostics.get("primary_binding_constraint"),
+        "requested_selection_count": len(payload.get("selection_ids") or []),
+        "invalid_count": len(result.get("invalid_selections") or []),
+        "valid_count": result.get("valid_count", len(result.get("games") or [])),
+        "candidate_timing_ms": diagnostics.get("timing_ms"),
+        "booking_timing_ms": booking.get("timing_ms"),
+        "generation_timing_ms": result.get("timing_ms"),
+        "persistence_ms": round((time.perf_counter() - persistence_started) * 1000),
+        "duration_ms": round((time.perf_counter() - started) * 1000),
+    })
+
 def _start_builder_revision(target: float, horizon: str, result: dict) -> dict:
+    # Generation owns provenance; a later refresh cannot relabel this slip.
+    if result.get("board"):
+        if result.get("status") != "success" or not result.get("games"):
+            return result
+        from leagues.builder_revisions import create_initial_run
+        return create_initial_run(target, horizon, result)
     try:
         from leagues.engine import prepared_board_status
         state = prepared_board_status(days_ahead=7)
@@ -507,8 +553,11 @@ async def slip_builder_targets():
 async def slip_builder_v2_candidates(request: BuilderV2Filters):
     """Browse the current approved V2 candidate board without rebuilding providers."""
     import asyncio
+    import os
     from leagues.builder_v2 import list_candidates
 
+    if os.getenv("BUILDER_ENGINE", "v2").strip().lower() != "v2":
+        return {"status": "unavailable", "reason": "builder_mode_disabled", "retryable": False}
     return await asyncio.to_thread(
         list_candidates,
         _builder_v2_payload(request),
@@ -526,6 +575,26 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
 
     request_id = str(uuid.uuid4())
     payload = _builder_v2_payload(request)
+
+    import os
+    engine = os.getenv("BUILDER_ENGINE", "v2").strip().lower()
+    if engine == "legacy":
+        if request.mode != "target_odds" or request.horizon not in {"today", "7_days"} or any(
+            payload.get(key) for key in (
+                "markets", "include_leagues", "exclude_leagues",
+                "exclude_fixture_ids", "exclude_team_ids", "min_odds", "max_odds",
+                "min_probability",
+            )
+        ) or request.min_trust_grade != "B" or not request.require_bookable:
+            return {"status": "unavailable", "reason": "builder_mode_disabled", "retryable": False}
+        return await _legacy_slip_builder_generate(
+            request.target_odds or 0,
+            "week" if request.horizon == "7_days" else "today",
+            request.refresh,
+        )
+    if engine != "v2":
+        return {"status": "unavailable", "reason": "builder_engine_disabled", "retryable": False}
+    started = _t.perf_counter()
 
     if request.mode == "target_odds":
         from leagues.daily_feed import _publish_date
@@ -555,7 +624,7 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
         )
         hit = _V2_TARGET_CACHE.get(cache_key)
         if (
-            hit
+            hit and not request.refresh
             and (_t.time() - hit["ts"]) < _SLIP_TTL
             and _cached_slip_is_placeable(hit["result"])
         ):
@@ -568,7 +637,7 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
             async with lock:
                 hit = _V2_TARGET_CACHE.get(cache_key)
                 if (
-                    hit
+                    hit and not request.refresh
                     and (_t.time() - hit["ts"]) < _SLIP_TTL
                     and _cached_slip_is_placeable(hit["result"])
                 ):
@@ -595,13 +664,14 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
         and result.get("status") == "success"
         and result.get("games")
     ):
-        result = _start_builder_revision(
+        result = await asyncio.to_thread(_start_builder_revision,
             float(request.target_odds or result.get("odds") or 2),
             request.horizon,
             result,
         )
 
     result["request_id"] = request_id
+    await asyncio.to_thread(_record_v2_result, payload, result, started)
     return result
 
 
@@ -609,19 +679,35 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
 async def slip_builder_v2_manual(request: BuilderV2ManualRequest):
     """Book only the exact approved selection IDs chosen by the user."""
     import asyncio
+    import os
+    import time
     from leagues.builder_v2 import manual_build
 
+    if os.getenv("BUILDER_ENGINE", "v2").strip().lower() != "v2":
+        return {"status": "unavailable", "reason": "builder_mode_disabled", "retryable": False}
+    started = time.perf_counter()
     request_id = str(uuid.uuid4())
     result = await asyncio.to_thread(
         manual_build,
         _builder_v2_payload(request),
     )
     result["request_id"] = request_id
+    await asyncio.to_thread(_record_v2_result, {**_builder_v2_payload(request), "mode": "manual"}, result, started)
     return result
 
 @router.post("/slip-builder/generate")
 async def slip_builder_generate(target: float, horizon: str = "week",
                                 refresh: bool = False):
+    """Deprecated query contract; selection and cache belong to V2."""
+    return await slip_builder_v2_generate(BuilderV2Request(
+        mode="target_odds", target_odds=target,
+        horizon="7_days" if horizon == "week" else horizon,
+        refresh=refresh,
+    ))
+
+
+async def _legacy_slip_builder_generate(target: float, horizon: str = "week",
+                                       refresh: bool = False):
     """Build a slip to a requested multiplier and book it."""
     import time as _t
     from database import log_pool_exception, log_pool_status

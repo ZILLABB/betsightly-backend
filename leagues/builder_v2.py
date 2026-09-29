@@ -206,6 +206,7 @@ def _candidate_pool(
         horizon,
         force=False,
         refresh_sportybet=refresh_sportybet,
+        allow_pipeline_fallback=False,
     )
     filtered_raw = _raw_filter(raw, options)
     approved, trust_rejections = approved_builder_candidates(
