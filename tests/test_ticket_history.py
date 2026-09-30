@@ -51,3 +51,86 @@ def test_builder_identity_is_excluded_from_engine_but_kept_for_history():
     assert persistence_payload["anonymous_id"] == "anon_123456789012345"
     assert persistence_payload["target_odds"] == 2
     assert persistence_payload["mode"] == "target_odds"
+
+
+
+def test_recent_exposure_reads_only_current_anonymous_user(monkeypatch):
+    db = setup_db(monkeypatch)
+
+    anon_a = "anon_AAAAAAAAAAAAA"
+    anon_b = "anon_BBBBBBBBBBBBB"
+
+    first = result()
+    second_game = dict(
+        result()["games"][0],
+        fixture_id="f2",
+        selection_id="s2",
+        home_team="C",
+        away_team="D",
+        league="L2",
+        market="over_2_5",
+    )
+
+    history.record_generated_ticket(
+        {
+            "anonymous_id": anon_a,
+            "mode": "strongest",
+            "horizon": "today",
+        },
+        first,
+    )
+
+    history.record_generated_ticket(
+        {
+            "anonymous_id": anon_a,
+            "mode": "strongest",
+            "horizon": "today",
+        },
+        result([second_game]),
+    )
+
+    history.record_generated_ticket(
+        {
+            "anonymous_id": anon_b,
+            "mode": "strongest",
+            "horizon": "today",
+        },
+        result([
+            dict(
+                second_game,
+                fixture_id="other-user",
+                selection_id="other-selection",
+            )
+        ]),
+    )
+
+    exposure = history.recent_exposure(anon_a)
+
+    assert exposure["history_ticket_count"] == 2
+    assert set(exposure["exact_selection_ids"]) == {"s1", "s2"}
+    assert set(exposure["recent_fixture_ids"]) == {"f1", "f2"}
+    assert "other-selection" not in exposure["exact_selection_ids"]
+
+
+def test_build_another_is_not_an_optimizer_identity_input():
+    from leagues import api
+
+    request = api.BuilderV2Request(
+        mode="target_odds",
+        target_odds=2,
+        horizon="today",
+        anonymous_id="anon_123456789012345",
+        build_another=True,
+    )
+
+    engine_payload = api._builder_v2_payload(request)
+    persistence_payload = api._builder_v2_persistence_payload(
+        request,
+        engine_payload,
+    )
+
+    assert "anonymous_id" not in engine_payload
+    assert "build_another" not in engine_payload
+
+    assert persistence_payload["anonymous_id"] == "anon_123456789012345"
+    assert persistence_payload["build_another"] is True

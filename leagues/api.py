@@ -415,6 +415,7 @@ class BuilderV2Request(BuilderV2Filters):
     max_games: int | None = None
     fill_strategy: str = "strict_selected_markets"
     refresh: bool = False
+    build_another: bool = False
 
 
 class BuilderV2ManualRequest(BuilderV2Filters):
@@ -429,6 +430,9 @@ def _builder_v2_payload(model: BaseModel) -> dict:
         else model.dict()
     )
     payload.pop("anonymous_id", None)
+    # User-history behavior is orchestrated by the API boundary and must not
+    # become a prediction/model/cache input.
+    payload.pop("build_another", None)
     return payload
 
 
@@ -441,6 +445,8 @@ def _builder_v2_persistence_payload(
     anonymous_id = getattr(model, "anonymous_id", None)
     if anonymous_id:
         payload["anonymous_id"] = anonymous_id
+    if bool(getattr(model, "build_another", False)):
+        payload["build_another"] = True
     return payload
 
 def _record_v2_result(payload: dict, result: dict, started: float) -> None:
@@ -652,6 +658,32 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
     request_id = str(uuid.uuid4())
     payload = _builder_v2_payload(request)
 
+    if request.build_another:
+        payload["_build_another"] = True
+
+        if request.anonymous_id:
+            try:
+                from leagues.ticket_history import recent_exposure
+                payload["_recent_exposure"] = await asyncio.to_thread(
+                    recent_exposure,
+                    request.anonymous_id,
+                )
+            except Exception as exc:
+                # Diversification is optional context. A history failure must
+                # never break an otherwise valid Builder request.
+                logger.warning(
+                    "builder_recent_exposure_failed error_type=%s",
+                    type(exc).__name__,
+                )
+                payload["_recent_exposure"] = {
+                    "history_ticket_count": 0,
+                    "exact_selection_ids": [],
+                    "recent_fixture_ids": [],
+                    "team_counts": {},
+                    "league_counts": {},
+                    "market_counts": {},
+                }
+
     import os
     engine = os.getenv("BUILDER_ENGINE", "v2").strip().lower()
     if engine == "legacy":
@@ -698,7 +730,11 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
             _publish_date(),
             cache_board_identity,
         )
-        hit = _V2_TARGET_CACHE.get(cache_key)
+        hit = (
+            None
+            if request.build_another
+            else _V2_TARGET_CACHE.get(cache_key)
+        )
         if (
             hit and not request.refresh
             and (_t.time() - hit["ts"]) < _SLIP_TTL
@@ -711,7 +747,11 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
                 asyncio.Lock(),
             )
             async with lock:
-                hit = _V2_TARGET_CACHE.get(cache_key)
+                hit = (
+            None
+            if request.build_another
+            else _V2_TARGET_CACHE.get(cache_key)
+        )
                 if (
                     hit and not request.refresh
                     and (_t.time() - hit["ts"]) < _SLIP_TTL
@@ -724,7 +764,8 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
                         payload,
                     )
                     if (
-                        result.get("status") == "success"
+                        not request.build_another
+                        and result.get("status") == "success"
                         and _cached_target_result_is_reusable(result)
                     ):
                         _V2_TARGET_CACHE[cache_key] = {

@@ -39,6 +39,129 @@ ticket_selections = Table("user_ticket_selections", metadata,
 
 def ensure_tables(): metadata.create_all(engine, tables=[ticket_history, ticket_selections], checkfirst=True)
 
+RECENT_EXPOSURE_DAYS = 7
+RECENT_FIXTURE_DAYS = 3
+
+
+def _normalise_key(value) -> str:
+    return str(value or "").strip().casefold()
+
+
+def _utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def recent_exposure(
+    anonymous_id: str | None,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    """Return bounded recent Builder exposure for one anonymous user.
+
+    This is diversification context only. It never changes prediction
+    probabilities, trust grades, market policy, or bookability.
+    """
+    empty = {
+        "window_days": RECENT_EXPOSURE_DAYS,
+        "fixture_window_days": RECENT_FIXTURE_DAYS,
+        "history_ticket_count": 0,
+        "exact_selection_ids": [],
+        "recent_fixture_ids": [],
+        "team_counts": {},
+        "league_counts": {},
+        "market_counts": {},
+    }
+
+    if not anonymous_id:
+        return empty
+
+    ensure_tables()
+
+    now = _utc(now) or datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=RECENT_EXPOSURE_DAYS)
+    fixture_cutoff = now - timedelta(days=RECENT_FIXTURE_DAYS)
+
+    stmt = (
+        select(
+            ticket_history.c.id.label("ticket_id"),
+            ticket_history.c.created_at.label("ticket_created_at"),
+            ticket_selections.c.selection_fingerprint,
+            ticket_selections.c.fixture_id,
+            ticket_selections.c.home_team,
+            ticket_selections.c.away_team,
+            ticket_selections.c.league,
+            ticket_selections.c.market,
+        )
+        .select_from(
+            ticket_history.join(
+                ticket_selections,
+                ticket_selections.c.ticket_id == ticket_history.c.id,
+            )
+        )
+        .where(
+            ticket_history.c.anonymous_id == anonymous_id,
+            ticket_history.c.created_at >= cutoff,
+        )
+    )
+
+    with engine.connect() as conn:
+        rows = conn.execute(stmt).mappings().all()
+
+    tickets = set()
+    selections = set()
+    fixtures = set()
+    team_counts = {}
+    league_counts = {}
+    market_counts = {}
+
+    for row in rows:
+        ticket_id = str(row.get("ticket_id") or "")
+        if ticket_id:
+            tickets.add(ticket_id)
+
+        selection_id = str(row.get("selection_fingerprint") or "")
+        if selection_id:
+            selections.add(selection_id)
+
+        created_at = _utc(row.get("ticket_created_at"))
+        fixture_id = str(row.get("fixture_id") or "")
+
+        if (
+            fixture_id
+            and created_at is not None
+            and created_at >= fixture_cutoff
+        ):
+            fixtures.add(fixture_id)
+
+        for team in (row.get("home_team"), row.get("away_team")):
+            key = _normalise_key(team)
+            if key:
+                team_counts[key] = team_counts.get(key, 0) + 1
+
+        league = _normalise_key(row.get("league"))
+        if league:
+            league_counts[league] = league_counts.get(league, 0) + 1
+
+        market = str(row.get("market") or "").strip()
+        if market:
+            market_counts[market] = market_counts.get(market, 0) + 1
+
+    return {
+        "window_days": RECENT_EXPOSURE_DAYS,
+        "fixture_window_days": RECENT_FIXTURE_DAYS,
+        "history_ticket_count": len(tickets),
+        "exact_selection_ids": sorted(selections),
+        "recent_fixture_ids": sorted(fixtures),
+        "team_counts": team_counts,
+        "league_counts": league_counts,
+        "market_counts": market_counts,
+    }
+
+
 def _fingerprint(games: list[dict]) -> str:
     stable = [{"fixture": str(g.get("fixture_id") or g.get("match_id") or ""), "selection": str(g.get("selection_id") or ""), "market": str(g.get("market") or ""), "prediction": str(g.get("prediction") or "")} for g in games]
     return hashlib.sha256(json.dumps(sorted(stable, key=lambda x: json.dumps(x, sort_keys=True)), sort_keys=True, separators=(",", ":")).encode()).hexdigest()

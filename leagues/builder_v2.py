@@ -116,6 +116,123 @@ def _rank_key(pick: dict) -> tuple:
     )
 
 
+def _recent_exposure(options: dict) -> dict:
+    value = options.get("_recent_exposure") or {}
+    return value if isinstance(value, dict) else {}
+
+
+def _diversification_stage_names(options: dict) -> list[str]:
+    """Fresh first; qualified repeats are a fallback, never a weaker gate."""
+    if not options.get("_build_another"):
+        return ["normal"]
+
+    exposure = _recent_exposure(options)
+
+    if not int(exposure.get("history_ticket_count") or 0):
+        return ["no_history"]
+
+    return [
+        "fresh",
+        "fixture_reuse",
+        "qualified_repeat_fallback",
+    ]
+
+
+def _apply_diversification_stage(
+    pool: list[dict],
+    options: dict,
+    stage: str,
+) -> list[dict]:
+    if stage in {"normal", "no_history", "qualified_repeat_fallback"}:
+        return list(pool)
+
+    exposure = _recent_exposure(options)
+
+    exact = {
+        str(value)
+        for value in exposure.get("exact_selection_ids") or []
+        if str(value)
+    }
+
+    fixtures = {
+        str(value)
+        for value in exposure.get("recent_fixture_ids") or []
+        if str(value)
+    }
+
+    out = []
+
+    for pick in pool:
+        selection_id = str(pick.get("selection_id") or "")
+        fixture_id = str(pick.get("match_id") or "")
+
+        if selection_id and selection_id in exact:
+            continue
+
+        if stage == "fresh" and fixture_id and fixture_id in fixtures:
+            continue
+
+        out.append(pick)
+
+    return out
+
+
+def _diversification_metadata(
+    selected: list[dict],
+    options: dict,
+    stage: str,
+) -> dict:
+    build_another = bool(options.get("_build_another"))
+    exposure = _recent_exposure(options)
+
+    exact = {
+        str(value)
+        for value in exposure.get("exact_selection_ids") or []
+        if str(value)
+    }
+
+    fixtures = {
+        str(value)
+        for value in exposure.get("recent_fixture_ids") or []
+        if str(value)
+    }
+
+    repeated_selections = sum(
+        1
+        for item in selected
+        if str(item.get("selection_id") or "") in exact
+    )
+
+    repeated_fixtures = sum(
+        1
+        for item in selected
+        if str(item.get("match_id") or item.get("fixture_id") or "") in fixtures
+    )
+
+    delivered = len(selected)
+
+    return {
+        "applied": bool(
+            build_another
+            and int(exposure.get("history_ticket_count") or 0)
+        ),
+        "build_another": build_another,
+        "history_ticket_count": int(
+            exposure.get("history_ticket_count") or 0
+        ),
+        "strategy_used": stage,
+        "fresh_selection_count": max(
+            0,
+            delivered - repeated_selections,
+        ),
+        "repeated_selection_count": repeated_selections,
+        "repeated_fixture_count": repeated_fixtures,
+        # A repeated exact selection only appears in the final fallback.
+        "unavoidable_reuse_count": repeated_selections,
+        "quality_floor_preserved": True,
+    }
+
+
 def _fixture_teams(pick: dict) -> set[str]:
     fixture = pick.get("_fixture") or {}
     values: set[str] = set()
@@ -819,14 +936,45 @@ def generate_v2(options: dict) -> dict:
                 "mode": mode,
                 "reason": f"Choose a target between {MIN_TARGET:g} and {MAX_TARGET:g}.",
             }
-        built = build_slip(
-            target,
-            pool=pool,
-            max_legs=MAX_LEGS,
-            horizon=str(options.get("horizon") or "7_days"),
-            require_bookable=True,
-            preapproved_pool=True,
-        )
+        built = None
+        diversification_stage = "normal"
+
+        stages = _diversification_stage_names(options)
+
+        for index, stage in enumerate(stages):
+            stage_pool = _apply_diversification_stage(
+                pool,
+                options,
+                stage,
+            )
+
+            candidate = build_slip(
+                target,
+                pool=stage_pool,
+                max_legs=MAX_LEGS,
+                horizon=str(options.get("horizon") or "7_days"),
+                require_bookable=True,
+                preapproved_pool=True,
+            )
+
+            built = candidate
+            diversification_stage = stage
+
+            achieved = float(
+                candidate.get("achieved_odds")
+                or candidate.get("best_reachable")
+                or 0.0
+            )
+
+            # Freshness wins when it can still satisfy the requested target
+            # under the exact same quality/bookability policy.
+            if candidate.get("ok") and achieved >= target:
+                break
+
+            # Otherwise progressively relax only the repeat preference.
+            if index == len(stages) - 1:
+                break
+
         out = _public_result_from_build(
             target,
             str(options.get("horizon") or "7_days"),
@@ -843,6 +991,11 @@ def generate_v2(options: dict) -> dict:
             "selection_diagnostics_v2": diagnostics,
             "board": _board_context(board),
         })
+        out["diversification"] = _diversification_metadata(
+            list(out.get("games") or []),
+            options,
+            diversification_stage,
+        )
         return out
 
     if mode == "game_count":
@@ -854,12 +1007,45 @@ def generate_v2(options: dict) -> dict:
                 "reason": f"game_count must be between 1 and {MAX_GAME_COUNT}.",
             }
 
-        selected, market_balance = _select_market_balanced(
-            pool,
-            requested,
-            list(options.get("markets") or []),
-            fallback_pool=fallback_pool,
-        )
+        selected = []
+        market_balance = {}
+        diversification_stage = "normal"
+
+        stages = _diversification_stage_names(options)
+
+        for index, stage in enumerate(stages):
+            stage_pool = _apply_diversification_stage(
+                pool,
+                options,
+                stage,
+            )
+            stage_fallback = (
+                _apply_diversification_stage(
+                    fallback_pool,
+                    options,
+                    stage,
+                )
+                if fallback_pool is not None
+                else None
+            )
+
+            candidate_selected, candidate_balance = _select_market_balanced(
+                stage_pool,
+                requested,
+                list(options.get("markets") or []),
+                fallback_pool=stage_fallback,
+            )
+
+            selected = candidate_selected
+            market_balance = candidate_balance
+            diversification_stage = stage
+
+            if len(candidate_selected) >= requested:
+                break
+
+            if index == len(stages) - 1:
+                break
+
         result = _selected_response(
             mode,
             options,
@@ -886,6 +1072,11 @@ def generate_v2(options: dict) -> dict:
             diagnostics,
             market_balance,
         )
+        result["diversification"] = _diversification_metadata(
+            selected,
+            options,
+            diversification_stage,
+        )
         return result
 
     max_games = int(options.get("max_games") or 10)
@@ -895,8 +1086,45 @@ def generate_v2(options: dict) -> dict:
             "mode": mode,
             "reason": f"max_games must be between 1 and {MAX_GAME_COUNT}.",
         }
-    selected = _select_unique(pool, max_games)
-    return _selected_response(mode, options, selected, board, diagnostics)
+    selected = []
+    diversification_stage = "normal"
+
+    stages = _diversification_stage_names(options)
+
+    for index, stage in enumerate(stages):
+        stage_pool = _apply_diversification_stage(
+            pool,
+            options,
+            stage,
+        )
+
+        candidate_selected = _select_unique(
+            stage_pool,
+            max_games,
+        )
+
+        selected = candidate_selected
+        diversification_stage = stage
+
+        if len(candidate_selected) >= max_games:
+            break
+
+        if index == len(stages) - 1:
+            break
+
+    result = _selected_response(
+        mode,
+        options,
+        selected,
+        board,
+        diagnostics,
+    )
+    result["diversification"] = _diversification_metadata(
+        selected,
+        options,
+        diversification_stage,
+    )
+    return result
 
 
 def manual_build(options: dict) -> dict:

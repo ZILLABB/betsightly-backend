@@ -1676,3 +1676,81 @@ def test_all_four_modes_share_frozen_board_and_exact_booking(monkeypatch):
         assert result["booking"]["booking_status"] == "FULL"
         assert result["booking"]["readback_validation"] == "PASSED"
     assert [game["selection_id"] for game in results[-1]["games"]] == ids
+
+
+
+def test_build_another_prefers_fresh_selections_when_sufficient(monkeypatch):
+    picks = [
+        _pick(1, probability=.90),
+        _pick(2, probability=.85),
+        _pick(3, probability=.80),
+    ]
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "strongest",
+        "max_games": 1,
+        "horizon": "today",
+        "_build_another": True,
+        "_recent_exposure": {
+            "history_ticket_count": 2,
+            "exact_selection_ids": [
+                picks[0]["selection_id"],
+            ],
+            "recent_fixture_ids": [
+                picks[1]["match_id"],
+            ],
+        },
+    })
+
+    assert result["status"] == "success"
+    assert result["games"][0]["selection_id"] == picks[2]["selection_id"]
+    assert result["diversification"]["strategy_used"] == "fresh"
+    assert result["diversification"]["repeated_selection_count"] == 0
+
+
+def test_build_another_allows_qualified_repeat_when_needed(monkeypatch):
+    picks = [
+        _pick(1, probability=.90),
+        _pick(2, probability=.85),
+        _pick(3, probability=.80),
+    ]
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "strongest",
+        "max_games": 3,
+        "horizon": "today",
+        "_build_another": True,
+        "_recent_exposure": {
+            "history_ticket_count": 2,
+            "exact_selection_ids": [
+                picks[0]["selection_id"],
+            ],
+            "recent_fixture_ids": [
+                picks[1]["match_id"],
+            ],
+        },
+    })
+
+    assert result["status"] == "success"
+    assert result["legs"] == 3
+    assert result["diversification"]["strategy_used"] == "qualified_repeat_fallback"
+    assert result["diversification"]["repeated_selection_count"] == 1
+    assert result["diversification"]["unavoidable_reuse_count"] == 1
+
+
+def test_normal_builder_is_unchanged_by_diversification_helpers(monkeypatch):
+    picks = [_pick(i) for i in range(5)]
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "strongest",
+        "max_games": 3,
+        "horizon": "today",
+    })
+
+    assert result["status"] == "success"
+    assert result["legs"] == 3
+    assert result["diversification"]["build_another"] is False
+    assert result["diversification"]["strategy_used"] == "normal"
