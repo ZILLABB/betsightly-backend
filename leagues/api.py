@@ -202,6 +202,19 @@ async def ml_shadow(days: int = 60):
         raise HTTPException(500, str(e))
 
 
+@router.get("/football-first-shadow")
+def football_first_shadow_report():
+    try:
+        from leagues.football_first_shadow_observations import shadow_report
+        return shadow_report()
+    except Exception as e:
+        logger.error(
+            f"Football-first shadow report failed: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(500, str(e))
+
+
 @router.get("/live-scores")
 def get_live_scores():
     """Scores for the fixtures on today's card, keyed by match_id.

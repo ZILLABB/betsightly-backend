@@ -633,6 +633,14 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
 
     all_picks: list[dict] = []
     priced = unpriced = with_elo = 0
+    football_first_shadow_summary = {
+        "shadow_only": True,
+        "recorded": 0,
+        "existing": 0,
+        "skipped": 0,
+        "disabled": 0,
+        "errors": 0,
+    }
 
     for fx in fixtures:
         base = rates_for(fx["league_slug"], cached_rates)
@@ -652,6 +660,39 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
             priced += 1
         else:
             unpriced += 1
+
+        # Prospective football-first evidence is a second opinion only.
+        # It stores immutable pre-kickoff probabilities in its own table and
+        # cannot change this model, any pick, publication, Builder or booking.
+        if history is not None:
+            try:
+                from leagues.football_first_shadow_observations import (
+                    observe_fixture as observe_football_first_fixture,
+                )
+                shadow_observation = observe_football_first_fixture(
+                    fx,
+                    model,
+                    history,
+                    observed_at=now_dt,
+                )
+                shadow_status = str(
+                    shadow_observation.get("status") or "SKIPPED"
+                ).lower()
+                if shadow_status == "recorded":
+                    football_first_shadow_summary["recorded"] += 1
+                elif shadow_status == "exists":
+                    football_first_shadow_summary["existing"] += 1
+                elif shadow_status == "disabled":
+                    football_first_shadow_summary["disabled"] += 1
+                else:
+                    football_first_shadow_summary["skipped"] += 1
+            except Exception as exc:
+                football_first_shadow_summary["errors"] += 1
+                logger.warning(
+                    "football-first prospective shadow observation failed: %s",
+                    exc,
+                )
+
         fx["_model"] = model
         all_picks.extend(build_picks(
             fx, model, min_confidence=MIN_CANDIDATE_CONFIDENCE, fit=fit))
@@ -773,6 +814,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     )
     provider["sportybet_shadow_model"] = (
         sportybet_shadow_model
+    )
+    provider["football_first_shadow"] = (
+        football_first_shadow_summary
     )
 
     # Preserve the evaluated environment before any product optimizer narrows
