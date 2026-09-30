@@ -1459,7 +1459,15 @@ def prepared_bookable_pool(
     qualified_pool = _pool(
         horizon, force=force, allow_pipeline_fallback=allow_pipeline_fallback,
     )
-    timings = {"candidate_retrieval": elapsed_ms(stage)}
+    timings = {
+        "candidate_retrieval": elapsed_ms(stage),
+        "qualified_pool_count": len(qualified_pool),
+        "supplemental_qualified_count": sum(
+            1
+            for pick in qualified_pool
+            if pick.get("_staging_supplemental")
+        ),
+    }
 
     stage = monotonic_time.perf_counter()
     try:
@@ -1473,6 +1481,7 @@ def prepared_bookable_pool(
 
     snapshot_id = sportybet.board_metadata(board).get("snapshot_id")
     bookable_pool = []
+    supplemental_bookability_rejections: collections.Counter = collections.Counter()
     stage = monotonic_time.perf_counter()
     for pick in qualified_pool:
         try:
@@ -1490,6 +1499,14 @@ def prepared_bookable_pool(
         except (KeyError, TypeError, ValueError):
             continue
         if not availability.get("sportybet_available"):
+            if pick.get("_staging_supplemental"):
+                supplemental_bookability_rejections.update([
+                    str(
+                        availability.get("status")
+                        or availability.get("failure_reason")
+                        or "SPORTYBET_UNAVAILABLE"
+                    )
+                ])
             continue
         candidate = dict(pick)
         candidate["selection_id"] = _selection_id(candidate)
@@ -1499,6 +1516,14 @@ def prepared_bookable_pool(
         candidate["odds_are_real"] = True
         bookable_pool.append(candidate)
     timings["fixture_matching"] = elapsed_ms(stage)
+    timings["supplemental_bookable_count"] = sum(
+        1
+        for pick in bookable_pool
+        if pick.get("_staging_supplemental")
+    )
+    timings["supplemental_bookability_rejections"] = dict(
+        supplemental_bookability_rejections
+    )
     timings["board_lookup"] = round(
         (monotonic_time.perf_counter() - started) * 1000
     )

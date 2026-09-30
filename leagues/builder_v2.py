@@ -541,6 +541,34 @@ def _candidate_pool(
         "after_user_raw_filters": len(filtered_raw),
         "after_trust_and_policy": len(approved),
         "approved_count": len(final),
+        "staging_supplemental_counts": {
+            "qualified_pool": int(
+                timings.get("supplemental_qualified_count") or 0
+            ),
+            "prepared_bookable": sum(
+                1
+                for pick in raw
+                if pick.get("_staging_supplemental")
+            ),
+            "after_user_raw_filters": sum(
+                1
+                for pick in filtered_raw
+                if pick.get("_staging_supplemental")
+            ),
+            "after_trust_and_policy": sum(
+                1
+                for pick in approved
+                if pick.get("_staging_supplemental")
+            ),
+            "approved": sum(
+                1
+                for pick in final
+                if pick.get("_staging_supplemental")
+            ),
+        },
+        "staging_supplemental_bookability_rejections": dict(
+            timings.get("supplemental_bookability_rejections") or {}
+        ),
         "effective_min_probability": effective_floor,
         "trust_rejection_reasons": dict(trust_rejections),
         "market_counts": {

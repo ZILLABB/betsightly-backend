@@ -46,7 +46,20 @@ def _wire(monkeypatch, picks):
         lambda horizon, force=False, refresh_sportybet=False, **kwargs: (
             {"__meta__": {"snapshot_id": "sporty-snap"}},
             list(picks),
-            {"candidate_retrieval": 1},
+            {
+                "candidate_retrieval": 1,
+                "supplemental_qualified_count": sum(
+                    1
+                    for pick in picks
+                    if pick.get("_staging_supplemental")
+                ),
+                "supplemental_bookable_count": sum(
+                    1
+                    for pick in picks
+                    if pick.get("_staging_supplemental")
+                ),
+                "supplemental_bookability_rejections": {},
+            },
         ),
     )
     monkeypatch.setattr(
@@ -214,6 +227,33 @@ def test_original_v2_advanced_league_fixture_team_and_odds_filters(monkeypatch):
     assert [item["selection_id"] for item in odds_window["candidates"]] == [
         laliga["selection_id"]
     ]
+
+
+def test_staging_supplemental_stage_counts_are_visible(monkeypatch):
+    supplemental = _pick(777, market="over_1_5")
+    supplemental["_staging_supplemental"] = True
+    _wire(monkeypatch, [supplemental])
+
+    result = builder_v2.list_candidates({
+        "horizon": "7_days",
+        "markets": ["over_1_5"],
+    })
+
+    counts = result["selection_diagnostics"]["staging_supplemental_counts"]
+
+    assert counts == {
+        "qualified_pool": 1,
+        "prepared_bookable": 1,
+        "after_user_raw_filters": 1,
+        "after_trust_and_policy": 1,
+        "approved": 1,
+    }
+
+    assert (
+        result["selection_diagnostics"]
+        ["staging_supplemental_bookability_rejections"]
+        == {}
+    )
 
 
 def test_user_probability_filter_cannot_lower_system_floor(monkeypatch):
