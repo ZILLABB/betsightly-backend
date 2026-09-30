@@ -461,6 +461,46 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         all_picks.extend(build_picks(
             fx, model, min_confidence=MIN_CANDIDATE_CONFIDENCE, fit=fit))
 
+    # SportyBet-only supplemental fixtures are modelled in isolation.
+    # They never enter all_picks, fixtures, Builder, booking or settlement.
+    sportybet_shadow_model = {}
+
+    try:
+        if (
+            sportybet_board
+            and sportybet_shadow_supplemental
+        ):
+            from leagues.sportybet_shadow import (
+                evaluate_shadow_supplemental,
+            )
+
+            sportybet_shadow_model = (
+                evaluate_shadow_supplemental(
+                    sportybet_shadow_supplemental,
+                    sportybet_board,
+                    cached_rates=cached_rates,
+                    history=history,
+                    ratings=ratings,
+                    fit=fit,
+                    live_picks=all_picks,
+                )
+            )
+
+    except Exception as e:
+        logger.warning(
+            "SportyBet supplemental shadow model unavailable: %s",
+            e,
+        )
+
+        sportybet_shadow_model = {
+            "status": "unavailable",
+            "shadow_only": True,
+            "publishing_changed": False,
+            "prediction_pool_changed": False,
+            "official_record_changed": False,
+            "error_type": type(e).__name__,
+        }
+
     # Match context is attached only after normal predictions and candidate
     # picks already exist. It is shadow data and cannot change this run's
     # prediction probability, trust, quality or SportyBet bookability.
@@ -500,6 +540,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     provider["sportybet_coverage"] = sportybet_coverage
     provider["sportybet_shadow_supplemental"] = (
         sportybet_shadow_supplemental
+    )
+    provider["sportybet_shadow_model"] = (
+        sportybet_shadow_model
     )
 
     # Preserve the evaluated environment before any product optimizer narrows
