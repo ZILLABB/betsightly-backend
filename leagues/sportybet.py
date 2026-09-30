@@ -896,6 +896,509 @@ def apply_to_fixtures(fixtures: list[dict], board: dict | None = None) -> int:
     return matched
 
 
+def registry_competition_match(
+    competition: str,
+) -> dict:
+    """Audit-only mapping from SportyBet tournament name to known registry.
+
+    Only an exact normalized display-name match is considered safe enough for
+    future automatic use. Fuzzy similarity is diagnostic only.
+    """
+    from leagues.competition_registry import (
+        provider_slugs,
+    )
+
+    competition = str(
+        competition or ""
+    ).strip()
+
+    if not competition:
+        return {
+            "status": "UNMAPPED",
+            "sportybet_competition": None,
+            "league_slug": None,
+            "league": None,
+            "best_candidate": None,
+            "best_score": 0.0,
+        }
+
+    candidates = []
+
+    for slug, name in provider_slugs().items():
+        score = _league_score(
+            name,
+            competition,
+        )
+
+        candidates.append(
+            (
+                score,
+                slug,
+                name,
+            )
+        )
+
+    candidates.sort(
+        reverse=True,
+        key=lambda item: (
+            item[0],
+            item[1],
+        ),
+    )
+
+    exact = [
+        item
+        for item in candidates
+        if abs(
+            item[0] - 1.0
+        ) < 1e-9
+    ]
+
+    if len(exact) == 1:
+        score, slug, name = exact[0]
+
+        return {
+            "status": "MAPPED_EXACT",
+            "sportybet_competition": competition,
+            "league_slug": slug,
+            "league": name,
+            "best_candidate": name,
+            "best_score": score,
+        }
+
+    if len(exact) > 1:
+        return {
+            "status": "AMBIGUOUS",
+            "sportybet_competition": competition,
+            "league_slug": None,
+            "league": None,
+            "best_candidate": exact[0][2],
+            "best_score": 1.0,
+        }
+
+    best = (
+        candidates[0]
+        if candidates
+        else (
+            0.0,
+            None,
+            None,
+        )
+    )
+
+    return {
+        "status": "UNMAPPED",
+        "sportybet_competition": competition,
+        "league_slug": None,
+        "league": None,
+        "best_candidate": best[2],
+        "best_score": round(
+            float(best[0]),
+            4,
+        ),
+    }
+
+
+def coverage_against_fixtures(
+    fixtures: list[dict],
+    board: dict | None = None,
+    *,
+    now=None,
+    days_ahead: int = 7,
+    sample_limit: int = 20,
+) -> dict:
+    """Read-only comparison of ESPN's fixture universe with SportyBet.
+
+    It never creates a prediction or adds a SportyBet-only match to the live
+    pool. The purpose is to quantify the coverage gap before widening input
+    sources.
+    """
+    from collections import Counter
+    from datetime import (
+        datetime,
+        timedelta,
+        timezone,
+    )
+
+    if board is None:
+        board = fetch_board()
+
+    meta = board_metadata(
+        board
+    )
+
+    now = (
+        now
+        or datetime.now(
+            timezone.utc
+        )
+    )
+
+    if now.tzinfo is None:
+        now = now.replace(
+            tzinfo=timezone.utc
+        )
+
+    now = now.astimezone(
+        timezone.utc
+    )
+
+    days_ahead = max(
+        1,
+        min(
+            14,
+            int(days_ahead),
+        ),
+    )
+
+    end = now + timedelta(
+        days=days_ahead
+    )
+
+    horizon_entries = []
+
+    for _, entry in _board_entries(
+        board
+    ):
+        try:
+            kickoff = datetime.fromtimestamp(
+                float(
+                    entry.get(
+                        "kickoff_ms"
+                    )
+                ) / 1000.0,
+                tz=timezone.utc,
+            )
+
+        except (
+            TypeError,
+            ValueError,
+            OSError,
+        ):
+            continue
+
+        if now <= kickoff <= end:
+            horizon_entries.append(
+                entry
+            )
+
+    horizon_ids = {
+        str(
+            entry.get("event_id")
+            or ""
+        )
+        for entry in horizon_entries
+        if str(
+            entry.get("event_id")
+            or ""
+        )
+    }
+
+    matched_event_ids = set()
+
+    espn_in_horizon = []
+
+    for fixture in fixtures:
+        commence = str(
+            fixture.get(
+                "commence_time"
+            )
+            or ""
+        )
+
+        try:
+            kickoff = datetime.fromisoformat(
+                commence.replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+
+            if kickoff.tzinfo is None:
+                kickoff = kickoff.replace(
+                    tzinfo=timezone.utc
+                )
+
+            kickoff = kickoff.astimezone(
+                timezone.utc
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            continue
+
+        if not (
+            now
+            <= kickoff
+            <= end
+        ):
+            continue
+
+        espn_in_horizon.append(
+            fixture
+        )
+
+        # apply_to_fixtures() normally ran immediately before this audit,
+        # so reuse its exact match instead of resolving twice.
+        event_id = (
+            (
+                fixture.get("odds")
+                or {}
+            ).get(
+                "sportybet_event_id"
+            )
+        )
+
+        if not event_id:
+            try:
+                matched = match_fixture(
+                    board,
+                    (
+                        fixture.get("home")
+                        or {}
+                    ).get("name", ""),
+                    (
+                        fixture.get("away")
+                        or {}
+                    ).get("name", ""),
+                    commence,
+                    fixture.get(
+                        "league",
+                        "",
+                    ),
+                )
+
+                entry = matched.get(
+                    "entry"
+                )
+
+                event_id = (
+                    entry.get(
+                        "event_id"
+                    )
+                    if entry
+                    else None
+                )
+
+            except Exception:
+                event_id = None
+
+        if event_id:
+            matched_event_ids.add(
+                str(event_id)
+            )
+
+    matched_event_ids &= horizon_ids
+
+    sporty_only = [
+        entry
+        for entry in horizon_entries
+        if str(
+            entry.get("event_id")
+            or ""
+        )
+        not in matched_event_ids
+    ]
+
+    competition_counts = Counter(
+        str(
+            entry.get(
+                "competition"
+            )
+            or "unknown"
+        )
+        for entry in sporty_only
+    )
+
+    mapped_competitions = {}
+    mapped_exact_fixture_count = 0
+    unmapped_fixture_count = 0
+    ambiguous_fixture_count = 0
+
+    for competition, count in competition_counts.items():
+        mapping = registry_competition_match(
+            competition
+        )
+
+        mapped_competitions[
+            competition
+        ] = {
+            **mapping,
+            "fixture_count": count,
+        }
+
+        if mapping["status"] == "MAPPED_EXACT":
+            mapped_exact_fixture_count += count
+
+        elif mapping["status"] == "AMBIGUOUS":
+            ambiguous_fixture_count += count
+
+        else:
+            unmapped_fixture_count += count
+
+    samples = []
+
+    for entry in sporty_only:
+        competition = str(
+            entry.get(
+                "competition"
+            )
+            or "unknown"
+        )
+
+        mapping = mapped_competitions.get(
+            competition
+        ) or registry_competition_match(
+            competition
+        )
+
+        try:
+            kickoff = datetime.fromtimestamp(
+                float(
+                    entry.get(
+                        "kickoff_ms"
+                    )
+                ) / 1000.0,
+                tz=timezone.utc,
+            ).isoformat()
+
+        except (
+            TypeError,
+            ValueError,
+            OSError,
+        ):
+            kickoff = None
+
+        samples.append({
+            "event_id": entry.get(
+                "event_id"
+            ),
+            "home_team": entry.get(
+                "home_team"
+            ),
+            "away_team": entry.get(
+                "away_team"
+            ),
+            "kickoff": kickoff,
+            "competition": competition,
+            "competition_mapping_status": (
+                mapping.get("status")
+            ),
+            "mapped_league_slug": (
+                mapping.get(
+                    "league_slug"
+                )
+            ),
+            "mapped_league": (
+                mapping.get("league")
+            ),
+            "best_mapping_candidate": (
+                mapping.get(
+                    "best_candidate"
+                )
+            ),
+            "best_mapping_score": (
+                mapping.get(
+                    "best_score"
+                )
+            ),
+        })
+
+    samples.sort(
+        key=lambda item: (
+            item.get("kickoff")
+            or "",
+            item.get("competition")
+            or "",
+            str(
+                item.get(
+                    "event_id"
+                )
+                or ""
+            ),
+        )
+    )
+
+    overlap = len(
+        matched_event_ids
+    )
+
+    sporty_count = len(
+        horizon_entries
+    )
+
+    return {
+        "status": "success",
+        "read_only": True,
+        "publishing_changed": False,
+        "model_inputs_changed": False,
+        "requested_days": days_ahead,
+        "sportybet_snapshot_id": (
+            meta.get(
+                "snapshot_id"
+            )
+        ),
+        "sportybet_board_complete": bool(
+            meta.get(
+                "is_complete"
+            )
+        ),
+        "espn_fixture_count": len(
+            espn_in_horizon
+        ),
+        "sportybet_fixture_count": sporty_count,
+        "matched_fixture_count": overlap,
+        "sportybet_only_fixture_count": len(
+            sporty_only
+        ),
+        "sportybet_overlap_rate": (
+            round(
+                overlap / sporty_count,
+                4,
+            )
+            if sporty_count
+            else 0.0
+        ),
+        "exact_registry_mapped_sportybet_only": (
+            mapped_exact_fixture_count
+        ),
+        "ambiguous_registry_sportybet_only": (
+            ambiguous_fixture_count
+        ),
+        "unmapped_registry_sportybet_only": (
+            unmapped_fixture_count
+        ),
+        "sportybet_only_competitions": [
+            mapped_competitions[
+                competition
+            ]
+            for competition in sorted(
+                mapped_competitions,
+                key=lambda name: (
+                    -mapped_competitions[
+                        name
+                    ][
+                        "fixture_count"
+                    ],
+                    name,
+                ),
+            )
+        ],
+        "sportybet_only_samples": samples[
+            :max(
+                0,
+                int(sample_limit),
+            )
+        ],
+        "next_gate": (
+            "only exact registry-mapped SportyBet-only fixtures may enter "
+            "the future shadow-supplemental fixture experiment"
+        ),
+    }
+
+
 def board_status() -> dict:
     """What the cache holds, for the admin dashboard and health checks."""
     cached = _db_get(_CACHE_KEY) or {}

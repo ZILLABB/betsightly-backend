@@ -347,11 +347,39 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     # book that is unreachable leaves the fixtures exactly as ESPN supplied
     # them, and the card falls back to estimated prices as it always has.
     sb_matched = 0
+    sportybet_coverage = {}
+
     try:
         from leagues import sportybet
-        sb_matched = sportybet.apply_to_fixtures(fixtures)
+
+        sportybet_board = sportybet.fetch_board()
+
+        sb_matched = sportybet.apply_to_fixtures(
+            fixtures,
+            board=sportybet_board,
+        )
+
+        sportybet_coverage = (
+            sportybet.coverage_against_fixtures(
+                fixtures,
+                sportybet_board,
+                now=now_dt,
+                days_ahead=days_ahead,
+            )
+        )
+
     except Exception as e:
-        logger.warning(f"SportyBet pricing unavailable: {e}")
+        logger.warning(
+            f"SportyBet pricing unavailable: {e}"
+        )
+
+        sportybet_coverage = {
+            "status": "unavailable",
+            "read_only": True,
+            "publishing_changed": False,
+            "model_inputs_changed": False,
+            "error_type": type(e).__name__,
+        }
 
     # Requests and the 08:00 publication path only consume completed history.
     # Cold ESPN refresh runs independently in start_history_prewarm().
@@ -437,6 +465,7 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         espn_cache_metadata() or {}
     )
     provider["match_context"] = context_summary
+    provider["sportybet_coverage"] = sportybet_coverage
 
     # Preserve the evaluated environment before any product optimizer narrows
     # it. Archiving is observability: failure is logged and never blocks picks.
