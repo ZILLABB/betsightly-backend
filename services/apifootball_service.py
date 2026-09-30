@@ -335,6 +335,101 @@ class APIFootballService:
             logger.error(f"Error fetching leagues: {e}")
             return []
 
+    def get_fixture_details(
+        self,
+        fixture_ids: List[int],
+    ) -> List[Dict[str, Any]]:
+        """Fetch enriched fixture objects in API-Football batches.
+
+        API-Football accepts up to 20 fixture IDs in one `fixtures?ids=`
+        request. These objects may contain lineups when they have been
+        published.
+
+        This method is cache-backed and is intended for prepared-board
+        enrichment, never one request per website visitor.
+        """
+        unique_ids = []
+
+        for value in fixture_ids:
+            try:
+                fixture_id = int(value)
+            except (TypeError, ValueError):
+                continue
+
+            if fixture_id > 0 and fixture_id not in unique_ids:
+                unique_ids.append(fixture_id)
+
+        out = []
+
+        for index in range(0, len(unique_ids), 20):
+            batch = unique_ids[index:index + 20]
+
+            try:
+                data = self._get(
+                    "fixtures",
+                    {
+                        "ids": "-".join(
+                            str(value)
+                            for value in batch
+                        )
+                    },
+                )
+
+                out.extend(
+                    data.get("response", [])
+                    if isinstance(data, dict)
+                    else []
+                )
+
+            except Exception as e:
+                logger.error(
+                    "Error fetching fixture detail batch: %s",
+                    e,
+                )
+
+        return out
+
+    def get_fixture_injuries(
+        self,
+        fixture_id: int,
+    ) -> Dict[str, Any]:
+        """Fetch raw injury/suspension context for one provider fixture.
+
+        Keep the raw envelope so callers can distinguish an empty response
+        from a provider error. Coverage availability is evaluated separately.
+        """
+        try:
+            data = self._get(
+                "injuries",
+                {"fixture": int(fixture_id)},
+            )
+
+            if not isinstance(data, dict):
+                return {
+                    "response": [],
+                    "errors": {"invalid_response": True},
+                }
+
+            return {
+                "response": list(data.get("response") or []),
+                "errors": data.get("errors") or {},
+                "results": data.get("results"),
+            }
+
+        except Exception as e:
+            logger.error(
+                "Error fetching injuries for fixture %s: %s",
+                fixture_id,
+                e,
+            )
+
+            return {
+                "response": [],
+                "errors": {
+                    "request_failed": type(e).__name__,
+                },
+            }
+
     def clear_cache(self) -> int:
         """Remove all cached responses. Returns number of files removed."""
         count = 0
@@ -381,6 +476,15 @@ class APIFootballService:
                 "country_name": league.get("country", ""),
                 "season": league.get("season", ""),
                 "round": league.get("round", ""),
+                "venue_id": (
+                    fixture_info.get("venue", {}) or {}
+                ).get("id"),
+                "venue_name": (
+                    fixture_info.get("venue", {}) or {}
+                ).get("name"),
+                "venue_city": (
+                    fixture_info.get("venue", {}) or {}
+                ).get("city"),
                 "home_team_id": teams.get("home", {}).get("id", 0),
                 "home_team": teams.get("home", {}).get("name", "Unknown"),
                 "away_team_id": teams.get("away", {}).get("id", 0),
