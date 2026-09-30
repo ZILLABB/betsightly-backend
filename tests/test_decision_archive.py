@@ -383,3 +383,147 @@ def test_context_metrics_do_not_guess_legacy_linkage(monkeypatch):
     assert report["linked_settled_legs"] == 0
     assert report["unlinked_legacy_legs"] == 1
     assert report["linked_rate"] == 0.0
+
+
+
+def test_context_comparison_can_flag_offline_challenger_without_live_promotion():
+    # Same predicted probability in both groups. The exposed group settles
+    # materially worse, so the residual difference is not caused merely by
+    # one group containing lower-confidence predictions.
+    exposed = [
+        {
+            "probability": .70,
+            "outcome": (
+                1.0
+                if index < 40
+                else 0.0
+            ),
+            "odds": 1.55,
+            "odds_source": "SportyBet",
+            "bookable": True,
+        }
+        for index in range(80)
+    ]
+
+    control = [
+        {
+            "probability": .70,
+            "outcome": (
+                1.0
+                if index < 56
+                else 0.0
+            ),
+            "odds": 1.55,
+            "odds_source": "SportyBet",
+            "bookable": True,
+        }
+        for index in range(80)
+    ]
+
+    result = decision_archive._context_comparison(
+        exposed,
+        control,
+        exposed_labels=("short_rest",),
+        control_labels=("normal_rest",),
+    )
+
+    assert result["status"] == "offline_challenger_candidate"
+
+    assert (
+        result["candidate_for_offline_challenger"]
+        is True
+    )
+
+    assert result["promotion_enabled"] is False
+
+    assert (
+        result["direction"]
+        == "exposed_underperformed_vs_prediction"
+    )
+
+    assert (
+        result[
+            "calibration_residual_delta_ci95"
+        ]["high"]
+        < 0
+    )
+
+
+def test_context_comparison_refuses_thin_sample_even_with_large_gap():
+    exposed = [
+        {
+            "probability": .80,
+            "outcome": 0.0,
+        }
+        for _ in range(10)
+    ]
+
+    control = [
+        {
+            "probability": .80,
+            "outcome": 1.0,
+        }
+        for _ in range(10)
+    ]
+
+    result = decision_archive._context_comparison(
+        exposed,
+        control,
+        exposed_labels=("reported",),
+        control_labels=("none_reported",),
+    )
+
+    assert result["status"] == "insufficient_sample"
+
+    assert (
+        result["candidate_for_offline_challenger"]
+        is False
+    )
+
+    assert result["promotion_enabled"] is False
+
+
+def test_weather_comparison_merges_predefined_adverse_conditions():
+    dimensions = {
+        "weather": {
+            "wet": [
+                {
+                    "probability": .70,
+                    "outcome": 1.0,
+                }
+            ],
+            "windy": [
+                {
+                    "probability": .70,
+                    "outcome": 0.0,
+                }
+            ],
+            "wet_and_windy": [
+                {
+                    "probability": .70,
+                    "outcome": 0.0,
+                }
+            ],
+            "other_known": [
+                {
+                    "probability": .70,
+                    "outcome": 1.0,
+                }
+            ],
+        }
+    }
+
+    result = decision_archive._context_comparisons(
+        dimensions
+    )
+
+    weather = result["weather"]
+
+    assert weather["exposed"]["n"] == 3
+    assert weather["control"]["n"] == 1
+
+    assert weather["exposed_labels"] == [
+        "wet",
+        "windy",
+        "wet_and_windy",
+    ]

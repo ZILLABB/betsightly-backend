@@ -1180,6 +1180,17 @@ def _settled_context_metrics(
         for market, market_dimensions in by_market.items()
     }
 
+    comparisons = _context_comparisons(
+        dimensions
+    )
+
+    market_comparisons = {
+        market: _context_comparisons(
+            market_dimensions
+        )
+        for market, market_dimensions in by_market.items()
+    }
+
     return {
         "status": "success",
         "shadow_only": True,
@@ -1200,6 +1211,8 @@ def _settled_context_metrics(
         ),
         "dimensions": summarized_dimensions,
         "by_market": summarized_markets,
+        "comparisons": comparisons,
+        "market_comparisons": market_comparisons,
         "minimum_signal_sample": 75,
         "strong_signal_sample": 150,
         "decision_rule": (
@@ -1212,6 +1225,363 @@ def _settled_context_metrics(
             "booking-code readback ROI."
         ),
     }
+
+
+def _merge_context_cells(
+    cells,
+    labels,
+) -> list[dict]:
+    merged = []
+
+    for label in labels:
+        merged.extend(
+            cells.get(label)
+            or []
+        )
+
+    return merged
+
+
+def _sample_variance(
+    values: list[float],
+) -> float:
+    if len(values) < 2:
+        return 0.0
+
+    mean = sum(values) / len(values)
+
+    return sum(
+        (value - mean) ** 2
+        for value in values
+    ) / (len(values) - 1)
+
+
+def _context_comparison(
+    exposed: list[dict],
+    control: list[dict],
+    *,
+    exposed_labels: tuple[str, ...],
+    control_labels: tuple[str, ...],
+) -> dict:
+    exposed_summary = _context_summary(
+        exposed
+    )
+
+    control_summary = _context_summary(
+        control
+    )
+
+    exposed_n = len(exposed)
+    control_n = len(control)
+
+    result = {
+        "exposed_labels": list(
+            exposed_labels
+        ),
+        "control_labels": list(
+            control_labels
+        ),
+        "exposed": exposed_summary,
+        "control": control_summary,
+        "minimum_sample_per_group": 75,
+        "promotion_enabled": False,
+    }
+
+    if not exposed or not control:
+        result.update({
+            "status": "insufficient_sample",
+            "candidate_for_offline_challenger": False,
+            "reason": "comparison_group_missing",
+        })
+
+        return result
+
+    exposed_hit = sum(
+        float(value["outcome"])
+        for value in exposed
+    ) / exposed_n
+
+    control_hit = sum(
+        float(value["outcome"])
+        for value in control
+    ) / control_n
+
+    exposed_residuals = [
+        float(value["outcome"])
+        - float(value["probability"])
+        for value in exposed
+    ]
+
+    control_residuals = [
+        float(value["outcome"])
+        - float(value["probability"])
+        for value in control
+    ]
+
+    exposed_residual = (
+        sum(exposed_residuals)
+        / exposed_n
+    )
+
+    control_residual = (
+        sum(control_residuals)
+        / control_n
+    )
+
+    residual_delta = (
+        exposed_residual
+        - control_residual
+    )
+
+    if (
+        exposed_n >= 2
+        and control_n >= 2
+    ):
+        se = math.sqrt(
+            _sample_variance(
+                exposed_residuals
+            ) / exposed_n
+            + _sample_variance(
+                control_residuals
+            ) / control_n
+        )
+
+        residual_ci = (
+            residual_delta - 1.96 * se,
+            residual_delta + 1.96 * se,
+        )
+
+    else:
+        residual_ci = (
+            None,
+            None,
+        )
+
+    brier_delta = None
+
+    if (
+        exposed_summary.get("brier")
+        is not None
+        and control_summary.get("brier")
+        is not None
+    ):
+        brier_delta = (
+            float(
+                exposed_summary["brier"]
+            )
+            - float(
+                control_summary["brier"]
+            )
+        )
+
+    exposed_roi = (
+        exposed_summary.get(
+            "sportybet_price_record",
+            {},
+        ).get("roi")
+    )
+
+    control_roi = (
+        control_summary.get(
+            "sportybet_price_record",
+            {},
+        ).get("roi")
+    )
+
+    roi_delta = (
+        float(exposed_roi)
+        - float(control_roi)
+        if (
+            exposed_roi is not None
+            and control_roi is not None
+        )
+        else None
+    )
+
+    sample_ready = (
+        exposed_n >= 75
+        and control_n >= 75
+    )
+
+    low, high = residual_ci
+
+    statistically_separated = bool(
+        sample_ready
+        and low is not None
+        and high is not None
+        and (
+            low > 0
+            or high < 0
+        )
+    )
+
+    if not sample_ready:
+        status = "insufficient_sample"
+
+    elif statistically_separated:
+        status = (
+            "offline_challenger_candidate"
+        )
+
+    else:
+        status = "observe"
+
+    if (
+        residual_delta < 0
+        and statistically_separated
+    ):
+        direction = (
+            "exposed_underperformed_vs_prediction"
+        )
+
+    elif (
+        residual_delta > 0
+        and statistically_separated
+    ):
+        direction = (
+            "exposed_outperformed_vs_prediction"
+        )
+
+    else:
+        direction = "not_established"
+
+    result.update({
+        "status": status,
+        "candidate_for_offline_challenger": (
+            statistically_separated
+        ),
+        "direction": direction,
+        "hit_rate_delta": round(
+            exposed_hit - control_hit,
+            4,
+        ),
+        # outcome - probability.
+        # Negative = outcomes were worse than the model expected.
+        "calibration_residual_delta": round(
+            residual_delta,
+            4,
+        ),
+        "calibration_residual_delta_ci95": {
+            "low": (
+                round(low, 4)
+                if low is not None
+                else None
+            ),
+            "high": (
+                round(high, 4)
+                if high is not None
+                else None
+            ),
+        },
+        "brier_delta": (
+            round(brier_delta, 4)
+            if brier_delta is not None
+            else None
+        ),
+        "sportybet_roi_delta": (
+            round(roi_delta, 4)
+            if roi_delta is not None
+            else None
+        ),
+        "interpretation": (
+            "descriptive_association_not_causal"
+        ),
+    })
+
+    return result
+
+
+def _context_comparisons(
+    dimensions,
+) -> dict:
+    """Predefined comparisons only; do not data-mine arbitrary splits."""
+    rules = {
+        "lineups": {
+            "exposed": (
+                "confirmed",
+            ),
+            "control": (
+                "available_unconfirmed",
+            ),
+        },
+        "injuries": {
+            "exposed": (
+                "reported",
+            ),
+            "control": (
+                "none_reported",
+            ),
+        },
+        "suspensions": {
+            "exposed": (
+                "reported",
+            ),
+            "control": (
+                "none_reported",
+            ),
+        },
+        "rest": {
+            "exposed": (
+                "short_rest",
+            ),
+            "control": (
+                "normal_rest",
+            ),
+        },
+        "congestion": {
+            "exposed": (
+                "congested",
+            ),
+            "control": (
+                "not_congested",
+            ),
+        },
+        "weather": {
+            "exposed": (
+                "wet",
+                "windy",
+                "wet_and_windy",
+            ),
+            "control": (
+                "other_known",
+            ),
+        },
+    }
+
+    comparisons = {}
+
+    for dimension, rule in rules.items():
+        cells = (
+            dimensions.get(
+                dimension
+            )
+            or {}
+        )
+
+        exposed = _merge_context_cells(
+            cells,
+            rule["exposed"],
+        )
+
+        control = _merge_context_cells(
+            cells,
+            rule["control"],
+        )
+
+        comparisons[dimension] = (
+            _context_comparison(
+                exposed,
+                control,
+                exposed_labels=rule[
+                    "exposed"
+                ],
+                control_labels=rule[
+                    "control"
+                ],
+            )
+        )
+
+    return comparisons
 
 
 def _gap_bucket(gap: float) -> str:
