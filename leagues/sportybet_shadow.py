@@ -24,7 +24,10 @@ from typing import Any
 
 from leagues.base_rates import rates_for
 from leagues.competition_registry import competition_for
-from leagues.elo_engine import probabilities_for_fixture
+from leagues.elo_engine import (
+    probabilities_for_fixture,
+    recent_league_ratings,
+)
 from leagues.fixture_ranker import canonical_fixture_recommendations
 from leagues.picks import MIN_CANDIDATE_CONFIDENCE, build_picks
 from leagues.predictor import predict
@@ -442,6 +445,65 @@ def _pool_summary(
     }
 
 
+
+def _shadow_ratings_for_ready(
+    ready: list[dict],
+    ratings: dict | None,
+) -> tuple[dict, list[str]]:
+    """Overlay current ESPN-history Elo for supplemental leagues only.
+
+    The live ratings dictionary is never mutated.
+    """
+    combined = dict(
+        ratings or {}
+    )
+
+    slugs = sorted({
+        str(
+            item.get(
+                "league_slug"
+            )
+            or ""
+        )
+        for item in ready
+        if str(
+            item.get(
+                "league_slug"
+            )
+            or ""
+        )
+    })
+
+    if not slugs:
+        return combined, []
+
+    try:
+        refreshed = (
+            recent_league_ratings(
+                slugs,
+            )
+        )
+
+    except Exception:
+        refreshed = {}
+
+    for slug, pool in (
+        refreshed or {}
+    ).items():
+        combined[
+            slug
+        ] = pool
+
+    return (
+        combined,
+        sorted(
+            refreshed
+            or {}
+        ),
+    )
+
+
+
 def evaluate_shadow_supplemental(
     readiness: dict,
     board: dict,
@@ -486,6 +548,13 @@ def evaluate_shadow_supplemental(
             int(limit),
         )
     ]
+
+    shadow_ratings, refreshed_elo_leagues = (
+        _shadow_ratings_for_ready(
+            ready,
+            ratings,
+        )
+    )
 
     raw_shadow_picks = []
 
@@ -543,7 +612,7 @@ def evaluate_shadow_supplemental(
         try:
             elo = probabilities_for_fixture(
                 fixture,
-                ratings,
+                shadow_ratings,
             )
 
         except Exception:
@@ -825,6 +894,15 @@ def evaluate_shadow_supplemental(
             skipped_context
         ),
         "elo_fixture_count": elo_count,
+        "elo_source": (
+            "espn_monthly_history_shadow_only"
+        ),
+        "elo_refreshed_league_count": len(
+            refreshed_elo_leagues
+        ),
+        "elo_refreshed_leagues": (
+            refreshed_elo_leagues
+        ),
         "ml_fixture_count": 0,
         "raw_shadow_candidate_count": len(
             raw_shadow_picks

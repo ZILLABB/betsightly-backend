@@ -338,3 +338,150 @@ def test_shadow_fixture_rejects_competition_context_we_cannot_reconstruct():
         )
         is None
     )
+
+
+
+def test_recent_shadow_elo_uses_monthly_history(
+    monkeypatch,
+):
+    from leagues import elo_engine
+
+    rows = []
+
+    for index in range(12):
+        rows.append({
+            "id": str(index),
+            "date": (
+                f"2026-09-"
+                f"{index + 1:02d}"
+            ),
+            "home": (
+                "Alpha"
+                if index % 2 == 0
+                else "Beta"
+            ),
+            "away": (
+                "Beta"
+                if index % 2 == 0
+                else "Alpha"
+            ),
+            "hs": (
+                2
+                if index % 2 == 0
+                else 0
+            ),
+            "as": (
+                0
+                if index % 2 == 0
+                else 1
+            ),
+            "team_type": "CLUB",
+        })
+
+    monkeypatch.setattr(
+        "leagues.history_months.finished_matches",
+        lambda slug, start, end: rows,
+    )
+
+    ratings = (
+        elo_engine.recent_league_ratings(
+            ["eng.3"],
+            now=datetime(
+                2026,
+                9,
+                30,
+                tzinfo=timezone.utc,
+            ),
+        )
+    )
+
+    assert "eng.3" in ratings
+
+    assert (
+        ratings["eng.3"]["Alpha"]["matches"]
+        >= 3
+    )
+
+    assert (
+        ratings["eng.3"]["Beta"]["matches"]
+        >= 3
+    )
+
+
+def test_shadow_elo_overlay_does_not_mutate_live_ratings(
+    monkeypatch,
+):
+    existing = {
+        "eng.1": {
+            "Existing": {
+                "rating": 1500,
+                "matches": 8,
+            }
+        }
+    }
+
+    original = deepcopy(
+        existing
+    )
+
+    monkeypatch.setattr(
+        sportybet_shadow,
+        "recent_league_ratings",
+        lambda slugs: {
+            "eng.1": {
+                "Manchester United": {
+                    "rating": 1580,
+                    "matches": 12,
+                },
+                "Chelsea": {
+                    "rating": 1510,
+                    "matches": 12,
+                },
+            }
+        },
+    )
+
+    combined, refreshed = (
+        sportybet_shadow._shadow_ratings_for_ready(
+            [
+                _sample()
+            ],
+            existing,
+        )
+    )
+
+    assert existing == original
+
+    assert refreshed == [
+        "eng.1"
+    ]
+
+    fixture = (
+        sportybet_shadow._shadow_fixture(
+            _sample(),
+            _entry(),
+            {
+                "snapshot_id": (
+                    "sb-shadow-1"
+                ),
+            },
+        )
+    )
+
+    assert fixture is not None
+
+    from leagues.elo_engine import (
+        probabilities_for_fixture,
+    )
+
+    elo = probabilities_for_fixture(
+        fixture,
+        combined,
+    )
+
+    assert elo is not None
+
+    assert (
+        elo["rating_evidence"]
+        == 12
+    )
