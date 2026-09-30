@@ -1,0 +1,754 @@
+{
+  "combined_results": {
+    "conflicting_duplicates": 0,
+    "duplicate_rows": 0,
+    "input_normalized_rows": 74474,
+    "league_count": 35,
+    "max_date": "2026-06-01",
+    "min_date": "2012-01-24",
+    "same_score_duplicates_removed": 0,
+    "source_counts": {
+      "football_history": 7775,
+      "legacy_training_baseline": 66699
+    },
+    "unique_rows": 74474
+  },
+  "experiment": "phase8_historical_coverage_v1",
+  "extra_historical_leagues": [
+    106,
+    169,
+    197,
+    218,
+    283
+  ],
+  "feature_build": {
+    "feature_count": 28,
+    "input_matches": 74474,
+    "national_team_samples": 49,
+    "source_counts": {
+      "football_history": 5652,
+      "legacy_training_baseline": 64300
+    },
+    "trainable_samples": 69952,
+    "warmup_skipped": 4522
+  },
+  "leagues": [
+    {
+      "calendar_years": 3,
+      "competition": "FIFA World Cup",
+      "coverage_tier": "VERY_THIN",
+      "first_year": 2014,
+      "last_year": 2022,
+      "league_id": 1,
+      "max_date": "2022-12-17",
+      "min_date": "2014-06-12",
+      "results": 174,
+      "results_last_365d_of_corpus": 0,
+      "source_counts": {
+        "football_history": 174
+      },
+      "trainable": 49,
+      "trainable_rate": 0.281609,
+      "warmup_loss": 125
+    },
+    {
+      "calendar_years": 15,
+      "competition": "UEFA Champions League",
+      "coverage_tier": "DEEP",
+      "first_year": 2012,
+      "last_year": 2026,
+      "league_id": 2,
+      "max_date": "2026-05-06",
+      "min_date": "2012-09-18",
+      "results": 2022,
+      "results_last_365d_of_corpus": 272,
+      "source_counts": {
+        "football_history": 2022
+      },
+      "trainable": 1563,
+      "trainable_rate": 0.772997,
+      "warmup_loss": 459
+    },
+    {
+      "calendar_years": 6,
+      "competition": "UEFA Europa League",
+      "coverage_tier": "ADEQUATE",
+      "first_year": 2020,
+      "last_year": 2025,
+      "league_id": 3,
+      "max_date": "2025-08-28",
+      "min_date": "2020-10-22",
+      "results": 935,
+      "results_last_365d_of_corpus": 71,
+      "source_counts": {
+        "football_history": 935
+      },
+      "trainable": 782,
+      "trainable_rate": 0.836364,
+      "warmup_loss": 153
+    },
+    {
+      "calendar_years": 14,
+      "competition": "Copa Sudamericana",
+      "coverage_tier": "DEEP",
+      "first_year": 2012,
+      "last_year": 2025,
+      "league_id": 11,
+      "max_date": "2025-04-24",
+      "min_date": "2012-07-24",
+      "results": 1481,
+      "results_last_365d_of_corpus": 0,
+      "source_counts": {
+        "football_history": 1481
+      },
+      "trainable": 1005,
+      "trainable_rate": 0.678596,
+      "warmup_loss": 476
+    },
+    {
+      "calendar_years": 15,
+      "competition": "Copa Libertadores",
+      "coverage_tier": "DEEP",
+      "first_year": 2012,
+      "last_year": 2026,
+      "league_id": 13,
+      "max_date": "2026-05-28",
+      "min_date": "2012-01-24",
+      "results": 2150,
+      "results_last_365d_of_corpus": 144,
+      "source_counts": {
+        "football_history": 2150
+      },
+      "trainable": 1704,
+      "trainable_rate": 0.792558,
+      "warmup_loss": 446
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Premier League",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 39,
+      "max_date": "2026-05-24",
+      "min_date": "2019-08-09",
+      "results": 2660,
+      "results_last_365d_of_corpus": 380,
+      "source_counts": {
+        "legacy_training_baseline": 2660
+      },
+      "trainable": 2613,
+      "trainable_rate": 0.982331,
+      "warmup_loss": 47
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Championship",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 40,
+      "max_date": "2026-05-02",
+      "min_date": "2019-08-02",
+      "results": 3864,
+      "results_last_365d_of_corpus": 552,
+      "source_counts": {
+        "legacy_training_baseline": 3864
+      },
+      "trainable": 3750,
+      "trainable_rate": 0.970497,
+      "warmup_loss": 114
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Ligue 1",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 61,
+      "max_date": "2026-05-17",
+      "min_date": "2019-08-09",
+      "results": 2336,
+      "results_last_365d_of_corpus": 305,
+      "source_counts": {
+        "legacy_training_baseline": 2336
+      },
+      "trainable": 2286,
+      "trainable_rate": 0.978596,
+      "warmup_loss": 50
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Ligue 2",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 62,
+      "max_date": "2026-05-09",
+      "min_date": "2019-07-26",
+      "results": 2410,
+      "results_last_365d_of_corpus": 305,
+      "source_counts": {
+        "legacy_training_baseline": 2410
+      },
+      "trainable": 2312,
+      "trainable_rate": 0.959336,
+      "warmup_loss": 98
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Serie A",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 71,
+      "max_date": "2026-06-01",
+      "min_date": "2019-04-27",
+      "results": 2837,
+      "results_last_365d_of_corpus": 457,
+      "source_counts": {
+        "legacy_training_baseline": 2837
+      },
+      "trainable": 2751,
+      "trainable_rate": 0.969686,
+      "warmup_loss": 86
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Bundesliga",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 78,
+      "max_date": "2026-05-16",
+      "min_date": "2019-08-16",
+      "results": 2142,
+      "results_last_365d_of_corpus": 306,
+      "source_counts": {
+        "legacy_training_baseline": 2142
+      },
+      "trainable": 2099,
+      "trainable_rate": 0.979925,
+      "warmup_loss": 43
+    },
+    {
+      "calendar_years": 8,
+      "competition": "2. Bundesliga",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 79,
+      "max_date": "2026-05-17",
+      "min_date": "2019-07-26",
+      "results": 2142,
+      "results_last_365d_of_corpus": 306,
+      "source_counts": {
+        "legacy_training_baseline": 2142
+      },
+      "trainable": 2052,
+      "trainable_rate": 0.957983,
+      "warmup_loss": 90
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Eredivisie",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 88,
+      "max_date": "2026-05-17",
+      "min_date": "2019-08-02",
+      "results": 2068,
+      "results_last_365d_of_corpus": 306,
+      "source_counts": {
+        "legacy_training_baseline": 2068
+      },
+      "trainable": 1984,
+      "trainable_rate": 0.959381,
+      "warmup_loss": 84
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Primeira Liga",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 94,
+      "max_date": "2026-05-16",
+      "min_date": "2019-08-09",
+      "results": 2142,
+      "results_last_365d_of_corpus": 306,
+      "source_counts": {
+        "legacy_training_baseline": 2142
+      },
+      "trainable": 2054,
+      "trainable_rate": 0.958917,
+      "warmup_loss": 88
+    },
+    {
+      "calendar_years": 7,
+      "competition": "J1 League",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2025,
+      "league_id": 98,
+      "max_date": "2025-12-06",
+      "min_date": "2019-02-22",
+      "results": 2372,
+      "results_last_365d_of_corpus": 194,
+      "source_counts": {
+        "legacy_training_baseline": 2372
+      },
+      "trainable": 2279,
+      "trainable_rate": 0.960793,
+      "warmup_loss": 93
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Eliteserien",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 103,
+      "max_date": "2026-05-30",
+      "min_date": "2019-03-30",
+      "results": 1778,
+      "results_last_365d_of_corpus": 257,
+      "source_counts": {
+        "legacy_training_baseline": 1778
+      },
+      "trainable": 1688,
+      "trainable_rate": 0.949381,
+      "warmup_loss": 90
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Ekstraklasa",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 106,
+      "max_date": "2026-05-23",
+      "min_date": "2019-07-19",
+      "results": 2066,
+      "results_last_365d_of_corpus": 306,
+      "source_counts": {
+        "legacy_training_baseline": 2066
+      },
+      "trainable": 1961,
+      "trainable_rate": 0.949177,
+      "warmup_loss": 105
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Allsvenskan",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 113,
+      "max_date": "2026-05-31",
+      "min_date": "2019-03-31",
+      "results": 1771,
+      "results_last_365d_of_corpus": 228,
+      "source_counts": {
+        "legacy_training_baseline": 1771
+      },
+      "trainable": 1675,
+      "trainable_rate": 0.945793,
+      "warmup_loss": 96
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Superliga",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 119,
+      "max_date": "2026-05-17",
+      "min_date": "2019-07-12",
+      "results": 1399,
+      "results_last_365d_of_corpus": 192,
+      "source_counts": {
+        "legacy_training_baseline": 1399
+      },
+      "trainable": 1344,
+      "trainable_rate": 0.960686,
+      "warmup_loss": 55
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Primera Division",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 128,
+      "max_date": "2026-05-24",
+      "min_date": "2019-07-27",
+      "results": 3419,
+      "results_last_365d_of_corpus": 510,
+      "source_counts": {
+        "legacy_training_baseline": 3419
+      },
+      "trainable": 3332,
+      "trainable_rate": 0.974554,
+      "warmup_loss": 87
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Serie A",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 135,
+      "max_date": "2026-05-24",
+      "min_date": "2019-08-24",
+      "results": 2660,
+      "results_last_365d_of_corpus": 380,
+      "source_counts": {
+        "legacy_training_baseline": 2660
+      },
+      "trainable": 2612,
+      "trainable_rate": 0.981955,
+      "warmup_loss": 48
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Serie B",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 136,
+      "max_date": "2026-05-08",
+      "min_date": "2019-08-23",
+      "results": 2660,
+      "results_last_365d_of_corpus": 380,
+      "source_counts": {
+        "legacy_training_baseline": 2660
+      },
+      "trainable": 2518,
+      "trainable_rate": 0.946617,
+      "warmup_loss": 142
+    },
+    {
+      "calendar_years": 8,
+      "competition": "La Liga",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 140,
+      "max_date": "2026-05-24",
+      "min_date": "2019-08-16",
+      "results": 2660,
+      "results_last_365d_of_corpus": 380,
+      "source_counts": {
+        "legacy_training_baseline": 2660
+      },
+      "trainable": 2612,
+      "trainable_rate": 0.981955,
+      "warmup_loss": 48
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Segunda Division",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 141,
+      "max_date": "2026-05-31",
+      "min_date": "2019-08-17",
+      "results": 3234,
+      "results_last_365d_of_corpus": 470,
+      "source_counts": {
+        "legacy_training_baseline": 3234
+      },
+      "trainable": 3117,
+      "trainable_rate": 0.963822,
+      "warmup_loss": 117
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Pro League",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 144,
+      "max_date": "2026-05-24",
+      "min_date": "2019-07-26",
+      "results": 2085,
+      "results_last_365d_of_corpus": 311,
+      "source_counts": {
+        "legacy_training_baseline": 2085
+      },
+      "trainable": 2003,
+      "trainable_rate": 0.960671,
+      "warmup_loss": 82
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Super League",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 169,
+      "max_date": "2026-05-31",
+      "min_date": "2019-03-01",
+      "results": 1728,
+      "results_last_365d_of_corpus": 259,
+      "source_counts": {
+        "legacy_training_baseline": 1728
+      },
+      "trainable": 1587,
+      "trainable_rate": 0.918403,
+      "warmup_loss": 141
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Premiership",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 179,
+      "max_date": "2026-05-17",
+      "min_date": "2019-08-03",
+      "results": 1547,
+      "results_last_365d_of_corpus": 228,
+      "source_counts": {
+        "legacy_training_baseline": 1547
+      },
+      "trainable": 1502,
+      "trainable_rate": 0.970911,
+      "warmup_loss": 45
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Super League",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 197,
+      "max_date": "2026-05-21",
+      "min_date": "2019-08-24",
+      "results": 1669,
+      "results_last_365d_of_corpus": 236,
+      "source_counts": {
+        "legacy_training_baseline": 1669
+      },
+      "trainable": 1601,
+      "trainable_rate": 0.959257,
+      "warmup_loss": 68
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Super Lig",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 203,
+      "max_date": "2026-05-17",
+      "min_date": "2019-08-16",
+      "results": 2476,
+      "results_last_365d_of_corpus": 308,
+      "source_counts": {
+        "legacy_training_baseline": 2476
+      },
+      "trainable": 2367,
+      "trainable_rate": 0.955977,
+      "warmup_loss": 109
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Bundesliga",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 218,
+      "max_date": "2026-05-17",
+      "min_date": "2019-07-26",
+      "results": 1361,
+      "results_last_365d_of_corpus": 192,
+      "source_counts": {
+        "legacy_training_baseline": 1361
+      },
+      "trainable": 1306,
+      "trainable_rate": 0.959589,
+      "warmup_loss": 55
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Veikkausliiga",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 244,
+      "max_date": "2026-05-31",
+      "min_date": "2019-04-03",
+      "results": 1208,
+      "results_last_365d_of_corpus": 179,
+      "source_counts": {
+        "legacy_training_baseline": 1208
+      },
+      "trainable": 1141,
+      "trainable_rate": 0.944536,
+      "warmup_loss": 67
+    },
+    {
+      "calendar_years": 8,
+      "competition": "MLS",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 253,
+      "max_date": "2026-05-25",
+      "min_date": "2019-03-02",
+      "results": 3507,
+      "results_last_365d_of_corpus": 521,
+      "source_counts": {
+        "legacy_training_baseline": 3507
+      },
+      "trainable": 3414,
+      "trainable_rate": 0.973482,
+      "warmup_loss": 93
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Liga MX",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 262,
+      "max_date": "2026-05-25",
+      "min_date": "2019-07-20",
+      "results": 2317,
+      "results_last_365d_of_corpus": 336,
+      "source_counts": {
+        "legacy_training_baseline": 2317
+      },
+      "trainable": 2266,
+      "trainable_rate": 0.977989,
+      "warmup_loss": 51
+    },
+    {
+      "calendar_years": 8,
+      "competition": "Liga I",
+      "coverage_tier": "DEEP",
+      "first_year": 2019,
+      "last_year": 2026,
+      "league_id": 283,
+      "max_date": "2026-06-01",
+      "min_date": "2019-07-12",
+      "results": 2181,
+      "results_last_365d_of_corpus": 321,
+      "source_counts": {
+        "legacy_training_baseline": 2181
+      },
+      "trainable": 2074,
+      "trainable_rate": 0.95094,
+      "warmup_loss": 107
+    },
+    {
+      "calendar_years": 5,
+      "competition": "UEFA Conference League",
+      "coverage_tier": "ADEQUATE",
+      "first_year": 2021,
+      "last_year": 2025,
+      "league_id": 848,
+      "max_date": "2025-08-28",
+      "min_date": "2021-09-14",
+      "results": 1013,
+      "results_last_365d_of_corpus": 230,
+      "source_counts": {
+        "football_history": 1013
+      },
+      "trainable": 549,
+      "trainable_rate": 0.541955,
+      "warmup_loss": 464
+    }
+  ],
+  "overview": {
+    "league_count": 35,
+    "max_date": "2026-06-01",
+    "min_date": "2012-01-24",
+    "source_counts": {
+      "football_history": 7775,
+      "legacy_training_baseline": 66699
+    },
+    "trainable_samples": 69952,
+    "unique_results": 74474
+  },
+  "schema": 1,
+  "target_league_ids": [
+    1,
+    2,
+    3,
+    11,
+    13,
+    39,
+    40,
+    61,
+    62,
+    71,
+    78,
+    79,
+    88,
+    94,
+    98,
+    103,
+    113,
+    119,
+    128,
+    135,
+    136,
+    140,
+    141,
+    144,
+    179,
+    203,
+    244,
+    253,
+    262,
+    265,
+    292,
+    307,
+    848
+  ],
+  "target_leagues_missing": [
+    265,
+    292,
+    307
+  ],
+  "target_leagues_present": [
+    1,
+    2,
+    3,
+    11,
+    13,
+    39,
+    40,
+    61,
+    62,
+    71,
+    78,
+    79,
+    88,
+    94,
+    98,
+    103,
+    113,
+    119,
+    128,
+    135,
+    136,
+    140,
+    141,
+    144,
+    179,
+    203,
+    244,
+    253,
+    262,
+    848
+  ],
+  "thin_or_very_thin": [
+    1
+  ]
+}

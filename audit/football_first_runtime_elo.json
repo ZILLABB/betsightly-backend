@@ -1,0 +1,633 @@
+{
+  "automatic_promotion": false,
+  "base_feature_count": 15,
+  "base_feature_version": "football-first-runtime-core-v1",
+  "combined_results": {
+    "conflicting_duplicates": 0,
+    "duplicate_rows": 0,
+    "input_normalized_rows": 74474,
+    "league_count": 35,
+    "max_date": "2026-06-01",
+    "min_date": "2012-01-24",
+    "same_score_duplicates_removed": 0,
+    "source_counts": {
+      "football_history": 7775,
+      "legacy_training_baseline": 66699
+    },
+    "unique_rows": 74474
+  },
+  "elo_core_version": "betsightly-runtime-elo-core-v1",
+  "elo_feature_version": "football-first-runtime-elo-v1",
+  "expanded_feature_columns": [
+    "home_win_rate_5",
+    "home_win_rate_10",
+    "home_draw_rate_5",
+    "home_goals_scored_5",
+    "home_goals_conceded_5",
+    "away_win_rate_5",
+    "away_win_rate_10",
+    "away_draw_rate_5",
+    "away_goals_scored_5",
+    "away_goals_conceded_5",
+    "h2h_home_win_rate",
+    "h2h_avg_goals",
+    "h2h_btts_rate",
+    "h2h_meetings",
+    "national_team_match",
+    "runtime_elo_available",
+    "runtime_elo_home_expectation",
+    "runtime_elo_diff_scaled",
+    "runtime_elo_evidence_scaled"
+  ],
+  "expanded_feature_count": 19,
+  "experiment": "football_first_runtime_elo_comparison_v1",
+  "feature_build": {
+    "feature_count": 28,
+    "input_matches": 74474,
+    "national_team_samples": 49,
+    "source_counts": {
+      "football_history": 5652,
+      "legacy_training_baseline": 64300
+    },
+    "trainable_samples": 69952,
+    "warmup_skipped": 4522
+  },
+  "live_adjustment_allowed": false,
+  "match_result_signal_improved": true,
+  "runtime_artifact_blockers": [
+    "provider_identity_parity_not_closed",
+    "historical_tournament_neutral_context_not_available",
+    "prospective_v1_shadow_evidence_is_still_collecting"
+  ],
+  "runtime_artifact_ready": false,
+  "runtime_elo_build": {
+    "availability_rate": 0.906136,
+    "available": 63386,
+    "elo_core_version": "betsightly-runtime-elo-core-v1",
+    "feature_version": "football-first-runtime-elo-v1",
+    "history_window_days": 240,
+    "insufficient_evidence": 914,
+    "provider_identity_blocker": "offline corpus uses API-Football/OpenFootball names while live Elo is built from ESPN names",
+    "provider_identity_parity": false,
+    "same_day_results_visible": false,
+    "samples": 69952,
+    "unsupported_context": 5652,
+    "window_rebuilds": 21464
+  },
+  "schema": 1,
+  "targets": {
+    "btts": {
+      "median_skill_delta": 0.00017,
+      "runtime_core_plus_elo": {
+        "family_selection_counts": {
+          "logistic": 4
+        },
+        "fold_count": 4,
+        "folds": [
+          {
+            "fold": 1,
+            "log_loss_skill_vs_prior": 0.002199,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.529405,
+              "brier_multiclass": 0.49831,
+              "log_loss": 0.691474,
+              "top_label_ece": 0.0086
+            },
+            "test_end": "2023-10-18",
+            "test_n": 8196,
+            "test_start": "2022-12-12"
+          },
+          {
+            "fold": 2,
+            "log_loss_skill_vs_prior": 0.003672,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.54062,
+              "brier_multiclass": 0.495811,
+              "log_loss": 0.688953,
+              "top_label_ece": 0.006691
+            },
+            "test_end": "2024-08-26",
+            "test_n": 8518,
+            "test_start": "2023-10-19"
+          },
+          {
+            "fold": 3,
+            "log_loss_skill_vs_prior": 0.004763,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.536218,
+              "brier_multiclass": 0.495327,
+              "log_loss": 0.688451,
+              "top_label_ece": 0.001282
+            },
+            "test_end": "2025-07-20",
+            "test_n": 9291,
+            "test_start": "2024-08-27"
+          },
+          {
+            "fold": 4,
+            "log_loss_skill_vs_prior": 0.004514,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.548166,
+              "brier_multiclass": 0.494043,
+              "log_loss": 0.687168,
+              "top_label_ece": 0.008047
+            },
+            "test_end": "2026-06-01",
+            "test_n": 9353,
+            "test_start": "2025-07-21"
+          }
+        ],
+        "median_skill": 0.004093,
+        "minimum_skill": 0.002199,
+        "positive_skill_folds": 4
+      },
+      "runtime_core_v1": {
+        "family_selection_counts": {
+          "logistic": 4
+        },
+        "fold_count": 4,
+        "folds": [
+          {
+            "fold": 1,
+            "log_loss_skill_vs_prior": 0.001821,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.528795,
+              "brier_multiclass": 0.498575,
+              "log_loss": 0.691736,
+              "top_label_ece": 0.005807
+            },
+            "test_end": "2023-10-18",
+            "test_n": 8196,
+            "test_start": "2022-12-12"
+          },
+          {
+            "fold": 2,
+            "log_loss_skill_vs_prior": 0.003594,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.54062,
+              "brier_multiclass": 0.495865,
+              "log_loss": 0.689007,
+              "top_label_ece": 0.007781
+            },
+            "test_end": "2024-08-26",
+            "test_n": 8518,
+            "test_start": "2023-10-19"
+          },
+          {
+            "fold": 3,
+            "log_loss_skill_vs_prior": 0.004888,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.537402,
+              "brier_multiclass": 0.495242,
+              "log_loss": 0.688365,
+              "top_label_ece": 0.002781
+            },
+            "test_end": "2025-07-20",
+            "test_n": 9291,
+            "test_start": "2024-08-27"
+          },
+          {
+            "fold": 4,
+            "log_loss_skill_vs_prior": 0.004253,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.543355,
+              "brier_multiclass": 0.494228,
+              "log_loss": 0.687348,
+              "top_label_ece": 0.005033
+            },
+            "test_end": "2026-06-01",
+            "test_n": 9353,
+            "test_start": "2025-07-21"
+          }
+        ],
+        "median_skill": 0.003923,
+        "minimum_skill": 0.001821,
+        "positive_skill_folds": 4
+      }
+    },
+    "match_result": {
+      "median_skill_delta": 0.011388,
+      "runtime_core_plus_elo": {
+        "family_selection_counts": {
+          "hist_gradient_boosting": 1,
+          "logistic": 3
+        },
+        "fold_count": 4,
+        "folds": [
+          {
+            "fold": 1,
+            "log_loss_skill_vs_prior": 0.047477,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.489141,
+              "brier_multiclass": 0.609964,
+              "log_loss": 1.018169,
+              "top_label_ece": 0.015522
+            },
+            "test_end": "2023-10-18",
+            "test_n": 8196,
+            "test_start": "2022-12-12"
+          },
+          {
+            "fold": 2,
+            "log_loss_skill_vs_prior": 0.047115,
+            "selected_family": "hist_gradient_boosting",
+            "test": {
+              "accuracy": 0.488965,
+              "brier_multiclass": 0.612346,
+              "log_loss": 1.022327,
+              "top_label_ece": 0.006118
+            },
+            "test_end": "2024-08-26",
+            "test_n": 8518,
+            "test_start": "2023-10-19"
+          },
+          {
+            "fold": 3,
+            "log_loss_skill_vs_prior": 0.044318,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.49069,
+              "brier_multiclass": 0.613219,
+              "log_loss": 1.022737,
+              "top_label_ece": 0.003734
+            },
+            "test_end": "2025-07-20",
+            "test_n": 9291,
+            "test_start": "2024-08-27"
+          },
+          {
+            "fold": 4,
+            "log_loss_skill_vs_prior": 0.041732,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.484978,
+              "brier_multiclass": 0.616574,
+              "log_loss": 1.027431,
+              "top_label_ece": 0.005853
+            },
+            "test_end": "2026-06-01",
+            "test_n": 9353,
+            "test_start": "2025-07-21"
+          }
+        ],
+        "median_skill": 0.045717,
+        "minimum_skill": 0.041732,
+        "positive_skill_folds": 4
+      },
+      "runtime_core_v1": {
+        "family_selection_counts": {
+          "hist_gradient_boosting": 1,
+          "logistic": 3
+        },
+        "fold_count": 4,
+        "folds": [
+          {
+            "fold": 1,
+            "log_loss_skill_vs_prior": 0.036747,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.482186,
+              "brier_multiclass": 0.617637,
+              "log_loss": 1.029639,
+              "top_label_ece": 0.012981
+            },
+            "test_end": "2023-10-18",
+            "test_n": 8196,
+            "test_start": "2022-12-12"
+          },
+          {
+            "fold": 2,
+            "log_loss_skill_vs_prior": 0.036027,
+            "selected_family": "hist_gradient_boosting",
+            "test": {
+              "accuracy": 0.478281,
+              "brier_multiclass": 0.62067,
+              "log_loss": 1.034223,
+              "top_label_ece": 0.007397
+            },
+            "test_end": "2024-08-26",
+            "test_n": 8518,
+            "test_start": "2023-10-19"
+          },
+          {
+            "fold": 3,
+            "log_loss_skill_vs_prior": 0.031131,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.477236,
+              "brier_multiclass": 0.623232,
+              "log_loss": 1.036849,
+              "top_label_ece": 0.005121
+            },
+            "test_end": "2025-07-20",
+            "test_n": 9291,
+            "test_start": "2024-08-27"
+          },
+          {
+            "fold": 4,
+            "log_loss_skill_vs_prior": 0.032632,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.477494,
+              "brier_multiclass": 0.623444,
+              "log_loss": 1.037188,
+              "top_label_ece": 0.007131
+            },
+            "test_end": "2026-06-01",
+            "test_n": 9353,
+            "test_start": "2025-07-21"
+          }
+        ],
+        "median_skill": 0.034329,
+        "minimum_skill": 0.031131,
+        "positive_skill_folds": 4
+      }
+    },
+    "over_1_5": {
+      "median_skill_delta": 0.000578,
+      "runtime_core_plus_elo": {
+        "family_selection_counts": {
+          "hist_gradient_boosting": 1,
+          "logistic": 3
+        },
+        "fold_count": 4,
+        "folds": [
+          {
+            "fold": 1,
+            "log_loss_skill_vs_prior": 0.008641,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.740727,
+              "brier_multiclass": 0.380403,
+              "log_loss": 0.56735,
+              "top_label_ece": 0.005346
+            },
+            "test_end": "2023-10-18",
+            "test_n": 8196,
+            "test_start": "2022-12-12"
+          },
+          {
+            "fold": 2,
+            "log_loss_skill_vs_prior": 0.010411,
+            "selected_family": "hist_gradient_boosting",
+            "test": {
+              "accuracy": 0.756163,
+              "brier_multiclass": 0.364984,
+              "log_loss": 0.550273,
+              "top_label_ece": 0.008886
+            },
+            "test_end": "2024-08-26",
+            "test_n": 8518,
+            "test_start": "2023-10-19"
+          },
+          {
+            "fold": 3,
+            "log_loss_skill_vs_prior": 0.013388,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.744592,
+              "brier_multiclass": 0.374744,
+              "log_loss": 0.560595,
+              "top_label_ece": 0.008713
+            },
+            "test_end": "2025-07-20",
+            "test_n": 9291,
+            "test_start": "2024-08-27"
+          },
+          {
+            "fold": 4,
+            "log_loss_skill_vs_prior": 0.01144,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.760612,
+              "brier_multiclass": 0.360249,
+              "log_loss": 0.544827,
+              "top_label_ece": 0.00725
+            },
+            "test_end": "2026-06-01",
+            "test_n": 9353,
+            "test_start": "2025-07-21"
+          }
+        ],
+        "median_skill": 0.010926,
+        "minimum_skill": 0.008641,
+        "positive_skill_folds": 4
+      },
+      "runtime_core_v1": {
+        "family_selection_counts": {
+          "hist_gradient_boosting": 1,
+          "logistic": 3
+        },
+        "fold_count": 4,
+        "folds": [
+          {
+            "fold": 1,
+            "log_loss_skill_vs_prior": 0.008092,
+            "selected_family": "hist_gradient_boosting",
+            "test": {
+              "accuracy": 0.740727,
+              "brier_multiclass": 0.380554,
+              "log_loss": 0.567664,
+              "top_label_ece": 0.003185
+            },
+            "test_end": "2023-10-18",
+            "test_n": 8196,
+            "test_start": "2022-12-12"
+          },
+          {
+            "fold": 2,
+            "log_loss_skill_vs_prior": 0.010029,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.756163,
+              "brier_multiclass": 0.365133,
+              "log_loss": 0.550485,
+              "top_label_ece": 0.005955
+            },
+            "test_end": "2024-08-26",
+            "test_n": 8518,
+            "test_start": "2023-10-19"
+          },
+          {
+            "fold": 3,
+            "log_loss_skill_vs_prior": 0.012395,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.744592,
+              "brier_multiclass": 0.375119,
+              "log_loss": 0.561159,
+              "top_label_ece": 0.010478
+            },
+            "test_end": "2025-07-20",
+            "test_n": 9291,
+            "test_start": "2024-08-27"
+          },
+          {
+            "fold": 4,
+            "log_loss_skill_vs_prior": 0.010667,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.760612,
+              "brier_multiclass": 0.360549,
+              "log_loss": 0.545253,
+              "top_label_ece": 0.007402
+            },
+            "test_end": "2026-06-01",
+            "test_n": 9353,
+            "test_start": "2025-07-21"
+          }
+        ],
+        "median_skill": 0.010348,
+        "minimum_skill": 0.008092,
+        "positive_skill_folds": 4
+      }
+    },
+    "over_2_5": {
+      "median_skill_delta": 0.001447,
+      "runtime_core_plus_elo": {
+        "family_selection_counts": {
+          "logistic": 4
+        },
+        "fold_count": 4,
+        "folds": [
+          {
+            "fold": 1,
+            "log_loss_skill_vs_prior": 0.011761,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.552099,
+              "brier_multiclass": 0.491861,
+              "log_loss": 0.684972,
+              "top_label_ece": 0.006404
+            },
+            "test_end": "2023-10-18",
+            "test_n": 8196,
+            "test_start": "2022-12-12"
+          },
+          {
+            "fold": 2,
+            "log_loss_skill_vs_prior": 0.013339,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.552829,
+              "brier_multiclass": 0.491236,
+              "log_loss": 0.684264,
+              "top_label_ece": 0.005144
+            },
+            "test_end": "2024-08-26",
+            "test_n": 8518,
+            "test_start": "2023-10-19"
+          },
+          {
+            "fold": 3,
+            "log_loss_skill_vs_prior": 0.014039,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.554623,
+              "brier_multiclass": 0.490356,
+              "log_loss": 0.683427,
+              "top_label_ece": 0.008554
+            },
+            "test_end": "2025-07-20",
+            "test_n": 9291,
+            "test_start": "2024-08-27"
+          },
+          {
+            "fold": 4,
+            "log_loss_skill_vs_prior": 0.011109,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.550198,
+              "brier_multiclass": 0.492245,
+              "log_loss": 0.685335,
+              "top_label_ece": 0.003035
+            },
+            "test_end": "2026-06-01",
+            "test_n": 9353,
+            "test_start": "2025-07-21"
+          }
+        ],
+        "median_skill": 0.01255,
+        "minimum_skill": 0.011109,
+        "positive_skill_folds": 4
+      },
+      "runtime_core_v1": {
+        "family_selection_counts": {
+          "hist_gradient_boosting": 1,
+          "logistic": 3
+        },
+        "fold_count": 4,
+        "folds": [
+          {
+            "fold": 1,
+            "log_loss_skill_vs_prior": 0.009887,
+            "selected_family": "hist_gradient_boosting",
+            "test": {
+              "accuracy": 0.550878,
+              "brier_multiclass": 0.493117,
+              "log_loss": 0.686271,
+              "top_label_ece": 0.006296
+            },
+            "test_end": "2023-10-18",
+            "test_n": 8196,
+            "test_start": "2022-12-12"
+          },
+          {
+            "fold": 2,
+            "log_loss_skill_vs_prior": 0.011659,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.548838,
+              "brier_multiclass": 0.492329,
+              "log_loss": 0.685429,
+              "top_label_ece": 0.003508
+            },
+            "test_end": "2024-08-26",
+            "test_n": 8518,
+            "test_start": "2023-10-19"
+          },
+          {
+            "fold": 3,
+            "log_loss_skill_vs_prior": 0.01282,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.558175,
+              "brier_multiclass": 0.49118,
+              "log_loss": 0.684272,
+              "top_label_ece": 0.011522
+            },
+            "test_end": "2025-07-20",
+            "test_n": 9291,
+            "test_start": "2024-08-27"
+          },
+          {
+            "fold": 4,
+            "log_loss_skill_vs_prior": 0.010548,
+            "selected_family": "logistic",
+            "test": {
+              "accuracy": 0.542607,
+              "brier_multiclass": 0.492682,
+              "log_loss": 0.685724,
+              "top_label_ece": 0.007666
+            },
+            "test_end": "2026-06-01",
+            "test_n": 9353,
+            "test_start": "2025-07-21"
+          }
+        ],
+        "median_skill": 0.011103,
+        "minimum_skill": 0.009887,
+        "positive_skill_folds": 4
+      }
+    }
+  }
+}
