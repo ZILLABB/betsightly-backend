@@ -3,6 +3,19 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Iterable
 
+# ``selection_quality.price_quality_reason_codes`` mixes descriptive labels
+# with genuinely adverse price/evidence signals. PRICE_POSITIVE,
+# PRICE_NEUTRAL, PRICE_NEGATIVE and DNB_PUSH_AWARE are diagnostics used by
+# ranking/UI. They must not become trust rejections merely because a pick was
+# quality-annotated before evaluate_leg_trust() runs.
+#
+# These codes, however, describe real evidence problems and remain blocking.
+TRUST_BLOCKING_PRICE_REASON_CODES = {
+    "SPARSE_COMPETITION_EVIDENCE",
+    "EXTREME_PRICE_MODEL_DISAGREEMENT",
+    "UNSUPPORTED_PRICE_EDGE",
+}
+
 def reprice_for_live_sportybet(pick: dict) -> dict:
     """Recompute selection economics from the exact currently bookable price.
 
@@ -114,7 +127,11 @@ def evaluate_leg_trust(pick: dict, *, minimum_samples: int | None = None) -> dic
     fixture = pick.get("_fixture") or {}
     complete = bool(pick.get("match_id") and pick.get("market") and fixture.get("commence_time"))
     reasons = []
-    reasons.extend(pick.get("price_quality_reason_codes") or [])
+    reasons.extend(
+        code
+        for code in (pick.get("price_quality_reason_codes") or [])
+        if code in TRUST_BLOCKING_PRICE_REASON_CODES
+    )
     if not bookable: reasons.append("sportybet_selection_not_exactly_bookable")
     if (not pick.get("safe_tier_eligible", sample >= minimum_samples)
             and fused["state"] not in ("SUPPORTED", "PROVEN")):

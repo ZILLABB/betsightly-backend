@@ -23,6 +23,26 @@ def test_trusted_leg_is_accepted():
     assert decision["trust_grade"] in ("A", "B")
 
 
+@pytest.mark.parametrize(
+    "price_label",
+    ["PRICE_POSITIVE", "PRICE_NEUTRAL", "PRICE_NEGATIVE", "DNB_PUSH_AWARE"],
+)
+def test_diagnostic_price_labels_do_not_reject_an_otherwise_trusted_leg(price_label):
+    decision = evaluate_leg_trust(
+        _pick(price_quality_reason_codes=[price_label])
+    )
+    assert decision["accepted"]
+    assert price_label not in decision["rejection_reasons"]
+
+
+def test_blocking_price_evidence_code_still_rejects():
+    decision = evaluate_leg_trust(
+        _pick(price_quality_reason_codes=["EXTREME_PRICE_MODEL_DISAGREEMENT"])
+    )
+    assert not decision["accepted"]
+    assert "EXTREME_PRICE_MODEL_DISAGREEMENT" in decision["rejection_reasons"]
+
+
 def test_sparse_market_is_rejected_conservatively():
     decision = evaluate_leg_trust(_pick(market="unknown_market", calibration_sample=3, safe_tier_eligible=False))
     assert not decision["accepted"]
