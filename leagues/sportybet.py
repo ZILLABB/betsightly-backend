@@ -1052,8 +1052,113 @@ def _tournament_identity_metadata(
     }
 
 
+
+# Verified from the live Nigerian SportyBet football catalogue.
+#
+# Automatic supplemental mapping is keyed by BOTH provider tournament and
+# category identity. Names are descriptive only and never sufficient when a
+# provider identity is present.
+#
+# A mapping here does NOT make a fixture publishable. The existing history,
+# team identity, evidence, trust, safe-tier and exact-bookability gates still
+# apply downstream.
+_SPORTYBET_COMPETITION_IDS = {
+    # England
+    ("sr:tournament:17", "sr:category:1"): "eng.1",
+    ("sr:tournament:18", "sr:category:1"): "eng.2",
+    ("sr:tournament:24", "sr:category:1"): "eng.3",
+    ("sr:tournament:25", "sr:category:1"): "eng.4",
+    ("sr:tournament:21", "sr:category:1"): "eng.league_cup",
+
+    # Spain
+    ("sr:tournament:8", "sr:category:32"): "esp.1",
+    ("sr:tournament:54", "sr:category:32"): "esp.2",
+
+    # Germany
+    ("sr:tournament:35", "sr:category:30"): "ger.1",
+    ("sr:tournament:44", "sr:category:30"): "ger.2",
+    ("sr:tournament:217", "sr:category:30"): "ger.dfb_pokal",
+
+    # Italy
+    ("sr:tournament:23", "sr:category:31"): "ita.1",
+    ("sr:tournament:53", "sr:category:31"): "ita.2",
+
+    # France
+    ("sr:tournament:34", "sr:category:7"): "fra.1",
+    ("sr:tournament:182", "sr:category:7"): "fra.2",
+
+    # Portugal / Netherlands / Belgium / Turkey
+    ("sr:tournament:238", "sr:category:44"): "por.1",
+    ("sr:tournament:37", "sr:category:35"): "ned.1",
+    ("sr:tournament:38", "sr:category:33"): "bel.1",
+    ("sr:tournament:52", "sr:category:46"): "tur.1",
+
+    # Europe
+    ("sr:tournament:45", "sr:category:17"): "aut.1",
+    ("sr:tournament:185", "sr:category:67"): "gre.1",
+    ("sr:tournament:36", "sr:category:22"): "sco.1",
+    ("sr:tournament:20", "sr:category:5"): "nor.1",
+    ("sr:tournament:40", "sr:category:9"): "swe.1",
+    ("sr:tournament:202", "sr:category:47"): "pol.1",
+    ("sr:tournament:172", "sr:category:18"): "cze.1",
+    ("sr:tournament:152", "sr:category:77"): "rou.1",
+    ("sr:tournament:203", "sr:category:21"): "rus.1",
+    ("sr:tournament:210", "sr:category:152"): "srb.1",
+
+    # North America
+    ("sr:tournament:242", "sr:category:26"): "usa.1",
+    ("sr:tournament:1690", "sr:category:26"): "usa.nwsl",
+    ("sr:tournament:28163", "sr:category:26"): "usa.usl.1",
+    ("sr:tournament:27464", "sr:category:12"): "mex.1",
+    ("sr:tournament:27382", "sr:category:12"): "mex.2",
+
+    # South America
+    ("sr:tournament:325", "sr:category:13"): "bra.1",
+    ("sr:tournament:390", "sr:category:13"): "bra.2",
+    ("sr:tournament:155", "sr:category:48"): "arg.1",
+    ("sr:tournament:703", "sr:category:48"): "arg.2",
+    ("sr:tournament:27665", "sr:category:49"): "chi.1",
+    ("sr:tournament:27070", "sr:category:274"): "col.1",
+    ("sr:tournament:406", "sr:category:20"): "per.1",
+    ("sr:tournament:278", "sr:category:57"): "uru.1",
+    ("sr:tournament:240", "sr:category:165"): "ecu.1",
+    ("sr:tournament:27098", "sr:category:280"): "par.1",
+
+    # Asia / Oceania
+    ("sr:tournament:402", "sr:category:52"): "jpn.2",
+    ("sr:tournament:136", "sr:category:34"): "aus.1",
+
+    # UEFA / international
+    ("sr:tournament:7", "sr:category:393"): "uefa.champions",
+    ("sr:tournament:679", "sr:category:393"): "uefa.europa",
+    ("sr:tournament:34480", "sr:category:393"): "uefa.europa.conf",
+    ("sr:tournament:23755", "sr:category:4"): "uefa.nations",
+    ("sr:tournament:851", "sr:category:4"): "fifa.friendly",
+}
+
+
+def _provider_competition_mapping(
+    *,
+    tournament_id: str | None,
+    category_id: str | None,
+):
+    """Resolve only an explicitly verified provider identity."""
+    if not tournament_id or not category_id:
+        return None
+
+    return _SPORTYBET_COMPETITION_IDS.get(
+        (
+            str(tournament_id),
+            str(category_id),
+        )
+    )
+
+
 def registry_competition_match(
     competition: str,
+    *,
+    tournament_id: str | None = None,
+    category_id: str | None = None,
 ) -> dict:
     """Strict automatic registry match.
 
@@ -1065,8 +1170,65 @@ def registry_competition_match(
     league mapping.
     """
     from leagues.competition_registry import (
+        competition_for,
         provider_slugs,
     )
+
+    # When SportyBet supplies stable provider identity, only our explicitly
+    # reviewed identity table may map it. We deliberately do NOT fall back to
+    # the display name for an unknown provider id: another country can use the
+    # exact same competition name.
+    if tournament_id or category_id:
+        slug = _provider_competition_mapping(
+            tournament_id=tournament_id,
+            category_id=category_id,
+        )
+
+        if slug:
+            registered = competition_for(
+                slug
+            )
+
+            if registered:
+                return {
+                    "status": "MAPPED_EXACT",
+                    "match_basis": "sportybet_provider_identity",
+                    "sportybet_competition": str(
+                        competition or ""
+                    ).strip() or None,
+                    "sportybet_tournament_id": str(
+                        tournament_id
+                    ),
+                    "sportybet_category_id": str(
+                        category_id
+                    ),
+                    "league_slug": slug,
+                    "league": registered.display_name,
+                    "best_candidate": registered.display_name,
+                    "best_score": 1.0,
+                }
+
+        return {
+            "status": "UNMAPPED",
+            "match_basis": None,
+            "sportybet_competition": str(
+                competition or ""
+            ).strip() or None,
+            "sportybet_tournament_id": (
+                str(tournament_id)
+                if tournament_id
+                else None
+            ),
+            "sportybet_category_id": (
+                str(category_id)
+                if category_id
+                else None
+            ),
+            "league_slug": None,
+            "league": None,
+            "best_candidate": None,
+            "best_score": 0.0,
+        }
 
     competition = str(
         competition or ""
@@ -1390,11 +1552,31 @@ def coverage_against_fixtures(
     ]
 
     competition_counts = Counter(
-        str(
-            entry.get(
-                "competition"
-            )
-            or "unknown"
+        (
+            str(
+                entry.get(
+                    "sportybet_tournament_id"
+                )
+                or ""
+            ),
+            str(
+                entry.get(
+                    "sportybet_category_id"
+                )
+                or ""
+            ),
+            str(
+                entry.get(
+                    "competition"
+                )
+                or "unknown"
+            ),
+            str(
+                entry.get(
+                    "sportybet_category"
+                )
+                or ""
+            ),
         )
         for entry in sporty_only
     )
@@ -1404,15 +1586,42 @@ def coverage_against_fixtures(
     unmapped_fixture_count = 0
     ambiguous_fixture_count = 0
 
-    for competition, count in competition_counts.items():
+    for identity, count in competition_counts.items():
+        (
+            tournament_id,
+            category_id,
+            competition,
+            category,
+        ) = identity
+
         mapping = registry_competition_match(
-            competition
+            competition,
+            tournament_id=(
+                tournament_id
+                or None
+            ),
+            category_id=(
+                category_id
+                or None
+            ),
         )
 
         mapped_competitions[
-            competition
+            identity
         ] = {
             **mapping,
+            "sportybet_tournament_id": (
+                tournament_id
+                or None
+            ),
+            "sportybet_category_id": (
+                category_id
+                or None
+            ),
+            "sportybet_category": (
+                category
+                or None
+            ),
             "fixture_count": count,
         }
 
@@ -1435,10 +1644,42 @@ def coverage_against_fixtures(
             or "unknown"
         )
 
+        identity = (
+            str(
+                entry.get(
+                    "sportybet_tournament_id"
+                )
+                or ""
+            ),
+            str(
+                entry.get(
+                    "sportybet_category_id"
+                )
+                or ""
+            ),
+            competition,
+            str(
+                entry.get(
+                    "sportybet_category"
+                )
+                or ""
+            ),
+        )
+
         mapping = mapped_competitions.get(
-            competition
+            identity
         ) or registry_competition_match(
-            competition
+            competition,
+            tournament_id=(
+                entry.get(
+                    "sportybet_tournament_id"
+                )
+            ),
+            category_id=(
+                entry.get(
+                    "sportybet_category_id"
+                )
+            ),
         )
 
         try:
@@ -1587,22 +1828,35 @@ def coverage_against_fixtures(
         "unmapped_registry_sportybet_only": (
             unmapped_fixture_count
         ),
-        "sportybet_only_competitions": [
-            mapped_competitions[
-                competition
-            ]
-            for competition in sorted(
-                mapped_competitions,
-                key=lambda name: (
-                    -mapped_competitions[
-                        name
-                    ][
+        "sportybet_only_competitions": sorted(
+            mapped_competitions.values(),
+            key=lambda item: (
+                -int(
+                    item.get(
                         "fixture_count"
-                    ],
-                    name,
+                    )
+                    or 0
                 ),
-            )
-        ],
+                str(
+                    item.get(
+                        "sportybet_category"
+                    )
+                    or ""
+                ),
+                str(
+                    item.get(
+                        "sportybet_competition"
+                    )
+                    or ""
+                ),
+                str(
+                    item.get(
+                        "sportybet_tournament_id"
+                    )
+                    or ""
+                ),
+            ),
+        ),
         "sportybet_only_samples": samples[
             :max(
                 0,

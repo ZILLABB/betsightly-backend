@@ -266,3 +266,74 @@ def test_tournament_identity_metadata_is_preserved_when_available():
         ]
         == "England"
     )
+
+
+
+def test_provider_identity_disambiguates_same_competition_name():
+    england = sportybet.registry_competition_match(
+        "Premier League",
+        tournament_id="sr:tournament:17",
+        category_id="sr:category:1",
+    )
+
+    russia = sportybet.registry_competition_match(
+        "Premier League",
+        tournament_id="sr:tournament:203",
+        category_id="sr:category:21",
+    )
+
+    assert england["status"] == "MAPPED_EXACT"
+    assert england["league_slug"] == "eng.1"
+
+    assert russia["status"] == "MAPPED_EXACT"
+    assert russia["league_slug"] == "rus.1"
+
+    assert (
+        england["match_basis"]
+        == "sportybet_provider_identity"
+    )
+
+
+def test_unknown_provider_identity_never_falls_back_to_name():
+    result = sportybet.registry_competition_match(
+        "Premier League",
+        tournament_id="sr:tournament:unknown",
+        category_id="sr:category:999",
+    )
+
+    assert result["status"] == "UNMAPPED"
+    assert result["league_slug"] is None
+    assert result["match_basis"] is None
+
+
+def test_verified_provider_alias_can_map_different_display_name():
+    result = sportybet.registry_competition_match(
+        "LALIGA HYPERMOTION",
+        tournament_id="sr:tournament:54",
+        category_id="sr:category:32",
+    )
+
+    assert result["status"] == "MAPPED_EXACT"
+    assert result["league_slug"] == "esp.2"
+    assert result["league"] == "LaLiga 2"
+
+
+def test_provider_identity_maps_verified_efl_levels():
+    expectations = {
+        ("sr:tournament:18", "sr:category:1"): "eng.2",
+        ("sr:tournament:24", "sr:category:1"): "eng.3",
+        ("sr:tournament:25", "sr:category:1"): "eng.4",
+    }
+
+    for (
+        tournament_id,
+        category_id,
+    ), slug in expectations.items():
+        result = sportybet.registry_competition_match(
+            "different provider label",
+            tournament_id=tournament_id,
+            category_id=category_id,
+        )
+
+        assert result["status"] == "MAPPED_EXACT"
+        assert result["league_slug"] == slug
