@@ -30,6 +30,8 @@ _PREPARED_STALE_TTL = 6 * 3600
 _PIPELINE_LOCK = threading.Lock()
 _PREWARM_LOCK = threading.Lock()
 _PREWARMING = False
+_PERSISTENCE_LOCK = threading.Lock()
+_PERSISTENCE_HYDRATED = False
 
 
 def _parse_kickoff(value: str) -> datetime | None:
@@ -60,9 +62,101 @@ def _filter_cached(entry: dict, days_ahead: int,
     return picks, fixtures
 
 
+def _hydrate_persisted_cache() -> None:
+    """Hydrate the process cache once from the optional persistent store."""
+    global _PERSISTENCE_HYDRATED
+
+    if _PERSISTENCE_HYDRATED:
+        return
+
+    with _PERSISTENCE_LOCK:
+        if _PERSISTENCE_HYDRATED:
+            return
+
+        from leagues import prepared_board_store
+
+        if not prepared_board_store.enabled():
+            _PERSISTENCE_HYDRATED = True
+            return
+
+        try:
+            rows = prepared_board_store.load_entries()
+        except Exception as exc:
+            logger.warning(
+                "prepared board persistence hydrate failed: %s",
+                exc,
+                exc_info=True,
+            )
+            return
+
+        for row in rows:
+            entry = row.get("entry")
+
+            if not isinstance(entry, dict):
+                continue
+
+            horizon = int(
+                row.get("horizon_days")
+                or (
+                    entry.get("metadata")
+                    or {}
+                ).get("requested_days")
+                or 0
+            )
+
+            if horizon <= 0:
+                continue
+
+            metadata = entry.setdefault(
+                "metadata",
+                {},
+            )
+            metadata[
+                "_restored_from_persistence"
+            ] = True
+
+            slot = str(
+                row.get("slot")
+                or "latest"
+            )
+
+            bucket_name = (
+                "healthy_entries"
+                if slot == "healthy"
+                else "entries"
+            )
+
+            bucket = _CACHE.setdefault(
+                bucket_name,
+                {},
+            )
+
+            current = bucket.get(
+                horizon
+            )
+
+            if (
+                current is None
+                or float(
+                    entry.get("ts")
+                    or 0
+                )
+                > float(
+                    current.get("ts")
+                    or 0
+                )
+            ):
+                bucket[
+                    horizon
+                ] = entry
+
+        _PERSISTENCE_HYDRATED = True
+
+
 def _covering_entry(days_ahead: int, now_ts: float,
                     require_complete: bool = False,
                     allow_stale: bool = False) -> dict | None:
+    _hydrate_persisted_cache()
     now_dt = datetime.fromtimestamp(now_ts, timezone.utc)
     requested_end = now_dt + timedelta(days=days_ahead)
 
@@ -143,8 +237,34 @@ def _store_cache_entry(days_ahead: int, picks: list[dict],
         },
     }
     _CACHE.setdefault("entries", {})[days_ahead] = entry
-    if provider.get("complete", True):
-        _CACHE.setdefault("healthy_entries", {})[days_ahead] = entry
+    healthy = bool(
+        provider.get(
+            "complete",
+            True,
+        )
+    )
+
+    if healthy:
+        _CACHE.setdefault(
+            "healthy_entries",
+            {},
+        )[days_ahead] = entry
+
+    try:
+        from leagues import prepared_board_store
+
+        if prepared_board_store.enabled():
+            prepared_board_store.persist_entry(
+                days_ahead,
+                entry,
+                healthy=healthy,
+            )
+    except Exception as exc:
+        logger.warning(
+            "prepared board persistence save failed: %s",
+            exc,
+            exc_info=True,
+        )
 
 
 def prepared_board_status(days_ahead: int = 7) -> dict:
@@ -186,7 +306,19 @@ def _status_for_entry(entry: dict | None, days_ahead: int, now: float) -> dict:
         "age_seconds": age_seconds,
         "stale": bool(age_seconds >= _TTL),
         "board_source": (
-            "stale_fallback" if age_seconds >= _TTL else "cache"
+            (
+                "persistent_stale_fallback"
+                if age_seconds >= _TTL
+                else "persistent_cache"
+            )
+            if entry["metadata"].get(
+                "_restored_from_persistence"
+            )
+            else (
+                "stale_fallback"
+                if age_seconds >= _TTL
+                else "cache"
+            )
         ),
         "board_snapshot_id": entry["metadata"].get(
             "decision_snapshot_id"

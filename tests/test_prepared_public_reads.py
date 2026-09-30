@@ -22,6 +22,7 @@ def _entry(monkeypatch, *, stale=False, degraded=False):
          "league_slug": "eng.1", "league": "Premier League"},
     ]
     monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    monkeypatch.setattr(engine, "_PERSISTENCE_HYDRATED", True)
     engine._store_cache_entry(
         7, [{"match_id": "future"}, {"match_id": "past"}], fixtures,
         time.time(), now, {"complete": not degraded},
@@ -85,6 +86,7 @@ def test_fresh_degraded_board_does_not_refresh_loop(monkeypatch):
 
 def test_cold_public_read_is_retryable_without_pipeline(monkeypatch):
     monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    monkeypatch.setattr(engine, "_PERSISTENCE_HYDRATED", True)
     _no_pipeline(monkeypatch)
     monkeypatch.setattr(history_readiness, "status",
                         lambda: {"usable": True, "state": "READY"})
@@ -102,6 +104,7 @@ def test_cold_public_read_is_retryable_without_pipeline(monkeypatch):
 
 def test_concurrent_cold_public_reads_start_one_pipeline(monkeypatch):
     monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    monkeypatch.setattr(engine, "_PERSISTENCE_HYDRATED", True)
     monkeypatch.setattr(engine, "_PREWARMING", False)
     monkeypatch.setattr(history_readiness, "status",
                         lambda: {"usable": True, "state": "READY"})
@@ -138,6 +141,182 @@ def test_concurrent_cold_public_reads_start_one_pipeline(monkeypatch):
         release.set()
 
 
+def test_persisted_board_hydrates_after_process_restart(monkeypatch):
+    from leagues import prepared_board_store
+
+    now = datetime.now(timezone.utc)
+    future = (
+        now + timedelta(hours=3)
+    ).isoformat()
+
+    entry = {
+        "picks": [
+            {"match_id": "persisted"}
+        ],
+        "fixtures": [
+            {
+                "match_id": "persisted",
+                "commence_time": future,
+                "league": "Persisted League",
+            }
+        ],
+        "builder_supplemental_picks": [],
+        "ts": time.time(),
+        "metadata": {
+            "generated_at": now.isoformat(),
+            "requested_days": 7,
+            "coverage_start": now.isoformat(),
+            "coverage_end": (
+                now + timedelta(days=7)
+            ).isoformat(),
+            "fixture_count": 1,
+            "provider": {
+                "complete": True,
+                "requested_league_count": 1,
+                "successful_league_count": 1,
+            },
+            "decision_snapshot_id": "persisted-board",
+        },
+    }
+
+    monkeypatch.setattr(
+        engine,
+        "_CACHE",
+        {
+            "entries": {},
+            "healthy_entries": {},
+        },
+    )
+    monkeypatch.setattr(
+        engine,
+        "_PERSISTENCE_HYDRATED",
+        False,
+    )
+    monkeypatch.setattr(
+        prepared_board_store,
+        "enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        prepared_board_store,
+        "load_entries",
+        lambda: [
+            {
+                "horizon_days": 7,
+                "slot": "healthy",
+                "entry": entry,
+            }
+        ],
+    )
+
+    _no_pipeline(monkeypatch)
+
+    picks, fixtures, status = (
+        engine.prepared_board(7)
+    )
+
+    assert [
+        pick["match_id"]
+        for pick in picks
+    ] == ["persisted"]
+
+    assert [
+        fixture["match_id"]
+        for fixture in fixtures
+    ] == ["persisted"]
+
+    assert status["ready"] is True
+    assert (
+        status["board_snapshot_id"]
+        == "persisted-board"
+    )
+    assert (
+        status["board_source"]
+        == "persistent_cache"
+    )
+
+
+def test_stale_persisted_board_keeps_stale_safety_contract(monkeypatch):
+    from leagues import prepared_board_store
+
+    now = datetime.now(timezone.utc)
+    future = (
+        now + timedelta(hours=3)
+    ).isoformat()
+
+    entry = {
+        "picks": [
+            {"match_id": "persisted-stale"}
+        ],
+        "fixtures": [
+            {
+                "match_id": "persisted-stale",
+                "commence_time": future,
+            }
+        ],
+        "builder_supplemental_picks": [],
+        "ts": (
+            time.time()
+            - engine._TTL
+            - 5
+        ),
+        "metadata": {
+            "generated_at": now.isoformat(),
+            "requested_days": 7,
+            "coverage_start": now.isoformat(),
+            "coverage_end": (
+                now + timedelta(days=7)
+            ).isoformat(),
+            "fixture_count": 1,
+            "provider": {
+                "complete": True,
+            },
+            "decision_snapshot_id": (
+                "persisted-stale-board"
+            ),
+        },
+    }
+
+    monkeypatch.setattr(
+        engine,
+        "_CACHE",
+        {
+            "entries": {},
+            "healthy_entries": {},
+        },
+    )
+    monkeypatch.setattr(
+        engine,
+        "_PERSISTENCE_HYDRATED",
+        False,
+    )
+    monkeypatch.setattr(
+        prepared_board_store,
+        "enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        prepared_board_store,
+        "load_entries",
+        lambda: [
+            {
+                "horizon_days": 7,
+                "slot": "healthy",
+                "entry": entry,
+            }
+        ],
+    )
+
+    status = engine.prepared_board_status(7)
+
+    assert status["ready"] is True
+    assert status["stale"] is True
+    assert (
+        status["board_source"]
+        == "persistent_stale_fallback"
+    )
+
+
 def test_bookable_now_passes_only_prepared_future_picks(monkeypatch):
     _entry(monkeypatch)
     _no_pipeline(monkeypatch)
@@ -152,6 +331,7 @@ def test_bookable_now_passes_only_prepared_future_picks(monkeypatch):
 def test_builder_pool_has_no_implicit_cold_pipeline(monkeypatch):
     from leagues import slip_builder
     monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    monkeypatch.setattr(engine, "_PERSISTENCE_HYDRATED", True)
     _no_pipeline(monkeypatch)
     assert slip_builder._pool("week") == []
 
