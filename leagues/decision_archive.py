@@ -447,6 +447,16 @@ def quality_report(limit: int = 30) -> dict:
     settled = _settled_quality_metrics()
     context_evidence = _settled_context_metrics(rows)
 
+    from leagues.context_challenger import (
+        evaluate_context_challenger,
+    )
+
+    context_challenger = evaluate_context_challenger(
+        _linked_context_observations(
+            rows
+        )
+    )
+
     return {
         "status": "success", "read_only": True,
         "board": {"snapshots": len(rows), "candidates": total_candidates,
@@ -465,6 +475,7 @@ def quality_report(limit: int = 30) -> dict:
         "readiness": "thin" if len(rows) < 14 else "early" if len(rows) < 30 else "provisional",
         "minimum_policy_comparison_snapshots": 30,
         "match_context": context_evidence,
+        "context_challenger": context_challenger,
         "settled_evidence": {
             "legs": settled["legs"],
             "strength": settled["strength"],
@@ -1582,6 +1593,200 @@ def _context_comparisons(
         )
 
     return comparisons
+
+
+def _linked_context_observations(
+    snapshot_rows=None,
+) -> list[dict]:
+    """Exact prediction-time context observations for offline evaluation."""
+    if snapshot_rows is None:
+        ensure_tables()
+
+        with engine.begin() as conn:
+            snapshot_rows = conn.execute(
+                select(
+                    board_snapshots
+                ).order_by(
+                    board_snapshots.c.generated_at.desc()
+                ).limit(180)
+            ).mappings().all()
+
+    context_index = _snapshot_context_index(
+        snapshot_rows
+    )
+
+    try:
+        from leagues.picks_db import (
+            get_history,
+        )
+
+        slips = get_history(
+            limit_days=3650
+        )
+
+    except Exception:
+        slips = []
+
+    observations = []
+    seen = set()
+
+    for slip in slips:
+        publication_date = str(
+            slip.get("date")
+            or ""
+        )[:10]
+
+        for leg in (
+            slip.get("picks")
+            or []
+        ):
+            status = str(
+                leg.get("status")
+                or ""
+            ).lower()
+
+            if status not in {
+                "won",
+                "lost",
+            }:
+                continue
+
+            snapshot_id = str(
+                leg.get(
+                    "board_snapshot_id"
+                )
+                or ""
+            )
+
+            fixture_id = str(
+                leg.get("match_id")
+                or ""
+            )
+
+            market = str(
+                leg.get("market")
+                or ""
+            )
+
+            if (
+                not snapshot_id
+                or not fixture_id
+                or not market
+            ):
+                continue
+
+            identity = (
+                snapshot_id,
+                fixture_id,
+                market,
+            )
+
+            if identity in seen:
+                continue
+
+            seen.add(identity)
+
+            candidate = context_index.get(
+                identity
+            )
+
+            if not candidate:
+                continue
+
+            context = (
+                leg.get("match_context")
+                or candidate.get(
+                    "match_context"
+                )
+            )
+
+            if (
+                not isinstance(
+                    context,
+                    dict,
+                )
+                or not bool(
+                    context.get(
+                        "shadow_only"
+                    )
+                )
+            ):
+                continue
+
+            probability = candidate.get(
+                "conservative_probability"
+            )
+
+            if probability is None:
+                probability = leg.get(
+                    "selection_probability"
+                )
+
+            if probability is None:
+                probability = leg.get(
+                    "confidence"
+                )
+
+            try:
+                probability = float(
+                    probability
+                )
+
+            except (TypeError, ValueError):
+                continue
+
+            if not 0 < probability < 1:
+                continue
+
+            kickoff = str(
+                candidate.get(
+                    "kickoff"
+                )
+                or leg.get(
+                    "commence_time"
+                )
+                or ""
+            )
+
+            observation_date = (
+                kickoff[:10]
+                if len(kickoff) >= 10
+                else publication_date
+            )
+
+            observations.append({
+                "date": observation_date,
+                "publication_date": publication_date,
+                "snapshot_id": snapshot_id,
+                "fixture_id": fixture_id,
+                "market": market,
+                "probability": probability,
+                "outcome": (
+                    1.0
+                    if status == "won"
+                    else 0.0
+                ),
+                "labels": _context_labels(
+                    context
+                ),
+                "context_version": str(
+                    context.get(
+                        "version"
+                    )
+                    or "unknown"
+                ),
+            })
+
+    observations.sort(
+        key=lambda row: (
+            row["date"],
+            row["snapshot_id"],
+            row["fixture_id"],
+            row["market"],
+        )
+    )
+
+    return observations
 
 
 def _gap_bucket(gap: float) -> str:
