@@ -453,6 +453,11 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
                         continue
                     parsed_records += 1
                     parsed["competition"] = tournament.get("name")
+                    parsed.update(
+                        _tournament_identity_metadata(
+                            tournament
+                        )
+                    )
                     key = (f"{_norm(parsed['home_team'])}|"
                            f"{_norm(parsed['away_team'])}")
                     bucket = fixtures.setdefault(key, [])
@@ -896,13 +901,154 @@ def apply_to_fixtures(fixtures: list[dict], board: dict | None = None) -> int:
     return matched
 
 
+def _competition_identity_key(
+    value: str | None,
+) -> str:
+    """Strict competition identity key.
+
+    Unlike `_league_score`, this retains every meaningful word and number.
+    It is deliberately unsuitable for fuzzy matching.
+
+    Examples:
+      FA Cup != NM Cup
+      Liga I != 2. Liga
+      Premier League == Premier League
+    """
+    value = str(
+        value or ""
+    ).strip()
+
+    if not value:
+        return ""
+
+    normalized = (
+        value
+        .lower()
+        .translate(_LETTERS)
+    )
+
+    normalized = unicodedata.normalize(
+        "NFKD",
+        normalized,
+    )
+
+    normalized = "".join(
+        char
+        for char in normalized
+        if not unicodedata.combining(
+            char
+        )
+    )
+
+    normalized = "".join(
+        char
+        if char.isalnum()
+        else " "
+        for char in normalized
+    )
+
+    return " ".join(
+        normalized.split()
+    )
+
+
+def _identity_value(
+    value,
+):
+    if isinstance(
+        value,
+        dict,
+    ):
+        return (
+            value.get("name")
+            or value.get("displayName")
+            or value.get("description")
+        )
+
+    return value
+
+
+def _identity_id(
+    value,
+):
+    if isinstance(
+        value,
+        dict,
+    ):
+        return (
+            value.get("id")
+            or value.get("categoryId")
+            or value.get("countryId")
+        )
+
+    return None
+
+
+def _tournament_identity_metadata(
+    tournament: dict,
+) -> dict:
+    """Preserve provider identity for future deterministic mappings."""
+    category = tournament.get(
+        "category"
+    )
+
+    country = tournament.get(
+        "country"
+    )
+
+    return {
+        "sportybet_tournament_id": (
+            tournament.get("id")
+            or tournament.get(
+                "tournamentId"
+            )
+        ),
+        "sportybet_category_id": (
+            tournament.get(
+                "categoryId"
+            )
+            or _identity_id(
+                category
+            )
+        ),
+        "sportybet_category": (
+            tournament.get(
+                "categoryName"
+            )
+            or _identity_value(
+                category
+            )
+        ),
+        "sportybet_country_id": (
+            tournament.get(
+                "countryId"
+            )
+            or _identity_id(
+                country
+            )
+        ),
+        "sportybet_country": (
+            tournament.get(
+                "countryName"
+            )
+            or _identity_value(
+                country
+            )
+        ),
+    }
+
+
 def registry_competition_match(
     competition: str,
 ) -> dict:
-    """Audit-only mapping from SportyBet tournament name to known registry.
+    """Strict automatic registry match.
 
-    Only an exact normalized display-name match is considered safe enough for
-    future automatic use. Fuzzy similarity is diagnostic only.
+    Automatic mapping requires equality of the complete canonical competition
+    identity. `_league_score` remains diagnostic only.
+
+    Future aliases must be explicit and preferably scoped by SportyBet
+    tournament/category identity; fuzzy similarity never becomes an automatic
+    league mapping.
     """
     from leagues.competition_registry import (
         provider_slugs,
@@ -912,9 +1058,16 @@ def registry_competition_match(
         competition or ""
     ).strip()
 
-    if not competition:
+    wanted_key = (
+        _competition_identity_key(
+            competition
+        )
+    )
+
+    if not wanted_key:
         return {
             "status": "UNMAPPED",
+            "match_basis": None,
             "sportybet_competition": None,
             "league_slug": None,
             "league": None,
@@ -923,6 +1076,8 @@ def registry_competition_match(
         }
 
     candidates = []
+
+    strict = []
 
     for slug, name in provider_slugs().items():
         score = _league_score(
@@ -938,6 +1093,19 @@ def registry_competition_match(
             )
         )
 
+        if (
+            _competition_identity_key(
+                name
+            )
+            == wanted_key
+        ):
+            strict.append(
+                (
+                    slug,
+                    name,
+                )
+            )
+
     candidates.sort(
         reverse=True,
         key=lambda item: (
@@ -946,33 +1114,37 @@ def registry_competition_match(
         ),
     )
 
-    exact = [
-        item
-        for item in candidates
-        if abs(
-            item[0] - 1.0
-        ) < 1e-9
-    ]
-
-    if len(exact) == 1:
-        score, slug, name = exact[0]
+    if len(strict) == 1:
+        slug, name = strict[0]
 
         return {
             "status": "MAPPED_EXACT",
-            "sportybet_competition": competition,
+            "match_basis": (
+                "canonical_full_name"
+            ),
+            "sportybet_competition": (
+                competition
+            ),
             "league_slug": slug,
             "league": name,
             "best_candidate": name,
-            "best_score": score,
+            "best_score": 1.0,
         }
 
-    if len(exact) > 1:
+    if len(strict) > 1:
         return {
             "status": "AMBIGUOUS",
-            "sportybet_competition": competition,
+            "match_basis": (
+                "duplicate_canonical_name"
+            ),
+            "sportybet_competition": (
+                competition
+            ),
             "league_slug": None,
             "league": None,
-            "best_candidate": exact[0][2],
+            "best_candidate": (
+                strict[0][1]
+            ),
             "best_score": 1.0,
         }
 
@@ -988,16 +1160,17 @@ def registry_competition_match(
 
     return {
         "status": "UNMAPPED",
+        "match_basis": None,
         "sportybet_competition": competition,
         "league_slug": None,
         "league": None,
+        # Diagnostic only. Never promotes automatically.
         "best_candidate": best[2],
         "best_score": round(
             float(best[0]),
             4,
         ),
     }
-
 
 def coverage_against_fixtures(
     fixtures: list[dict],
@@ -1283,8 +1456,38 @@ def coverage_against_fixtures(
             ),
             "kickoff": kickoff,
             "competition": competition,
+            "sportybet_tournament_id": (
+                entry.get(
+                    "sportybet_tournament_id"
+                )
+            ),
+            "sportybet_category_id": (
+                entry.get(
+                    "sportybet_category_id"
+                )
+            ),
+            "sportybet_category": (
+                entry.get(
+                    "sportybet_category"
+                )
+            ),
+            "sportybet_country_id": (
+                entry.get(
+                    "sportybet_country_id"
+                )
+            ),
+            "sportybet_country": (
+                entry.get(
+                    "sportybet_country"
+                )
+            ),
             "competition_mapping_status": (
                 mapping.get("status")
+            ),
+            "competition_mapping_basis": (
+                mapping.get(
+                    "match_basis"
+                )
             ),
             "mapped_league_slug": (
                 mapping.get(

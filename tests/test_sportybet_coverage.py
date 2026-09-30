@@ -205,3 +205,64 @@ def test_coverage_audit_keeps_unknown_competitions_unmapped():
 
     assert sample["competition_mapping_status"] == "UNMAPPED"
     assert sample["mapped_league_slug"] is None
+
+
+
+def test_generic_cup_name_cannot_fake_an_exact_registry_match():
+    result = sportybet.registry_competition_match(
+        "NM Cup"
+    )
+
+    assert result["status"] == "UNMAPPED"
+    assert result["league_slug"] is None
+
+    # Similarity may remain visible diagnostically, but it cannot become
+    # automatic identity.
+    assert result["match_basis"] is None
+
+
+def test_generic_liga_name_cannot_become_exact_from_token_similarity():
+    result = sportybet.registry_competition_match(
+        "2. Liga"
+    )
+
+    assert result["status"] != "MAPPED_EXACT"
+    assert result["league_slug"] is None
+
+
+def test_tournament_identity_metadata_is_preserved_when_available():
+    metadata = (
+        sportybet._tournament_identity_metadata({
+            "id": "sr:tournament:123",
+            "name": "Premier League",
+            "category": {
+                "id": "sr:category:1",
+                "name": "England",
+            },
+            "country": {
+                "id": "GB",
+                "name": "England",
+            },
+        })
+    )
+
+    assert (
+        metadata[
+            "sportybet_tournament_id"
+        ]
+        == "sr:tournament:123"
+    )
+
+    assert (
+        metadata[
+            "sportybet_category"
+        ]
+        == "England"
+    )
+
+    assert (
+        metadata[
+            "sportybet_country"
+        ]
+        == "England"
+    )
