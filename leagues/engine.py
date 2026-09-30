@@ -348,6 +348,7 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     # them, and the card falls back to estimated prices as it always has.
     sb_matched = 0
     sportybet_coverage = {}
+    sportybet_board = None
 
     try:
         from leagues import sportybet
@@ -403,6 +404,37 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     except Exception as e:
         logger.warning(f"team history unavailable, ML second opinion off: {e}")
         history = None
+
+    sportybet_shadow_supplemental = {}
+
+    try:
+        if sportybet_board:
+            from leagues import sportybet
+
+            sportybet_shadow_supplemental = (
+                sportybet.shadow_supplemental_readiness(
+                    fixtures,
+                    sportybet_board,
+                    cached_rates=cached_rates,
+                    history=history,
+                    now=now_dt,
+                    days_ahead=days_ahead,
+                )
+            )
+
+    except Exception as e:
+        logger.warning(
+            "SportyBet supplemental shadow audit unavailable: %s",
+            e,
+        )
+
+        sportybet_shadow_supplemental = {
+            "status": "unavailable",
+            "shadow_only": True,
+            "publishing_changed": False,
+            "prediction_pool_changed": False,
+            "error_type": type(e).__name__,
+        }
 
     all_picks: list[dict] = []
     priced = unpriced = with_elo = 0
@@ -466,6 +498,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     )
     provider["match_context"] = context_summary
     provider["sportybet_coverage"] = sportybet_coverage
+    provider["sportybet_shadow_supplemental"] = (
+        sportybet_shadow_supplemental
+    )
 
     # Preserve the evaluated environment before any product optimizer narrows
     # it. Archiving is observability: failure is logged and never blocks picks.

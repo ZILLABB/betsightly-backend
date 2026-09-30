@@ -1399,6 +1399,435 @@ def coverage_against_fixtures(
     }
 
 
+def _history_team_identity(
+    history,
+    team: str,
+    team_type: str,
+) -> dict:
+    """Strict normalized lookup into existing ESPN team history."""
+    if history is None:
+        return {
+            "status": "UNAVAILABLE",
+            "team": None,
+            "matches": 0,
+        }
+
+    wanted = _norm(
+        team
+    )
+
+    matches = []
+
+    for key, rows in getattr(
+        history,
+        "by_team",
+        {},
+    ).items():
+        try:
+            current_type, current_team = key
+        except (TypeError, ValueError):
+            continue
+
+        if current_type != team_type:
+            continue
+
+        if _norm(current_team) != wanted:
+            continue
+
+        matches.append({
+            "team": current_team,
+            "matches": len(
+                rows or []
+            ),
+        })
+
+    if not matches:
+        return {
+            "status": "NOT_FOUND",
+            "team": None,
+            "matches": 0,
+        }
+
+    if len(matches) > 1:
+        return {
+            "status": "AMBIGUOUS",
+            "team": None,
+            "matches": max(
+                item["matches"]
+                for item in matches
+            ),
+        }
+
+    return {
+        "status": "MATCHED",
+        **matches[0],
+    }
+
+
+def shadow_supplemental_readiness(
+    fixtures: list[dict],
+    board: dict | None = None,
+    *,
+    cached_rates: dict | None = None,
+    history=None,
+    now=None,
+    days_ahead: int = 7,
+    sample_limit: int = 25,
+) -> dict:
+    """Evaluate SportyBet-only fixtures without adding them to live picks.
+
+    A fixture can become READY_FOR_SHADOW_MODEL only when:
+      * SportyBet competition maps exactly to an enabled BetSightly competition
+      * it is a senior fixture
+      * that competition has real historical results
+      * both teams resolve uniquely into existing ESPN history
+      * each team has enough previous games for real form features
+      * at least one currently supported SportyBet selection is priced
+
+    This function never invokes the predictor and never mutates `fixtures`.
+    """
+    from collections import Counter
+
+    from leagues.base_rates import MIN_SAMPLE
+    from leagues.competition_registry import (
+        competition_for,
+    )
+
+    if board is None:
+        board = fetch_board()
+
+    cached_rates = cached_rates or {}
+
+    coverage = coverage_against_fixtures(
+        fixtures,
+        board,
+        now=now,
+        days_ahead=days_ahead,
+        sample_limit=100000,
+    )
+
+    missing_ids = {
+        str(
+            item.get("event_id")
+            or ""
+        )
+        for item in (
+            coverage.get(
+                "sportybet_only_samples"
+            )
+            or []
+        )
+        if str(
+            item.get("event_id")
+            or ""
+        )
+    }
+
+    entries_by_id = {
+        str(
+            entry.get("event_id")
+            or ""
+        ): entry
+        for _, entry in _board_entries(
+            board
+        )
+        if str(
+            entry.get("event_id")
+            or ""
+        )
+        in missing_ids
+    }
+
+    states = Counter()
+    results = []
+
+    for sample in (
+        coverage.get(
+            "sportybet_only_samples"
+        )
+        or []
+    ):
+        event_id = str(
+            sample.get(
+                "event_id"
+            )
+            or ""
+        )
+
+        entry = entries_by_id.get(
+            event_id
+        )
+
+        mapping_status = sample.get(
+            "competition_mapping_status"
+        )
+
+        slug = sample.get(
+            "mapped_league_slug"
+        )
+
+        competition = (
+            competition_for(slug)
+            if slug
+            else None
+        )
+
+        direct_history = int(
+            (
+                cached_rates.get(
+                    slug,
+                    {},
+                )
+                if slug
+                else {}
+            ).get(
+                "matches"
+            )
+            or 0
+        )
+
+        home_name = (
+            entry.get("home_team")
+            if entry
+            else sample.get(
+                "home_team"
+            )
+        )
+
+        away_name = (
+            entry.get("away_team")
+            if entry
+            else sample.get(
+                "away_team"
+            )
+        )
+
+        team_type = (
+            competition.team_type
+            if competition
+            else None
+        )
+
+        if team_type:
+            home_history = (
+                _history_team_identity(
+                    history,
+                    home_name,
+                    team_type,
+                )
+            )
+
+            away_history = (
+                _history_team_identity(
+                    history,
+                    away_name,
+                    team_type,
+                )
+            )
+
+        else:
+            home_history = {
+                "status": "UNAVAILABLE",
+                "team": None,
+                "matches": 0,
+            }
+
+            away_history = dict(
+                home_history
+            )
+
+        home_squad = (
+            entry.get(
+                "home_squad"
+            )
+            if entry
+            else None
+        )
+
+        away_squad = (
+            entry.get(
+                "away_squad"
+            )
+            if entry
+            else None
+        )
+
+        senior_fixture = (
+            home_squad in (
+                "",
+                None,
+            )
+            and away_squad in (
+                "",
+                None,
+            )
+        )
+
+        priced_markets = []
+
+        if entry:
+            for market, price in (
+                entry.get("prices")
+                or {}
+            ).items():
+                if market not in MARKET_TO_SPORTYBET:
+                    continue
+
+                try:
+                    price = float(
+                        price
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    continue
+
+                if price > 1.0:
+                    priced_markets.append(
+                        market
+                    )
+
+        priced_markets = sorted(
+            set(
+                priced_markets
+            )
+        )
+
+        if mapping_status != "MAPPED_EXACT":
+            state = "UNMAPPED_COMPETITION"
+
+        elif competition is None:
+            state = "UNMAPPED_COMPETITION"
+
+        elif not senior_fixture:
+            state = "UNSUPPORTED_SQUAD"
+
+        elif direct_history < MIN_SAMPLE:
+            state = (
+                "INSUFFICIENT_COMPETITION_HISTORY"
+            )
+
+        elif (
+            home_history["status"]
+            != "MATCHED"
+            or away_history["status"]
+            != "MATCHED"
+        ):
+            state = (
+                "TEAM_IDENTITY_NOT_READY"
+            )
+
+        elif (
+            home_history["matches"] < 3
+            or away_history["matches"] < 3
+        ):
+            # Three matches is the existing threshold at which the ML
+            # feature-provenance code stops describing a side as neutral-only.
+            state = (
+                "INSUFFICIENT_TEAM_HISTORY"
+            )
+
+        elif not priced_markets:
+            state = "NO_SUPPORTED_PRICE"
+
+        else:
+            state = (
+                "READY_FOR_SHADOW_MODEL"
+            )
+
+        states[state] += 1
+
+        results.append({
+            "event_id": event_id,
+            "home_team": home_name,
+            "away_team": away_name,
+            "kickoff": sample.get(
+                "kickoff"
+            ),
+            "competition": sample.get(
+                "competition"
+            ),
+            "league_slug": slug,
+            "league": sample.get(
+                "mapped_league"
+            ),
+            "team_type": team_type,
+            "readiness": state,
+            "competition_history_matches": (
+                direct_history
+            ),
+            "home_history": home_history,
+            "away_history": away_history,
+            "priced_market_count": len(
+                priced_markets
+            ),
+            "priced_markets": priced_markets,
+            "senior_fixture": senior_fixture,
+        })
+
+    results.sort(
+        key=lambda item: (
+            item["readiness"]
+            != "READY_FOR_SHADOW_MODEL",
+            item.get("kickoff")
+            or "",
+            str(
+                item.get("event_id")
+                or ""
+            ),
+        )
+    )
+
+    ready = [
+        item
+        for item in results
+        if (
+            item["readiness"]
+            == "READY_FOR_SHADOW_MODEL"
+        )
+    ]
+
+    return {
+        "status": "success",
+        "shadow_only": True,
+        "read_only": True,
+        "publishing_changed": False,
+        "prediction_pool_changed": False,
+        "predictor_invoked": False,
+        "sportybet_only_fixture_count": (
+            coverage.get(
+                "sportybet_only_fixture_count",
+                0,
+            )
+        ),
+        "evaluated_fixture_count": len(
+            results
+        ),
+        "ready_for_shadow_model_count": len(
+            ready
+        ),
+        "readiness_counts": dict(
+            states
+        ),
+        "minimum_competition_history_matches": (
+            MIN_SAMPLE
+        ),
+        "minimum_team_history_matches": 3,
+        "samples": results[
+            :max(
+                0,
+                int(sample_limit),
+            )
+        ],
+        "next_gate": (
+            "READY_FOR_SHADOW_MODEL fixtures may be modelled only in an "
+            "isolated supplemental shadow experiment; they remain excluded "
+            "from the public Builder and official track record"
+        ),
+    }
+
+
 def board_status() -> dict:
     """What the cache holds, for the admin dashboard and health checks."""
     cached = _db_get(_CACHE_KEY) or {}
