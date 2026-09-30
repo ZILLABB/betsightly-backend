@@ -751,6 +751,23 @@ def evaluate_shadow_supplemental(
         shadow_summary=shadow_summary,
     )
 
+    from leagues.sportybet_shadow_evidence import (
+        evaluate_evidence_snapshot_gate,
+    )
+
+    settled_evidence_snapshot_gate = (
+        evaluate_evidence_snapshot_gate(
+            shadow_ranked,
+            board_complete=bool(
+                meta.get(
+                    "is_complete"
+                )
+            ),
+            live_summary=live_summary,
+            shadow_summary=shadow_summary,
+        )
+    )
+
     fixture_results.sort(
         key=lambda item: (
             item.get("kickoff")
@@ -884,6 +901,9 @@ def evaluate_shadow_supplemental(
             )
         ),
         "staging_gate": staging_gate,
+        "settled_evidence_snapshot_gate": (
+            settled_evidence_snapshot_gate
+        ),
         "ready_input_fixture_count": len(
             ready
         ),
