@@ -1,0 +1,2978 @@
+{
+  "experiment": "football_first_walk_forward_v1",
+  "fold_plan": [
+    {
+      "calib_end": "2022-12-11",
+      "calib_start": "2022-03-05",
+      "fold": 1,
+      "test_end": "2023-10-18",
+      "test_start": "2022-12-12",
+      "train_end": "2022-03-04",
+      "train_start": "2012-04-05"
+    },
+    {
+      "calib_end": "2023-10-18",
+      "calib_start": "2022-11-27",
+      "fold": 2,
+      "test_end": "2024-08-26",
+      "test_start": "2023-10-19",
+      "train_end": "2022-11-26",
+      "train_start": "2012-04-05"
+    },
+    {
+      "calib_end": "2024-08-26",
+      "calib_start": "2023-08-17",
+      "fold": 3,
+      "test_end": "2025-07-20",
+      "test_start": "2024-08-27",
+      "train_end": "2023-08-16",
+      "train_start": "2012-04-05"
+    },
+    {
+      "calib_end": "2025-07-20",
+      "calib_start": "2024-05-08",
+      "fold": 4,
+      "test_end": "2026-06-01",
+      "test_start": "2025-07-21",
+      "train_end": "2024-05-07",
+      "train_start": "2012-04-05"
+    }
+  ],
+  "live_adjustment_allowed": false,
+  "minimum_segment_samples": 100,
+  "next_stage_rule": "A target is only a candidate for deeper shadow study when walk-forward skill is positive in all but at most one fold and median skill remains positive. This does not promote it.",
+  "promotion_enabled": false,
+  "promotion_state": "OFFLINE_ONLY",
+  "schema": 1,
+  "targets": {
+    "btts": {
+      "family_selection_counts": {
+        "hist_gradient_boosting": 1,
+        "logistic": 3
+      },
+      "fold_count": 4,
+      "folds": [
+        {
+          "baseline_test": {
+            "accuracy": 0.510249,
+            "brier_multiclass": 0.499851,
+            "log_loss": 0.692998,
+            "top_label_ece": 0.005534
+          },
+          "calib_end": "2022-12-11",
+          "calib_n": 8107,
+          "calib_start": "2022-03-05",
+          "fold": 1,
+          "log_loss_skill_vs_prior": 0.002206,
+          "selected_family": "hist_gradient_boosting",
+          "test": {
+            "accuracy": 0.52794,
+            "brier_multiclass": 0.498306,
+            "log_loss": 0.691469,
+            "top_label_ece": 0.013342
+          },
+          "test_end": "2023-10-18",
+          "test_n": 8196,
+          "test_start": "2022-12-12",
+          "train_end": "2022-03-04",
+          "train_n": 26487,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.535454,
+            "brier_multiclass": 0.498346,
+            "log_loss": 0.691492,
+            "top_label_ece": 0.020731
+          },
+          "calib_end": "2023-10-18",
+          "calib_n": 8349,
+          "calib_start": "2022-11-27",
+          "fold": 2,
+          "log_loss_skill_vs_prior": 0.005182,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.538741,
+            "brier_multiclass": 0.494779,
+            "log_loss": 0.687909,
+            "top_label_ece": 0.00723
+          },
+          "test_end": "2024-08-26",
+          "test_n": 8518,
+          "test_start": "2023-10-19",
+          "train_end": "2022-11-26",
+          "train_n": 34441,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.528361,
+            "brier_multiclass": 0.498599,
+            "log_loss": 0.691746,
+            "top_label_ece": 0.010196
+          },
+          "calib_end": "2024-08-26",
+          "calib_n": 10514,
+          "calib_start": "2023-08-17",
+          "fold": 3,
+          "log_loss_skill_vs_prior": 0.006767,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.539447,
+            "brier_multiclass": 0.49396,
+            "log_loss": 0.687065,
+            "top_label_ece": 0.007621
+          },
+          "test_end": "2025-07-20",
+          "test_n": 9291,
+          "test_start": "2024-08-27",
+          "train_end": "2023-08-16",
+          "train_n": 40794,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.546135,
+            "brier_multiclass": 0.497138,
+            "log_loss": 0.690284,
+            "top_label_ece": 0.026407
+          },
+          "calib_end": "2025-07-20",
+          "calib_n": 11588,
+          "calib_start": "2024-05-08",
+          "fold": 4,
+          "log_loss_skill_vs_prior": 0.008694,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.554047,
+            "brier_multiclass": 0.491197,
+            "log_loss": 0.684283,
+            "top_label_ece": 0.005979
+          },
+          "test_end": "2026-06-01",
+          "test_n": 9353,
+          "test_start": "2025-07-21",
+          "train_end": "2024-05-07",
+          "train_n": 49011,
+          "train_start": "2012-04-05"
+        }
+      ],
+      "league_segments_min_100": [
+        {
+          "baseline_test": {
+            "accuracy": 0.524974,
+            "brier_multiclass": 0.498738,
+            "log_loss": 0.691885,
+            "top_label_ece": 0.007682
+          },
+          "competition": "Championship",
+          "league_id": 40,
+          "log_loss_skill_vs_prior": 0.001298,
+          "n": 1922,
+          "test": {
+            "accuracy": 0.533299,
+            "brier_multiclass": 0.497843,
+            "log_loss": 0.690987,
+            "top_label_ece": 0.008968
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.413319,
+            "brier_multiclass": 0.506551,
+            "log_loss": 0.699701,
+            "top_label_ece": 0.103814
+          },
+          "competition": "Primera Division",
+          "league_id": 128,
+          "log_loss_skill_vs_prior": 0.025368,
+          "n": 1892,
+          "test": {
+            "accuracy": 0.580867,
+            "brier_multiclass": 0.488835,
+            "log_loss": 0.681951,
+            "top_label_ece": 0.033223
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.597432,
+            "brier_multiclass": 0.493899,
+            "log_loss": 0.687044,
+            "top_label_ece": 0.080339
+          },
+          "competition": "MLS",
+          "league_id": 253,
+          "log_loss_skill_vs_prior": 0.022636,
+          "n": 1791,
+          "test": {
+            "accuracy": 0.596873,
+            "brier_multiclass": 0.478583,
+            "log_loss": 0.671492,
+            "top_label_ece": 0.015254
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.5,
+            "brier_multiclass": 0.500207,
+            "log_loss": 0.693354,
+            "top_label_ece": 0.017305
+          },
+          "competition": "Segunda Division",
+          "league_id": 141,
+          "log_loss_skill_vs_prior": 0.005117,
+          "n": 1604,
+          "test": {
+            "accuracy": 0.529925,
+            "brier_multiclass": 0.496665,
+            "log_loss": 0.689806,
+            "top_label_ece": 0.001883
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.527536,
+            "brier_multiclass": 0.498489,
+            "log_loss": 0.691636,
+            "top_label_ece": 0.010287
+          },
+          "competition": "La Liga",
+          "league_id": 140,
+          "log_loss_skill_vs_prior": 0.000849,
+          "n": 1380,
+          "test": {
+            "accuracy": 0.526087,
+            "brier_multiclass": 0.497896,
+            "log_loss": 0.691049,
+            "top_label_ece": 0.00473
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.571325,
+            "brier_multiclass": 0.495743,
+            "log_loss": 0.688889,
+            "top_label_ece": 0.054073
+          },
+          "competition": "Premier League",
+          "league_id": 39,
+          "log_loss_skill_vs_prior": 0.00819,
+          "n": 1374,
+          "test": {
+            "accuracy": 0.564774,
+            "brier_multiclass": 0.490085,
+            "log_loss": 0.683247,
+            "top_label_ece": 0.008404
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.49635,
+            "brier_multiclass": 0.50104,
+            "log_loss": 0.694187,
+            "top_label_ece": 0.020905
+          },
+          "competition": "Serie A",
+          "league_id": 135,
+          "log_loss_skill_vs_prior": -0.000579,
+          "n": 1370,
+          "test": {
+            "accuracy": 0.50292,
+            "brier_multiclass": 0.501424,
+            "log_loss": 0.694589,
+            "top_label_ece": 0.024226
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.540746,
+            "brier_multiclass": 0.497808,
+            "log_loss": 0.690954,
+            "top_label_ece": 0.023466
+          },
+          "competition": "Serie B",
+          "league_id": 136,
+          "log_loss_skill_vs_prior": -0.004811,
+          "n": 1313,
+          "test": {
+            "accuracy": 0.49048,
+            "brier_multiclass": 0.50113,
+            "log_loss": 0.694278,
+            "top_label_ece": 0.032963
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.503459,
+            "brier_multiclass": 0.500301,
+            "log_loss": 0.693448,
+            "top_label_ece": 0.013821
+          },
+          "competition": "Serie A",
+          "league_id": 71,
+          "log_loss_skill_vs_prior": -0.002816,
+          "n": 1301,
+          "test": {
+            "accuracy": 0.496541,
+            "brier_multiclass": 0.502244,
+            "log_loss": 0.695401,
+            "top_label_ece": 0.024959
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.54955,
+            "brier_multiclass": 0.497201,
+            "log_loss": 0.690347,
+            "top_label_ece": 0.032459
+          },
+          "competition": "Super Lig",
+          "league_id": 203,
+          "log_loss_skill_vs_prior": -0.002145,
+          "n": 1221,
+          "test": {
+            "accuracy": 0.545455,
+            "brier_multiclass": 0.498638,
+            "log_loss": 0.691828,
+            "top_label_ece": 0.005536
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.5025,
+            "brier_multiclass": 0.500365,
+            "log_loss": 0.693513,
+            "top_label_ece": 0.01457
+          },
+          "competition": "Ligue 2",
+          "league_id": 62,
+          "log_loss_skill_vs_prior": 0.000446,
+          "n": 1200,
+          "test": {
+            "accuracy": 0.49,
+            "brier_multiclass": 0.500058,
+            "log_loss": 0.693204,
+            "top_label_ece": 0.031624
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.567818,
+            "brier_multiclass": 0.495856,
+            "log_loss": 0.689001,
+            "top_label_ece": 0.050608
+          },
+          "competition": "Liga MX",
+          "league_id": 262,
+          "log_loss_skill_vs_prior": 0.003531,
+          "n": 1187,
+          "test": {
+            "accuracy": 0.565291,
+            "brier_multiclass": 0.49339,
+            "log_loss": 0.686568,
+            "top_label_ece": 0.015805
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.538797,
+            "brier_multiclass": 0.497945,
+            "log_loss": 0.691091,
+            "top_label_ece": 0.021601
+          },
+          "competition": "Ligue 1",
+          "league_id": 61,
+          "log_loss_skill_vs_prior": -0.000812,
+          "n": 1147,
+          "test": {
+            "accuracy": 0.530078,
+            "brier_multiclass": 0.498519,
+            "log_loss": 0.691652,
+            "top_label_ece": 0.017046
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.489927,
+            "brier_multiclass": 0.501319,
+            "log_loss": 0.694467,
+            "top_label_ece": 0.027297
+          },
+          "competition": "Primeira Liga",
+          "league_id": 94,
+          "log_loss_skill_vs_prior": -0.001369,
+          "n": 1092,
+          "test": {
+            "accuracy": 0.492674,
+            "brier_multiclass": 0.502246,
+            "log_loss": 0.695418,
+            "top_label_ece": 0.040552
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.514652,
+            "brier_multiclass": 0.499726,
+            "log_loss": 0.692873,
+            "top_label_ece": 0.002534
+          },
+          "competition": "Liga I",
+          "league_id": 283,
+          "log_loss_skill_vs_prior": -0.001061,
+          "n": 1092,
+          "test": {
+            "accuracy": 0.504579,
+            "brier_multiclass": 0.500462,
+            "log_loss": 0.693608,
+            "top_label_ece": 0.017785
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.602388,
+            "brier_multiclass": 0.493571,
+            "log_loss": 0.686715,
+            "top_label_ece": 0.085092
+          },
+          "competition": "Bundesliga",
+          "league_id": 78,
+          "log_loss_skill_vs_prior": 0.019915,
+          "n": 1089,
+          "test": {
+            "accuracy": 0.596878,
+            "brier_multiclass": 0.480032,
+            "log_loss": 0.673039,
+            "top_label_ece": 0.011597
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.567867,
+            "brier_multiclass": 0.495668,
+            "log_loss": 0.688813,
+            "top_label_ece": 0.050626
+          },
+          "competition": "Eredivisie",
+          "league_id": 88,
+          "log_loss_skill_vs_prior": 0.01244,
+          "n": 1083,
+          "test": {
+            "accuracy": 0.564174,
+            "brier_multiclass": 0.487202,
+            "log_loss": 0.680244,
+            "top_label_ece": 0.010844
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.544268,
+            "brier_multiclass": 0.497588,
+            "log_loss": 0.690734,
+            "top_label_ece": 0.027014
+          },
+          "competition": "Pro League",
+          "league_id": 144,
+          "log_loss_skill_vs_prior": 0.00094,
+          "n": 1073,
+          "test": {
+            "accuracy": 0.547996,
+            "brier_multiclass": 0.496915,
+            "log_loss": 0.690085,
+            "top_label_ece": 0.007303
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.591856,
+            "brier_multiclass": 0.494211,
+            "log_loss": 0.687356,
+            "top_label_ece": 0.074557
+          },
+          "competition": "2. Bundesliga",
+          "league_id": 79,
+          "log_loss_skill_vs_prior": 0.014899,
+          "n": 1056,
+          "test": {
+            "accuracy": 0.592803,
+            "brier_multiclass": 0.484075,
+            "log_loss": 0.677115,
+            "top_label_ece": 0.026442
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.549618,
+            "brier_multiclass": 0.496997,
+            "log_loss": 0.690143,
+            "top_label_ece": 0.032374
+          },
+          "competition": "Ekstraklasa",
+          "league_id": 106,
+          "log_loss_skill_vs_prior": 0.002628,
+          "n": 1048,
+          "test": {
+            "accuracy": 0.545802,
+            "brier_multiclass": 0.495197,
+            "log_loss": 0.688329,
+            "top_label_ece": 0.008104
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.506208,
+            "brier_multiclass": 0.500365,
+            "log_loss": 0.693512,
+            "top_label_ece": 0.010559
+          },
+          "competition": "J1 League",
+          "league_id": 98,
+          "log_loss_skill_vs_prior": 0.002741,
+          "n": 1047,
+          "test": {
+            "accuracy": 0.526266,
+            "brier_multiclass": 0.498467,
+            "log_loss": 0.691611,
+            "top_label_ece": 0.002824
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.483412,
+            "brier_multiclass": 0.501742,
+            "log_loss": 0.69489,
+            "top_label_ece": 0.033827
+          },
+          "competition": "Super League",
+          "league_id": 197,
+          "log_loss_skill_vs_prior": 0.007611,
+          "n": 844,
+          "test": {
+            "accuracy": 0.520142,
+            "brier_multiclass": 0.496474,
+            "log_loss": 0.689601,
+            "top_label_ece": 0.010992
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.584726,
+            "brier_multiclass": 0.49451,
+            "log_loss": 0.687655,
+            "top_label_ece": 0.067696
+          },
+          "competition": "Super League",
+          "league_id": 169,
+          "log_loss_skill_vs_prior": 0.01744,
+          "n": 838,
+          "test": {
+            "accuracy": 0.591885,
+            "brier_multiclass": 0.482685,
+            "log_loss": 0.675662,
+            "top_label_ece": 0.02919
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.513514,
+            "brier_multiclass": 0.499612,
+            "log_loss": 0.692759,
+            "top_label_ece": 0.003706
+          },
+          "competition": "Premiership",
+          "league_id": 179,
+          "log_loss_skill_vs_prior": -0.002317,
+          "n": 814,
+          "test": {
+            "accuracy": 0.515971,
+            "brier_multiclass": 0.501179,
+            "log_loss": 0.694364,
+            "top_label_ece": 0.032845
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.554994,
+            "brier_multiclass": 0.496802,
+            "log_loss": 0.689948,
+            "top_label_ece": 0.037833
+          },
+          "competition": "Eliteserien",
+          "league_id": 103,
+          "log_loss_skill_vs_prior": 0.005566,
+          "n": 791,
+          "test": {
+            "accuracy": 0.546144,
+            "brier_multiclass": 0.493005,
+            "log_loss": 0.686108,
+            "top_label_ece": 0.019635
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.53599,
+            "brier_multiclass": 0.49803,
+            "log_loss": 0.691176,
+            "top_label_ece": 0.018871
+          },
+          "competition": "Allsvenskan",
+          "league_id": 113,
+          "log_loss_skill_vs_prior": 0.000213,
+          "n": 778,
+          "test": {
+            "accuracy": 0.534704,
+            "brier_multiclass": 0.49786,
+            "log_loss": 0.691029,
+            "top_label_ece": 0.011506
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.52994,
+            "brier_multiclass": 0.498283,
+            "log_loss": 0.69143,
+            "top_label_ece": 0.012669
+          },
+          "competition": "Bundesliga",
+          "league_id": 218,
+          "log_loss_skill_vs_prior": -0.001698,
+          "n": 668,
+          "test": {
+            "accuracy": 0.528443,
+            "brier_multiclass": 0.499435,
+            "log_loss": 0.692604,
+            "top_label_ece": 0.015052
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.601824,
+            "brier_multiclass": 0.493545,
+            "log_loss": 0.68669,
+            "top_label_ece": 0.084629
+          },
+          "competition": "Superliga",
+          "league_id": 119,
+          "log_loss_skill_vs_prior": 0.017659,
+          "n": 658,
+          "test": {
+            "accuracy": 0.594225,
+            "brier_multiclass": 0.481553,
+            "log_loss": 0.674564,
+            "top_label_ece": 0.016893
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.570916,
+            "brier_multiclass": 0.495412,
+            "log_loss": 0.688557,
+            "top_label_ece": 0.053812
+          },
+          "competition": "Veikkausliiga",
+          "league_id": 244,
+          "log_loss_skill_vs_prior": 0.005696,
+          "n": 557,
+          "test": {
+            "accuracy": 0.572711,
+            "brier_multiclass": 0.4915,
+            "log_loss": 0.684635,
+            "top_label_ece": 0.026982
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.537341,
+            "brier_multiclass": 0.497991,
+            "log_loss": 0.691138,
+            "top_label_ece": 0.019391
+          },
+          "competition": "UEFA Champions League",
+          "league_id": 2,
+          "log_loss_skill_vs_prior": 0.007126,
+          "n": 549,
+          "test": {
+            "accuracy": 0.530055,
+            "brier_multiclass": 0.493158,
+            "log_loss": 0.686213,
+            "top_label_ece": 0.03059
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.533487,
+            "brier_multiclass": 0.498126,
+            "log_loss": 0.691272,
+            "top_label_ece": 0.016458
+          },
+          "competition": "UEFA Europa League",
+          "league_id": 3,
+          "log_loss_skill_vs_prior": -0.005438,
+          "n": 433,
+          "test": {
+            "accuracy": 0.501155,
+            "brier_multiclass": 0.501855,
+            "log_loss": 0.695031,
+            "top_label_ece": 0.028933
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.415094,
+            "brier_multiclass": 0.506868,
+            "log_loss": 0.700019,
+            "top_label_ece": 0.102211
+          },
+          "competition": "Copa Libertadores",
+          "league_id": 13,
+          "log_loss_skill_vs_prior": 0.021031,
+          "n": 424,
+          "test": {
+            "accuracy": 0.54717,
+            "brier_multiclass": 0.492182,
+            "log_loss": 0.685297,
+            "top_label_ece": 0.014222
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.501193,
+            "brier_multiclass": 0.500612,
+            "log_loss": 0.693759,
+            "top_label_ece": 0.016108
+          },
+          "competition": "UEFA Conference League",
+          "league_id": 848,
+          "log_loss_skill_vs_prior": -0.001261,
+          "n": 419,
+          "test": {
+            "accuracy": 0.491647,
+            "brier_multiclass": 0.501461,
+            "log_loss": 0.694634,
+            "top_label_ece": 0.033164
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.456667,
+            "brier_multiclass": 0.503238,
+            "log_loss": 0.696387,
+            "top_label_ece": 0.059168
+          },
+          "competition": "Copa Sudamericana",
+          "league_id": 11,
+          "log_loss_skill_vs_prior": 0.007209,
+          "n": 300,
+          "test": {
+            "accuracy": 0.51,
+            "brier_multiclass": 0.498228,
+            "log_loss": 0.691367,
+            "top_label_ece": 0.022807
+          }
+        }
+      ],
+      "maximum_log_loss_skill_vs_prior": 0.008694,
+      "median_log_loss_skill_vs_prior": 0.005974,
+      "minimum_log_loss_skill_vs_prior": 0.002206,
+      "positive_skill_folds": 4,
+      "stable_positive_skill": true,
+      "status": "EVALUATED"
+    },
+    "match_result": {
+      "family_selection_counts": {
+        "logistic": 4
+      },
+      "fold_count": 4,
+      "folds": [
+        {
+          "baseline_test": {
+            "accuracy": 0.451318,
+            "brier_multiclass": 0.646016,
+            "log_loss": 1.068918,
+            "top_label_ece": 0.015895
+          },
+          "calib_end": "2022-12-11",
+          "calib_n": 8107,
+          "calib_start": "2022-03-05",
+          "fold": 1,
+          "log_loss_skill_vs_prior": 0.05677,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.500854,
+            "brier_multiclass": 0.602606,
+            "log_loss": 1.008235,
+            "top_label_ece": 0.007311
+          },
+          "test_end": "2023-10-18",
+          "test_n": 8196,
+          "test_start": "2022-12-12",
+          "train_end": "2022-03-04",
+          "train_n": 26487,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.440596,
+            "brier_multiclass": 0.648882,
+            "log_loss": 1.072875,
+            "top_label_ece": 0.002129
+          },
+          "calib_end": "2023-10-18",
+          "calib_n": 8349,
+          "calib_start": "2022-11-27",
+          "fold": 2,
+          "log_loss_skill_vs_prior": 0.051864,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.490021,
+            "brier_multiclass": 0.609268,
+            "log_loss": 1.017231,
+            "top_label_ece": 0.01587
+          },
+          "test_end": "2024-08-26",
+          "test_n": 8518,
+          "test_start": "2023-10-19",
+          "train_end": "2022-11-26",
+          "train_n": 34441,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.446131,
+            "brier_multiclass": 0.647005,
+            "log_loss": 1.070164,
+            "top_label_ece": 0.00731
+          },
+          "calib_end": "2024-08-26",
+          "calib_n": 10514,
+          "calib_start": "2023-08-17",
+          "fold": 3,
+          "log_loss_skill_vs_prior": 0.049998,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.493596,
+            "brier_multiclass": 0.608826,
+            "log_loss": 1.016658,
+            "top_label_ece": 0.00794
+          },
+          "test_end": "2025-07-20",
+          "test_n": 9291,
+          "test_start": "2024-08-27",
+          "train_end": "2023-08-16",
+          "train_n": 40794,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.441783,
+            "brier_multiclass": 0.64841,
+            "log_loss": 1.072175,
+            "top_label_ece": 0.001842
+          },
+          "calib_end": "2025-07-20",
+          "calib_n": 11588,
+          "calib_start": "2024-05-08",
+          "fold": 4,
+          "log_loss_skill_vs_prior": 0.045549,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.4915,
+            "brier_multiclass": 0.613362,
+            "log_loss": 1.023338,
+            "top_label_ece": 0.011234
+          },
+          "test_end": "2026-06-01",
+          "test_n": 9353,
+          "test_start": "2025-07-21",
+          "train_end": "2024-05-07",
+          "train_n": 49011,
+          "train_start": "2012-04-05"
+        }
+      ],
+      "league_segments_min_100": [
+        {
+          "baseline_test": {
+            "accuracy": 0.436004,
+            "brier_multiclass": 0.65023,
+            "log_loss": 1.074763,
+            "top_label_ece": 0.002322
+          },
+          "competition": "Championship",
+          "league_id": 40,
+          "log_loss_skill_vs_prior": 0.026674,
+          "n": 1922,
+          "test": {
+            "accuracy": 0.458897,
+            "brier_multiclass": 0.629394,
+            "log_loss": 1.046095,
+            "top_label_ece": 0.014323
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.426004,
+            "brier_multiclass": 0.658228,
+            "log_loss": 1.087824,
+            "top_label_ece": 0.012144
+          },
+          "competition": "Primera Division",
+          "league_id": 128,
+          "log_loss_skill_vs_prior": 0.016871,
+          "n": 1892,
+          "test": {
+            "accuracy": 0.422304,
+            "brier_multiclass": 0.646565,
+            "log_loss": 1.069471,
+            "top_label_ece": 0.03703
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.461753,
+            "brier_multiclass": 0.642914,
+            "log_loss": 1.064598,
+            "top_label_ece": 0.023657
+          },
+          "competition": "MLS",
+          "league_id": 253,
+          "log_loss_skill_vs_prior": 0.014658,
+          "n": 1791,
+          "test": {
+            "accuracy": 0.479062,
+            "brier_multiclass": 0.630639,
+            "log_loss": 1.048993,
+            "top_label_ece": 0.028226
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.455736,
+            "brier_multiclass": 0.646714,
+            "log_loss": 1.070713,
+            "top_label_ece": 0.017429
+          },
+          "competition": "Segunda Division",
+          "league_id": 141,
+          "log_loss_skill_vs_prior": 0.015605,
+          "n": 1604,
+          "test": {
+            "accuracy": 0.455736,
+            "brier_multiclass": 0.636035,
+            "log_loss": 1.054005,
+            "top_label_ece": 0.015618
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.465942,
+            "brier_multiclass": 0.641385,
+            "log_loss": 1.062378,
+            "top_label_ece": 0.027703
+          },
+          "competition": "La Liga",
+          "league_id": 140,
+          "log_loss_skill_vs_prior": 0.07147,
+          "n": 1380,
+          "test": {
+            "accuracy": 0.531159,
+            "brier_multiclass": 0.587374,
+            "log_loss": 0.98645,
+            "top_label_ece": 0.022881
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.439592,
+            "brier_multiclass": 0.647468,
+            "log_loss": 1.070206,
+            "top_label_ece": 0.001321
+          },
+          "competition": "Premier League",
+          "league_id": 39,
+          "log_loss_skill_vs_prior": 0.073404,
+          "n": 1374,
+          "test": {
+            "accuracy": 0.522562,
+            "brier_multiclass": 0.592598,
+            "log_loss": 0.991649,
+            "top_label_ece": 0.020667
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.40292,
+            "brier_multiclass": 0.660648,
+            "log_loss": 1.089541,
+            "top_label_ece": 0.03536
+          },
+          "competition": "Serie A",
+          "league_id": 135,
+          "log_loss_skill_vs_prior": 0.087229,
+          "n": 1370,
+          "test": {
+            "accuracy": 0.522628,
+            "brier_multiclass": 0.593637,
+            "log_loss": 0.994501,
+            "top_label_ece": 0.022554
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.405179,
+            "brier_multiclass": 0.66355,
+            "log_loss": 1.09504,
+            "top_label_ece": 0.033146
+          },
+          "competition": "Serie B",
+          "league_id": 136,
+          "log_loss_skill_vs_prior": 0.022072,
+          "n": 1313,
+          "test": {
+            "accuracy": 0.418888,
+            "brier_multiclass": 0.647419,
+            "log_loss": 1.07087,
+            "top_label_ece": 0.039404
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.485012,
+            "brier_multiclass": 0.636354,
+            "log_loss": 1.055605,
+            "top_label_ece": 0.046611
+          },
+          "competition": "Serie A",
+          "league_id": 71,
+          "log_loss_skill_vs_prior": 0.029578,
+          "n": 1301,
+          "test": {
+            "accuracy": 0.495004,
+            "brier_multiclass": 0.614449,
+            "log_loss": 1.024382,
+            "top_label_ece": 0.0197
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.459459,
+            "brier_multiclass": 0.642262,
+            "log_loss": 1.063205,
+            "top_label_ece": 0.021251
+          },
+          "competition": "Super Lig",
+          "league_id": 203,
+          "log_loss_skill_vs_prior": 0.092659,
+          "n": 1221,
+          "test": {
+            "accuracy": 0.529075,
+            "brier_multiclass": 0.572512,
+            "log_loss": 0.964689,
+            "top_label_ece": 0.049584
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.426667,
+            "brier_multiclass": 0.653886,
+            "log_loss": 1.08018,
+            "top_label_ece": 0.011427
+          },
+          "competition": "Ligue 2",
+          "league_id": 62,
+          "log_loss_skill_vs_prior": 0.011042,
+          "n": 1200,
+          "test": {
+            "accuracy": 0.435833,
+            "brier_multiclass": 0.644965,
+            "log_loss": 1.068253,
+            "top_label_ece": 0.017084
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.461668,
+            "brier_multiclass": 0.64209,
+            "log_loss": 1.063212,
+            "top_label_ece": 0.023418
+          },
+          "competition": "Liga MX",
+          "league_id": 262,
+          "log_loss_skill_vs_prior": 0.052431,
+          "n": 1187,
+          "test": {
+            "accuracy": 0.518113,
+            "brier_multiclass": 0.601947,
+            "log_loss": 1.007467,
+            "top_label_ece": 0.019806
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.438535,
+            "brier_multiclass": 0.647039,
+            "log_loss": 1.069401,
+            "top_label_ece": 0.000387
+          },
+          "competition": "Ligue 1",
+          "league_id": 61,
+          "log_loss_skill_vs_prior": 0.0624,
+          "n": 1147,
+          "test": {
+            "accuracy": 0.513514,
+            "brier_multiclass": 0.599081,
+            "log_loss": 1.00267,
+            "top_label_ece": 0.031225
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.442308,
+            "brier_multiclass": 0.64703,
+            "log_loss": 1.069682,
+            "top_label_ece": 0.004058
+          },
+          "competition": "Primeira Liga",
+          "league_id": 94,
+          "log_loss_skill_vs_prior": 0.140527,
+          "n": 1092,
+          "test": {
+            "accuracy": 0.565018,
+            "brier_multiclass": 0.541692,
+            "log_loss": 0.919363,
+            "top_label_ece": 0.019578
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.437729,
+            "brier_multiclass": 0.651812,
+            "log_loss": 1.077771,
+            "top_label_ece": 0.000524
+          },
+          "competition": "Liga I",
+          "league_id": 283,
+          "log_loss_skill_vs_prior": 0.034152,
+          "n": 1092,
+          "test": {
+            "accuracy": 0.462454,
+            "brier_multiclass": 0.625123,
+            "log_loss": 1.040963,
+            "top_label_ece": 0.041059
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.429752,
+            "brier_multiclass": 0.651316,
+            "log_loss": 1.075922,
+            "top_label_ece": 0.008571
+          },
+          "competition": "Bundesliga",
+          "league_id": 78,
+          "log_loss_skill_vs_prior": 0.073302,
+          "n": 1089,
+          "test": {
+            "accuracy": 0.512397,
+            "brier_multiclass": 0.595225,
+            "log_loss": 0.997055,
+            "top_label_ece": 0.027851
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.44783,
+            "brier_multiclass": 0.646021,
+            "log_loss": 1.068575,
+            "top_label_ece": 0.009551
+          },
+          "competition": "Eredivisie",
+          "league_id": 88,
+          "log_loss_skill_vs_prior": 0.115704,
+          "n": 1083,
+          "test": {
+            "accuracy": 0.545706,
+            "brier_multiclass": 0.559945,
+            "log_loss": 0.944937,
+            "top_label_ece": 0.027432
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.427773,
+            "brier_multiclass": 0.6531,
+            "log_loss": 1.078936,
+            "top_label_ece": 0.010558
+          },
+          "competition": "Pro League",
+          "league_id": 144,
+          "log_loss_skill_vs_prior": 0.062489,
+          "n": 1073,
+          "test": {
+            "accuracy": 0.49301,
+            "brier_multiclass": 0.60412,
+            "log_loss": 1.011514,
+            "top_label_ece": 0.029995
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.449811,
+            "brier_multiclass": 0.645065,
+            "log_loss": 1.067081,
+            "top_label_ece": 0.011485
+          },
+          "competition": "2. Bundesliga",
+          "league_id": 79,
+          "log_loss_skill_vs_prior": 0.02063,
+          "n": 1056,
+          "test": {
+            "accuracy": 0.465909,
+            "brier_multiclass": 0.628049,
+            "log_loss": 1.045067,
+            "top_label_ece": 0.021363
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.445611,
+            "brier_multiclass": 0.649005,
+            "log_loss": 1.073648,
+            "top_label_ece": 0.007319
+          },
+          "competition": "Ekstraklasa",
+          "league_id": 106,
+          "log_loss_skill_vs_prior": 0.015019,
+          "n": 1048,
+          "test": {
+            "accuracy": 0.455153,
+            "brier_multiclass": 0.636758,
+            "log_loss": 1.057523,
+            "top_label_ece": 0.029344
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.415473,
+            "brier_multiclass": 0.65551,
+            "log_loss": 1.081829,
+            "top_label_ece": 0.022564
+          },
+          "competition": "J1 League",
+          "league_id": 98,
+          "log_loss_skill_vs_prior": 0.014065,
+          "n": 1047,
+          "test": {
+            "accuracy": 0.464183,
+            "brier_multiclass": 0.642804,
+            "log_loss": 1.066613,
+            "top_label_ece": 0.038976
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.412322,
+            "brier_multiclass": 0.656513,
+            "log_loss": 1.083268,
+            "top_label_ece": 0.025969
+          },
+          "competition": "Super League",
+          "league_id": 197,
+          "log_loss_skill_vs_prior": 0.115869,
+          "n": 844,
+          "test": {
+            "accuracy": 0.513033,
+            "brier_multiclass": 0.569443,
+            "log_loss": 0.957751,
+            "top_label_ece": 0.046701
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.459427,
+            "brier_multiclass": 0.642713,
+            "log_loss": 1.063977,
+            "top_label_ece": 0.021391
+          },
+          "competition": "Super League",
+          "league_id": 169,
+          "log_loss_skill_vs_prior": 0.099271,
+          "n": 838,
+          "test": {
+            "accuracy": 0.556086,
+            "brier_multiclass": 0.568603,
+            "log_loss": 0.958355,
+            "top_label_ece": 0.023472
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.459459,
+            "brier_multiclass": 0.641682,
+            "log_loss": 1.062185,
+            "top_label_ece": 0.021178
+          },
+          "competition": "Premiership",
+          "league_id": 179,
+          "log_loss_skill_vs_prior": 0.099146,
+          "n": 814,
+          "test": {
+            "accuracy": 0.540541,
+            "brier_multiclass": 0.565566,
+            "log_loss": 0.956874,
+            "top_label_ece": 0.023107
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.480405,
+            "brier_multiclass": 0.633007,
+            "log_loss": 1.049092,
+            "top_label_ece": 0.042182
+          },
+          "competition": "Eliteserien",
+          "league_id": 103,
+          "log_loss_skill_vs_prior": 0.057392,
+          "n": 791,
+          "test": {
+            "accuracy": 0.537295,
+            "brier_multiclass": 0.587093,
+            "log_loss": 0.988883,
+            "top_label_ece": 0.032356
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.433162,
+            "brier_multiclass": 0.647686,
+            "log_loss": 1.069836,
+            "top_label_ece": 0.004959
+          },
+          "competition": "Allsvenskan",
+          "league_id": 113,
+          "log_loss_skill_vs_prior": 0.046464,
+          "n": 778,
+          "test": {
+            "accuracy": 0.484576,
+            "brier_multiclass": 0.611124,
+            "log_loss": 1.020127,
+            "top_label_ece": 0.024831
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.401198,
+            "brier_multiclass": 0.660349,
+            "log_loss": 1.088894,
+            "top_label_ece": 0.03708
+          },
+          "competition": "Bundesliga",
+          "league_id": 218,
+          "log_loss_skill_vs_prior": 0.042961,
+          "n": 668,
+          "test": {
+            "accuracy": 0.489521,
+            "brier_multiclass": 0.626912,
+            "log_loss": 1.042114,
+            "top_label_ece": 0.04407
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.425532,
+            "brier_multiclass": 0.652436,
+            "log_loss": 1.077521,
+            "top_label_ece": 0.012726
+          },
+          "competition": "Superliga",
+          "league_id": 119,
+          "log_loss_skill_vs_prior": 0.045647,
+          "n": 658,
+          "test": {
+            "accuracy": 0.50304,
+            "brier_multiclass": 0.616464,
+            "log_loss": 1.028335,
+            "top_label_ece": 0.021155
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.436266,
+            "brier_multiclass": 0.648941,
+            "log_loss": 1.072495,
+            "top_label_ece": 0.001802
+          },
+          "competition": "Veikkausliiga",
+          "league_id": 244,
+          "log_loss_skill_vs_prior": 0.054508,
+          "n": 557,
+          "test": {
+            "accuracy": 0.513465,
+            "brier_multiclass": 0.605795,
+            "log_loss": 1.014035,
+            "top_label_ece": 0.02192
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.510018,
+            "brier_multiclass": 0.622906,
+            "log_loss": 1.034532,
+            "top_label_ece": 0.07109
+          },
+          "competition": "UEFA Champions League",
+          "league_id": 2,
+          "log_loss_skill_vs_prior": 0.056365,
+          "n": 549,
+          "test": {
+            "accuracy": 0.535519,
+            "brier_multiclass": 0.578564,
+            "log_loss": 0.976221,
+            "top_label_ece": 0.020765
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.496536,
+            "brier_multiclass": 0.630425,
+            "log_loss": 1.046329,
+            "top_label_ece": 0.05818
+          },
+          "competition": "UEFA Europa League",
+          "league_id": 3,
+          "log_loss_skill_vs_prior": 0.01442,
+          "n": 433,
+          "test": {
+            "accuracy": 0.498845,
+            "brier_multiclass": 0.618112,
+            "log_loss": 1.031241,
+            "top_label_ece": 0.046422
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.542453,
+            "brier_multiclass": 0.618536,
+            "log_loss": 1.030301,
+            "top_label_ece": 0.104079
+          },
+          "competition": "Copa Libertadores",
+          "league_id": 13,
+          "log_loss_skill_vs_prior": 0.019813,
+          "n": 424,
+          "test": {
+            "accuracy": 0.542453,
+            "brier_multiclass": 0.601642,
+            "log_loss": 1.009888,
+            "top_label_ece": 0.071455
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.494033,
+            "brier_multiclass": 0.630033,
+            "log_loss": 1.045392,
+            "top_label_ece": 0.055522
+          },
+          "competition": "UEFA Conference League",
+          "league_id": 848,
+          "log_loss_skill_vs_prior": 0.005791,
+          "n": 419,
+          "test": {
+            "accuracy": 0.50358,
+            "brier_multiclass": 0.622887,
+            "log_loss": 1.039338,
+            "top_label_ece": 0.062143
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.47,
+            "brier_multiclass": 0.639844,
+            "log_loss": 1.06004,
+            "top_label_ece": 0.032848
+          },
+          "competition": "Copa Sudamericana",
+          "league_id": 11,
+          "log_loss_skill_vs_prior": 0.06898,
+          "n": 300,
+          "test": {
+            "accuracy": 0.546667,
+            "brier_multiclass": 0.585083,
+            "log_loss": 0.986918,
+            "top_label_ece": 0.067551
+          }
+        }
+      ],
+      "maximum_log_loss_skill_vs_prior": 0.05677,
+      "median_log_loss_skill_vs_prior": 0.050931,
+      "minimum_log_loss_skill_vs_prior": 0.045549,
+      "positive_skill_folds": 4,
+      "stable_positive_skill": true,
+      "status": "EVALUATED"
+    },
+    "over_1_5": {
+      "family_selection_counts": {
+        "logistic": 4
+      },
+      "fold_count": 4,
+      "folds": [
+        {
+          "baseline_test": {
+            "accuracy": 0.740727,
+            "brier_multiclass": 0.384101,
+            "log_loss": 0.572295,
+            "top_label_ece": 0.000442
+          },
+          "calib_end": "2022-12-11",
+          "calib_n": 8107,
+          "calib_start": "2022-03-05",
+          "fold": 1,
+          "log_loss_skill_vs_prior": 0.013795,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.740727,
+            "brier_multiclass": 0.377925,
+            "log_loss": 0.5644,
+            "top_label_ece": 0.008265
+          },
+          "test_end": "2023-10-18",
+          "test_n": 8196,
+          "test_start": "2022-12-12",
+          "train_end": "2022-03-04",
+          "train_n": 26487,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.756163,
+            "brier_multiclass": 0.369215,
+            "log_loss": 0.556062,
+            "top_label_ece": 0.015079
+          },
+          "calib_end": "2023-10-18",
+          "calib_n": 8349,
+          "calib_start": "2022-11-27",
+          "fold": 2,
+          "log_loss_skill_vs_prior": 0.018216,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.756163,
+            "brier_multiclass": 0.361943,
+            "log_loss": 0.545933,
+            "top_label_ece": 0.005121
+          },
+          "test_end": "2024-08-26",
+          "test_n": 8518,
+          "test_start": "2023-10-19",
+          "train_end": "2022-11-26",
+          "train_n": 34441,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.744592,
+            "brier_multiclass": 0.380352,
+            "log_loss": 0.568202,
+            "top_label_ece": 0.001004
+          },
+          "calib_end": "2024-08-26",
+          "calib_n": 10514,
+          "calib_start": "2023-08-17",
+          "fold": 3,
+          "log_loss_skill_vs_prior": 0.01765,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.744592,
+            "brier_multiclass": 0.372764,
+            "log_loss": 0.558173,
+            "top_label_ece": 0.009502
+          },
+          "test_end": "2025-07-20",
+          "test_n": 9291,
+          "test_start": "2024-08-27",
+          "train_end": "2023-08-16",
+          "train_n": 40794,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.760612,
+            "brier_multiclass": 0.364732,
+            "log_loss": 0.551132,
+            "top_label_ece": 0.01687
+          },
+          "calib_end": "2025-07-20",
+          "calib_n": 11588,
+          "calib_start": "2024-05-08",
+          "fold": 4,
+          "log_loss_skill_vs_prior": 0.015728,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.760612,
+            "brier_multiclass": 0.358533,
+            "log_loss": 0.542464,
+            "top_label_ece": 0.006406
+          },
+          "test_end": "2026-06-01",
+          "test_n": 9353,
+          "test_start": "2025-07-21",
+          "train_end": "2024-05-07",
+          "train_n": 49011,
+          "train_start": "2012-04-05"
+        }
+      ],
+      "league_segments_min_100": [
+        {
+          "baseline_test": {
+            "accuracy": 0.734651,
+            "brier_multiclass": 0.390005,
+            "log_loss": 0.578743,
+            "top_label_ece": 0.007874
+          },
+          "competition": "Championship",
+          "league_id": 40,
+          "log_loss_skill_vs_prior": 0.005123,
+          "n": 1922,
+          "test": {
+            "accuracy": 0.734651,
+            "brier_multiclass": 0.387747,
+            "log_loss": 0.575778,
+            "top_label_ece": 0.009365
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.614693,
+            "brier_multiclass": 0.506345,
+            "log_loss": 0.705755,
+            "top_label_ece": 0.127723
+          },
+          "competition": "Primera Division",
+          "league_id": 128,
+          "log_loss_skill_vs_prior": 0.057629,
+          "n": 1892,
+          "test": {
+            "accuracy": 0.614693,
+            "brier_multiclass": 0.472292,
+            "log_loss": 0.665083,
+            "top_label_ece": 0.032479
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.791178,
+            "brier_multiclass": 0.335165,
+            "log_loss": 0.518869,
+            "top_label_ece": 0.048776
+          },
+          "competition": "MLS",
+          "league_id": 253,
+          "log_loss_skill_vs_prior": 0.017669,
+          "n": 1791,
+          "test": {
+            "accuracy": 0.791178,
+            "brier_multiclass": 0.328761,
+            "log_loss": 0.509701,
+            "top_label_ece": 0.009175
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.677681,
+            "brier_multiclass": 0.44513,
+            "log_loss": 0.638897,
+            "top_label_ece": 0.064853
+          },
+          "competition": "Segunda Division",
+          "league_id": 141,
+          "log_loss_skill_vs_prior": 0.023631,
+          "n": 1604,
+          "test": {
+            "accuracy": 0.677681,
+            "brier_multiclass": 0.432761,
+            "log_loss": 0.623799,
+            "top_label_ece": 0.009006
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.734058,
+            "brier_multiclass": 0.390474,
+            "log_loss": 0.579232,
+            "top_label_ece": 0.00843
+          },
+          "competition": "La Liga",
+          "league_id": 140,
+          "log_loss_skill_vs_prior": 0.004982,
+          "n": 1380,
+          "test": {
+            "accuracy": 0.734058,
+            "brier_multiclass": 0.38834,
+            "log_loss": 0.576346,
+            "top_label_ece": 0.005885
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.810044,
+            "brier_multiclass": 0.316936,
+            "log_loss": 0.498982,
+            "top_label_ece": 0.067549
+          },
+          "competition": "Premier League",
+          "league_id": 39,
+          "log_loss_skill_vs_prior": 0.031344,
+          "n": 1374,
+          "test": {
+            "accuracy": 0.810044,
+            "brier_multiclass": 0.306095,
+            "log_loss": 0.483342,
+            "top_label_ece": 0.01235
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.730657,
+            "brier_multiclass": 0.393953,
+            "log_loss": 0.58307,
+            "top_label_ece": 0.011841
+          },
+          "competition": "Serie A",
+          "league_id": 135,
+          "log_loss_skill_vs_prior": -0.001314,
+          "n": 1370,
+          "test": {
+            "accuracy": 0.730657,
+            "brier_multiclass": 0.394388,
+            "log_loss": 0.583836,
+            "top_label_ece": 0.015303
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.721249,
+            "brier_multiclass": 0.402926,
+            "log_loss": 0.592833,
+            "top_label_ece": 0.021271
+          },
+          "competition": "Serie B",
+          "league_id": 136,
+          "log_loss_skill_vs_prior": 0.002375,
+          "n": 1313,
+          "test": {
+            "accuracy": 0.721249,
+            "brier_multiclass": 0.402054,
+            "log_loss": 0.591425,
+            "top_label_ece": 0.017567
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.725596,
+            "brier_multiclass": 0.398767,
+            "log_loss": 0.588305,
+            "top_label_ece": 0.016899
+          },
+          "competition": "Serie A",
+          "league_id": 71,
+          "log_loss_skill_vs_prior": 0.006243,
+          "n": 1301,
+          "test": {
+            "accuracy": 0.725596,
+            "brier_multiclass": 0.395885,
+            "log_loss": 0.584632,
+            "top_label_ece": 0.01404
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.787879,
+            "brier_multiclass": 0.338485,
+            "log_loss": 0.522519,
+            "top_label_ece": 0.045476
+          },
+          "competition": "Super Lig",
+          "league_id": 203,
+          "log_loss_skill_vs_prior": 0.020436,
+          "n": 1221,
+          "test": {
+            "accuracy": 0.787879,
+            "brier_multiclass": 0.331342,
+            "log_loss": 0.511841,
+            "top_label_ece": 0.006748
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.696667,
+            "brier_multiclass": 0.426813,
+            "log_loss": 0.61892,
+            "top_label_ece": 0.045693
+          },
+          "competition": "Ligue 2",
+          "league_id": 62,
+          "log_loss_skill_vs_prior": 0.003561,
+          "n": 1200,
+          "test": {
+            "accuracy": 0.696667,
+            "brier_multiclass": 0.425076,
+            "log_loss": 0.616716,
+            "top_label_ece": 0.032788
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.775063,
+            "brier_multiclass": 0.350846,
+            "log_loss": 0.535999,
+            "top_label_ece": 0.032593
+          },
+          "competition": "Liga MX",
+          "league_id": 262,
+          "log_loss_skill_vs_prior": 0.00361,
+          "n": 1187,
+          "test": {
+            "accuracy": 0.775063,
+            "brier_multiclass": 0.349235,
+            "log_loss": 0.534064,
+            "top_label_ece": 0.010805
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.769834,
+            "brier_multiclass": 0.355868,
+            "log_loss": 0.541471,
+            "top_label_ece": 0.027393
+          },
+          "competition": "Ligue 1",
+          "league_id": 61,
+          "log_loss_skill_vs_prior": 0.005902,
+          "n": 1147,
+          "test": {
+            "accuracy": 0.769834,
+            "brier_multiclass": 0.353617,
+            "log_loss": 0.538275,
+            "top_label_ece": 0.00741
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.735348,
+            "brier_multiclass": 0.389263,
+            "log_loss": 0.577919,
+            "top_label_ece": 0.007124
+          },
+          "competition": "Primeira Liga",
+          "league_id": 94,
+          "log_loss_skill_vs_prior": 0.006465,
+          "n": 1092,
+          "test": {
+            "accuracy": 0.735348,
+            "brier_multiclass": 0.386843,
+            "log_loss": 0.574183,
+            "top_label_ece": 0.035195
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.704212,
+            "brier_multiclass": 0.419518,
+            "log_loss": 0.610961,
+            "top_label_ece": 0.038238
+          },
+          "competition": "Liga I",
+          "league_id": 283,
+          "log_loss_skill_vs_prior": 0.001655,
+          "n": 1092,
+          "test": {
+            "accuracy": 0.704212,
+            "brier_multiclass": 0.418774,
+            "log_loss": 0.60995,
+            "top_label_ece": 0.015729
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.835629,
+            "brier_multiclass": 0.292123,
+            "log_loss": 0.471894,
+            "top_label_ece": 0.093097
+          },
+          "competition": "Bundesliga",
+          "league_id": 78,
+          "log_loss_skill_vs_prior": 0.058998,
+          "n": 1089,
+          "test": {
+            "accuracy": 0.835629,
+            "brier_multiclass": 0.273449,
+            "log_loss": 0.444053,
+            "top_label_ece": 0.009352
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.835642,
+            "brier_multiclass": 0.292005,
+            "log_loss": 0.471742,
+            "top_label_ece": 0.093155
+          },
+          "competition": "Eredivisie",
+          "league_id": 88,
+          "log_loss_skill_vs_prior": 0.057938,
+          "n": 1083,
+          "test": {
+            "accuracy": 0.835642,
+            "brier_multiclass": 0.274017,
+            "log_loss": 0.44441,
+            "top_label_ece": 0.017829
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.768872,
+            "brier_multiclass": 0.356789,
+            "log_loss": 0.542475,
+            "top_label_ece": 0.026373
+          },
+          "competition": "Pro League",
+          "league_id": 144,
+          "log_loss_skill_vs_prior": 0.015086,
+          "n": 1073,
+          "test": {
+            "accuracy": 0.768872,
+            "brier_multiclass": 0.351101,
+            "log_loss": 0.534291,
+            "top_label_ece": 0.017793
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.808712,
+            "brier_multiclass": 0.318196,
+            "log_loss": 0.500351,
+            "top_label_ece": 0.066187
+          },
+          "competition": "2. Bundesliga",
+          "league_id": 79,
+          "log_loss_skill_vs_prior": 0.021907,
+          "n": 1056,
+          "test": {
+            "accuracy": 0.808712,
+            "brier_multiclass": 0.31034,
+            "log_loss": 0.48939,
+            "top_label_ece": 0.013073
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.754771,
+            "brier_multiclass": 0.370447,
+            "log_loss": 0.557382,
+            "top_label_ece": 0.012286
+          },
+          "competition": "Ekstraklasa",
+          "league_id": 106,
+          "log_loss_skill_vs_prior": 0.008149,
+          "n": 1048,
+          "test": {
+            "accuracy": 0.754771,
+            "brier_multiclass": 0.367274,
+            "log_loss": 0.55284,
+            "top_label_ece": 0.013527
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.701051,
+            "brier_multiclass": 0.422688,
+            "log_loss": 0.614445,
+            "top_label_ece": 0.041218
+          },
+          "competition": "J1 League",
+          "league_id": 98,
+          "log_loss_skill_vs_prior": 0.00535,
+          "n": 1047,
+          "test": {
+            "accuracy": 0.701051,
+            "brier_multiclass": 0.419983,
+            "log_loss": 0.611158,
+            "top_label_ece": 0.0264
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.751185,
+            "brier_multiclass": 0.374048,
+            "log_loss": 0.561339,
+            "top_label_ece": 0.008698
+          },
+          "competition": "Super League",
+          "league_id": 197,
+          "log_loss_skill_vs_prior": 0.011041,
+          "n": 844,
+          "test": {
+            "accuracy": 0.751185,
+            "brier_multiclass": 0.369943,
+            "log_loss": 0.555141,
+            "top_label_ece": 0.011389
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.793556,
+            "brier_multiclass": 0.332817,
+            "log_loss": 0.516297,
+            "top_label_ece": 0.051246
+          },
+          "competition": "Super League",
+          "league_id": 169,
+          "log_loss_skill_vs_prior": 0.028536,
+          "n": 838,
+          "test": {
+            "accuracy": 0.793556,
+            "brier_multiclass": 0.323344,
+            "log_loss": 0.501564,
+            "top_label_ece": 0.019383
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.792383,
+            "brier_multiclass": 0.33406,
+            "log_loss": 0.517676,
+            "top_label_ece": 0.049906
+          },
+          "competition": "Premiership",
+          "league_id": 179,
+          "log_loss_skill_vs_prior": 0.020859,
+          "n": 814,
+          "test": {
+            "accuracy": 0.792383,
+            "brier_multiclass": 0.32698,
+            "log_loss": 0.506878,
+            "top_label_ece": 0.009853
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.793932,
+            "brier_multiclass": 0.332408,
+            "log_loss": 0.51584,
+            "top_label_ece": 0.051498
+          },
+          "competition": "Eliteserien",
+          "league_id": 103,
+          "log_loss_skill_vs_prior": 0.01585,
+          "n": 791,
+          "test": {
+            "accuracy": 0.793932,
+            "brier_multiclass": 0.326346,
+            "log_loss": 0.507664,
+            "top_label_ece": 0.015585
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.784062,
+            "brier_multiclass": 0.342086,
+            "log_loss": 0.526429,
+            "top_label_ece": 0.04165
+          },
+          "competition": "Allsvenskan",
+          "league_id": 113,
+          "log_loss_skill_vs_prior": 0.012007,
+          "n": 778,
+          "test": {
+            "accuracy": 0.784062,
+            "brier_multiclass": 0.337522,
+            "log_loss": 0.520108,
+            "top_label_ece": 0.01099
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.763473,
+            "brier_multiclass": 0.36198,
+            "log_loss": 0.548132,
+            "top_label_ece": 0.020976
+          },
+          "competition": "Bundesliga",
+          "league_id": 218,
+          "log_loss_skill_vs_prior": -0.001799,
+          "n": 668,
+          "test": {
+            "accuracy": 0.763473,
+            "brier_multiclass": 0.362312,
+            "log_loss": 0.549118,
+            "top_label_ece": 0.006878
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.802432,
+            "brier_multiclass": 0.324183,
+            "log_loss": 0.506865,
+            "top_label_ece": 0.05998
+          },
+          "competition": "Superliga",
+          "league_id": 119,
+          "log_loss_skill_vs_prior": 0.023464,
+          "n": 658,
+          "test": {
+            "accuracy": 0.802432,
+            "brier_multiclass": 0.315983,
+            "log_loss": 0.494972,
+            "top_label_ece": 0.014753
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.791741,
+            "brier_multiclass": 0.334628,
+            "log_loss": 0.518284,
+            "top_label_ece": 0.049364
+          },
+          "competition": "Veikkausliiga",
+          "league_id": 244,
+          "log_loss_skill_vs_prior": -0.005094,
+          "n": 557,
+          "test": {
+            "accuracy": 0.791741,
+            "brier_multiclass": 0.336005,
+            "log_loss": 0.520924,
+            "top_label_ece": 0.042981
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.79235,
+            "brier_multiclass": 0.333937,
+            "log_loss": 0.517509,
+            "top_label_ece": 0.049372
+          },
+          "competition": "UEFA Champions League",
+          "league_id": 2,
+          "log_loss_skill_vs_prior": 0.008251,
+          "n": 549,
+          "test": {
+            "accuracy": 0.79235,
+            "brier_multiclass": 0.329978,
+            "log_loss": 0.513239,
+            "top_label_ece": 0.023293
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.785219,
+            "brier_multiclass": 0.340871,
+            "log_loss": 0.525083,
+            "top_label_ece": 0.042671
+          },
+          "competition": "UEFA Europa League",
+          "league_id": 3,
+          "log_loss_skill_vs_prior": 0.009216,
+          "n": 433,
+          "test": {
+            "accuracy": 0.785219,
+            "brier_multiclass": 0.337945,
+            "log_loss": 0.520244,
+            "top_label_ece": 0.011346
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.665094,
+            "brier_multiclass": 0.457681,
+            "log_loss": 0.652674,
+            "top_label_ece": 0.07745
+          },
+          "competition": "Copa Libertadores",
+          "league_id": 13,
+          "log_loss_skill_vs_prior": 0.015921,
+          "n": 424,
+          "test": {
+            "accuracy": 0.665094,
+            "brier_multiclass": 0.448927,
+            "log_loss": 0.642283,
+            "top_label_ece": 0.048796
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.756563,
+            "brier_multiclass": 0.368698,
+            "log_loss": 0.555469,
+            "top_label_ece": 0.01391
+          },
+          "competition": "UEFA Conference League",
+          "league_id": 848,
+          "log_loss_skill_vs_prior": 0.00436,
+          "n": 419,
+          "test": {
+            "accuracy": 0.756563,
+            "brier_multiclass": 0.36683,
+            "log_loss": 0.553047,
+            "top_label_ece": 0.008498
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.723333,
+            "brier_multiclass": 0.400875,
+            "log_loss": 0.590588,
+            "top_label_ece": 0.018248
+          },
+          "competition": "Copa Sudamericana",
+          "league_id": 11,
+          "log_loss_skill_vs_prior": 0.012147,
+          "n": 300,
+          "test": {
+            "accuracy": 0.723333,
+            "brier_multiclass": 0.395077,
+            "log_loss": 0.583414,
+            "top_label_ece": 0.038188
+          }
+        }
+      ],
+      "maximum_log_loss_skill_vs_prior": 0.018216,
+      "median_log_loss_skill_vs_prior": 0.016689,
+      "minimum_log_loss_skill_vs_prior": 0.013795,
+      "positive_skill_folds": 4,
+      "stable_positive_skill": true,
+      "status": "EVALUATED"
+    },
+    "over_2_5": {
+      "family_selection_counts": {
+        "logistic": 4
+      },
+      "fold_count": 4,
+      "folds": [
+        {
+          "baseline_test": {
+            "accuracy": 0.503538,
+            "brier_multiclass": 0.499976,
+            "log_loss": 0.693124,
+            "top_label_ece": 0.000856
+          },
+          "calib_end": "2022-12-11",
+          "calib_n": 8107,
+          "calib_start": "2022-03-05",
+          "fold": 1,
+          "log_loss_skill_vs_prior": 0.015377,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.559053,
+            "brier_multiclass": 0.48931,
+            "log_loss": 0.682466,
+            "top_label_ece": 0.006795
+          },
+          "test_end": "2023-10-18",
+          "test_n": 8196,
+          "test_start": "2022-12-12",
+          "train_end": "2022-03-04",
+          "train_n": 26487,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.480394,
+            "brier_multiclass": 0.500368,
+            "log_loss": 0.693515,
+            "top_label_ece": 0.023836
+          },
+          "calib_end": "2023-10-18",
+          "calib_n": 8349,
+          "calib_start": "2022-11-27",
+          "fold": 2,
+          "log_loss_skill_vs_prior": 0.01855,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.552947,
+            "brier_multiclass": 0.487685,
+            "log_loss": 0.68065,
+            "top_label_ece": 0.008992
+          },
+          "test_end": "2024-08-26",
+          "test_n": 8518,
+          "test_start": "2023-10-19",
+          "train_end": "2022-11-26",
+          "train_n": 34441,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.490259,
+            "brier_multiclass": 0.500011,
+            "log_loss": 0.693158,
+            "top_label_ece": 0.010013
+          },
+          "calib_end": "2024-08-26",
+          "calib_n": 10514,
+          "calib_start": "2023-08-17",
+          "fold": 3,
+          "log_loss_skill_vs_prior": 0.019345,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.56431,
+            "brier_multiclass": 0.486721,
+            "log_loss": 0.679749,
+            "top_label_ece": 0.002168
+          },
+          "test_end": "2025-07-20",
+          "test_n": 9291,
+          "test_start": "2024-08-27",
+          "train_end": "2023-08-16",
+          "train_n": 40794,
+          "train_start": "2012-04-05"
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.523041,
+            "brier_multiclass": 0.499887,
+            "log_loss": 0.693034,
+            "top_label_ece": 0.021778
+          },
+          "calib_end": "2025-07-20",
+          "calib_n": 11588,
+          "calib_start": "2024-05-08",
+          "fold": 4,
+          "log_loss_skill_vs_prior": 0.017337,
+          "selected_family": "logistic",
+          "test": {
+            "accuracy": 0.557254,
+            "brier_multiclass": 0.488168,
+            "log_loss": 0.681019,
+            "top_label_ece": 0.005198
+          },
+          "test_end": "2026-06-01",
+          "test_n": 9353,
+          "test_start": "2025-07-21",
+          "train_end": "2024-05-07",
+          "train_n": 49011,
+          "train_start": "2012-04-05"
+        }
+      ],
+      "league_segments_min_100": [
+        {
+          "baseline_test": {
+            "accuracy": 0.522893,
+            "brier_multiclass": 0.499905,
+            "log_loss": 0.693052,
+            "top_label_ece": 0.020526
+          },
+          "competition": "Championship",
+          "league_id": 40,
+          "log_loss_skill_vs_prior": 0.007072,
+          "n": 1922,
+          "test": {
+            "accuracy": 0.542144,
+            "brier_multiclass": 0.49501,
+            "log_loss": 0.688151,
+            "top_label_ece": 0.00449
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.578753,
+            "brier_multiclass": 0.49888,
+            "log_loss": 0.692027,
+            "top_label_ece": 0.076243
+          },
+          "competition": "Primera Division",
+          "league_id": 128,
+          "log_loss_skill_vs_prior": 0.076084,
+          "n": 1892,
+          "test": {
+            "accuracy": 0.668605,
+            "brier_multiclass": 0.447117,
+            "log_loss": 0.639375,
+            "top_label_ece": 0.045796
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.46957,
+            "brier_multiclass": 0.500528,
+            "log_loss": 0.693675,
+            "top_label_ece": 0.032936
+          },
+          "competition": "MLS",
+          "league_id": 253,
+          "log_loss_skill_vs_prior": 0.025356,
+          "n": 1791,
+          "test": {
+            "accuracy": 0.579564,
+            "brier_multiclass": 0.483066,
+            "log_loss": 0.676086,
+            "top_label_ece": 0.005667
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.563591,
+            "brier_multiclass": 0.499003,
+            "log_loss": 0.69215,
+            "top_label_ece": 0.061239
+          },
+          "competition": "Segunda Division",
+          "league_id": 141,
+          "log_loss_skill_vs_prior": 0.019725,
+          "n": 1604,
+          "test": {
+            "accuracy": 0.572943,
+            "brier_multiclass": 0.485479,
+            "log_loss": 0.678497,
+            "top_label_ece": 0.012135
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.521739,
+            "brier_multiclass": 0.499721,
+            "log_loss": 0.692869,
+            "top_label_ece": 0.019317
+          },
+          "competition": "La Liga",
+          "league_id": 140,
+          "log_loss_skill_vs_prior": 0.010975,
+          "n": 1380,
+          "test": {
+            "accuracy": 0.565942,
+            "brier_multiclass": 0.492157,
+            "log_loss": 0.685265,
+            "top_label_ece": 0.024087
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.452693,
+            "brier_multiclass": 0.500677,
+            "log_loss": 0.693825,
+            "top_label_ece": 0.049717
+          },
+          "competition": "Premier League",
+          "league_id": 39,
+          "log_loss_skill_vs_prior": 0.019283,
+          "n": 1374,
+          "test": {
+            "accuracy": 0.56623,
+            "brier_multiclass": 0.487148,
+            "log_loss": 0.680446,
+            "top_label_ece": 0.01132
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.509489,
+            "brier_multiclass": 0.499813,
+            "log_loss": 0.69296,
+            "top_label_ece": 0.007085
+          },
+          "competition": "Serie A",
+          "league_id": 135,
+          "log_loss_skill_vs_prior": -0.002192,
+          "n": 1370,
+          "test": {
+            "accuracy": 0.538686,
+            "brier_multiclass": 0.501072,
+            "log_loss": 0.694479,
+            "top_label_ece": 0.018847
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.527799,
+            "brier_multiclass": 0.49969,
+            "log_loss": 0.692837,
+            "top_label_ece": 0.025428
+          },
+          "competition": "Serie B",
+          "league_id": 136,
+          "log_loss_skill_vs_prior": -0.000977,
+          "n": 1313,
+          "test": {
+            "accuracy": 0.527037,
+            "brier_multiclass": 0.500274,
+            "log_loss": 0.693514,
+            "top_label_ece": 0.026254
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.535742,
+            "brier_multiclass": 0.499616,
+            "log_loss": 0.692764,
+            "top_label_ece": 0.033292
+          },
+          "competition": "Serie A",
+          "league_id": 71,
+          "log_loss_skill_vs_prior": 0.004387,
+          "n": 1301,
+          "test": {
+            "accuracy": 0.544197,
+            "brier_multiclass": 0.496503,
+            "log_loss": 0.689725,
+            "top_label_ece": 0.007566
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.455364,
+            "brier_multiclass": 0.500662,
+            "log_loss": 0.693809,
+            "top_label_ece": 0.047155
+          },
+          "competition": "Super Lig",
+          "league_id": 203,
+          "log_loss_skill_vs_prior": 0.02686,
+          "n": 1221,
+          "test": {
+            "accuracy": 0.551188,
+            "brier_multiclass": 0.482824,
+            "log_loss": 0.675173,
+            "top_label_ece": 0.027023
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.52,
+            "brier_multiclass": 0.499694,
+            "log_loss": 0.692841,
+            "top_label_ece": 0.017397
+          },
+          "competition": "Ligue 2",
+          "league_id": 62,
+          "log_loss_skill_vs_prior": 0.001552,
+          "n": 1200,
+          "test": {
+            "accuracy": 0.531667,
+            "brier_multiclass": 0.498591,
+            "log_loss": 0.691766,
+            "top_label_ece": 0.018145
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.480202,
+            "brier_multiclass": 0.50032,
+            "log_loss": 0.693467,
+            "top_label_ece": 0.022238
+          },
+          "competition": "Liga MX",
+          "league_id": 262,
+          "log_loss_skill_vs_prior": 0.008977,
+          "n": 1187,
+          "test": {
+            "accuracy": 0.52401,
+            "brier_multiclass": 0.494194,
+            "log_loss": 0.687242,
+            "top_label_ece": 0.030275
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.474281,
+            "brier_multiclass": 0.500289,
+            "log_loss": 0.693436,
+            "top_label_ece": 0.02821
+          },
+          "competition": "Ligue 1",
+          "league_id": 61,
+          "log_loss_skill_vs_prior": 0.008632,
+          "n": 1147,
+          "test": {
+            "accuracy": 0.526591,
+            "brier_multiclass": 0.494087,
+            "log_loss": 0.68745,
+            "top_label_ece": 0.032046
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.499084,
+            "brier_multiclass": 0.500158,
+            "log_loss": 0.693305,
+            "top_label_ece": 0.003362
+          },
+          "competition": "Primeira Liga",
+          "league_id": 94,
+          "log_loss_skill_vs_prior": 0.019636,
+          "n": 1092,
+          "test": {
+            "accuracy": 0.547619,
+            "brier_multiclass": 0.486934,
+            "log_loss": 0.679691,
+            "top_label_ece": 0.021379
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.534799,
+            "brier_multiclass": 0.499792,
+            "log_loss": 0.69294,
+            "top_label_ece": 0.032324
+          },
+          "competition": "Liga I",
+          "league_id": 283,
+          "log_loss_skill_vs_prior": 0.012337,
+          "n": 1092,
+          "test": {
+            "accuracy": 0.565018,
+            "brier_multiclass": 0.491301,
+            "log_loss": 0.684391,
+            "top_label_ece": 0.025653
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.460055,
+            "brier_multiclass": 0.500741,
+            "log_loss": 0.693888,
+            "top_label_ece": 0.042297
+          },
+          "competition": "Bundesliga",
+          "league_id": 78,
+          "log_loss_skill_vs_prior": 0.051501,
+          "n": 1089,
+          "test": {
+            "accuracy": 0.61708,
+            "brier_multiclass": 0.466096,
+            "log_loss": 0.658152,
+            "top_label_ece": 0.008075
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.467221,
+            "brier_multiclass": 0.500719,
+            "log_loss": 0.693866,
+            "top_label_ece": 0.035202
+          },
+          "competition": "Eredivisie",
+          "league_id": 88,
+          "log_loss_skill_vs_prior": 0.03722,
+          "n": 1083,
+          "test": {
+            "accuracy": 0.590028,
+            "brier_multiclass": 0.475795,
+            "log_loss": 0.66804,
+            "top_label_ece": 0.013395
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.478099,
+            "brier_multiclass": 0.500276,
+            "log_loss": 0.693423,
+            "top_label_ece": 0.024309
+          },
+          "competition": "Pro League",
+          "league_id": 144,
+          "log_loss_skill_vs_prior": 0.005673,
+          "n": 1073,
+          "test": {
+            "accuracy": 0.520969,
+            "brier_multiclass": 0.496326,
+            "log_loss": 0.689489,
+            "top_label_ece": 0.035757
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.451705,
+            "brier_multiclass": 0.50072,
+            "log_loss": 0.693867,
+            "top_label_ece": 0.050671
+          },
+          "competition": "2. Bundesliga",
+          "league_id": 79,
+          "log_loss_skill_vs_prior": 0.021041,
+          "n": 1056,
+          "test": {
+            "accuracy": 0.583333,
+            "brier_multiclass": 0.486191,
+            "log_loss": 0.679267,
+            "top_label_ece": 0.026465
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.520038,
+            "brier_multiclass": 0.499661,
+            "log_loss": 0.692808,
+            "top_label_ece": 0.017605
+          },
+          "competition": "Ekstraklasa",
+          "league_id": 106,
+          "log_loss_skill_vs_prior": 0.008087,
+          "n": 1048,
+          "test": {
+            "accuracy": 0.526718,
+            "brier_multiclass": 0.494089,
+            "log_loss": 0.687205,
+            "top_label_ece": 0.011735
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.511939,
+            "brier_multiclass": 0.49995,
+            "log_loss": 0.693097,
+            "top_label_ece": 0.00934
+          },
+          "competition": "J1 League",
+          "league_id": 98,
+          "log_loss_skill_vs_prior": -0.003067,
+          "n": 1047,
+          "test": {
+            "accuracy": 0.501433,
+            "brier_multiclass": 0.50206,
+            "log_loss": 0.695223,
+            "top_label_ece": 0.040233
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.496445,
+            "brier_multiclass": 0.500096,
+            "log_loss": 0.693243,
+            "top_label_ece": 0.005978
+          },
+          "competition": "Super League",
+          "league_id": 197,
+          "log_loss_skill_vs_prior": 0.015352,
+          "n": 844,
+          "test": {
+            "accuracy": 0.548578,
+            "brier_multiclass": 0.489642,
+            "log_loss": 0.6826,
+            "top_label_ece": 0.022648
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.46778,
+            "brier_multiclass": 0.500455,
+            "log_loss": 0.693603,
+            "top_label_ece": 0.034914
+          },
+          "competition": "Super League",
+          "league_id": 169,
+          "log_loss_skill_vs_prior": 0.038725,
+          "n": 838,
+          "test": {
+            "accuracy": 0.584726,
+            "brier_multiclass": 0.474197,
+            "log_loss": 0.666743,
+            "top_label_ece": 0.010466
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.457002,
+            "brier_multiclass": 0.500422,
+            "log_loss": 0.693569,
+            "top_label_ece": 0.04543
+          },
+          "competition": "Premiership",
+          "league_id": 179,
+          "log_loss_skill_vs_prior": 0.014489,
+          "n": 814,
+          "test": {
+            "accuracy": 0.538084,
+            "brier_multiclass": 0.490374,
+            "log_loss": 0.68352,
+            "top_label_ece": 0.025617
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.47914,
+            "brier_multiclass": 0.500621,
+            "log_loss": 0.693768,
+            "top_label_ece": 0.023355
+          },
+          "competition": "Eliteserien",
+          "league_id": 103,
+          "log_loss_skill_vs_prior": 0.02741,
+          "n": 791,
+          "test": {
+            "accuracy": 0.587863,
+            "brier_multiclass": 0.481537,
+            "log_loss": 0.674752,
+            "top_label_ece": 0.016914
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.494859,
+            "brier_multiclass": 0.50056,
+            "log_loss": 0.693707,
+            "top_label_ece": 0.007648
+          },
+          "competition": "Allsvenskan",
+          "league_id": 113,
+          "log_loss_skill_vs_prior": 0.007058,
+          "n": 778,
+          "test": {
+            "accuracy": 0.539846,
+            "brier_multiclass": 0.495636,
+            "log_loss": 0.688811,
+            "top_label_ece": 0.018097
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.497006,
+            "brier_multiclass": 0.499877,
+            "log_loss": 0.693024,
+            "top_label_ece": 0.005414
+          },
+          "competition": "Bundesliga",
+          "league_id": 218,
+          "log_loss_skill_vs_prior": -0.006711,
+          "n": 668,
+          "test": {
+            "accuracy": 0.513473,
+            "brier_multiclass": 0.503866,
+            "log_loss": 0.697675,
+            "top_label_ece": 0.030677
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.469605,
+            "brier_multiclass": 0.500465,
+            "log_loss": 0.693612,
+            "top_label_ece": 0.032874
+          },
+          "competition": "Superliga",
+          "league_id": 119,
+          "log_loss_skill_vs_prior": 0.01749,
+          "n": 658,
+          "test": {
+            "accuracy": 0.580547,
+            "brier_multiclass": 0.488316,
+            "log_loss": 0.681481,
+            "top_label_ece": 0.028908
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.473968,
+            "brier_multiclass": 0.500343,
+            "log_loss": 0.69349,
+            "top_label_ece": 0.028609
+          },
+          "competition": "Veikkausliiga",
+          "league_id": 244,
+          "log_loss_skill_vs_prior": 0.007785,
+          "n": 557,
+          "test": {
+            "accuracy": 0.5386,
+            "brier_multiclass": 0.49495,
+            "log_loss": 0.688091,
+            "top_label_ece": 0.022116
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.51184,
+            "brier_multiclass": 0.499797,
+            "log_loss": 0.692944,
+            "top_label_ece": 0.010079
+          },
+          "competition": "UEFA Champions League",
+          "league_id": 2,
+          "log_loss_skill_vs_prior": 0.026804,
+          "n": 549,
+          "test": {
+            "accuracy": 0.586521,
+            "brier_multiclass": 0.481342,
+            "log_loss": 0.67437,
+            "top_label_ece": 0.013968
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.454965,
+            "brier_multiclass": 0.500438,
+            "log_loss": 0.693585,
+            "top_label_ece": 0.047136
+          },
+          "competition": "UEFA Europa League",
+          "league_id": 3,
+          "log_loss_skill_vs_prior": 0.005141,
+          "n": 433,
+          "test": {
+            "accuracy": 0.498845,
+            "brier_multiclass": 0.497214,
+            "log_loss": 0.690019,
+            "top_label_ece": 0.075692
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.483491,
+            "brier_multiclass": 0.499982,
+            "log_loss": 0.693129,
+            "top_label_ece": 0.018843
+          },
+          "competition": "Copa Libertadores",
+          "league_id": 13,
+          "log_loss_skill_vs_prior": 0.016085,
+          "n": 424,
+          "test": {
+            "accuracy": 0.566038,
+            "brier_multiclass": 0.488803,
+            "log_loss": 0.68198,
+            "top_label_ece": 0.018298
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.470167,
+            "brier_multiclass": 0.500184,
+            "log_loss": 0.693331,
+            "top_label_ece": 0.031892
+          },
+          "competition": "UEFA Conference League",
+          "league_id": 848,
+          "log_loss_skill_vs_prior": 0.00883,
+          "n": 419,
+          "test": {
+            "accuracy": 0.536993,
+            "brier_multiclass": 0.494211,
+            "log_loss": 0.687209,
+            "top_label_ece": 0.006185
+          }
+        },
+        {
+          "baseline_test": {
+            "accuracy": 0.523333,
+            "brier_multiclass": 0.499711,
+            "log_loss": 0.692858,
+            "top_label_ece": 0.019755
+          },
+          "competition": "Copa Sudamericana",
+          "league_id": 11,
+          "log_loss_skill_vs_prior": 0.016605,
+          "n": 300,
+          "test": {
+            "accuracy": 0.55,
+            "brier_multiclass": 0.488274,
+            "log_loss": 0.681353,
+            "top_label_ece": 0.020275
+          }
+        }
+      ],
+      "maximum_log_loss_skill_vs_prior": 0.019345,
+      "median_log_loss_skill_vs_prior": 0.017944,
+      "minimum_log_loss_skill_vs_prior": 0.015377,
+      "positive_skill_folds": 4,
+      "stable_positive_skill": true,
+      "status": "EVALUATED"
+    }
+  }
+}
