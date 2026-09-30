@@ -525,7 +525,10 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
             fx, model, min_confidence=MIN_CANDIDATE_CONFIDENCE, fit=fit))
 
     # SportyBet-only supplemental fixtures are modelled in isolation.
-    # They never enter all_picks, fixtures, Builder, booking or settlement.
+    # They never enter all_picks or fixtures and therefore cannot silently
+    # widen public Predictions, publication, official records, or settlement.
+    # A separate staging-only path may expose only 6H-approved exact picks to
+    # the interactive Builder when both supplemental feature flags are enabled.
     sportybet_shadow_model = {}
     sportybet_staging_builder_picks = []
 

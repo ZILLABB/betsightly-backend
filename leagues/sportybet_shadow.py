@@ -965,7 +965,17 @@ def evaluate_shadow_supplemental(
             live_picks
         ),
         "next_gate": (
-            "shadow supplemental candidates must show comparable evidence/"
-            "quality characteristics before any feature-flagged staging merge"
+            (
+                "staging Builder merge is active; next gate is Builder stress, "
+                "isolation, and reliability validation before any production promotion"
+            )
+            if (
+                staging_builder_merge
+                and staging_builder_merge.get("merge_executed")
+            )
+            else (
+                "shadow supplemental candidates must show comparable evidence/"
+                "quality characteristics before any feature-flagged staging Builder merge"
+            )
         ),
     }
