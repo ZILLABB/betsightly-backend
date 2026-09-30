@@ -1,0 +1,297 @@
+{
+  "combined_results": {
+    "conflicting_duplicates": 0,
+    "duplicate_rows": 0,
+    "input_normalized_rows": 74474,
+    "league_count": 35,
+    "max_date": "2026-06-01",
+    "min_date": "2012-01-24",
+    "same_score_duplicates_removed": 0,
+    "source_counts": {
+      "football_history": 7775,
+      "legacy_training_baseline": 66699
+    },
+    "unique_rows": 74474
+  },
+  "experiment": "football_first_challenger_v1",
+  "feature_build": {
+    "feature_count": 28,
+    "input_matches": 74474,
+    "national_team_samples": 49,
+    "source_counts": {
+      "football_history": 5652,
+      "legacy_training_baseline": 64300
+    },
+    "trainable_samples": 69952,
+    "warmup_skipped": 4522
+  },
+  "feature_columns": [
+    "home_win_rate_5",
+    "home_win_rate_10",
+    "home_draw_rate_5",
+    "home_goals_scored_5",
+    "home_goals_conceded_5",
+    "home_home_win_rate_5",
+    "home_home_goals_5",
+    "away_win_rate_5",
+    "away_win_rate_10",
+    "away_draw_rate_5",
+    "away_goals_scored_5",
+    "away_goals_conceded_5",
+    "away_away_win_rate_5",
+    "away_away_goals_5",
+    "h2h_home_win_rate",
+    "h2h_avg_goals",
+    "h2h_btts_rate",
+    "h2h_meetings",
+    "competition_home_goals",
+    "competition_away_goals",
+    "competition_over_1_5_rate",
+    "competition_over_2_5_rate",
+    "competition_btts_rate",
+    "elo_home_expectation",
+    "elo_diff_scaled",
+    "home_rest_days_scaled",
+    "away_rest_days_scaled",
+    "national_team_match"
+  ],
+  "feature_count": 28,
+  "inputs": {
+    "football_history_csv": "C:\\Users\\ZILLAB\\Desktop\\betsightly-training-data-audit-20260927\\data\\football_history\\openfootball_matches.csv",
+    "legacy_csv": "C:\\Users\\ZILLAB\\Desktop\\betsightly-training-data-audit-20260927\\data\\api-football\\matches.csv"
+  },
+  "live_adjustment_allowed": false,
+  "market_price_features_used": [],
+  "promotion_blockers": [
+    "single_chronological_holdout_only",
+    "no_live_shadow_comparison_yet",
+    "no_league_market_minimum_sample_promotion_rule_yet"
+  ],
+  "promotion_enabled": false,
+  "promotion_state": "OFFLINE_ONLY",
+  "schema": 1,
+  "split": {
+    "calib": 10557,
+    "calib_end": "2025-05-10",
+    "calib_end_index": 59532,
+    "calib_start": "2024-05-06",
+    "calib_test_same_date_boundary": false,
+    "derived_samples": 69952,
+    "strategy": "whole_calendar_date",
+    "test": 10420,
+    "test_end": "2026-06-01",
+    "test_start": "2025-05-11",
+    "train": 48975,
+    "train_calib_same_date_boundary": false,
+    "train_end": "2024-05-05",
+    "train_end_index": 48975,
+    "train_start": "2012-04-05"
+  },
+  "targets": {
+    "btts": {
+      "baseline_test": {
+        "accuracy": 0.54501,
+        "brier_multiclass": 0.497531,
+        "log_loss": 0.690678,
+        "top_label_ece": 0.028134
+      },
+      "calibration_selection": {
+        "hist_gradient_boosting": {
+          "accuracy": 0.539926,
+          "brier_multiclass": 0.495315,
+          "log_loss": 0.68844,
+          "top_label_ece": 0.003467
+        },
+        "logistic": {
+          "accuracy": 0.541915,
+          "brier_multiclass": 0.493811,
+          "log_loss": 0.686916,
+          "top_label_ece": 0.003069
+        }
+      },
+      "classes": [
+        0,
+        1
+      ],
+      "log_loss_skill_vs_train_prior": 0.009104,
+      "selected_family": "logistic",
+      "status": "EVALUATED",
+      "test": {
+        "accuracy": 0.553455,
+        "brier_multiclass": 0.491302,
+        "log_loss": 0.68439,
+        "top_label_ece": 0.006678
+      },
+      "test_by_source": {
+        "football_history": {
+          "accuracy": 0.545966,
+          "brier_multiclass": 0.492635,
+          "log_loss": 0.685734,
+          "n": 533,
+          "top_label_ece": 0.002537
+        },
+        "legacy_training_baseline": {
+          "accuracy": 0.553859,
+          "brier_multiclass": 0.49123,
+          "log_loss": 0.684318,
+          "n": 9887,
+          "top_label_ece": 0.006902
+        }
+      }
+    },
+    "match_result": {
+      "baseline_test": {
+        "accuracy": 0.440691,
+        "brier_multiclass": 0.648639,
+        "log_loss": 1.07245,
+        "top_label_ece": 0.002835
+      },
+      "calibration_selection": {
+        "hist_gradient_boosting": {
+          "accuracy": 0.493417,
+          "brier_multiclass": 0.609018,
+          "log_loss": 1.017366,
+          "top_label_ece": 0.008905
+        },
+        "logistic": {
+          "accuracy": 0.494364,
+          "brier_multiclass": 0.608007,
+          "log_loss": 1.015615,
+          "top_label_ece": 0.006666
+        }
+      },
+      "classes": [
+        0,
+        1,
+        2
+      ],
+      "log_loss_skill_vs_train_prior": 0.04579,
+      "selected_family": "logistic",
+      "status": "EVALUATED",
+      "test": {
+        "accuracy": 0.491651,
+        "brier_multiclass": 0.613179,
+        "log_loss": 1.023342,
+        "top_label_ece": 0.010735
+      },
+      "test_by_source": {
+        "football_history": {
+          "accuracy": 0.530957,
+          "brier_multiclass": 0.59974,
+          "log_loss": 1.005815,
+          "n": 533,
+          "top_label_ece": 0.036027
+        },
+        "legacy_training_baseline": {
+          "accuracy": 0.489532,
+          "brier_multiclass": 0.613904,
+          "log_loss": 1.024287,
+          "n": 9887,
+          "top_label_ece": 0.011407
+        }
+      }
+    },
+    "over_1_5": {
+      "baseline_test": {
+        "accuracy": 0.76142,
+        "brier_multiclass": 0.364044,
+        "log_loss": 0.550401,
+        "top_label_ece": 0.019042
+      },
+      "calibration_selection": {
+        "hist_gradient_boosting": {
+          "accuracy": 0.747561,
+          "brier_multiclass": 0.3711,
+          "log_loss": 0.556735,
+          "top_label_ece": 0.007488
+        },
+        "logistic": {
+          "accuracy": 0.747561,
+          "brier_multiclass": 0.370069,
+          "log_loss": 0.555147,
+          "top_label_ece": 0.005933
+        }
+      },
+      "classes": [
+        0,
+        1
+      ],
+      "log_loss_skill_vs_train_prior": 0.016281,
+      "selected_family": "logistic",
+      "status": "EVALUATED",
+      "test": {
+        "accuracy": 0.76142,
+        "brier_multiclass": 0.35762,
+        "log_loss": 0.54144,
+        "top_label_ece": 0.006627
+      },
+      "test_by_source": {
+        "football_history": {
+          "accuracy": 0.729831,
+          "brier_multiclass": 0.384043,
+          "log_loss": 0.56951,
+          "n": 533,
+          "top_label_ece": 0.042817
+        },
+        "legacy_training_baseline": {
+          "accuracy": 0.763123,
+          "brier_multiclass": 0.356196,
+          "log_loss": 0.539926,
+          "n": 9887,
+          "top_label_ece": 0.009292
+        }
+      }
+    },
+    "over_2_5": {
+      "baseline_test": {
+        "accuracy": 0.475528,
+        "brier_multiclass": 0.50019,
+        "log_loss": 0.693337,
+        "top_label_ece": 0.02634
+      },
+      "calibration_selection": {
+        "hist_gradient_boosting": {
+          "accuracy": 0.561618,
+          "brier_multiclass": 0.488299,
+          "log_loss": 0.681328,
+          "top_label_ece": 0.001432
+        },
+        "logistic": {
+          "accuracy": 0.563228,
+          "brier_multiclass": 0.486608,
+          "log_loss": 0.679586,
+          "top_label_ece": 0.001293
+        }
+      },
+      "classes": [
+        0,
+        1
+      ],
+      "log_loss_skill_vs_train_prior": 0.016969,
+      "selected_family": "logistic",
+      "status": "EVALUATED",
+      "test": {
+        "accuracy": 0.557102,
+        "brier_multiclass": 0.488662,
+        "log_loss": 0.681572,
+        "top_label_ece": 0.005655
+      },
+      "test_by_source": {
+        "football_history": {
+          "accuracy": 0.589118,
+          "brier_multiclass": 0.478914,
+          "log_loss": 0.671846,
+          "n": 533,
+          "top_label_ece": 0.026071
+        },
+        "legacy_training_baseline": {
+          "accuracy": 0.555376,
+          "brier_multiclass": 0.489188,
+          "log_loss": 0.682096,
+          "n": 9887,
+          "top_label_ece": 0.006246
+        }
+      }
+    }
+  }
+}

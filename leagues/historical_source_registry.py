@@ -104,15 +104,18 @@ SOURCES: tuple[HistoricalSource, ...] = (
     HistoricalSource(
         11,
         "Copa Sudamericana",
-        "UNRESOLVED",
-        "unresolved",
-        UNRESOLVED,
-        REVIEW_REQUIRED,
-        None,
+        "OpenFootball",
+        "south-america/copa-libertadores",
+        RESULTS_ONLY,
+        VERIFIED,
+        "CC0-1.0 / public domain",
+        True,
         False,
-        False,
-        None,
-        "No verified ingestion source selected yet.",
+        "openfootball/south-america",
+        (
+            "Sudamericana fixtures/results are ingested from the "
+            "verified *_copas.txt series; no bookmaker-price provenance."
+        ),
     ),
     HistoricalSource(
         265,
