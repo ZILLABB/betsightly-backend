@@ -659,6 +659,29 @@ def evaluate_shadow_supplemental(
         )
     ]
 
+    shadow_summary = _pool_summary(
+        shadow_ranked
+    )
+
+    live_summary = _pool_summary(
+        live_ranked
+    )
+
+    from leagues.sportybet_shadow_gate import (
+        evaluate_staging_gate,
+    )
+
+    staging_gate = evaluate_staging_gate(
+        shadow_ranked,
+        board_complete=bool(
+            meta.get(
+                "is_complete"
+            )
+        ),
+        live_summary=live_summary,
+        shadow_summary=shadow_summary,
+    )
+
     fixture_results.sort(
         key=lambda item: (
             item.get("kickoff")
@@ -716,6 +739,26 @@ def evaluate_shadow_supplemental(
                     "market_trust_state"
                 )
             ),
+            "market_floor_eligible": bool(
+                pick.get(
+                    "market_floor_eligible"
+                )
+            ),
+            "safe_tier_eligible": bool(
+                pick.get(
+                    "safe_tier_eligible"
+                )
+            ),
+            "lower_reliability_bound": (
+                pick.get(
+                    "lower_reliability_bound"
+                )
+            ),
+            "evidence_strength": (
+                pick.get(
+                    "evidence_strength"
+                )
+            ),
             "odds": pick.get(
                 "odds"
             ),
@@ -766,6 +809,12 @@ def evaluate_shadow_supplemental(
         "booking_exposed": False,
         "sportybet_used_as_probability_anchor": False,
         "sportybet_used_as_price_source": True,
+        "sportybet_board_complete": bool(
+            meta.get(
+                "is_complete"
+            )
+        ),
+        "staging_gate": staging_gate,
         "ready_input_fixture_count": len(
             ready
         ),
@@ -786,12 +835,8 @@ def evaluate_shadow_supplemental(
         "bookable_shadow_candidate_count": len(
             shadow_bookable
         ),
-        "shadow_pool": _pool_summary(
-            shadow_ranked
-        ),
-        "live_espn_pool": _pool_summary(
-            live_ranked
-        ),
+        "shadow_pool": shadow_summary,
+        "live_espn_pool": live_summary,
         "fixture_samples": fixture_results[
             :20
         ],
