@@ -27,6 +27,7 @@ opening the card an hour apart get the same slip.
 """
 
 import collections
+import hashlib
 import json
 import itertools
 import logging
@@ -43,6 +44,8 @@ logger = logging.getLogger(__name__)
 BASE_URL = None  # resolved from the adapter so there is one host to change
 _GENERATED_BOOKING_LOCKS: dict[str, threading.Lock] = {}
 _GENERATED_BOOKING_LOCKS_GUARD = threading.Lock()
+_TIER_BOOKING_LOCK = threading.Lock()
+BOOKING_RECHECK_SECONDS = 15 * 60
 
 
 def _base() -> str:
@@ -94,14 +97,69 @@ def _ensure_table(conn) -> None:
         "CREATE TABLE IF NOT EXISTS generated_bookings ("
         " leg_fingerprint VARCHAR(64) PRIMARY KEY, share_code VARCHAR(32),"
         " detail TEXT NOT NULL, created_at VARCHAR(32) NOT NULL)"))
+    conn.execute(text(
+        "CREATE TABLE IF NOT EXISTS tier_booking_editions ("
+        " publish_date VARCHAR(10) NOT NULL, tier VARCHAR(24) NOT NULL,"
+        " booking_version INTEGER NOT NULL, previous_booking_version INTEGER,"
+        " official_card_id VARCHAR(64) NOT NULL, identity_hash VARCHAR(64) NOT NULL,"
+        " generated_at VARCHAR(32) NOT NULL, checked_at VARCHAR(32),"
+        " share_code VARCHAR(32), actual_sportybet_odds FLOAT,"
+        " detail TEXT NOT NULL,"
+        " PRIMARY KEY (publish_date, tier, booking_version))"))
+
+
+def _edition_identity(record: dict, official_card_id: str) -> str:
+    """Only a different code, booked set or lifecycle makes a new edition."""
+    legs = record.get("final_booked_legs") or []
+    selections = sorted((str(game.get("match_id") or game.get("sportybet_event_id") or ""),
+                         str(game.get("market") or game.get("market_key") or ""))
+                        for game in legs)
+    payload = [official_card_id, record.get("share_code"), record.get("booking_status"),
+               record.get("status"), selections]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _edition_detail(record: dict, official_card_id: str,
+                    version: int, previous: int | None) -> dict:
+    originals = record.get("original_legs") or []
+    final = record.get("final_booked_legs") or []
+    selected = {(game.get("match_id"), game.get("market") or game.get("market_key"))
+                for game in final}
+    preserved = [game for game in originals
+                 if (game.get("match_id"), game.get("market") or
+                     game.get("market_key")) in selected]
+    return {
+        "official_card_id": official_card_id,
+        "booking_version": version,
+        "previous_booking_version": previous,
+        "generated_at": record.get("generated_at") or
+                        datetime.now(timezone.utc).isoformat(),
+        "checked_at": record.get("checked_at"),
+        "code": record.get("share_code"),
+        "current_sportybet_odds": record.get("actual_sportybet_odds"),
+        "original_legs": originals,
+        "preserved_legs": preserved,
+        "removed_legs": record.get("excluded_legs") or [],
+        "replacements": record.get("replacements") or [],
+        "rebuild_reason": record.get("rebuild_reason") or record.get("reason"),
+        "stale_reason": record.get("failure_category"),
+        "target_odds": record.get("predicted_tier_odds"),
+        "achieved_odds": record.get("actual_sportybet_odds"),
+        "target_reached": record.get("target_reached"),
+        "readback_validation": record.get("readback_validation"),
+        "board_snapshot_id": record.get("board_snapshot_id"),
+        "booking_status": record.get("booking_status"),
+        "booked_legs": final,
+    }
 
 
 def _store(publish_date: str, tier: str, record: dict) -> None:
-    from sqlalchemy import text
+    from sqlalchemy import inspect, text
     from database import engine
     try:
         with engine.begin() as conn:
             _ensure_table(conn)
+            record = dict(record)
             params = {
                 "d": publish_date, "t": tier,
                 "c": record.get("share_code"), "u": record.get("share_url"),
@@ -134,8 +192,67 @@ def _store(publish_date: str, tier: str, record: dict) -> None:
                     "  predicted_odds, actual_sportybet_odds, board_snapshot_id)"
                     " VALUES (:d,:t,:c,:u,:l,:s,:j,:a,:bs,:ol,:bl,:el,:rc,"
                     " :po,:ao,:snap)"), params)
+            official_id = f"prepublication:{publish_date}:{tier}"
+            if inspect(conn).has_table("published_slips"):
+                published_id = conn.execute(text(
+                    "SELECT id FROM published_slips WHERE date=:d AND category=:t "
+                    "ORDER BY id LIMIT 1"), {"d": publish_date, "t": tier}).scalar()
+                if published_id is not None:
+                    official_id = f"published_slip:{published_id}"
+            identity = _edition_identity(record, official_id)
+            latest = conn.execute(text(
+                "SELECT booking_version, identity_hash FROM tier_booking_editions "
+                "WHERE publish_date=:d AND tier=:t "
+                "ORDER BY booking_version DESC LIMIT 1"),
+                {"d": publish_date, "t": tier}).first()
+            previous = int(latest[0]) if latest else None
+            if latest and latest[1] == identity:
+                version = previous
+            else:
+                version = (previous or 0) + 1
+                detail = _edition_detail(record, official_id, version, previous)
+                conn.execute(text(
+                    "INSERT INTO tier_booking_editions "
+                    "(publish_date,tier,booking_version,previous_booking_version,"
+                    "official_card_id,identity_hash,generated_at,checked_at,"
+                    "share_code,actual_sportybet_odds,detail) "
+                    "VALUES (:d,:t,:v,:pv,:cid,:identity,:generated,:checked,"
+                    ":code,:odds,:detail)"), {
+                        "d": publish_date, "t": tier, "v": version,
+                        "pv": previous, "cid": official_id, "identity": identity,
+                        "generated": detail["generated_at"],
+                        "checked": detail["checked_at"],
+                        "code": detail["code"],
+                        "odds": detail["current_sportybet_odds"],
+                        "detail": json.dumps(detail),
+                    })
+            record["booking_version"] = version
+            record["official_card_id"] = official_id
+            conn.execute(text(
+                "UPDATE tier_bookings SET detail=:detail "
+                "WHERE publish_date=:d AND tier=:t"), {
+                    "detail": json.dumps(record), "d": publish_date, "t": tier})
     except Exception as e:
         logger.warning(f"booking persist failed for {tier}: {e}")
+
+
+def booking_editions_for(publish_date: str, tier: str) -> list[dict]:
+    """Read-only, append-only editions for an official date and product."""
+    from sqlalchemy import inspect, text
+    from database import engine
+    try:
+        with engine.connect() as conn:
+            if not inspect(conn).has_table("tier_booking_editions"):
+                return []
+            rows = conn.execute(text(
+                "SELECT detail FROM tier_booking_editions "
+                "WHERE publish_date=:d AND tier=:t ORDER BY booking_version"),
+                {"d": publish_date, "t": tier}).fetchall()
+        return [json.loads(row[0]) for row in rows]
+    except Exception as exc:
+        logger.warning("booking edition lookup failed tier=%s type=%s",
+                       tier, type(exc).__name__)
+        return []
 
 
 def bookings_for(publish_date: str) -> dict:
@@ -397,9 +514,12 @@ def booking_lifecycle(record: dict | None, games: list,
         return invalid("expired", "CODE_EXPIRED",
                        "The SportyBet code has expired.")
 
-    # Only the code's INCLUDED fixtures determine whether a partial
-    # singles ticket is still placeable; excluded picks remain on the card.
-    actionable_games = (record["final_booked_legs"] if partial_singles else games)
+    # A rebuilt edition is a separate booking variant. Its replacements may
+    # remain placeable after an original published leg starts; that original
+    # must still remain on the official card for settlement.
+    actionable_games = (record.get("final_booked_legs") or games
+                        if partial_singles or booking_status == "REBUILT_FULL"
+                        else games)
     states = [game_kickoff_lifecycle(game, current) for game in actionable_games]
     if "invalid" in states:
         return invalid("stale", "KICKOFF_MISMATCH",
@@ -458,7 +578,9 @@ def selections_for(games: list, board: dict) -> tuple[list, list]:
         home, away = g.get("home_team", ""), g.get("away_team", "")
         availability = sportybet.availability_for(
             board, home, away, g.get("kickoff") or g.get("date") or "",
-            g.get("league") or "", market or "")
+            g.get("league") or "", market or "",
+            event_id=(g.get("sportybet_event_id") or
+                      (g.get("sportybet_availability") or {}).get("event_id")))
         if not availability.get("sportybet_available"):
             unmapped.append({
                 "match": f"{home} v {away}", "home_team": home,
@@ -789,6 +911,8 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
                     board, game.get("home_team", ""), game.get("away_team", ""),
                     game.get("kickoff") or game.get("date") or "",
                     game.get("league") or "", game.get("market") or "",
+                    event_id=(game.get("sportybet_event_id") or
+                              (game.get("sportybet_availability") or {}).get("event_id")),
                 )
             price = availability.get("sportybet_odds")
             if price and availability.get("sportybet_available"):
@@ -940,7 +1064,9 @@ def _revalidate_games(games: list, board: dict) -> tuple[list, list]:
         availability = availability_for(
             board, game.get("home_team", ""), game.get("away_team", ""),
             game.get("kickoff") or game.get("date") or "",
-            game.get("league") or "", game.get("market") or "")
+            game.get("league") or "", game.get("market") or "",
+            event_id=(game.get("sportybet_event_id") or
+                      (game.get("sportybet_availability") or {}).get("event_id")))
         game["sportybet_availability"] = availability
         game["bookable"] = bool(availability.get("sportybet_available"))
         if game["bookable"]:
@@ -1046,6 +1172,25 @@ def _select_replacements(available: list, candidates: list,
 
 def book_card(publish_date: str, accumulators: dict,
               force: bool = False) -> dict:
+    """Serialize tier refreshes within this worker to avoid duplicate codes."""
+    with _TIER_BOOKING_LOCK:
+        return _book_card_unlocked(publish_date, accumulators, force)
+
+
+def _booking_recheck_due(record: dict, now: datetime | None = None) -> bool:
+    current = now or datetime.now(timezone.utc)
+    raw = record.get("checked_at") or record.get("priced_at")
+    try:
+        checked = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    return (current - checked).total_seconds() >= BOOKING_RECHECK_SECONDS
+
+
+def _book_card_unlocked(publish_date: str, accumulators: dict,
+                        force: bool = False) -> dict:
     """Book every tier on the day's card. Idempotent.
 
     A tier already holding a valid code is left alone, so this can be re-run
@@ -1111,8 +1256,32 @@ def book_card(publish_date: str, accumulators: dict,
         # A held code is reused only while it still describes this tier. If the
         # tier was extended or rebuilt since, the old code is for a different
         # slip and has to be replaced rather than skipped over.
-        prior_checked = booking_lifecycle(prior, games)
-        if prior_checked and prior_checked.get("actionable") and not force:
+        prior_checked = booking_lifecycle(
+            prior, games, allow_partial_singles=(tier == "over_1_5"))
+        reusable = bool(prior_checked and prior_checked.get("actionable")
+                        and not force)
+        if reusable and _booking_recheck_due(prior):
+            # A live board and readback, not the existence of an old code,
+            # decide whether this edition is still placeable. The official
+            # tier games remain the immutable source of historical truth.
+            booked_games = prior.get("final_booked_legs") or games
+            still_bookable, removed = _revalidate_games(booked_games, board)
+            selections, unmapped = selections_for(still_bookable, board)
+            if removed or unmapped or len(selections) != len(booked_games):
+                reusable = False
+            else:
+                valid, reason, actual_odds = validate_code_details(
+                    prior["share_code"], selections)
+                reusable = bool(valid)
+                if reusable:
+                    prior["checked_at"] = datetime.now(timezone.utc).isoformat()
+                    if actual_odds is not None:
+                        prior["actual_sportybet_odds"] = actual_odds
+                    _store(publish_date, tier, prior)
+                else:
+                    logger.info("Booking recheck failed tier=%s reason=%s",
+                                tier, str(reason)[:80])
+        if reusable:
             report["skipped"].append(f"{tier}: {prior.get('share_code')}")
             if tier != "over_1_5":
                 claimed_replacements.update(
@@ -1197,6 +1366,41 @@ def book_card(publish_date: str, accumulators: dict,
         f"bookings {publish_date}: {len(report['booked'])} booked, "
         f"{len(report['skipped'])} already held, {len(report['failed'])} failed")
     return report
+
+
+def refresh_due_bookings() -> dict:
+    """Background-only refresh of today's mutable booking editions.
+
+    The official card is read from persistence. No public GET and no
+    prediction pipeline is involved; book_card reuses the prepared, locked
+    qualified replacement snapshot already attached to that card.
+    """
+    from leagues.daily_feed import _publish_date, build_daily_accumulators
+
+    publish_date = _publish_date()
+    card = build_daily_accumulators(allow_generation=False) or {}
+    if card.get("date") != publish_date:
+        return {"status": "no_current_published_card", "date": publish_date}
+    accumulators = card.get("accumulators") or {}
+    existing = bookings_for(publish_date)
+    for tier, data in accumulators.items():
+        if tier.startswith("_") or not isinstance(data, dict):
+            continue
+        if not (data.get("games") or tier == "rollover"):
+            continue
+        prior = existing.get(tier)
+        if not prior or _booking_recheck_due(prior):
+            break
+        if data.get("games") and prior.get("status") == "active":
+            checked = booking_lifecycle(
+                prior, data["games"],
+                allow_partial_singles=(tier == "over_1_5"))
+            if not checked or not checked.get("actionable"):
+                break
+    else:
+        return {"status": "fresh", "date": publish_date}
+    report = book_card(publish_date, accumulators)
+    return {"status": "refreshed", **report}
 
 
 def finalize_prepublication_card(publish_date: str,

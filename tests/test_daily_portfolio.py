@@ -48,7 +48,7 @@ def test_daily_products_are_built_independently_before_diversification(monkeypat
     monkeypatch.setattr("leagues.engine.run_pipeline", lambda **_: (picks, fixtures))
     monkeypatch.setattr(daily_feed, "_publish_date", lambda: target_date)
     monkeypatch.setattr(daily_feed, "_load_locked", lambda _: None)
-    monkeypatch.setattr(daily_feed, "_build_rollover", lambda *_: {
+    monkeypatch.setattr(daily_feed, "_build_rollover", lambda *_, **kw: {
         "selected": False, "games": [], "chain": [], "chain_length": 0,
     })
     monkeypatch.setattr(daily_feed, "_archive", lambda *_: None)
@@ -72,3 +72,34 @@ def test_daily_products_are_built_independently_before_diversification(monkeypat
         }
         for entry in diagnostics.values()
     )
+
+
+def test_daily_preview_uses_same_selector_without_publication_writes(monkeypatch):
+    target_date = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
+    kickoff = f"{target_date}T18:00:00Z"
+    picks = [_pick(index, kickoff) for index in range(12)]
+    fixtures = [pick["_fixture"] for pick in picks]
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("preview attempted publication or provider I/O")
+
+    monkeypatch.setattr("leagues.engine.run_pipeline", forbidden)
+    monkeypatch.setattr(daily_feed, "_load_locked", forbidden)
+    monkeypatch.setattr(daily_feed, "_archive", forbidden)
+    monkeypatch.setattr("leagues.picks_db.save_card", forbidden)
+    monkeypatch.setattr("leagues.decision_archive.record_daily", forbidden)
+    monkeypatch.setattr("leagues.rollover_db.load_chain", forbidden)
+    monkeypatch.setattr("leagues.rollover_db.append_day", forbidden)
+    old_cache = dict(daily_feed._accum_cache)
+    try:
+        result = daily_feed.build_daily_accumulators(preview={
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "target_wat_date": target_date,
+            "picks": picks, "fixtures": fixtures,
+        })
+        assert result["accumulators"]["2_odds"]["selected"]
+        assert result["locked"] is False
+        assert daily_feed._accum_cache == old_cache
+    finally:
+        daily_feed._accum_cache.clear()
+        daily_feed._accum_cache.update(old_cache)

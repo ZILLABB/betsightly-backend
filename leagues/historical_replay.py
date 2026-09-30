@@ -19,14 +19,9 @@ import pandas as pd
 
 from leagues.base_rates import GLOBAL_DEFAULTS, MIN_SAMPLE, SHRINKAGE_K
 from leagues.predictor import predict
+from leagues.market_registry import MARKETS as MARKET_REGISTRY
 
-MARKETS = (
-    "home_win", "draw", "away_win", "home_or_draw", "home_or_away",
-    "away_or_draw", "dnb_home", "dnb_away", "over_1_5", "over_2_5",
-    "over_3_5", "under_1_5", "under_2_5", "under_3_5", "under_4_5",
-    "home_over_0_5", "away_over_0_5", "home_over_1_5",
-    "away_over_1_5", "btts_yes", "btts_no",
-)
+MARKETS = tuple(key for key, spec in MARKET_REGISTRY.items() if spec.replay)
 BUCKETS = ((0, .5), (.5, .55), (.55, .6), (.6, .65), (.65, .7),
            (.7, .75), (.75, .8), (.8, .85), (.85, .9), (.9, 1.00001))
 
@@ -71,9 +66,14 @@ def settle_markets(home: int, away: int) -> dict[str, int | None]:
         "over_1_5": int(total >= 2), "over_2_5": int(total >= 3),
         "over_3_5": int(total >= 4), "under_1_5": int(total <= 1),
         "under_2_5": int(total <= 2), "under_3_5": int(total <= 3),
-        "under_4_5": int(total <= 4), "home_over_0_5": int(home >= 1),
+        "under_4_5": int(total <= 4), "over_4_5": int(total >= 5),
+        "home_over_0_5": int(home >= 1),
         "away_over_0_5": int(away >= 1), "home_over_1_5": int(home >= 2),
         "away_over_1_5": int(away >= 2),
+        "home_under_0_5": int(home == 0),
+        "home_under_1_5": int(home <= 1),
+        "away_under_0_5": int(away == 0),
+        "away_under_1_5": int(away <= 1),
         "btts_yes": int(home >= 1 and away >= 1),
         "btts_no": int(home == 0 or away == 0),
     }
@@ -204,7 +204,8 @@ def replay(rows: list[dict], max_matches: int | None = None) -> dict:
             base=_rates(leagues[league]) if len(leagues[league])>=MIN_SAMPLE else _rates(global_history); fallbacks+=len(leagues[league])<MIN_SAMPLE
             odds={"implied":one,"implied_over":two[0] if two else None,"implied_under":two[1] if two else None,"ou_line":2.5}
             result=predict({"odds":odds},base,elo_probs=None); outcomes=settle_markets(row["home_score"],row["away_score"]); predictions+=1
-            for market,p in result["probabilities"].items():
+            for market,p in {**result["probabilities"],
+                             **result.get("shadow_probabilities", {})}.items():
                 y=outcomes[market]
                 if y is None:continue
                 bp=(one or {}).get(market)

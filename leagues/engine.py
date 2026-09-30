@@ -17,6 +17,7 @@ league is fetched in one ranged request.
 """
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -106,6 +107,7 @@ def _covering_entry(days_ahead: int, now_ts: float,
     return max(
         valid,
         key=lambda item: (
+            now_ts - item["ts"] < _TTL,
             bool((item["metadata"].get("provider") or {}).get(
                 "complete", True
             )),
@@ -150,6 +152,11 @@ def prepared_board_status(days_ahead: int = 7) -> dict:
     """
     now = time.time()
     entry = _covering_entry(days_ahead, now, allow_stale=True)
+    return _status_for_entry(entry, days_ahead, now)
+
+
+def _status_for_entry(entry: dict | None, days_ahead: int, now: float) -> dict:
+    """Describe the exact entry whose evaluated picks a caller receives."""
     if not entry:
         return {"ready": False, "requested_days": days_ahead}
     provider = entry["metadata"].get("provider") or {}
@@ -192,8 +199,14 @@ def prepared_pipeline(days_ahead: int = 7) -> tuple[list[dict], list[dict]]:
     says it is ready. Normal pipeline calls still require complete provider
     coverage and therefore retry partial ESPN caches on scheduled refreshes.
     """
+    picks, fixtures, _ = prepared_board(days_ahead)
+    return picks, fixtures
+
+
+def prepared_board(days_ahead: int = 7) -> tuple[list[dict], list[dict], dict]:
+    """One no-network evaluated snapshot and its matching provenance."""
     now = time.time()
-    now_dt = datetime.now(timezone.utc)
+    now_dt = datetime.fromtimestamp(now, timezone.utc)
     # Interactive requests may safely keep using the last evaluated board
     # while its replacement is prepared. Kickoff filtering below removes games
     # that have since started; selection policy and bookability are re-applied.
@@ -201,8 +214,9 @@ def prepared_pipeline(days_ahead: int = 7) -> tuple[list[dict], list[dict]]:
         days_ahead, now, require_complete=False, allow_stale=True,
     )
     if not entry:
-        return [], []
-    return _filter_cached(entry, days_ahead, now_dt)
+        return [], [], _status_for_entry(None, days_ahead, now)
+    picks, fixtures = _filter_cached(entry, days_ahead, now_dt)
+    return picks, fixtures, _status_for_entry(entry, days_ahead, now)
 
 
 def start_prepared_board_refresh(days_ahead: int = 7,
@@ -227,6 +241,43 @@ def start_prepared_board_refresh(days_ahead: int = 7,
     threading.Thread(
         target=_work, daemon=True, name="weekly-board-prewarm"
     ).start()
+    return True
+
+
+_HISTORY_PREWARM_LOCK = threading.Lock()
+_HISTORY_PREWARMING = False
+
+
+def start_history_prewarm() -> bool:
+    """Refresh historical inputs off the publication and request paths.
+
+    Each artifact has a filesystem process claim. This is not a distributed
+    lease across separate Render instances; staging must verify topology.
+    """
+    global _HISTORY_PREWARMING
+    with _HISTORY_PREWARM_LOCK:
+        if _HISTORY_PREWARMING:
+            return False
+        _HISTORY_PREWARMING = True
+
+    def _work():
+        global _HISTORY_PREWARMING
+        try:
+            from leagues.base_rates import get_base_rates
+            from leagues.team_history import load
+            get_base_rates()
+            load()
+            from leagues.history_readiness import status
+            if status()["usable"] and not prepared_board_status(days_ahead=7).get("ready"):
+                start_prepared_board_refresh(days_ahead=7, force=False)
+        except Exception as exc:
+            logger.warning("history prewarm failed: %s", exc, exc_info=True)
+        finally:
+            with _HISTORY_PREWARM_LOCK:
+                _HISTORY_PREWARMING = False
+
+    threading.Thread(target=_work, daemon=True,
+                     name="history-prewarm").start()
     return True
 
 
@@ -255,11 +306,30 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
                 days_ahead, now, require_complete=True)):
             return _filter_cached(cached, days_ahead, now_dt)
 
-        return _build_pipeline(days_ahead, force, now, now_dt)
+        from utils.runtime_metrics import log_runtime_memory
+        started = time.perf_counter()
+        log_runtime_memory("prediction_board_start", horizon=days_ahead,
+                           forced=force)
+        try:
+            picks, fixtures = _build_pipeline(days_ahead, force, now, now_dt)
+        except Exception:
+            log_runtime_memory("prediction_board_error", level=logging.ERROR,
+                               horizon=days_ahead, forced=force,
+                               elapsed_ms=round((time.perf_counter() - started) * 1000))
+            raise
+        log_runtime_memory("prediction_board_end", horizon=days_ahead,
+                           forced=force, fixture_count=len(fixtures),
+                           pick_count=len(picks),
+                           elapsed_ms=round((time.perf_counter() - started) * 1000))
+        return picks, fixtures
 
 
 def _build_pipeline(days_ahead: int, force: bool, now: float,
                     now_dt: datetime) -> tuple[list[dict], list[dict]]:
+    from leagues.history_readiness import HistoryNotReady, status
+    if not status()["usable"] and os.getenv(
+            "ENVIRONMENT", "").lower() in {"production", "staging"}:
+        raise HistoryNotReady("historical evidence is not ready")
     from leagues.espn_source import (
         ESPN_CLUB_LEAGUES, cache_metadata as espn_cache_metadata,
         get_fixtures,
@@ -283,7 +353,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     except Exception as e:
         logger.warning(f"SportyBet pricing unavailable: {e}")
 
-    cached_rates = get_base_rates(ESPN_CLUB_LEAGUES)
+    # Requests and the 08:00 publication path only consume completed history.
+    # Cold ESPN refresh runs independently in start_history_prewarm().
+    cached_rates = get_base_rates(ESPN_CLUB_LEAGUES, allow_refresh=False)
     try:
         from leagues.elo_engine import get_ratings
         ratings = get_ratings(ESPN_CLUB_LEAGUES)
@@ -298,7 +370,8 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     # on each pick and evaluated against results, and does not move a published
     # number. Built once per run because the history index is a 15s fetch.
     try:
-        history = HistoryIndex()
+        from leagues.team_history import load as load_team_history
+        history = HistoryIndex(load_team_history(allow_refresh=False))
     except Exception as e:
         logger.warning(f"team history unavailable, ML second opinion off: {e}")
         history = None
@@ -314,6 +387,7 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         if elo:
             with_elo += 1
         model = predict(fx, base, elo)
+        model["elo_probabilities"] = elo
         if history is not None:
             try:
                 model["ml"] = ml_models.predict_fixture(fx, history)
@@ -355,9 +429,7 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     return all_picks, fixtures
 
 
-def picks_for_date(date_str: str, all_picks: list[dict] | None = None) -> list[dict]:
-    """Picks whose fixture kicks off on the WAT calendar `date_str`."""
-    if all_picks is None:
-        all_picks, _ = run_pipeline()
+def picks_for_date(date_str: str, all_picks: list[dict]) -> list[dict]:
+    """Filter an explicit evaluated board by WAT day; never fetch implicitly."""
     return [p for p in all_picks
             if kickoff_wat_date(p["_fixture"].get("commence_time")) == date_str]

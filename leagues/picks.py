@@ -21,6 +21,9 @@ estimate reflects what is actually obtainable.
 import hashlib
 import logging
 from datetime import datetime, timezone
+from leagues.market_registry import (MARKET_LABELS, MARKET_GROUP,
+                                     CALIBRATION_GROUP, REAL_ODDS_KEY,
+                                     MARKETS as MARKET_REGISTRY)
 
 logger = logging.getLogger(__name__)
 
@@ -53,162 +56,6 @@ ESTIMATE_MARGIN = 1.06
 # A model measured at roughly 5% skill on match_result and none on goals does
 # not find ten-percent edges at volume.
 MAX_CREDIBLE_EV = 1.10
-
-MARKET_LABELS = {
-    "home_win": "{home} Win",
-    "away_win": "{away} Win",
-    "draw": "Draw",
-    "home_or_draw": "{home} or Draw",
-    "away_or_draw": "{away} or Draw",
-    "home_or_away": "{home} or {away}",
-    "over_1_5": "Over 1.5 Goals",
-    "over_2_5": "Over 2.5 Goals",
-    "over_3_5": "Over 3.5 Goals",
-    "under_1_5": "Under 1.5 Goals",
-    "under_2_5": "Under 2.5 Goals",
-    "under_3_5": "Under 3.5 Goals",
-    "under_4_5": "Under 4.5 Goals",
-    "dnb_home": "{home} (Draw No Bet)",
-    "dnb_away": "{away} (Draw No Bet)",
-    "home_over_0_5": "{home} to Score",
-    "home_over_1_5": "{home} Over 1.5 Goals",
-    "away_over_0_5": "{away} to Score",
-    "away_over_1_5": "{away} Over 1.5 Goals",
-    "btts_yes": "Both Teams to Score",
-    "btts_no": "Both Teams to Score - No",
-}
-
-# Used for slip diversity: no slip should rest on one kind of market being
-# right. Overs and unders belong together here — they are the same opinion
-# about goals, so a slip holding both is not diversified.
-MARKET_GROUP = {
-    "home_win": "match_result",
-    "away_win": "match_result",
-    "draw": "match_result",
-    "home_or_draw": "double_chance",
-    "away_or_draw": "double_chance",
-    "home_or_away": "double_chance",
-    "over_1_5": "goals",
-    "over_2_5": "goals",
-    "over_3_5": "goals",
-    "under_1_5": "goals",
-    "under_2_5": "goals",
-    "under_3_5": "goals",
-    "under_4_5": "goals",
-    "btts_yes": "btts",
-    "btts_no": "btts",
-    # Separate groups for MARKET_CAP, which exists to stop a slip riding on
-    # one market being right. Team totals are the diversity the board was
-    # missing: on a full Saturday only nine match_result picks cleared their
-    # floor against 170 goals picks, so every slip was capped at three legs
-    # of anything useful and could not pass ~41x.
-    "home_over_0_5": "team_goals_home",
-    "home_over_1_5": "team_goals_home",
-    "away_over_0_5": "team_goals_away",
-    "away_over_1_5": "team_goals_away",
-    "dnb_home": "dnb",
-    "dnb_away": "dnb",
-}
-
-# Used for calibration, and deliberately *not* the same split.
-#
-# A calibration group must contain markets whose error points the same way. If
-# the goals model runs hot, every "over" is over-stated and every "under" is
-# under-stated by the same amount — opposite directions. Grouping them
-# together fits one shift to the average and then applies it to both, which
-# corrects the overs and pushes the unders further from the truth. Measured:
-#
-#     over_1_5   n=85   promised 73.9%   actual 67.1%   (+6.8, too high)
-#     over_2_5   n= 4   promised 57.7%   actual 50.0%   (+7.7, too high)
-#     under_2_5  n= 7   promised 57.0%   actual 71.4%  (-14.5, too low)
-#
-# The unders were being dragged down by a correction fitted on the overs.
-# Same argument for both-teams-to-score, which is also a yes/no pair.
-CALIBRATION_GROUP = {
-    "home_win": "match_result",
-    "away_win": "match_result",
-    "draw": "match_result",
-    "home_or_draw": "double_chance",
-    "away_or_draw": "double_chance",
-    "home_or_away": "double_chance",
-    # One cell per goal line, not one per direction.
-    #
-    # These were lumped as goals_over and goals_under, which was fine while
-    # over_1_5 was the only line published in any volume — 228 of the 241
-    # settled goals legs are over_1_5, so the group's correction was really
-    # that market's correction wearing a wider name.
-    #
-    # It stopped being fine the moment under_3_5 and under_4_5 started
-    # publishing. The whole under record is 13 settled legs, every one of them
-    # under_2_5, sitting around 55% — and that shift was being applied to
-    # under_4_5 picks sitting around 85%. A logit correction fitted on one end
-    # of the range has no business steering the other, and the two are not
-    # even the same bet: under 4.5 comes in four times in five, under 2.5
-    # rather more like a coin.
-    #
-    # Split, each line earns its own record. Anything under MIN_EVIDENCE_LEGS
-    # falls back to the blanket floor and the global shift, which is the right
-    # answer for a market that has never settled a leg.
-    "over_1_5": "goals_over_1_5",
-    "over_2_5": "goals_over_2_5",
-    "over_3_5": "goals_over_3_5",
-    "under_1_5": "goals_under_1_5",
-    "under_2_5": "goals_under_2_5",
-    "under_3_5": "goals_under_3_5",
-    "under_4_5": "goals_under_4_5",
-    "btts_yes": "btts_yes",
-    "btts_no": "btts_no",
-    # Tracked apart from the totals they are derived from. A team-total pick
-    # is a different claim from a match-total one — "the home side scores"
-    # can be right on a match that finishes 1-0 under every goals line — so
-    # folding them into goals_over would average two different accuracies
-    # into one correction and misprice both.
-    "home_over_0_5": "team_goals_home",
-    "home_over_1_5": "team_goals_home",
-    "away_over_0_5": "team_goals_away",
-    "away_over_1_5": "team_goals_away",
-    # Draw no bet is the 1X2 opinion with the draw removed, and it is right
-    # or wrong on different matches from a straight win pick, so it earns its
-    # own record rather than inheriting match_result's.
-    "dnb_home": "dnb",
-    "dnb_away": "dnb",
-}
-
-# Markets a book gives us a real price for, mapped to the odds key.
-#
-# This was five markets, because ESPN's feed carries a 1X2 moneyline and a
-# single over/under line and nothing else. Everything outside that list fell
-# back to an estimated price — which is our own probability with a flat 6%
-# added, so it can never be mispriced in our favour and can never disagree
-# with us. Sixteen of twenty-nine published legs were priced that way.
-#
-# SportyBet quotes all thirteen, so they can all carry a real price now. The
-# ones that changed — over_1_5, both BTTS sides and all three double chance
-# selections — are exactly the markets the card leans on most.
-REAL_ODDS_KEY = {
-    "home_win": "home_win",
-    "away_win": "away_win",
-    "draw": "draw",
-    "home_or_draw": "home_or_draw",
-    "away_or_draw": "away_or_draw",
-    "home_or_away": "home_or_away",
-    "over_1_5": "over_1_5",
-    "over_2_5": "over_2_5",
-    "over_3_5": "over_3_5",
-    "under_1_5": "under_1_5",
-    "under_2_5": "under_2_5",
-    "under_3_5": "under_3_5",
-    "under_4_5": "under_4_5",
-    "dnb_home": "dnb_home",
-    "dnb_away": "dnb_away",
-    "home_over_0_5": "home_over_0_5",
-    "home_over_1_5": "home_over_1_5",
-    "away_over_0_5": "away_over_0_5",
-    "away_over_1_5": "away_over_1_5",
-    "btts_yes": "btts_yes",
-    "btts_no": "btts_no",
-}
-
 
 def _ml_for(model: dict, market: str) -> float | None:
     """The trained ensemble's probability for this market, if it has one."""
@@ -394,6 +241,8 @@ def build_picks(
 
     picks = []
     for market, raw_prob in raw_probs.items():
+        if not MARKET_REGISTRY[market].candidate_generation:
+            continue
         calibration_group = CALIBRATION_GROUP[market]
         calibration_cell = (fit.get("groups") or {}).get(calibration_group) or {}
         calibration_sample = int(calibration_cell.get("n", 0))

@@ -8,8 +8,8 @@ away-only splits, previous meetings — and ESPN hands us none of that directly.
 The scoreboard carries a five-character form string ("WWLLD") and nothing about
 goals, so the history has to be assembled from finished matches.
 
-Same source and the same ranged-fetch trick as base_rates: one request per
-league covering the whole window, run in parallel, cached on disk. The window
+Same source and the same monthly-fetch path as base_rates, run in parallel and
+cached on disk. The window
 is longer here because a team needs its own last ten matches, not a league
 average, and a side playing weekly needs about three months to accumulate them.
 
@@ -27,7 +27,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
 from leagues.cache_paths import cache_path
 from leagues.competition_registry import competition_for, regulation_score
 
@@ -36,7 +35,7 @@ logger = logging.getLogger(__name__)
 CACHE_PATH = cache_path(Path(__file__).parent / "data" / "team_history.json")
 CACHE_TTL = 12 * 3600
 LOOKBACK_DAYS = 120
-SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard"
+HISTORY_CACHE_SCHEMA = 2  # ESPN monthly queries; schema 1 used rejected date ranges
 
 # Neutral fallbacks, used for a team with no recorded history. These are the
 # global averages measured in base_rates, so an unknown side looks like an
@@ -48,89 +47,109 @@ NEUTRAL = {
 }
 
 
-def _fetch_finished(slug: str, start: str, end: str) -> list[dict]:
-    """Finished matches for a league over a date range, in one request."""
-    try:
-        resp = requests.get(SCOREBOARD.format(slug=slug),
-                            params={"dates": f"{start}-{end}", "limit": 900},
-                            timeout=25)
-        if resp.status_code != 200:
-            return []
-        events = resp.json().get("events", []) or []
-    except Exception:
-        return []
-
-    out = []
-    for ev in events:
-        comp = (ev.get("competitions") or [{}])[0]
-        if not comp.get("status", {}).get("type", {}).get("completed"):
-            continue
-        teams = comp.get("competitors", []) or []
-        home = next((t for t in teams if t.get("homeAway") == "home"), None)
-        away = next((t for t in teams if t.get("homeAway") == "away"), None)
-        if not home or not away:
-            continue
-        score = regulation_score(comp)
-        if not score:
-            continue
-        hs, as_ = score["home_score"], score["away_score"]
-        meta = competition_for(slug)
-        out.append({
-            "date": ev.get("date", "")[:10],
-            "home": (home.get("team") or {}).get("displayName", ""),
-            "away": (away.get("team") or {}).get("displayName", ""),
-            "hs": hs, "as": as_,
-            "team_type": meta.team_type if meta else "CLUB",
-        })
-    return out
+def _fetch_finished(slug: str, start: str, end: str, *,
+                    as_of: datetime | None = None) -> list[dict]:
+    """Finished matches for a league over supported monthly queries."""
+    from leagues.history_months import finished_matches
+    return [{key: row[key] for key in ("date", "home", "away", "hs", "as", "team_type")}
+            for row in finished_matches(slug, start, end, as_of=as_of)]
 
 
-def build(slugs: dict[str, str] | None = None) -> dict:
+def build(slugs: dict[str, str] | None = None, *,
+          as_of: datetime | None = None) -> dict:
     """Fetch and index results. Returns {"matches": [...], "built_at": ...}."""
     if slugs is None:
         from leagues.espn_source import ESPN_CLUB_LEAGUES
         slugs = ESPN_CLUB_LEAGUES
 
-    now = datetime.now(timezone.utc)
+    now = as_of or datetime.now(timezone.utc)
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("as_of must be timezone-aware")
+    now = now.astimezone(timezone.utc)
     start = (now - timedelta(days=LOOKBACK_DAYS)).strftime("%Y%m%d")
     end = now.strftime("%Y%m%d")
 
+    from leagues.espn_history_fetch import HistoryMonthUnavailable
     matches: list[dict] = []
+    failed_leagues = []
+    unavailable_leagues = []
     with ThreadPoolExecutor(max_workers=12) as pool:
-        futures = {pool.submit(_fetch_finished, s, start, end): s for s in slugs}
+        futures = {pool.submit(_fetch_finished, s, start, end,
+                               as_of=as_of): s for s in slugs}
         for fut in as_completed(futures):
             try:
                 matches.extend(fut.result())
+            except HistoryMonthUnavailable as exc:
+                (unavailable_leagues if exc.permanent else failed_leagues).append(
+                    futures[fut])
+                continue
             except Exception:
+                failed_leagues.append(futures[fut])
                 continue
 
     matches.sort(key=lambda m: m["date"])
     logger.info(f"team history: {len(matches)} finished matches over {LOOKBACK_DAYS} days")
-    return {"matches": matches, "built_at": now.isoformat()}
+    return {"matches": matches, "built_at": now.isoformat(),
+            "failed_leagues": sorted(failed_leagues),
+            "unavailable_leagues": sorted(unavailable_leagues),
+            "_cache_schema": HISTORY_CACHE_SCHEMA}
 
 
-def load(force: bool = False) -> dict:
+def load(force: bool = False, *, as_of: datetime | None = None,
+         allow_refresh: bool = True) -> dict:
     """Cached history, rebuilt when stale."""
-    if not force and CACHE_PATH.exists():
+    from leagues.history_cache_io import (local_refresh_claim, read_complete,
+                                          replace_complete)
+    from leagues import shared_history_store
+    complete = read_complete(CACHE_PATH, HISTORY_CACHE_SCHEMA,
+                             required="matches") if as_of is None else None
+    if as_of is None and shared_history_store.production_shared():
         try:
-            if time.time() - CACHE_PATH.stat().st_mtime < CACHE_TTL:
-                return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+            complete = (shared_history_store.read("team_history", HISTORY_CACHE_SCHEMA,
+                                                  required="matches") or complete)
+        except Exception as exc:
+            logger.warning("Shared team-history cache unavailable: %s", exc)
+    if as_of is None and not force and complete:
+        try:
+            built = complete.get("built_at")
+            age = (time.time() - datetime.fromisoformat(built).timestamp()
+                   if built else time.time() - CACHE_PATH.stat().st_mtime)
+            if age < CACHE_TTL:
+                return complete
         except Exception:
             pass
-    try:
-        data = build()
-        if data.get("matches"):
-            CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    if as_of is None and not allow_refresh:
+        return complete or {"matches": []}
+
+    def refresh(owner=None):
+        data = build(as_of=as_of)
+        if data.get("failed_leagues") and as_of is None:
+            logger.warning("Team-history refresh incomplete: %s leagues failed",
+                           len(data["failed_leagues"]))
+            return complete or data
+        if data.get("matches") and as_of is None:
+            if owner:
+                if not shared_history_store.promote(
+                        "team_history", HISTORY_CACHE_SCHEMA, data, owner,
+                        required="matches"):
+                    return complete or {"matches": []}
+            replace_complete(CACHE_PATH, data, HISTORY_CACHE_SCHEMA,
+                             required="matches")
         return data
+
+    try:
+        if as_of is not None:
+            return refresh()
+        if shared_history_store.production_shared():
+            with shared_history_store.claim("team_history", HISTORY_CACHE_SCHEMA) as owner:
+                return refresh(owner) if owner else complete or {"matches": []}
+        with local_refresh_claim(CACHE_PATH) as acquired:
+            if not acquired:
+                return complete or {"matches": []}
+            return refresh()
     except Exception as e:
         logger.warning(f"team history build failed: {e}")
-        if CACHE_PATH.exists():
-            try:
-                return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-        return {"matches": []}
+        return complete or {"matches": []}
 
 
 class HistoryIndex:

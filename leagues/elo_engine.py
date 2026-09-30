@@ -158,6 +158,15 @@ def build_ratings(slugs: dict[str, str]) -> dict:
     return out
 
 
+def cached_ratings() -> dict:
+    """Read existing ELO evidence without an ESPN refresh (diagnostic reads)."""
+    try:
+        value = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
 def get_ratings(slugs: dict[str, str] | None = None, force: bool = False) -> dict:
     """Cached ESPN-derived ELO, rebuilt every CACHE_TTL."""
     if not force and CACHE_PATH.exists():

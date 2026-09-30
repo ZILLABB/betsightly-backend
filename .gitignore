@@ -75,8 +75,8 @@ leagues/data/team_history.json
 leagues/data/calibration_fit.json
 leagues/data/shopped_odds.json
 leagues/data/odds_budget.json
-
 # Rebuildable historical warehouse outputs. Keep the ingestion/normalization
 # code in git; raw/normalized datasets are generated locally or in data jobs.
 data/historical/raw/
 data/historical/normalized/
+leagues/data/history_months/

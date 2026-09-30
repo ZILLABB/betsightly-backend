@@ -27,7 +27,7 @@ def event(fixture_id, kickoff):
     }
 
 
-def setup(monkeypatch, tmp_path, http):
+def prepare_source(monkeypatch, tmp_path, http):
     monkeypatch.setattr(espn_source, "CACHE_PATH", tmp_path / "espn.json")
     monkeypatch.setattr(espn_source, "ESPN_CLUB_LEAGUES", {"eng.1": "Premier League"})
     monkeypatch.setattr(espn_source, "tournament_context", lambda *args: {})
@@ -42,7 +42,7 @@ def test_same_month_uses_one_monthly_request(monkeypatch, tmp_path):
         calls.append(params["dates"])
         assert params["limit"] == 500
         return FakeResponse(events=[event("sep", "2026-09-19T14:00:00Z")])
-    setup(monkeypatch, tmp_path, get)
+    prepare_source(monkeypatch, tmp_path, get)
     fixtures = espn_source.get_fixtures(
         days_ahead=7, now=datetime(2026, 9, 17, 12, tzinfo=timezone.utc))
     assert calls == ["202609"]
@@ -61,7 +61,7 @@ def test_cross_month_filters_deduplicates_and_marks_complete(monkeypatch, tmp_pa
             return FakeResponse(events=[event("sep", "2026-09-30T14:00:00Z"), overlap,
                                         event("old", "2026-09-01T14:00:00Z")])
         return FakeResponse(events=[overlap, event("late", "2026-10-20T14:00:00Z")])
-    setup(monkeypatch, tmp_path, get)
+    prepare_source(monkeypatch, tmp_path, get)
     fixtures = espn_source.get_fixtures(
         days_ahead=7, now=datetime(2026, 9, 29, 12, tzinfo=timezone.utc))
     assert calls == ["202609", "202610"]
@@ -79,7 +79,7 @@ def test_one_failed_month_is_not_reported_complete(monkeypatch, tmp_path):
         if month == "202610":
             return FakeResponse(code=503)
         return FakeResponse(events=[event("sep", "2026-09-30T14:00:00Z")])
-    setup(monkeypatch, tmp_path, get)
+    prepare_source(monkeypatch, tmp_path, get)
     fixtures = espn_source.get_fixtures(
         days_ahead=7, now=datetime(2026, 9, 29, 12, tzinfo=timezone.utc))
     assert [f["event_id"] for f in fixtures] == ["sep"]
@@ -94,7 +94,7 @@ def test_valid_empty_month_is_success(monkeypatch, tmp_path):
     def get(url, params, timeout):
         calls.append(params["dates"])
         return FakeResponse(events=[])
-    setup(monkeypatch, tmp_path, get)
+    prepare_source(monkeypatch, tmp_path, get)
     fixtures = espn_source.get_fixtures(
         days_ahead=7, now=datetime(2026, 9, 17, 12, tzinfo=timezone.utc))
     assert fixtures == []
