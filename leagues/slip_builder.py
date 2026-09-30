@@ -337,7 +337,11 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False,
           allow_pipeline_fallback: bool = False) -> list:
     """Every Builder-qualified pick within the requested horizon."""
     from leagues.calibrator import fit_calibration
-    from leagues.engine import prepared_pipeline, run_pipeline
+    from leagues.engine import (
+        prepared_builder_supplemental_picks,
+        prepared_pipeline,
+        run_pipeline,
+    )
     from leagues.picks import (
         MIN_CANDIDATE_CONFIDENCE,
         MIN_PUBLISHABLE_CONFIDENCE,
@@ -377,6 +381,14 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False,
                 market_floor_overrides=BUILDER_MARKET_FLOORS,
             )
         )
+
+    # Batch 6I: add only the exact fixture/market pairs approved by 6H.
+    # Never rebuild every market from supplemental fixtures here.
+    picks.extend(
+        prepared_builder_supplemental_picks(
+            days_ahead=POOL_DAYS
+        )
+    )
 
     from leagues.availability import kickoff_lifecycle
 

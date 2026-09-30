@@ -31,12 +31,19 @@ from leagues.picks import (
     competition_evidence_allows_safe_tier,
 )
 from leagues.sportybet_shadow_gate import (
+    FEATURE_FLAG,
+    _truthy,
+    candidate_gate,
     evaluate_staging_gate,
 )
 
 
 EVIDENCE_SNAPSHOT_ENV = (
     "SPORTYBET_SUPPLEMENTAL_EVIDENCE_SNAPSHOT_JSON"
+)
+
+BUILDER_MERGE_FLAG = (
+    "SPORTYBET_SUPPLEMENTAL_BUILDER_MERGE_ENABLED"
 )
 
 
@@ -454,3 +461,114 @@ def evaluate_evidence_snapshot_gate(
     })
 
     return report
+
+
+def staging_builder_merge_candidates(
+    picks: list[dict],
+    *,
+    board_complete: bool,
+    environment: str | None = None,
+    feature_flag: bool | None = None,
+    merge_flag: bool | None = None,
+    snapshot: dict | None = None,
+) -> tuple[list[dict], dict]:
+    """Return exact 6H-approved picks for the staging Builder only.
+
+    This is intentionally stricter than adding a supplemental fixture and
+    rebuilding all of its markets. Only the fixture/market pairs that pass the
+    evidence snapshot gate are returned. Predictions, daily tiers, settlement
+    and the official record never read this collection.
+    """
+    environment = str(
+        environment
+        if environment is not None
+        else os.getenv("ENVIRONMENT", "")
+    ).strip().casefold()
+
+    if feature_flag is None:
+        feature_flag = _truthy(os.getenv(FEATURE_FLAG, ""))
+
+    if merge_flag is None:
+        merge_flag = _truthy(os.getenv(BUILDER_MERGE_FLAG, ""))
+
+    snapshot = (
+        load_evidence_snapshot(snapshot)
+        if snapshot is not None
+        else load_evidence_snapshot()
+    )
+
+    report = {
+        "status": "blocked",
+        "environment": environment,
+        "review_feature_flag_enabled": bool(feature_flag),
+        "merge_feature_flag": BUILDER_MERGE_FLAG,
+        "merge_feature_flag_enabled": bool(merge_flag),
+        "board_complete": bool(board_complete),
+        "snapshot_configured": bool(snapshot),
+        "snapshot_version": snapshot.get("version") if snapshot else None,
+        "candidate_count": len(picks),
+        "eligible_candidate_count": 0,
+        "merge_executed": False,
+        "builder_pool_changed": False,
+        "prediction_pool_changed": False,
+        "publishing_changed": False,
+        "official_record_changed": False,
+        "production_merge_allowed": False,
+    }
+
+    if environment != "staging":
+        report["status"] = "not_applicable_outside_staging"
+        return [], report
+
+    if not feature_flag:
+        report["status"] = "review_feature_flag_off"
+        return [], report
+
+    if not merge_flag:
+        report["status"] = "builder_merge_flag_off"
+        return [], report
+
+    if not board_complete:
+        report["status"] = "sportybet_board_incomplete"
+        return [], report
+
+    if snapshot is None:
+        report["status"] = "evidence_snapshot_missing"
+        return [], report
+
+    eligible = []
+
+    for pick in picks:
+        clone = deepcopy(pick)
+
+        group, sample, snapshot_safe = _snapshot_evidence_for_pick(
+            pick,
+            snapshot,
+        )
+
+        clone["safe_tier_eligible"] = snapshot_safe
+        gate = candidate_gate(clone)
+
+        if not gate["eligible"]:
+            continue
+
+        clone["_staging_supplemental"] = True
+        clone["_staging_evidence_snapshot_version"] = snapshot.get("version")
+        clone["_staging_calibration_group"] = group
+        clone["_staging_aggregate_settled_sample"] = sample
+        clone["_staging_local_safe_tier_eligible"] = bool(
+            pick.get("safe_tier_eligible")
+        )
+
+        eligible.append(clone)
+
+    report.update({
+        "status": (
+            "ready_for_builder_merge"
+            if eligible
+            else "no_eligible_candidates"
+        ),
+        "eligible_candidate_count": len(eligible),
+    })
+
+    return eligible, report

@@ -121,11 +121,16 @@ def _covering_entry(days_ahead: int, now_ts: float,
 def _store_cache_entry(days_ahead: int, picks: list[dict],
                        fixtures: list[dict], now: float,
                        now_dt: datetime, provider: dict,
-                       decision_snapshot_id: str | None = None) -> None:
+                       decision_snapshot_id: str | None = None,
+                       builder_supplemental_picks: list[dict] | None = None,
+                       ) -> None:
     """Store one evaluated horizon; kept small so coverage rules are testable."""
     entry = {
         "picks": picks,
         "fixtures": fixtures,
+        "builder_supplemental_picks": list(
+            builder_supplemental_picks or []
+        ),
         "ts": now,
         "metadata": {
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -188,6 +193,9 @@ def _status_for_entry(entry: dict | None, days_ahead: int, now: float) -> dict:
         ),
         "raw_fixture_count": int(provider.get("fixture_count") or 0),
         "evaluated_fixture_count": len(entry.get("fixtures") or []),
+        "builder_supplemental_candidate_count": len(
+            entry.get("builder_supplemental_picks") or []
+        ),
         "refreshing": bool(_PREWARMING),
     }
 
@@ -201,6 +209,61 @@ def prepared_pipeline(days_ahead: int = 7) -> tuple[list[dict], list[dict]]:
     """
     picks, fixtures, _ = prepared_board(days_ahead)
     return picks, fixtures
+
+
+def prepared_builder_supplemental_picks(
+    days_ahead: int = 7,
+) -> list[dict]:
+    """Read staging-only supplemental picks without altering prepared_pipeline."""
+    now = time.time()
+    now_dt = datetime.fromtimestamp(
+        now,
+        timezone.utc,
+    )
+    end = now_dt + timedelta(
+        days=days_ahead
+    )
+
+    entry = _covering_entry(
+        days_ahead,
+        now,
+        require_complete=False,
+        allow_stale=True,
+    )
+
+    if not entry:
+        return []
+
+    out = []
+
+    for source in (
+        entry.get(
+            "builder_supplemental_picks"
+        )
+        or []
+    ):
+        fixture = source.get(
+            "_fixture"
+        ) or {}
+
+        kickoff = _parse_kickoff(
+            fixture.get(
+                "commence_time"
+            )
+        )
+
+        if (
+            kickoff is None
+            or kickoff < now_dt
+            or kickoff > end
+        ):
+            continue
+
+        out.append(
+            dict(source)
+        )
+
+    return out
 
 
 def prepared_board(days_ahead: int = 7) -> tuple[list[dict], list[dict], dict]:
@@ -464,6 +527,7 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     # SportyBet-only supplemental fixtures are modelled in isolation.
     # They never enter all_picks, fixtures, Builder, booking or settlement.
     sportybet_shadow_model = {}
+    sportybet_staging_builder_picks = []
 
     try:
         if (
@@ -485,6 +549,37 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
                     live_picks=all_picks,
                 )
             )
+
+            sportybet_staging_builder_picks = (
+                sportybet_shadow_model.pop(
+                    "_staging_builder_candidates",
+                    [],
+                )
+            )
+
+            merge_report = dict(
+                sportybet_shadow_model.get(
+                    "staging_builder_merge"
+                )
+                or {}
+            )
+
+            if sportybet_staging_builder_picks:
+                merge_report.update({
+                    "merge_executed": True,
+                    "builder_pool_changed": True,
+                    "merged_candidate_count": len(
+                        sportybet_staging_builder_picks
+                    ),
+                    "prediction_pool_changed": False,
+                    "publishing_changed": False,
+                    "official_record_changed": False,
+                    "production_merge_allowed": False,
+                })
+
+                sportybet_shadow_model[
+                    "staging_builder_merge"
+                ] = merge_report
 
     except Exception as e:
         logger.warning(
@@ -560,6 +655,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     _store_cache_entry(
         days_ahead, all_picks, fixtures, now, now_dt, provider,
         decision_snapshot_id=decision_snapshot_id,
+        builder_supplemental_picks=(
+            sportybet_staging_builder_picks
+        ),
     )
     return all_picks, fixtures
 
