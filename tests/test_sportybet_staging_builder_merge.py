@@ -1,6 +1,7 @@
 """Batch 6I staging-only SportyBet supplemental Builder merge."""
 from datetime import datetime, timedelta, timezone
 import time
+from pathlib import Path
 
 from leagues import engine
 from leagues.sportybet_shadow_evidence import (
@@ -178,3 +179,113 @@ def test_prepared_pipeline_does_not_expose_builder_supplemental(
     assert [pick["match_id"] for pick in builder_only] == [
         "sportybet-shadow:fixture-1"
     ]
+
+
+def test_persisted_restart_keeps_supplemental_builder_only(
+    monkeypatch,
+):
+    from leagues import prepared_board_store
+
+    now = datetime.now(timezone.utc)
+
+    normal_fixture = {
+        "match_id": "espn:persisted-normal",
+        "commence_time": (
+            now + timedelta(days=1)
+        ).isoformat(),
+    }
+
+    normal_pick = {
+        "match_id": "espn:persisted-normal",
+        "_fixture": normal_fixture,
+    }
+
+    supplemental = _pick()
+
+    entry = {
+        "picks": [normal_pick],
+        "fixtures": [normal_fixture],
+        "builder_supplemental_picks": [supplemental],
+        "ts": time.time(),
+        "metadata": {
+            "requested_days": 7,
+            "fixture_count": 1,
+            "provider": {
+                "complete": False,
+                "requested_league_count": 116,
+                "successful_league_count": 99,
+            },
+            "generated_at": now.isoformat(),
+            "coverage_start": now.isoformat(),
+            "coverage_end": (
+                now + timedelta(days=7)
+            ).isoformat(),
+            "decision_snapshot_id": "persisted-isolation-test",
+        },
+    }
+
+    monkeypatch.setattr(
+        engine,
+        "_CACHE",
+        {
+            "entries": {},
+            "healthy_entries": {},
+        },
+    )
+    monkeypatch.setattr(
+        engine,
+        "_PERSISTENCE_HYDRATED",
+        False,
+    )
+    monkeypatch.setattr(
+        prepared_board_store,
+        "enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        prepared_board_store,
+        "load_entries",
+        lambda: [{
+            "horizon_days": 7,
+            "slot": "latest",
+            "entry": entry,
+        }],
+    )
+
+    picks, fixtures, status = engine.prepared_board(7)
+    builder_only = engine.prepared_builder_supplemental_picks(7)
+
+    assert [pick["match_id"] for pick in picks] == [
+        "espn:persisted-normal"
+    ]
+    assert [fixture["match_id"] for fixture in fixtures] == [
+        "espn:persisted-normal"
+    ]
+    assert [pick["match_id"] for pick in builder_only] == [
+        "sportybet-shadow:fixture-1"
+    ]
+    assert status["board_source"] == "persistent_cache"
+
+
+def test_supplemental_reader_is_not_used_by_public_modules():
+    """Only engine + slip_builder may touch the Builder supplemental reader."""
+    leagues_dir = Path(__file__).resolve().parents[1] / "leagues"
+
+    allowed = {
+        "engine.py",
+        "slip_builder.py",
+    }
+
+    offenders = []
+
+    for path in leagues_dir.glob("*.py"):
+        if path.name in allowed:
+            continue
+
+        source = path.read_text(encoding="utf-8")
+
+        if "prepared_builder_supplemental_picks" in source:
+            offenders.append(path.name)
+
+    assert offenders == []
+

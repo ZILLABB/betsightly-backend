@@ -653,6 +653,8 @@ def _board_context(board: dict) -> dict:
             "board_age_seconds": prepared.get("age_seconds"),
             "board_degraded": bool(prepared.get("degraded")),
             "board_complete": bool(prepared.get("complete")),
+            "board_stale": bool(prepared.get("stale")),
+            "board_source": prepared.get("board_source"),
         })
     except Exception:
         pass
@@ -1220,8 +1222,40 @@ def generate_v2(options: dict) -> dict:
             "selection_diagnostics_v2": diagnostics,
             "board": _board_context(board),
         })
+        games = list(out.get("games") or [])
+        probabilities = []
+
+        for game in games:
+            value = (
+                game.get("selection_probability")
+                if game.get("selection_probability") is not None
+                else game.get("evidence_adjusted_probability")
+                if game.get("evidence_adjusted_probability") is not None
+                else game.get("confidence")
+            )
+            number = _number(value)
+            if number is not None:
+                probabilities.append(float(number))
+
+        if probabilities:
+            out.setdefault(
+                "average_probability",
+                round(
+                    sum(probabilities)
+                    / len(probabilities),
+                    6,
+                ),
+            )
+            out.setdefault(
+                "lowest_probability",
+                round(
+                    min(probabilities),
+                    6,
+                ),
+            )
+
         out["diversification"] = _diversification_metadata(
-            list(out.get("games") or []),
+            games,
             options,
             diversification_stage,
         )

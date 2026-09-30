@@ -106,6 +106,8 @@ def _wire(monkeypatch, picks):
             "age_seconds": 1,
             "degraded": False,
             "complete": True,
+            "stale": False,
+            "board_source": "persistent_cache",
         },
     )
     monkeypatch.setattr(
@@ -117,6 +119,126 @@ def _wire(monkeypatch, picks):
             "generated_at": "2099-01-01T00:00:00Z",
         },
     )
+
+
+def test_builder_context_surfaces_prepared_board_source(monkeypatch):
+    picks = [_pick(1)]
+    _wire(monkeypatch, picks)
+
+    result = builder_v2.generate_v2({
+        "mode": "strongest",
+        "max_games": 1,
+        "horizon": "7_days",
+    })
+
+    assert result["status"] == "success"
+    assert result["board"]["board_source"] == "persistent_cache"
+    assert result["board"]["board_stale"] is False
+
+
+def test_target_odds_normalizes_probability_telemetry(monkeypatch):
+    picks = [
+        _pick(1, probability=.80, odds=1.5),
+        _pick(2, probability=.74, odds=1.5),
+    ]
+    _wire(monkeypatch, picks)
+
+    from leagues import slip_builder
+
+    monkeypatch.setattr(
+        slip_builder,
+        "build_slip",
+        lambda target, **kwargs: {
+            "ok": True,
+            "result_status": "TARGET_REACHED",
+            "optimization_status": "OPTIMAL",
+            "picks": list(picks),
+            "odds": 2.25,
+            "legs": 2,
+            "hit_probability": .592,
+            "expected_return": 1.332,
+            "avg_confidence": .77,
+            "lowest_trust_grade": "A",
+        },
+    )
+
+    monkeypatch.setattr(
+        slip_builder,
+        "_public_result_from_build",
+        lambda target, horizon, built, board: {
+            "status": "success",
+            "target": target,
+            "odds": 2.25,
+            "achieved_odds": 2.25,
+            "legs": 2,
+            "lowest_trust_grade": "A",
+            "games": [
+                {
+                    "match_id": "m1",
+                    "selection_probability": .80,
+                },
+                {
+                    "match_id": "m2",
+                    "selection_probability": .74,
+                },
+            ],
+        },
+    )
+
+    result = builder_v2.generate_v2({
+        "mode": "target_odds",
+        "target_odds": 2,
+        "horizon": "7_days",
+    })
+
+    assert result["status"] == "success"
+    assert result["average_probability"] == .77
+    assert result["lowest_probability"] == .74
+
+
+def test_manual_selection_change_failures_never_expose_code(monkeypatch):
+    picks = [_pick(1)]
+    _wire(monkeypatch, picks)
+
+    from leagues import booking
+
+    categories = [
+        "FIXTURE_STARTED",
+        "KICKOFF_BUFFER",
+        "FIXTURE_MAPPING_FAILED",
+        "KICKOFF_MISMATCH",
+        "MARKET_NOT_FOUND",
+        "SELECTION_NOT_FOUND",
+        "OUTCOME_SUSPENDED",
+        "ODDS_UNAVAILABLE",
+        "READBACK_MISMATCH",
+    ]
+
+    for category in categories:
+        monkeypatch.setattr(
+            booking,
+            "create_booking",
+            lambda *args, _category=category, **kwargs: {
+                "status": "invalid",
+                "booking_status": "UNAVAILABLE",
+                "readback_validation": "FAILED",
+                "share_code": "MUST_NOT_LEAK",
+                "share_url": "https://unsafe.example",
+                "failure_category": _category,
+                "reason": _category,
+            },
+        )
+
+        result = builder_v2.manual_build({
+            "selection_ids": ["s1-over_1_5"],
+            "horizon": "7_days",
+        })
+
+        assert result["status"] == "SELECTIONS_CHANGED"
+        assert result["booking"]["failure_category"] == category
+        assert result["booking"]["share_code"] is None
+        assert result["booking"]["share_url"] is None
+        assert result["booking"]["actionable"] is False
 
 
 def test_game_count_never_exceeds_requested(monkeypatch):
