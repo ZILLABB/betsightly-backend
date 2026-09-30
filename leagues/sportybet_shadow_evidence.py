@@ -547,6 +547,14 @@ def staging_builder_merge_candidates(
         )
 
         clone["safe_tier_eligible"] = snapshot_safe
+        # The staging database is intentionally thin. Carry the same
+        # aggregate settled sample that admitted this clone through 6H
+        # into the Builder trust pass, without changing probability,
+        # calibration shifts, floors, or production evidence.
+        clone["calibration_sample"] = max(
+            int(pick.get("calibration_sample") or 0),
+            int(sample),
+        )
         gate = candidate_gate(clone)
 
         if not gate["eligible"]:

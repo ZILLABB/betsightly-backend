@@ -98,6 +98,7 @@ def test_builder_merge_admits_only_full_6h_gate_winners():
     assert eligible[0]["safe_tier_eligible"] is True
     assert eligible[0]["_staging_supplemental"] is True
     assert eligible[0]["_staging_aggregate_settled_sample"] == 617
+    assert eligible[0]["calibration_sample"] == 617
 
 
 def test_builder_merge_does_not_mutate_shadow_pick():
