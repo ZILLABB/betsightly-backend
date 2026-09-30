@@ -838,6 +838,23 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
             sportybet_staging_builder_picks
         ),
     )
+
+    # Settlement is isolated from this freshly generated prediction board.
+    try:
+        from leagues.football_first_shadow_observations import (
+            start_settlement_async,
+        )
+        settlement_trigger = start_settlement_async()
+        logger.info(
+            "football_first_shadow_settlement %s",
+            settlement_trigger,
+        )
+    except Exception as exc:
+        logger.warning(
+            "football-first shadow settlement trigger failed: %s",
+            exc,
+        )
+
     return all_picks, fixtures
 
 

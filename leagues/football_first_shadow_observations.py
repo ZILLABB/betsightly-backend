@@ -9,6 +9,8 @@ import hashlib
 import math
 import os
 import uuid
+import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -103,6 +105,30 @@ observations = Table(
 )
 
 
+reviews = Table(
+    "football_first_shadow_reviews",
+    metadata,
+    Column("review_id", String(36), primary_key=True),
+    Column("model_version", String(96), nullable=False, index=True),
+    Column("evidence_n", Integer, nullable=False),
+    Column("evidence_status", String(64), nullable=False),
+    Column("decision", String(64), nullable=False, index=True),
+    Column("reviewer", String(160)),
+    Column("note", String(2000)),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+)
+
+REVIEW_DECISIONS = {
+    "KEEP_CHAMPION",
+    "REJECT_CHALLENGER",
+    "APPROVE_FOR_PROMOTION_IMPLEMENTATION",
+}
+
+_SETTLEMENT_LOCK = threading.Lock()
+_SETTLEMENT_LAST_STARTED = 0.0
+SETTLEMENT_COOLDOWN_SECONDS = 15 * 60
+
+
 def _truthy(name: str) -> bool:
     return str(os.getenv(name, "false")).strip().lower() in {
         "1", "true", "yes", "on",
@@ -126,7 +152,11 @@ def table_exists(db_engine=engine) -> bool:
 
 
 def ensure_table(db_engine=engine) -> None:
-    metadata.create_all(db_engine, tables=[observations], checkfirst=True)
+    metadata.create_all(
+        db_engine,
+        tables=[observations, reviews],
+        checkfirst=True,
+    )
 
 
 def _utc(value) -> datetime | None:
@@ -404,6 +434,173 @@ def settle_pending_observations(
     }
 
 
+def start_settlement_async(
+    *,
+    force: bool = False,
+    db_engine=engine,
+) -> dict:
+    """Run settlement in a daemon thread without blocking predictions."""
+    global _SETTLEMENT_LAST_STARTED
+
+    if not table_exists(db_engine):
+        return {
+            "status": "SKIPPED",
+            "reason": "no_observation_table",
+            "shadow_only": True,
+        }
+
+    now_mono = time.monotonic()
+    if (
+        not force
+        and _SETTLEMENT_LAST_STARTED
+        and now_mono - _SETTLEMENT_LAST_STARTED
+        < SETTLEMENT_COOLDOWN_SECONDS
+    ):
+        return {
+            "status": "SKIPPED",
+            "reason": "cooldown",
+            "shadow_only": True,
+        }
+
+    if not _SETTLEMENT_LOCK.acquire(blocking=False):
+        return {
+            "status": "SKIPPED",
+            "reason": "already_running",
+            "shadow_only": True,
+        }
+
+    _SETTLEMENT_LAST_STARTED = now_mono
+
+    def worker():
+        try:
+            settle_pending_observations(db_engine=db_engine)
+        except Exception:
+            pass
+        finally:
+            _SETTLEMENT_LOCK.release()
+
+    thread = threading.Thread(
+        target=worker,
+        name="football-first-shadow-settlement",
+        daemon=True,
+    )
+    thread.start()
+
+    return {
+        "status": "STARTED",
+        "shadow_only": True,
+    }
+
+
+def latest_review(*, db_engine=engine) -> dict | None:
+    if not table_exists(db_engine):
+        return None
+
+    ensure_table(db_engine)
+    with db_engine.begin() as conn:
+        row = conn.execute(
+            select(reviews)
+            .order_by(reviews.c.created_at.desc())
+            .limit(1)
+        ).mappings().first()
+    return dict(row) if row else None
+
+
+def review_packet(*, db_engine=engine) -> dict:
+    report = shadow_report(db_engine=db_engine)
+    comparison = report.get("comparison") or {}
+    review = latest_review(db_engine=db_engine)
+
+    return {
+        "status": "success",
+        "model": report.get("model"),
+        "evidence": {
+            "observations": report.get("observations"),
+            "comparison": comparison,
+            "robust_match_result_leagues": report.get(
+                "robust_match_result_leagues"
+            ),
+            "historical_replay_counts_toward_threshold": False,
+        },
+        "review_gate": {
+            "eligible": (
+                comparison.get("status")
+                == "ELIGIBLE_FOR_HUMAN_REVIEW"
+            ),
+            "minimum_settled": MIN_PROSPECTIVE_REVIEW,
+            "current_settled": int(comparison.get("n") or 0),
+            "remaining_to_minimum": max(
+                0,
+                MIN_PROSPECTIVE_REVIEW - int(comparison.get("n") or 0),
+            ),
+            "required_conditions": [
+                "settled prospective fixtures >= 300",
+                "paired Brier lower 95% confidence bound > 0",
+                "challenger log loss <= champion log loss",
+                "challenger calibration error <= champion calibration error",
+            ],
+        },
+        "allowed_decisions": sorted(REVIEW_DECISIONS),
+        "latest_review": review,
+        "promotion_effective": False,
+        "automatic_promotion": False,
+        "live_adjustment_allowed": False,
+    }
+
+
+def record_review(
+    decision: str,
+    *,
+    reviewer: str | None = None,
+    note: str | None = None,
+    db_engine=engine,
+) -> dict:
+    normalized = str(decision or "").strip().upper()
+    if normalized not in REVIEW_DECISIONS:
+        raise ValueError("invalid_review_decision")
+
+    packet = review_packet(db_engine=db_engine)
+    gate = packet["review_gate"]
+    comparison = packet["evidence"].get("comparison") or {}
+    model = packet.get("model") or {}
+
+    if (
+        normalized == "APPROVE_FOR_PROMOTION_IMPLEMENTATION"
+        and not gate["eligible"]
+    ):
+        raise ValueError("promotion_review_gate_not_met")
+
+    ensure_table(db_engine)
+    row = {
+        "review_id": str(uuid.uuid4()),
+        "model_version": str(model.get("model_version") or "unknown"),
+        "evidence_n": int(comparison.get("n") or 0),
+        "evidence_status": str(
+            comparison.get("status") or "NO_PROSPECTIVE_EVIDENCE"
+        ),
+        "decision": normalized,
+        "reviewer": str(reviewer)[:160] if reviewer else None,
+        "note": str(note)[:2000] if note else None,
+        "created_at": datetime.now(timezone.utc),
+    }
+
+    with db_engine.begin() as conn:
+        conn.execute(reviews.insert().values(**row))
+
+    return {
+        "status": "RECORDED",
+        "review": row,
+        "promotion_effective": False,
+        "automatic_promotion": False,
+        "live_adjustment_allowed": False,
+        "next_action": (
+            "separate_code_review_and_deployment_required"
+            if normalized == "APPROVE_FOR_PROMOTION_IMPLEMENTATION"
+            else "keep_current_champion"
+        ),
+    }
+
+
 def _metrics(rows: list[dict], prefix: str) -> dict:
     if not rows:
         return {"n": 0}
@@ -573,6 +770,22 @@ def shadow_report(*, db_engine=engine) -> dict:
             "by_league": by_league,
         },
         "historical_replay_counts_toward_threshold": False,
+        "evidence_progress": {
+            "minimum_for_human_review": MIN_PROSPECTIVE_REVIEW,
+            "settled": len(settled),
+            "remaining": max(
+                0,
+                MIN_PROSPECTIVE_REVIEW - len(settled),
+            ),
+            "percent_complete": round(
+                min(
+                    100.0,
+                    100.0 * len(settled) / MIN_PROSPECTIVE_REVIEW,
+                ),
+                2,
+            ),
+        },
+        "latest_review": latest_review(db_engine=db_engine),
         "automatic_promotion": False,
         "live_adjustment_allowed": False,
     }

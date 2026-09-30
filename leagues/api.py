@@ -202,6 +202,12 @@ async def ml_shadow(days: int = 60):
         raise HTTPException(500, str(e))
 
 
+class FootballFirstShadowReviewRequest(BaseModel):
+    decision: str
+    reviewer: str | None = None
+    note: str | None = None
+
+
 @router.get("/football-first-shadow")
 def football_first_shadow_report():
     try:
@@ -210,6 +216,66 @@ def football_first_shadow_report():
     except Exception as e:
         logger.error(
             f"Football-first shadow report failed: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(500, str(e))
+
+
+@router.post(
+    "/football-first-shadow/settle",
+    dependencies=[Depends(require_api_key)],
+)
+def football_first_shadow_settle(limit: int = 250):
+    try:
+        from leagues.football_first_shadow_observations import (
+            settle_pending_observations,
+        )
+        return settle_pending_observations(
+            limit=max(1, min(1000, int(limit)))
+        )
+    except Exception as e:
+        logger.error(
+            f"Football-first shadow settlement failed: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(500, str(e))
+
+
+@router.get(
+    "/football-first-shadow/review",
+    dependencies=[Depends(require_api_key)],
+)
+def football_first_shadow_review_packet():
+    try:
+        from leagues.football_first_shadow_observations import review_packet
+        return review_packet()
+    except Exception as e:
+        logger.error(
+            f"Football-first shadow review packet failed: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(500, str(e))
+
+
+@router.post(
+    "/football-first-shadow/review",
+    dependencies=[Depends(require_api_key)],
+)
+def football_first_shadow_record_review(
+    request: FootballFirstShadowReviewRequest,
+):
+    try:
+        from leagues.football_first_shadow_observations import record_review
+        return record_review(
+            request.decision,
+            reviewer=request.reviewer,
+            note=request.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    except Exception as e:
+        logger.error(
+            f"Football-first shadow review decision failed: {e}",
             exc_info=True,
         )
         raise HTTPException(500, str(e))
@@ -272,6 +338,19 @@ async def trigger_results_check():
         summary = check_all_pending()
         slips = settle_published_slips()
         builders = settle_builder_predictions()
+        try:
+            from leagues.football_first_shadow_observations import (
+                settle_pending_observations,
+            )
+            football_first_shadow = settle_pending_observations()
+        except Exception as e:
+            logger.warning(
+                f"football-first shadow settlement during check-results failed: {e}"
+            )
+            football_first_shadow = {
+                "status": "ERROR",
+                "error_type": type(e).__name__,
+            }
         # Newly settled legs are exactly what the calibration is fitted on, so
         # refit now rather than serving a stale correction for up to six hours.
         try:
@@ -280,8 +359,13 @@ async def trigger_results_check():
             summary["calibration_legs"] = fit.get("n", 0)
         except Exception as e:
             logger.warning(f"calibration refit after settlement failed: {e}")
-        return {"status": "success", **summary, "slips": slips,
-                "builders": builders}
+        return {
+            "status": "success",
+            **summary,
+            "slips": slips,
+            "builders": builders,
+            "football_first_shadow": football_first_shadow,
+        }
     except Exception as e:
         logger.error(f"Results check trigger failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
