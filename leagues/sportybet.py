@@ -53,6 +53,11 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 40
 _CACHE_KEY = "sportybet_board"
 _CACHE_TTL_HOURS = 3.0
+
+# Increment whenever the persisted board-entry shape changes.
+# Old snapshots are then refetched automatically instead of being reused with
+# missing fields from a newer parser.
+_CACHE_SCHEMA_VERSION = 2
 try:
     KICKOFF_TOLERANCE_MINUTES = max(
         1, float(os.getenv("SPORTYBET_KICKOFF_TOLERANCE_MINUTES", "45")))
@@ -403,9 +408,17 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
         metadata = cached.get("metadata") or {}
         # Old cache entries had no completeness metadata. Refetch them instead
         # of reusing a board which may have silently stopped at page twelve.
-        if (age_h < _CACHE_TTL_HOURS and cached.get("fixtures")
-                and metadata.get("is_complete") is True):
-            return _snapshot(cached["fixtures"], metadata)
+        if (
+            age_h < _CACHE_TTL_HOURS
+            and cached.get("fixtures")
+            and metadata.get("is_complete") is True
+            and metadata.get("cache_schema_version")
+            == _CACHE_SCHEMA_VERSION
+        ):
+            return _snapshot(
+                cached["fixtures"],
+                metadata,
+            )
 
     fixtures: dict[str, list[dict]] = {}
     declared_total = 0
@@ -493,6 +506,7 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
         f"{unique_indexed_fixtures}|{page_count}".encode()
     ).hexdigest()[:16]
     metadata = {
+        "cache_schema_version": _CACHE_SCHEMA_VERSION,
         "snapshot_id": snapshot_id,
         "declared_total": declared_total,
         # fetched_total remains as a compatibility alias for old consumers.

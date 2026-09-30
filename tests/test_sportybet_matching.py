@@ -427,3 +427,149 @@ def test_stored_event_id_cannot_override_kickoff_or_squad_identity():
         board, "Home FC U19", "Away FC", "2026-08-24T19:00:00Z",
         "Premier League", "over_1_5", event_id="e1")
     assert youth["status"] == "FIXTURE_MAPPING_FAILED"
+
+
+
+def test_legacy_board_cache_schema_is_refetched(monkeypatch):
+    """A deploy that changes the board shape must not reuse old cached rows."""
+    calls = []
+
+    legacy = {
+        "fetched_at": sb.time.time(),
+        "fixtures": {
+            "old|fixture": [{
+                "event_id": "old",
+                "home_team": "Old",
+                "away_team": "Fixture",
+            }]
+        },
+        "metadata": {
+            "is_complete": True,
+            "snapshot_id": "legacy",
+            # deliberately no cache_schema_version
+        },
+    }
+
+    monkeypatch.setattr(
+        sb,
+        "_db_get",
+        lambda key: legacy,
+    )
+
+    monkeypatch.setattr(
+        sb,
+        "_db_set",
+        lambda key, value: None,
+    )
+
+    def get(url):
+        calls.append(url)
+
+        return {
+            "data": {
+                "totalNum": 1,
+                "tournaments": [{
+                    "id": "sr:tournament:1",
+                    "name": "Premier League",
+                    "category": {
+                        "id": "sr:category:1",
+                        "name": "England",
+                    },
+                    "events": [
+                        _page_event(
+                            1,
+                            "Arsenal",
+                            "Chelsea",
+                        )
+                    ],
+                }],
+            }
+        }
+
+    monkeypatch.setattr(
+        sb,
+        "_get_json",
+        get,
+    )
+
+    board = sb.fetch_board()
+
+    assert calls
+
+    meta = sb.board_metadata(
+        board
+    )
+
+    assert (
+        meta["cache_schema_version"]
+        == sb._CACHE_SCHEMA_VERSION
+    )
+
+    entry = next(
+        entry
+        for _, entry
+        in sb._board_entries(
+            board
+        )
+    )
+
+    assert (
+        entry[
+            "sportybet_tournament_id"
+        ]
+        == "sr:tournament:1"
+    )
+
+    assert (
+        entry[
+            "sportybet_category"
+        ]
+        == "England"
+    )
+
+
+def test_current_board_cache_schema_is_reused(monkeypatch):
+    """A current complete snapshot still observes the normal cache TTL."""
+    current = {
+        "fetched_at": sb.time.time(),
+        "fixtures": {
+            "home|away": [{
+                "event_id": "cached",
+                "home_team": "Home",
+                "away_team": "Away",
+            }]
+        },
+        "metadata": {
+            "is_complete": True,
+            "snapshot_id": "current",
+            "cache_schema_version": (
+                sb._CACHE_SCHEMA_VERSION
+            ),
+        },
+    }
+
+    monkeypatch.setattr(
+        sb,
+        "_db_get",
+        lambda key: current,
+    )
+
+    def should_not_fetch(url):
+        raise AssertionError(
+            "current cache should have been reused"
+        )
+
+    monkeypatch.setattr(
+        sb,
+        "_get_json",
+        should_not_fetch,
+    )
+
+    board = sb.fetch_board()
+
+    assert (
+        sb.board_metadata(
+            board
+        )["snapshot_id"]
+        == "current"
+    )
