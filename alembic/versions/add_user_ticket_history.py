@@ -1,0 +1,13 @@
+"""Add anonymous Builder ticket history without changing operational records."""
+from alembic import op
+import sqlalchemy as sa
+revision = "add_user_ticket_history"
+down_revision = "merge_v2_settlement_heads"
+branch_labels = None
+depends_on = None
+def upgrade():
+    op.create_table("user_ticket_history", sa.Column("id", sa.String(36), primary_key=True), sa.Column("user_id", sa.String(128)), sa.Column("anonymous_id", sa.String(128)), sa.Column("builder_request_id", sa.String(64), nullable=False), sa.Column("ticket_fingerprint", sa.String(64), nullable=False), sa.Column("mode", sa.String(24), nullable=False), sa.Column("horizon", sa.String(16), nullable=False), sa.Column("requested_target_odds", sa.Float()), sa.Column("requested_game_count", sa.Integer()), sa.Column("generated_odds", sa.Float()), sa.Column("booking_status", sa.String(32)), sa.Column("validation_status", sa.String(32)), sa.Column("board_snapshot_id", sa.String(128)), sa.Column("generated", sa.Boolean(), nullable=False), sa.Column("booking_validated", sa.Boolean(), nullable=False), sa.Column("copied_at", sa.DateTime(timezone=True)), sa.Column("played_at", sa.DateTime(timezone=True)), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False), sa.Column("expires_at", sa.DateTime(timezone=True)), sa.Column("metadata_json", sa.Text()), sa.UniqueConstraint("anonymous_id", "ticket_fingerprint", name="uq_ticket_history_anonymous_fingerprint"))
+    op.create_index("ix_ticket_history_anonymous_id", "user_ticket_history", ["anonymous_id"]); op.create_index("ix_ticket_history_user_id", "user_ticket_history", ["user_id"]); op.create_index("ix_ticket_history_fingerprint", "user_ticket_history", ["ticket_fingerprint"]); op.create_index("ix_ticket_history_created_at", "user_ticket_history", ["created_at"])
+    op.create_table("user_ticket_selections", sa.Column("id", sa.String(36), primary_key=True), sa.Column("ticket_id", sa.String(36), sa.ForeignKey("user_ticket_history.id"), nullable=False), sa.Column("selection_fingerprint", sa.String(128), nullable=False), sa.Column("fixture_id", sa.String(128)), sa.Column("home_team", sa.String(255)), sa.Column("away_team", sa.String(255)), sa.Column("league", sa.String(255)), sa.Column("market", sa.String(64)), sa.Column("prediction", sa.String(255)), sa.Column("odds", sa.Float()), sa.Column("confidence", sa.Float()), sa.Column("evidence_probability", sa.Float()), sa.Column("trust_grade", sa.String(8)), sa.Column("kickoff", sa.DateTime(timezone=True)), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False))
+    op.create_index("ix_ticket_selections_ticket_id", "user_ticket_selections", ["ticket_id"])
+def downgrade(): pass

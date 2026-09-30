@@ -404,6 +404,8 @@ class BuilderV2Filters(BaseModel):
     exclude_fixture_ids: list[str] = Field(default_factory=list)
     exclude_team_ids: list[str] = Field(default_factory=list)
     require_bookable: bool = True
+    # Anonymous-only until an authenticated Builder context exists server-side.
+    anonymous_id: str | None = Field(default=None, min_length=16, max_length=128)
 
 
 class BuilderV2Request(BuilderV2Filters):
@@ -420,7 +422,26 @@ class BuilderV2ManualRequest(BuilderV2Filters):
 
 
 def _builder_v2_payload(model: BaseModel) -> dict:
-    return model.model_dump() if hasattr(model, "model_dump") else model.dict()
+    """Return only fields that belong to Builder selection/optimization."""
+    payload = (
+        model.model_dump()
+        if hasattr(model, "model_dump")
+        else model.dict()
+    )
+    payload.pop("anonymous_id", None)
+    return payload
+
+
+def _builder_v2_persistence_payload(
+    model: BaseModel,
+    engine_payload: dict | None = None,
+) -> dict:
+    """Restore request identity only for audit/history persistence."""
+    payload = dict(engine_payload or _builder_v2_payload(model))
+    anonymous_id = getattr(model, "anonymous_id", None)
+    if anonymous_id:
+        payload["anonymous_id"] = anonymous_id
+    return payload
 
 def _record_v2_result(payload: dict, result: dict, started: float) -> None:
     """Adapt V2 to the existing settlement archive; log only safe facts."""
@@ -439,6 +460,9 @@ def _record_v2_result(payload: dict, result: dict, started: float) -> None:
             requested_game_count=(payload.get("game_count")
                                   if payload.get("mode") == "game_count" else None),
         )
+        if payload.get("anonymous_id"):
+            from leagues.ticket_history import record_generated_ticket
+            record_generated_ticket(payload, result)
     except Exception as exc:
         logger.error("builder_v2_persistence_failed request_id=%s error_type=%s",
                      result["request_id"], type(exc).__name__)
@@ -726,7 +750,12 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
         )
 
     result["request_id"] = request_id
-    await asyncio.to_thread(_record_v2_result, payload, result, started)
+    await asyncio.to_thread(
+        _record_v2_result,
+        _builder_v2_persistence_payload(request, payload),
+        result,
+        started,
+    )
     return result
 
 
@@ -742,12 +771,20 @@ async def slip_builder_v2_manual(request: BuilderV2ManualRequest):
         return {"status": "unavailable", "reason": "builder_mode_disabled", "retryable": False}
     started = time.perf_counter()
     request_id = str(uuid.uuid4())
+    payload = _builder_v2_payload(request)
     result = await asyncio.to_thread(
         manual_build,
-        _builder_v2_payload(request),
+        payload,
     )
     result["request_id"] = request_id
-    await asyncio.to_thread(_record_v2_result, {**_builder_v2_payload(request), "mode": "manual"}, result, started)
+    persistence_payload = _builder_v2_persistence_payload(request, payload)
+    persistence_payload["mode"] = "manual"
+    await asyncio.to_thread(
+        _record_v2_result,
+        persistence_payload,
+        result,
+        started,
+    )
     return result
 
 @router.post("/slip-builder/generate")
