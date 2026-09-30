@@ -401,6 +401,30 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         all_picks.extend(build_picks(
             fx, model, min_confidence=MIN_CANDIDATE_CONFIDENCE, fit=fit))
 
+    # Match context is attached only after normal predictions and candidate
+    # picks already exist. It is shadow data and cannot change this run's
+    # prediction probability, trust, quality or SportyBet bookability.
+    context_summary = {}
+
+    try:
+        from leagues.match_context import enrich_prepared_context
+
+        context_summary = enrich_prepared_context(
+            fixtures,
+            all_picks,
+            history=history,
+        )
+
+    except Exception as e:
+        logger.warning(
+            "match context enrichment unavailable: %s",
+            e,
+        )
+        context_summary = {
+            "shadow_only": True,
+            "status": "unavailable",
+        }
+
     logger.info(
         f"Pipeline: {len(fixtures)} fixtures ({priced} priced, {unpriced} base-rate only, "
         f"{sb_matched} with SportyBet prices, {with_elo} with ELO, "
@@ -409,7 +433,11 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         f"(calibrated on {fit.get('n', 0)} settled legs)"
     )
 
-    provider = espn_cache_metadata()
+    provider = dict(
+        espn_cache_metadata() or {}
+    )
+    provider["match_context"] = context_summary
+
     # Preserve the evaluated environment before any product optimizer narrows
     # it. Archiving is observability: failure is logged and never blocks picks.
     decision_snapshot_id = None

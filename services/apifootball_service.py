@@ -389,46 +389,73 @@ class APIFootballService:
 
         return out
 
+    def get_fixtures_injuries(
+        self,
+        fixture_ids: List[int],
+    ) -> Dict[str, Any]:
+        """Fetch injuries/suspensions for fixture IDs in quota-safe batches."""
+        unique_ids = []
+
+        for value in fixture_ids:
+            try:
+                fixture_id = int(value)
+            except (TypeError, ValueError):
+                continue
+
+            if fixture_id > 0 and fixture_id not in unique_ids:
+                unique_ids.append(fixture_id)
+
+        rows = []
+        errors = {}
+
+        for index in range(0, len(unique_ids), 20):
+            batch = unique_ids[index:index + 20]
+
+            try:
+                data = self._get(
+                    "injuries",
+                    {
+                        "ids": "-".join(
+                            str(value)
+                            for value in batch
+                        )
+                    },
+                )
+
+                if not isinstance(data, dict):
+                    errors[f"batch_{index // 20}"] = "invalid_response"
+                    continue
+
+                batch_errors = data.get("errors") or {}
+
+                if batch_errors:
+                    errors[f"batch_{index // 20}"] = batch_errors
+
+                rows.extend(
+                    data.get("response") or []
+                )
+
+            except Exception as e:
+                errors[f"batch_{index // 20}"] = type(e).__name__
+
+                logger.error(
+                    "Error fetching injury batch: %s",
+                    e,
+                )
+
+        return {
+            "response": rows,
+            "errors": errors,
+        }
+
     def get_fixture_injuries(
         self,
         fixture_id: int,
     ) -> Dict[str, Any]:
-        """Fetch raw injury/suspension context for one provider fixture.
-
-        Keep the raw envelope so callers can distinguish an empty response
-        from a provider error. Coverage availability is evaluated separately.
-        """
-        try:
-            data = self._get(
-                "injuries",
-                {"fixture": int(fixture_id)},
-            )
-
-            if not isinstance(data, dict):
-                return {
-                    "response": [],
-                    "errors": {"invalid_response": True},
-                }
-
-            return {
-                "response": list(data.get("response") or []),
-                "errors": data.get("errors") or {},
-                "results": data.get("results"),
-            }
-
-        except Exception as e:
-            logger.error(
-                "Error fetching injuries for fixture %s: %s",
-                fixture_id,
-                e,
-            )
-
-            return {
-                "response": [],
-                "errors": {
-                    "request_failed": type(e).__name__,
-                },
-            }
+        """Compatibility wrapper around the batched injury endpoint."""
+        return self.get_fixtures_injuries(
+            [fixture_id]
+        )
 
     def clear_cache(self) -> int:
         """Remove all cached responses. Returns number of files removed."""

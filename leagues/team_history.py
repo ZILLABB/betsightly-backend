@@ -229,6 +229,115 @@ class HistoryIndex:
         return {"home_win_rate": wins / n, "avg_goals": goals / n,
                 "btts_rate": btts / n, "meetings": n}
 
+    def rest_context(
+        self,
+        team: str,
+        kickoff,
+        team_type: str = "CLUB",
+    ) -> dict:
+        """Fixture-time rest/congestion facts from completed ESPN history.
+
+        These are observations only. They do not alter prediction probability.
+        """
+        try:
+            if isinstance(kickoff, datetime):
+                kickoff_dt = kickoff
+            else:
+                kickoff_dt = datetime.fromisoformat(
+                    str(kickoff).replace("Z", "+00:00")
+                )
+
+            if kickoff_dt.tzinfo is None:
+                kickoff_dt = kickoff_dt.replace(
+                    tzinfo=timezone.utc
+                )
+
+            kickoff_dt = kickoff_dt.astimezone(
+                timezone.utc
+            )
+
+        except (TypeError, ValueError):
+            return {
+                "status": "UNKNOWN",
+                "reason": "invalid_kickoff",
+            }
+
+        parsed_rows = []
+
+        for row in self.by_team.get(
+            (team_type, team),
+            [],
+        ):
+            try:
+                value = row.get("date")
+
+                if isinstance(value, datetime):
+                    match_dt = value
+                else:
+                    match_dt = datetime.fromisoformat(
+                        str(value).replace("Z", "+00:00")
+                    )
+
+                if match_dt.tzinfo is None:
+                    match_dt = match_dt.replace(
+                        tzinfo=timezone.utc
+                    )
+
+                match_dt = match_dt.astimezone(
+                    timezone.utc
+                )
+
+            except (TypeError, ValueError):
+                continue
+
+            if match_dt < kickoff_dt:
+                parsed_rows.append(match_dt)
+
+        if not parsed_rows:
+            return {
+                "status": "UNKNOWN",
+                "reason": "no_prior_match_history",
+            }
+
+        parsed_rows.sort(reverse=True)
+
+        last_match = parsed_rows[0]
+
+        days_since_last = (
+            kickoff_dt - last_match
+        ).total_seconds() / 86400.0
+
+        seven_days_ago = kickoff_dt - timedelta(
+            days=7
+        )
+
+        fourteen_days_ago = kickoff_dt - timedelta(
+            days=14
+        )
+
+        matches_7d = sum(
+            value >= seven_days_ago
+            for value in parsed_rows
+        )
+
+        matches_14d = sum(
+            value >= fourteen_days_ago
+            for value in parsed_rows
+        )
+
+        return {
+            "status": "AVAILABLE",
+            "days_since_last_match": round(
+                days_since_last,
+                2,
+            ),
+            "matches_last_7_days": matches_7d,
+            "matches_last_14_days": matches_14d,
+            "short_rest": days_since_last < 4.0,
+            "fixture_congestion": matches_14d >= 4,
+            "last_match_at": last_match.isoformat(),
+        }
+
     def coverage(self) -> dict:
         return {"teams": len(self.by_team), "h2h_pairs": len(self.h2h),
                 "matches": sum(len(v) for v in self.by_team.values()) // 2}

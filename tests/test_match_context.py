@@ -243,3 +243,271 @@ def test_fixture_details_are_batched_at_twenty(monkeypatch):
     assert len(
         calls[1][1]["ids"].split("-")
     ) == 5
+
+
+
+def test_rest_context_reports_fixture_congestion_without_changing_form():
+    from leagues.team_history import HistoryIndex
+
+    history = HistoryIndex({
+        "matches": [
+            {
+                "date": "2026-09-26T18:00:00Z",
+                "home": "Arsenal",
+                "away": "Leeds",
+                "hs": 2,
+                "as": 0,
+                "team_type": "CLUB",
+            },
+            {
+                "date": "2026-09-23T18:00:00Z",
+                "home": "Everton",
+                "away": "Arsenal",
+                "hs": 1,
+                "as": 1,
+                "team_type": "CLUB",
+            },
+            {
+                "date": "2026-09-20T18:00:00Z",
+                "home": "Arsenal",
+                "away": "Fulham",
+                "hs": 3,
+                "as": 1,
+                "team_type": "CLUB",
+            },
+            {
+                "date": "2026-09-17T18:00:00Z",
+                "home": "Chelsea",
+                "away": "Arsenal",
+                "hs": 0,
+                "as": 1,
+                "team_type": "CLUB",
+            },
+        ]
+    })
+
+    result = history.rest_context(
+        "Arsenal",
+        "2026-09-30T18:00:00Z",
+    )
+
+    assert result["status"] == "AVAILABLE"
+    assert result["days_since_last_match"] == 4.0
+    assert result["matches_last_14_days"] == 4
+    assert result["fixture_congestion"] is True
+    assert result["short_rest"] is False
+
+
+def test_context_shortlist_uses_only_bookable_fixtures():
+    fixtures = [
+        {
+            "match_id": "m1",
+            "commence_time": "2026-09-30T18:00:00Z",
+        },
+        {
+            "match_id": "m2",
+            "commence_time": "2026-09-30T19:00:00Z",
+        },
+    ]
+
+    picks = [
+        {
+            "match_id": "m1",
+            "bookable": True,
+            "confidence": .76,
+        },
+        {
+            "match_id": "m2",
+            "bookable": False,
+            "confidence": .99,
+        },
+    ]
+
+    selected = match_context.shortlist_context_fixtures(
+        fixtures,
+        picks,
+    )
+
+    assert [
+        fixture["match_id"]
+        for fixture in selected
+    ] == ["m1"]
+
+
+def test_enrich_prepared_context_batches_provider_data_and_keeps_quality():
+    fixtures = [
+        {
+            "match_id": "m1",
+            "home": {"name": "Arsenal"},
+            "away": {"name": "Chelsea"},
+            "commence_time": "2026-09-30T18:00:00Z",
+        },
+        {
+            "match_id": "m2",
+            "home": {"name": "Liverpool"},
+            "away": {"name": "Everton"},
+            "commence_time": "2026-09-30T19:00:00Z",
+        },
+    ]
+
+    picks = [
+        {
+            "selection_id": "s1",
+            "match_id": "m1",
+            "bookable": True,
+            "confidence": .82,
+            "trust": {"trust_grade": "A"},
+        },
+        {
+            "selection_id": "s2",
+            "match_id": "m2",
+            "bookable": True,
+            "confidence": .80,
+            "trust": {"trust_grade": "A"},
+        },
+    ]
+
+    class FakeService:
+        def __init__(self):
+            self.details_calls = []
+            self.injury_calls = []
+
+        def get_daily_fixtures(self, target_date):
+            assert target_date == "2026-09-30"
+
+            return [
+                {
+                    "fixture_id": 9001,
+                    "home_team": "Arsenal",
+                    "away_team": "Chelsea",
+                    "date": "2026-09-30T18:00:00+00:00",
+                    "venue_name": "Emirates Stadium",
+                    "venue_city": "London",
+                },
+                {
+                    "fixture_id": 9002,
+                    "home_team": "Liverpool",
+                    "away_team": "Everton",
+                    "date": "2026-09-30T19:00:00+00:00",
+                    "venue_name": "Anfield",
+                    "venue_city": "Liverpool",
+                },
+            ]
+
+        def get_fixture_details(self, ids):
+            self.details_calls.append(list(ids))
+
+            return [
+                {
+                    "fixture": {"id": 9001},
+                    "lineups": [
+                        {
+                            "team": {
+                                "id": 1,
+                                "name": "Arsenal",
+                            },
+                            "formation": "4-3-3",
+                            "startXI": [{} for _ in range(11)],
+                        },
+                        {
+                            "team": {
+                                "id": 2,
+                                "name": "Chelsea",
+                            },
+                            "formation": "4-2-3-1",
+                            "startXI": [{} for _ in range(11)],
+                        },
+                    ],
+                },
+                {
+                    "fixture": {"id": 9002},
+                    "lineups": [],
+                },
+            ]
+
+        def get_fixtures_injuries(self, ids):
+            self.injury_calls.append(list(ids))
+
+            return {
+                "response": [
+                    {
+                        "fixture": {"id": 9001},
+                        "player": {
+                            "id": 11,
+                            "name": "Player One",
+                        },
+                        "team": {
+                            "id": 1,
+                            "name": "Arsenal",
+                        },
+                        "type": "Injury",
+                        "reason": "Knock",
+                    },
+                ],
+                "errors": {},
+            }
+
+    service = FakeService()
+
+    summary = match_context.enrich_prepared_context(
+        fixtures,
+        picks,
+        service=service,
+    )
+
+    assert summary["shadow_only"] is True
+    assert summary["matched_fixture_count"] == 2
+
+    assert service.details_calls == [
+        [9001, 9002]
+    ]
+
+    assert service.injury_calls == [
+        [9001, 9002]
+    ]
+
+    # Shadow context cannot rewrite prediction quality.
+    assert picks[0]["confidence"] == .82
+    assert picks[0]["trust"]["trust_grade"] == "A"
+
+    assert (
+        picks[0]["match_context"]["lineups"]["status"]
+        == "AVAILABLE"
+    )
+
+    assert (
+        picks[0]["match_context"]["injuries"]["status"]
+        == "AVAILABLE"
+    )
+
+
+def test_decision_archive_keeps_shadow_context():
+    from leagues.decision_archive import _compact_candidate
+
+    context = match_context.empty_match_context(
+        "test"
+    )
+
+    pick = {
+        "match_id": "m1",
+        "market": "over_1_5",
+        "prediction": "Over 1.5",
+        "match_context": context,
+        "_fixture": {
+            "home": {"name": "A"},
+            "away": {"name": "B"},
+            "league": "Test",
+            "league_slug": "test",
+            "commence_time": "2026-09-30T18:00:00Z",
+        },
+        "_model": {},
+    }
+
+    compact = _compact_candidate(
+        pick
+    )
+
+    assert (
+        compact["match_context"]["shadow_only"]
+        is True
+    )

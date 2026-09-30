@@ -9,14 +9,24 @@ specific context signal improves out-of-sample decisions.
 """
 from __future__ import annotations
 
+import logging
+import os
 import re
 import unicodedata
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 CONTEXT_VERSION = "match_context_v1"
 DEFAULT_KICKOFF_TOLERANCE_MINUTES = 120
+
+# Context is intentionally collected only for fixtures that have at least one
+# SportyBet-bookable candidate. Twenty-four fixtures normally cost only a
+# handful of batched provider calls rather than one request per page visitor.
+MAX_CONTEXT_FIXTURES = 24
 
 
 def _fallback_team_key(value: Any) -> str:
@@ -389,3 +399,504 @@ def attach_shadow_context(
     out = dict(source)
     out["match_context"] = dict(context)
     return out
+
+
+
+def _context_score(
+    pick: dict,
+) -> float:
+    for key in (
+        "selection_probability",
+        "confidence",
+        "raw_confidence",
+    ):
+        try:
+            value = float(pick.get(key))
+
+            if value > 0:
+                return value
+
+        except (TypeError, ValueError):
+            continue
+
+    return 0.0
+
+
+def shortlist_context_fixtures(
+    fixtures: list[dict],
+    picks: list[dict],
+    *,
+    limit: int = MAX_CONTEXT_FIXTURES,
+) -> list[dict]:
+    """Strongest bookable fixture candidates, deterministic and bounded."""
+    fixture_by_id = {
+        str(fixture.get("match_id") or ""): fixture
+        for fixture in fixtures
+        if str(fixture.get("match_id") or "")
+    }
+
+    best_score = {}
+
+    for pick in picks:
+        if not pick.get("bookable"):
+            continue
+
+        fixture_id = str(
+            pick.get("match_id") or ""
+        )
+
+        if fixture_id not in fixture_by_id:
+            continue
+
+        score = _context_score(pick)
+
+        best_score[fixture_id] = max(
+            score,
+            best_score.get(fixture_id, 0.0),
+        )
+
+    ranked = sorted(
+        best_score,
+        key=lambda fixture_id: (
+            -best_score[fixture_id],
+            str(
+                fixture_by_id[fixture_id].get(
+                    "commence_time"
+                ) or ""
+            ),
+            fixture_id,
+        ),
+    )
+
+    return [
+        fixture_by_id[fixture_id]
+        for fixture_id in ranked[:max(0, int(limit))]
+    ]
+
+
+def _rest_summary(
+    fixture: dict,
+    history,
+) -> dict:
+    if history is None:
+        return _empty_section(
+            "team_history_not_available"
+        )
+
+    kickoff = fixture.get(
+        "commence_time"
+    )
+
+    home = _source_team(
+        fixture,
+        "home",
+    )
+
+    away = _source_team(
+        fixture,
+        "away",
+    )
+
+    team_type = str(
+        fixture.get("team_type")
+        or "CLUB"
+    )
+
+    home_rest = history.rest_context(
+        home,
+        kickoff,
+        team_type=team_type,
+    )
+
+    away_rest = history.rest_context(
+        away,
+        kickoff,
+        team_type=team_type,
+    )
+
+    if (
+        home_rest.get("status") != "AVAILABLE"
+        and away_rest.get("status") != "AVAILABLE"
+    ):
+        return {
+            "status": "UNKNOWN",
+            "reason": "insufficient_team_history",
+            "home": home_rest,
+            "away": away_rest,
+        }
+
+    return {
+        "status": "AVAILABLE",
+        "home": home_rest,
+        "away": away_rest,
+    }
+
+
+def _provider_collection_enabled() -> bool:
+    explicit = str(
+        os.getenv(
+            "MATCH_CONTEXT_PROVIDER_ENABLED",
+            "",
+        )
+    ).strip().casefold()
+
+    if explicit in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }:
+        return False
+
+    if explicit in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return True
+
+    return str(
+        os.getenv(
+            "ENVIRONMENT",
+            "",
+        )
+    ).strip().casefold() in {
+        "production",
+        "staging",
+    }
+
+
+def _fixture_id_from_detail(
+    detail: dict,
+) -> str:
+    return str(
+        (
+            detail.get("fixture") or {}
+        ).get("id")
+        or detail.get("fixture_id")
+        or ""
+    )
+
+
+def _injury_fixture_id(
+    row: dict,
+) -> str:
+    return str(
+        (
+            row.get("fixture") or {}
+        ).get("id")
+        or row.get("fixture_id")
+        or ""
+    )
+
+
+def enrich_prepared_context(
+    fixtures: list[dict],
+    picks: list[dict],
+    *,
+    history=None,
+    service=None,
+    limit: int = MAX_CONTEXT_FIXTURES,
+) -> dict:
+    """Attach shadow context to a prepared board.
+
+    Nothing in this function mutates confidence, probability, trust,
+    quality_score, market eligibility or bookability.
+    """
+    fixture_by_id = {
+        str(fixture.get("match_id") or ""): fixture
+        for fixture in fixtures
+        if str(fixture.get("match_id") or "")
+    }
+
+    # Rest/fatigue is local historical data, so collect it for every fixture.
+    for fixture in fixtures:
+        context = empty_match_context(
+            "outside_provider_context_shortlist"
+        )
+
+        context["rest"] = _rest_summary(
+            fixture,
+            history,
+        )
+
+        fixture["match_context"] = context
+
+    shortlisted = shortlist_context_fixtures(
+        fixtures,
+        picks,
+        limit=limit,
+    )
+
+    summary = {
+        "version": CONTEXT_VERSION,
+        "shadow_only": True,
+        "shortlisted_fixture_count": len(
+            shortlisted
+        ),
+        "matched_fixture_count": 0,
+        "lineup_available_count": 0,
+        "injury_available_count": 0,
+        "rest_available_count": sum(
+            (
+                fixture.get(
+                    "match_context"
+                ) or {}
+            ).get(
+                "rest",
+                {},
+            ).get("status")
+            == "AVAILABLE"
+            for fixture in fixtures
+        ),
+        "provider_enabled": False,
+    }
+
+    if not shortlisted:
+        for pick in picks:
+            match_id = str(
+                pick.get("match_id") or ""
+            )
+
+            if match_id in fixture_by_id:
+                pick["match_context"] = (
+                    fixture_by_id[match_id].get(
+                        "match_context"
+                    )
+                )
+
+        return summary
+
+    if service is None:
+        if not _provider_collection_enabled():
+            for pick in picks:
+                match_id = str(
+                    pick.get("match_id") or ""
+                )
+
+                if match_id in fixture_by_id:
+                    pick["match_context"] = (
+                        fixture_by_id[match_id].get(
+                            "match_context"
+                        )
+                    )
+
+            return summary
+
+        try:
+            from services.apifootball_service import (
+                API_KEY,
+                get_apifootball_service,
+            )
+
+            if not API_KEY:
+                return summary
+
+            service = get_apifootball_service()
+
+        except Exception as exc:
+            logger.warning(
+                "Match-context provider unavailable: %s",
+                exc,
+            )
+
+            return summary
+
+    summary["provider_enabled"] = True
+
+    provider_fixtures = []
+
+    dates = sorted({
+        kickoff.date().isoformat()
+        for fixture in shortlisted
+        if (
+            kickoff := _source_kickoff(
+                _source_fixture(fixture)
+            )
+        )
+        is not None
+    })
+
+    for target_date in dates:
+        try:
+            provider_fixtures.extend(
+                service.get_daily_fixtures(
+                    target_date
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "Match-context fixture lookup failed for %s: %s",
+                target_date,
+                exc,
+            )
+
+    matched = {}
+
+    for fixture in shortlisted:
+        provider = match_provider_fixture(
+            fixture,
+            provider_fixtures,
+        )
+
+        if not provider:
+            continue
+
+        provider_id = str(
+            provider.get("fixture_id")
+            or ""
+        )
+
+        if not provider_id:
+            continue
+
+        matched[provider_id] = (
+            fixture,
+            provider,
+        )
+
+    summary["matched_fixture_count"] = len(
+        matched
+    )
+
+    if matched:
+        ids = [
+            int(value)
+            for value in matched
+            if value.isdigit()
+        ]
+
+        try:
+            details = service.get_fixture_details(
+                ids
+            )
+        except Exception as exc:
+            logger.warning(
+                "Match-context detail batch failed: %s",
+                exc,
+            )
+            details = []
+
+        details_by_id = {
+            _fixture_id_from_detail(detail): detail
+            for detail in details
+            if _fixture_id_from_detail(detail)
+        }
+
+        try:
+            injuries_payload = (
+                service.get_fixtures_injuries(
+                    ids
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "Match-context injury batch failed: %s",
+                exc,
+            )
+            injuries_payload = {
+                "response": [],
+                "errors": {
+                    "request_failed": (
+                        type(exc).__name__
+                    ),
+                },
+            }
+
+        injuries_by_fixture = defaultdict(
+            list
+        )
+
+        for row in (
+            injuries_payload.get(
+                "response"
+            ) or []
+        ):
+            provider_id = _injury_fixture_id(
+                row
+            )
+
+            if provider_id:
+                injuries_by_fixture[
+                    provider_id
+                ].append(row)
+
+        injury_errors = (
+            injuries_payload.get(
+                "errors"
+            ) or {}
+        )
+
+        for provider_id, (
+            fixture,
+            provider,
+        ) in matched.items():
+            context = build_shadow_context(
+                provider,
+                fixture_details=details_by_id.get(
+                    provider_id
+                ),
+                injuries_payload={
+                    "response": (
+                        injuries_by_fixture.get(
+                            provider_id,
+                            [],
+                        )
+                    ),
+                    "errors": injury_errors,
+                },
+            )
+
+            # Preserve the free local rest calculation from before the
+            # provider overlay.
+            previous_rest = (
+                fixture.get(
+                    "match_context"
+                ) or {}
+            ).get("rest")
+
+            if previous_rest:
+                context["rest"] = previous_rest
+
+            fixture["match_context"] = context
+
+            if (
+                context.get(
+                    "lineups",
+                    {},
+                ).get("status")
+                == "AVAILABLE"
+            ):
+                summary[
+                    "lineup_available_count"
+                ] += 1
+
+            if (
+                context.get(
+                    "injuries",
+                    {},
+                ).get("status")
+                == "AVAILABLE"
+            ):
+                summary[
+                    "injury_available_count"
+                ] += 1
+
+    for pick in picks:
+        match_id = str(
+            pick.get("match_id") or ""
+        )
+
+        fixture = fixture_by_id.get(
+            match_id
+        )
+
+        if fixture:
+            pick["match_context"] = (
+                fixture.get(
+                    "match_context"
+                )
+            )
+
+    return summary

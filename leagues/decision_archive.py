@@ -201,6 +201,10 @@ def _compact_candidate(pick: dict) -> dict:
         "expected_away_goals": expected.get("away"),
         "expected_total_goals": expected.get("total"),
         "classification": pick.get("quality_classification"),
+        "match_context": (
+            pick.get("match_context")
+            or fixture.get("match_context")
+        ),
     }
 
 
