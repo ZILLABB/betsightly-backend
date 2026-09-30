@@ -10,6 +10,7 @@ import gzip
 import hashlib
 import json
 import logging
+import math
 import os
 import uuid
 from collections import Counter, defaultdict
@@ -444,6 +445,8 @@ def quality_report(limit: int = 30) -> dict:
             gap = abs(float(c.get("model_bookmaker_gap") or 0))
             disagreement["20+" if gap >= .20 else "15-20" if gap >= .15 else "10-15" if gap >= .10 else "5-10" if gap >= .05 else "0-5"] += 1
     settled = _settled_quality_metrics()
+    context_evidence = _settled_context_metrics(rows)
+
     return {
         "status": "success", "read_only": True,
         "board": {"snapshots": len(rows), "candidates": total_candidates,
@@ -461,6 +464,7 @@ def quality_report(limit: int = 30) -> dict:
                      "replay_ready": bool(rows), "adaptive_trust_enabled": False},
         "readiness": "thin" if len(rows) < 14 else "early" if len(rows) < 30 else "provisional",
         "minimum_policy_comparison_snapshots": 30,
+        "match_context": context_evidence,
         "settled_evidence": {
             "legs": settled["legs"],
             "strength": settled["strength"],
@@ -533,6 +537,681 @@ def _settled_quality_metrics() -> dict:
         return result
     return {"legs": len(seen), **{key: summarize(value)
                                    for key, value in groups.items()}}
+
+
+def _wilson_interval(
+    wins: int,
+    n: int,
+    z: float = 1.96,
+) -> tuple[float | None, float | None]:
+    """95% Wilson interval for a binary hit rate."""
+    if n <= 0:
+        return None, None
+
+    phat = wins / n
+    z2 = z * z
+
+    denominator = 1.0 + z2 / n
+
+    centre = (
+        phat
+        + z2 / (2.0 * n)
+    ) / denominator
+
+    margin = (
+        z
+        * math.sqrt(
+            (
+                phat * (1.0 - phat) / n
+                + z2 / (4.0 * n * n)
+            )
+        )
+        / denominator
+    )
+
+    return (
+        max(0.0, centre - margin),
+        min(1.0, centre + margin),
+    )
+
+
+def _context_summary(
+    values: list[dict],
+) -> dict:
+    n = len(values)
+
+    if not n:
+        return {
+            "n": 0,
+            "readiness": "thin",
+        }
+
+    wins = sum(
+        int(value["outcome"])
+        for value in values
+    )
+
+    promised = sum(
+        float(value["probability"])
+        for value in values
+    ) / n
+
+    actual = wins / n
+
+    low, high = _wilson_interval(
+        wins,
+        n,
+    )
+
+    sporty = [
+        value
+        for value in values
+        if (
+            str(
+                value.get("odds_source")
+                or ""
+            ).casefold()
+            == "sportybet"
+            and bool(
+                value.get("bookable")
+            )
+            and float(
+                value.get("odds")
+                or 0
+            ) > 1.0
+        )
+    ]
+
+    sporty_returned = sum(
+        (
+            float(value["odds"])
+            if value["outcome"]
+            else 0.0
+        )
+        for value in sporty
+    )
+
+    return {
+        "n": n,
+        "readiness": _readiness(n),
+        "mean_probability": round(
+            promised,
+            4,
+        ),
+        "hit_rate": round(
+            actual,
+            4,
+        ),
+        "bias": round(
+            promised - actual,
+            4,
+        ),
+        "brier": round(
+            sum(
+                (
+                    float(value["probability"])
+                    - float(value["outcome"])
+                ) ** 2
+                for value in values
+            ) / n,
+            4,
+        ),
+        "hit_rate_ci95": {
+            "low": (
+                round(low, 4)
+                if low is not None
+                else None
+            ),
+            "high": (
+                round(high, 4)
+                if high is not None
+                else None
+            ),
+        },
+        "sportybet_price_record": {
+            "n": len(sporty),
+            "returned": round(
+                sporty_returned,
+                4,
+            ),
+            "profit": round(
+                sporty_returned
+                - len(sporty),
+                4,
+            ),
+            "roi": (
+                round(
+                    (
+                        sporty_returned
+                        - len(sporty)
+                    ) / len(sporty),
+                    4,
+                )
+                if sporty
+                else None
+            ),
+        },
+    }
+
+
+def _context_labels(
+    context: dict,
+) -> dict[str, str]:
+    """Mutually exclusive labels inside each context dimension."""
+    context = context or {}
+
+    lineups = context.get(
+        "lineups"
+    ) or {}
+
+    if lineups.get("status") != "AVAILABLE":
+        lineup_label = "unknown"
+    elif lineups.get("confirmed"):
+        lineup_label = "confirmed"
+    else:
+        lineup_label = "available_unconfirmed"
+
+    injuries = context.get(
+        "injuries"
+    ) or {}
+
+    if injuries.get("status") != "AVAILABLE":
+        injury_label = "unknown"
+    elif int(injuries.get("count") or 0) > 0:
+        injury_label = "reported"
+    else:
+        injury_label = "none_reported"
+
+    suspensions = context.get(
+        "suspensions"
+    ) or {}
+
+    if suspensions.get("status") != "AVAILABLE":
+        suspension_label = "unknown"
+    elif int(suspensions.get("count") or 0) > 0:
+        suspension_label = "reported"
+    else:
+        suspension_label = "none_reported"
+
+    rest = context.get(
+        "rest"
+    ) or {}
+
+    rest_sides = [
+        rest.get("home") or {},
+        rest.get("away") or {},
+    ]
+
+    known_rest = [
+        side
+        for side in rest_sides
+        if side.get("status") == "AVAILABLE"
+    ]
+
+    if not known_rest:
+        rest_label = "unknown"
+        congestion_label = "unknown"
+    else:
+        rest_label = (
+            "short_rest"
+            if any(
+                bool(
+                    side.get("short_rest")
+                )
+                for side in known_rest
+            )
+            else "normal_rest"
+        )
+
+        congestion_label = (
+            "congested"
+            if any(
+                bool(
+                    side.get(
+                        "fixture_congestion"
+                    )
+                )
+                for side in known_rest
+            )
+            else "not_congested"
+        )
+
+    weather = context.get(
+        "weather"
+    ) or {}
+
+    if weather.get("status") != "AVAILABLE":
+        weather_label = "unknown"
+
+    else:
+        try:
+            precip = float(
+                weather.get("precip_mm")
+                or 0
+            )
+        except (TypeError, ValueError):
+            precip = 0.0
+
+        try:
+            rain = float(
+                weather.get(
+                    "chance_of_rain"
+                )
+                or 0
+            )
+        except (TypeError, ValueError):
+            rain = 0.0
+
+        try:
+            wind = float(
+                weather.get("wind_kph")
+                or 0
+            )
+        except (TypeError, ValueError):
+            wind = 0.0
+
+        try:
+            gust = float(
+                weather.get("gust_kph")
+                or 0
+            )
+        except (TypeError, ValueError):
+            gust = 0.0
+
+        wet = (
+            precip >= 1.0
+            or rain >= 50.0
+        )
+
+        windy = (
+            wind >= 30.0
+            or gust >= 40.0
+        )
+
+        if wet and windy:
+            weather_label = "wet_and_windy"
+        elif wet:
+            weather_label = "wet"
+        elif windy:
+            weather_label = "windy"
+        else:
+            weather_label = "other_known"
+
+    venue = context.get(
+        "venue"
+    ) or {}
+
+    venue_label = (
+        "available"
+        if venue.get("status") == "AVAILABLE"
+        else "unknown"
+    )
+
+    return {
+        "lineups": lineup_label,
+        "injuries": injury_label,
+        "suspensions": suspension_label,
+        "rest": rest_label,
+        "congestion": congestion_label,
+        "weather": weather_label,
+        "venue": venue_label,
+    }
+
+
+def _snapshot_context_index(
+    snapshot_rows,
+) -> dict:
+    index = {}
+
+    for row in snapshot_rows or []:
+        snapshot_id = str(
+            row.get("snapshot_id")
+            or ""
+        )
+
+        if not snapshot_id:
+            continue
+
+        try:
+            payload = json.loads(
+                gzip.decompress(
+                    row["payload"]
+                ).decode("utf-8")
+            )
+
+        except Exception:
+            continue
+
+        for candidate in (
+            payload.get("candidates")
+            or []
+        ):
+            fixture_id = str(
+                candidate.get(
+                    "fixture_id"
+                )
+                or ""
+            )
+
+            market = str(
+                candidate.get(
+                    "market"
+                )
+                or ""
+            )
+
+            if fixture_id and market:
+                index[
+                    (
+                        snapshot_id,
+                        fixture_id,
+                        market,
+                    )
+                ] = candidate
+
+    return index
+
+
+def _settled_context_metrics(
+    snapshot_rows=None,
+) -> dict:
+    """Evaluate shadow context only where outcome linkage is exact.
+
+    Legacy settled rows without an immutable board snapshot are reported as
+    unlinked rather than being guessed onto a nearby archive.
+    """
+    if snapshot_rows is None:
+        ensure_tables()
+
+        with engine.begin() as conn:
+            snapshot_rows = conn.execute(
+                select(
+                    board_snapshots
+                ).order_by(
+                    board_snapshots.c.generated_at.desc()
+                ).limit(180)
+            ).mappings().all()
+
+    context_index = _snapshot_context_index(
+        snapshot_rows
+    )
+
+    try:
+        from leagues.picks_db import get_history
+
+        slips = get_history(
+            limit_days=3650
+        )
+
+    except Exception:
+        slips = []
+
+    dimensions = {
+        name: defaultdict(list)
+        for name in (
+            "lineups",
+            "injuries",
+            "suspensions",
+            "rest",
+            "congestion",
+            "weather",
+            "venue",
+        )
+    }
+
+    by_market = defaultdict(
+        lambda: {
+            name: defaultdict(list)
+            for name in dimensions
+        }
+    )
+
+    versions = Counter()
+
+    linked = 0
+    unlinked_legacy = 0
+    eligible_settled = 0
+
+    seen = set()
+
+    for slip in slips:
+        slip_date = str(
+            slip.get("date")
+            or ""
+        )
+
+        for leg in (
+            slip.get("picks")
+            or []
+        ):
+            status = str(
+                leg.get("status")
+                or ""
+            ).lower()
+
+            if status not in {
+                "won",
+                "lost",
+            }:
+                continue
+
+            snapshot_id = str(
+                leg.get(
+                    "board_snapshot_id"
+                )
+                or ""
+            )
+
+            fixture_id = str(
+                leg.get("match_id")
+                or ""
+            )
+
+            market = str(
+                leg.get("market")
+                or ""
+            )
+
+            if snapshot_id:
+                identity = (
+                    snapshot_id,
+                    fixture_id,
+                    market,
+                )
+            else:
+                identity = (
+                    "legacy",
+                    slip_date,
+                    fixture_id,
+                    market,
+                )
+
+            if identity in seen:
+                continue
+
+            seen.add(identity)
+            eligible_settled += 1
+
+            candidate = context_index.get(
+                (
+                    snapshot_id,
+                    fixture_id,
+                    market,
+                )
+            )
+
+            context = (
+                leg.get("match_context")
+                or (
+                    candidate.get(
+                        "match_context"
+                    )
+                    if candidate
+                    else None
+                )
+            )
+
+            if (
+                not snapshot_id
+                or not candidate
+                or not isinstance(
+                    context,
+                    dict,
+                )
+            ):
+                unlinked_legacy += 1
+                continue
+
+            if not bool(
+                context.get("shadow_only")
+            ):
+                # This evaluator is deliberately limited to shadow evidence.
+                continue
+
+            probability = (
+                candidate.get(
+                    "conservative_probability"
+                )
+                if candidate
+                else None
+            )
+
+            if probability is None:
+                probability = leg.get(
+                    "selection_probability"
+                )
+
+            if probability is None:
+                probability = leg.get(
+                    "confidence"
+                )
+
+            try:
+                probability = float(
+                    probability
+                )
+            except (TypeError, ValueError):
+                continue
+
+            if not 0 < probability < 1:
+                continue
+
+            linked += 1
+
+            versions[
+                str(
+                    context.get("version")
+                    or "unknown"
+                )
+            ] += 1
+
+            outcome = (
+                1.0
+                if status == "won"
+                else 0.0
+            )
+
+            item = {
+                "probability": probability,
+                "outcome": outcome,
+                "odds": (
+                    candidate.get("odds")
+                    if candidate
+                    else leg.get("odds")
+                ),
+                "odds_source": (
+                    candidate.get(
+                        "odds_source"
+                    )
+                    if candidate
+                    else leg.get(
+                        "odds_provider"
+                    )
+                ),
+                "bookable": bool(
+                    (
+                        candidate.get(
+                            "bookable"
+                        )
+                        if candidate
+                        else leg.get(
+                            "bookable"
+                        )
+                    )
+                ),
+            }
+
+            labels = _context_labels(
+                context
+            )
+
+            for dimension, label in labels.items():
+                dimensions[
+                    dimension
+                ][label].append(item)
+
+                by_market[
+                    market
+                ][
+                    dimension
+                ][label].append(item)
+
+    summarized_dimensions = {
+        dimension: {
+            label: _context_summary(
+                values
+            )
+            for label, values in cells.items()
+        }
+        for dimension, cells in dimensions.items()
+    }
+
+    summarized_markets = {
+        market: {
+            dimension: {
+                label: _context_summary(
+                    values
+                )
+                for label, values in cells.items()
+            }
+            for dimension, cells in market_dimensions.items()
+            if cells
+        }
+        for market, market_dimensions in by_market.items()
+    }
+
+    return {
+        "status": "success",
+        "shadow_only": True,
+        "promotion_enabled": False,
+        "eligible_settled_legs": eligible_settled,
+        "linked_settled_legs": linked,
+        "unlinked_legacy_legs": unlinked_legacy,
+        "linked_rate": (
+            round(
+                linked / eligible_settled,
+                4,
+            )
+            if eligible_settled
+            else 0.0
+        ),
+        "context_versions": dict(
+            versions
+        ),
+        "dimensions": summarized_dimensions,
+        "by_market": summarized_markets,
+        "minimum_signal_sample": 75,
+        "strong_signal_sample": 150,
+        "decision_rule": (
+            "observe_only_until_predefined_sample_and_out_of_sample_"
+            "validation_are_satisfied"
+        ),
+        "roi_policy": (
+            "SportyBet price ROI includes only archived candidates that were "
+            "exactly bookable with real SportyBet prices; it is not aggregate "
+            "booking-code readback ROI."
+        ),
+    }
 
 
 def _gap_bucket(gap: float) -> str:

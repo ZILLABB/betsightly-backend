@@ -1,3 +1,4 @@
+import gzip
 import json
 
 import pytest
@@ -213,3 +214,172 @@ def test_settled_metrics_count_legs_once_and_keep_ranks_separate(monkeypatch):
     assert metrics["ranks"]["1"]["hit_rate"] == 1.0
     assert metrics["markets"]["over_1_5"]["brier"] == .0625
     assert metrics["markets"]["over_1_5"]["readiness"] == "thin"
+
+
+
+def test_context_metrics_require_exact_snapshot_linkage(monkeypatch):
+    candidate = {
+        "fixture_id": "fx-context",
+        "market": "over_1_5",
+        "conservative_probability": .70,
+        "odds": 1.55,
+        "odds_source": "SportyBet",
+        "bookable": True,
+        "match_context": {
+            "version": "match_context_v1",
+            "shadow_only": True,
+            "lineups": {
+                "status": "AVAILABLE",
+                "confirmed": True,
+            },
+            "injuries": {
+                "status": "AVAILABLE",
+                "count": 1,
+            },
+            "suspensions": {
+                "status": "AVAILABLE",
+                "count": 0,
+            },
+            "rest": {
+                "status": "AVAILABLE",
+                "home": {
+                    "status": "AVAILABLE",
+                    "short_rest": True,
+                    "fixture_congestion": True,
+                },
+                "away": {
+                    "status": "AVAILABLE",
+                    "short_rest": False,
+                    "fixture_congestion": False,
+                },
+            },
+            "weather": {
+                "status": "AVAILABLE",
+                "precip_mm": 3.0,
+                "chance_of_rain": 80,
+                "wind_kph": 15,
+                "gust_kph": 22,
+            },
+            "venue": {
+                "status": "AVAILABLE",
+            },
+        },
+    }
+
+    rows = [{
+        "snapshot_id": "snapshot-context",
+        "payload": gzip.compress(
+            json.dumps({
+                "candidates": [
+                    candidate
+                ]
+            }).encode("utf-8")
+        ),
+    }]
+
+    history = [{
+        "date": "2026-09-30",
+        "category": "2_odds",
+        "picks": [{
+            "board_snapshot_id": "snapshot-context",
+            "match_id": "fx-context",
+            "market": "over_1_5",
+            "status": "won",
+        }],
+    }]
+
+    monkeypatch.setattr(
+        "leagues.picks_db.get_history",
+        lambda limit_days: history,
+    )
+
+    report = decision_archive._settled_context_metrics(
+        rows
+    )
+
+    assert report["linked_settled_legs"] == 1
+    assert report["unlinked_legacy_legs"] == 0
+    assert report["promotion_enabled"] is False
+
+    assert (
+        report["dimensions"]["lineups"]["confirmed"]["n"]
+        == 1
+    )
+
+    assert (
+        report["dimensions"]["injuries"]["reported"]["n"]
+        == 1
+    )
+
+    assert (
+        report["dimensions"]["rest"]["short_rest"]["n"]
+        == 1
+    )
+
+    assert (
+        report["dimensions"]["congestion"]["congested"]["n"]
+        == 1
+    )
+
+    assert (
+        report["dimensions"]["weather"]["wet"]["n"]
+        == 1
+    )
+
+    cell = (
+        report["by_market"]["over_1_5"]["weather"]["wet"]
+    )
+
+    assert cell["hit_rate"] == 1.0
+    assert cell["mean_probability"] == .70
+    assert cell["brier"] == .09
+    assert cell["sportybet_price_record"]["roi"] == .55
+
+    assert (
+        cell["hit_rate_ci95"]["low"]
+        < cell["hit_rate_ci95"]["high"]
+    )
+
+
+def test_context_metrics_do_not_guess_legacy_linkage(monkeypatch):
+    rows = [{
+        "snapshot_id": "snapshot-new",
+        "payload": gzip.compress(
+            json.dumps({
+                "candidates": [{
+                    "fixture_id": "same-fixture",
+                    "market": "over_1_5",
+                    "match_context": {
+                        "version": "match_context_v1",
+                        "shadow_only": True,
+                    },
+                }]
+            }).encode("utf-8")
+        ),
+    }]
+
+    history = [{
+        "date": "2026-09-01",
+        "category": "2_odds",
+        "picks": [{
+            # Deliberately no board_snapshot_id.
+            "match_id": "same-fixture",
+            "market": "over_1_5",
+            "confidence": .75,
+            "status": "lost",
+        }],
+    }]
+
+    monkeypatch.setattr(
+        "leagues.picks_db.get_history",
+        lambda limit_days: history,
+    )
+
+    report = decision_archive._settled_context_metrics(
+        rows
+    )
+
+    assert report["eligible_settled_legs"] == 1
+    assert report["linked_settled_legs"] == 0
+    assert report["unlinked_legacy_legs"] == 1
+    assert report["linked_rate"] == 0.0

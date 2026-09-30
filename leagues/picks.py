@@ -560,6 +560,13 @@ def to_game(pick: dict) -> dict:
         "market_policy_version": pick.get("market_policy_version"),
         "quality_classification": pick.get("quality_classification"),
         "board_snapshot_id": pick.get("_board_snapshot_id"),
+        # Shadow context is observational only. Carry it forward so official
+        # settlement can later be joined back to what BetSightly knew when
+        # the prediction was made.
+        "match_context": (
+            pick.get("match_context")
+            or f.get("match_context")
+        ),
         "premium_eligible": pick.get("premium_eligible"),
         "fixture_alternatives": pick.get("fixture_alternatives", []),
         "rejected_fixture_alternatives": pick.get("rejected_fixture_alternatives", []),
