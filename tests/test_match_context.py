@@ -1,3 +1,4 @@
+﻿from datetime import datetime, timezone
 from leagues import match_context
 from services.apifootball_service import APIFootballService
 
@@ -511,3 +512,259 @@ def test_decision_archive_keeps_shadow_context():
         compact["match_context"]["shadow_only"]
         is True
     )
+
+
+
+def test_weather_at_kickoff_selects_nearest_forecast_hour():
+    from services.weather_service import (
+        weather_at_kickoff,
+    )
+
+    payload = {
+        "location": {
+            "name": "London",
+        },
+        "forecast": {
+            "forecastday": [
+                {
+                    "date": "2026-09-30",
+                    "hour": [
+                        {
+                            "time_epoch": 1790791200,
+                            "temp_c": 18.0,
+                            "feelslike_c": 17.5,
+                            "precip_mm": 2.1,
+                            "chance_of_rain": 70,
+                            "chance_of_snow": 0,
+                            "wind_kph": 22.0,
+                            "gust_kph": 31.0,
+                            "humidity": 81,
+                            "condition": {
+                                "text": "Light rain",
+                                "code": 1183,
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+    kickoff = datetime.fromtimestamp(
+        1790791200,
+        timezone.utc,
+    ).isoformat()
+
+    result = weather_at_kickoff(
+        payload,
+        kickoff,
+    )
+
+    assert result["status"] == "AVAILABLE"
+    assert result["temperature_c"] == 18.0
+    assert result["precip_mm"] == 2.1
+    assert result["wind_kph"] == 22.0
+    assert result["condition"] == "Light rain"
+
+
+def test_weather_outside_forecast_window_stays_unknown():
+    from services.weather_service import (
+        weather_at_kickoff,
+    )
+
+    payload = {
+        "forecast": {
+            "forecastday": []
+        }
+    }
+
+    result = weather_at_kickoff(
+        payload,
+        "2026-10-06T18:00:00Z",
+    )
+
+    assert result["status"] == "UNKNOWN"
+    assert (
+        result["reason"]
+        == "kickoff_outside_forecast_window"
+    )
+
+
+def test_context_coverage_counts_only_available_sections():
+    fixtures = [
+        {
+            "match_context": {
+                "injuries": {
+                    "status": "AVAILABLE",
+                },
+                "suspensions": {
+                    "status": "AVAILABLE",
+                },
+                "lineups": {
+                    "status": "UNKNOWN",
+                },
+                "rest": {
+                    "status": "AVAILABLE",
+                },
+                "weather": {
+                    "status": "AVAILABLE",
+                },
+                "venue": {
+                    "status": "AVAILABLE",
+                },
+            }
+        },
+        {
+            "match_context": {
+                "injuries": {
+                    "status": "UNKNOWN",
+                },
+                "suspensions": {
+                    "status": "UNKNOWN",
+                },
+                "lineups": {
+                    "status": "AVAILABLE",
+                },
+                "rest": {
+                    "status": "AVAILABLE",
+                },
+                "weather": {
+                    "status": "UNKNOWN",
+                },
+                "venue": {
+                    "status": "AVAILABLE",
+                },
+            }
+        },
+    ]
+
+    result = match_context._context_coverage(
+        fixtures
+    )
+
+    assert result["fixture_count"] == 2
+
+    assert (
+        result["available_counts"]["rest"]
+        == 2
+    )
+
+    assert (
+        result["coverage"]["weather"]
+        == .5
+    )
+
+    assert (
+        result["coverage"]["lineups"]
+        == .5
+    )
+
+
+def test_enrichment_weather_remains_shadow_only():
+    fixtures = [
+        {
+            "match_id": "m-weather",
+            "home": {"name": "Arsenal"},
+            "away": {"name": "Chelsea"},
+            "commence_time": "2026-09-30T18:00:00Z",
+        }
+    ]
+
+    picks = [
+        {
+            "selection_id": "s-weather",
+            "match_id": "m-weather",
+            "bookable": True,
+            "confidence": .84,
+            "selection_probability": .79,
+            "quality_score": 91.0,
+            "trust": {
+                "trust_grade": "A",
+            },
+        }
+    ]
+
+    class Football:
+        def get_daily_fixtures(self, date):
+            return [
+                {
+                    "fixture_id": 5001,
+                    "home_team": "Arsenal",
+                    "away_team": "Chelsea",
+                    "date": "2026-09-30T18:00:00+00:00",
+                    "venue_city": "London",
+                    "country_name": "England",
+                }
+            ]
+
+        def get_fixture_details(self, ids):
+            return []
+
+        def get_fixtures_injuries(self, ids):
+            return {
+                "response": [],
+                "errors": {},
+            }
+
+    class Weather:
+        def forecast(self, location, days=3):
+            assert location == "London, England"
+            assert days == 3
+
+            kickoff_epoch = int(
+                datetime(
+                    2026,
+                    9,
+                    30,
+                    18,
+                    tzinfo=timezone.utc,
+                ).timestamp()
+            )
+
+            return {
+                "forecast": {
+                    "forecastday": [
+                        {
+                            "hour": [
+                                {
+                                    "time_epoch": kickoff_epoch,
+                                    "temp_c": 13.0,
+                                    "wind_kph": 35.0,
+                                    "gust_kph": 48.0,
+                                    "precip_mm": 4.0,
+                                    "chance_of_rain": 90,
+                                    "humidity": 88,
+                                    "condition": {
+                                        "text": "Heavy rain",
+                                        "code": 1195,
+                                    },
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+
+    summary = match_context.enrich_prepared_context(
+        fixtures,
+        picks,
+        service=Football(),
+        weather_service=Weather(),
+    )
+
+    assert (
+        picks[0]["match_context"]["weather"]["status"]
+        == "AVAILABLE"
+    )
+
+    # Severe-looking weather is still observation only.
+    assert picks[0]["confidence"] == .84
+    assert picks[0]["selection_probability"] == .79
+    assert picks[0]["quality_score"] == 91.0
+    assert picks[0]["trust"]["trust_grade"] == "A"
+
+    assert (
+        summary["coverage"]["coverage"]["weather"]
+        == 1.0
+    )
+

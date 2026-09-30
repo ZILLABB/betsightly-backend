@@ -591,12 +591,88 @@ def _injury_fixture_id(
     )
 
 
+def _weather_location(
+    provider_fixture: dict,
+) -> str | None:
+    city = str(
+        provider_fixture.get(
+            "venue_city"
+        ) or ""
+    ).strip()
+
+    country = str(
+        provider_fixture.get(
+            "country_name"
+        ) or ""
+    ).strip()
+
+    if city and country:
+        return f"{city}, {country}"
+
+    return city or country or None
+
+
+def _context_coverage(
+    fixtures: list[dict],
+) -> dict:
+    total = len(fixtures)
+
+    sections = (
+        "injuries",
+        "suspensions",
+        "lineups",
+        "rest",
+        "weather",
+        "venue",
+    )
+
+    counts = {
+        section: sum(
+            (
+                (
+                    fixture.get(
+                        "match_context"
+                    )
+                    or {}
+                ).get(
+                    section,
+                    {},
+                ).get(
+                    "status"
+                )
+                == "AVAILABLE"
+            )
+            for fixture in fixtures
+        )
+        for section in sections
+    }
+
+    percentages = {
+        section: (
+            round(
+                count / total,
+                4,
+            )
+            if total
+            else 0.0
+        )
+        for section, count in counts.items()
+    }
+
+    return {
+        "fixture_count": total,
+        "available_counts": counts,
+        "coverage": percentages,
+    }
+
+
 def enrich_prepared_context(
     fixtures: list[dict],
     picks: list[dict],
     *,
     history=None,
     service=None,
+    weather_service=None,
     limit: int = MAX_CONTEXT_FIXTURES,
 ) -> dict:
     """Attach shadow context to a prepared board.
@@ -651,6 +727,8 @@ def enrich_prepared_context(
             for fixture in fixtures
         ),
         "provider_enabled": False,
+        "weather_provider_enabled": False,
+        "coverage": {},
     }
 
     if not shortlisted:
@@ -665,6 +743,10 @@ def enrich_prepared_context(
                         "match_context"
                     )
                 )
+
+        summary["coverage"] = _context_coverage(
+            fixtures
+        )
 
         return summary
 
@@ -681,6 +763,10 @@ def enrich_prepared_context(
                             "match_context"
                         )
                     )
+
+            summary["coverage"] = _context_coverage(
+                fixtures
+            )
 
             return summary
 
@@ -883,6 +969,102 @@ def enrich_prepared_context(
                     "injury_available_count"
                 ] += 1
 
+    # Weather is another shadow overlay. Only provider-matched fixtures have
+    # trustworthy venue/city metadata. Missing key or out-of-window forecast
+    # remains UNKNOWN.
+    if weather_service is None:
+        try:
+            from services.weather_service import (
+                API_KEY as WEATHER_API_KEY,
+                get_weather_service,
+            )
+
+            if WEATHER_API_KEY:
+                weather_service = (
+                    get_weather_service()
+                )
+
+        except Exception as exc:
+            logger.warning(
+                "Weather context unavailable: %s",
+                exc,
+            )
+
+    if weather_service is not None:
+        summary[
+            "weather_provider_enabled"
+        ] = True
+
+        forecasts = {}
+
+        for provider_id, (
+            fixture,
+            provider,
+        ) in matched.items():
+            location = _weather_location(
+                provider
+            )
+
+            if not location:
+                continue
+
+            if location not in forecasts:
+                try:
+                    forecasts[
+                        location
+                    ] = weather_service.forecast(
+                        location,
+                        days=3,
+                    )
+
+                except Exception as exc:
+                    logger.warning(
+                        "Weather lookup failed for %s: %s",
+                        location,
+                        exc,
+                    )
+
+                    forecasts[
+                        location
+                    ] = {
+                        "status": "UNKNOWN",
+                        "reason": (
+                            "weather_provider_error"
+                        ),
+                    }
+
+            try:
+                from services.weather_service import (
+                    weather_at_kickoff,
+                )
+
+                weather = weather_at_kickoff(
+                    forecasts[location],
+                    fixture.get(
+                        "commence_time"
+                    ),
+                )
+
+            except Exception as exc:
+                logger.warning(
+                    "Weather normalization failed: %s",
+                    exc,
+                )
+
+                weather = {
+                    "status": "UNKNOWN",
+                    "reason": (
+                        "weather_normalization_error"
+                    ),
+                }
+
+            (
+                fixture.setdefault(
+                    "match_context",
+                    empty_match_context(),
+                )
+            )["weather"] = weather
+
     for pick in picks:
         match_id = str(
             pick.get("match_id") or ""
@@ -898,5 +1080,9 @@ def enrich_prepared_context(
                     "match_context"
                 )
             )
+
+    summary["coverage"] = _context_coverage(
+        fixtures
+    )
 
     return summary
