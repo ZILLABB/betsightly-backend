@@ -577,17 +577,27 @@ def _log_builder_board(builder_run_id: str, target: float, horizon: str,
 @router.get("/slip-builder/targets")
 async def slip_builder_targets():
     """The targets offered, and what each is actually worth."""
-    from leagues.slip_builder import (HORIZONS, MAX_LEGS, MAX_TARGET,
-                                      MIN_TARGET, TARGETS)
+    from leagues.builder_v2 import V2_HORIZONS
+    from leagues.slip_builder import (
+        HORIZONS,
+        MAX_LEGS,
+        MAX_TARGET,
+        MIN_TARGET,
+        TARGETS,
+    )
+
     return {
         "status": "success",
         "targets": TARGETS,
         "min": MIN_TARGET,
         "max": MAX_TARGET,
         "max_legs": MAX_LEGS,
-        "horizons": sorted(HORIZONS),
-        "note": ("The return shown is the model's joint hit probability "
-                 "multiplied by the displayed odds. It is an estimate, not a guarantee."),
+        "horizons": sorted(V2_HORIZONS),
+        "legacy_horizons": sorted(HORIZONS),
+        "note": (
+            "The return shown is the model's joint hit probability "
+            "multiplied by the displayed odds. It is an estimate, not a guarantee."
+        ),
     }
 
 
