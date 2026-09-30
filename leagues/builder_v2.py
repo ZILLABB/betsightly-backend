@@ -16,6 +16,14 @@ V2_HORIZONS = {"today", "3_days", "7_days"}
 V2_MODES = {"target_odds", "game_count", "strongest", "manual"}
 TRUST_ORDER = {"D": 0, "C": 1, "B": 2, "A": 3}
 
+# Portfolio diversification never changes prediction probability or trust.
+# It is only allowed to choose a less-exposed candidate when its conservative
+# lower bound is effectively comparable with the strongest available option.
+PORTFOLIO_COMPARABLE_LOWER_BOUND_DELTA = 0.005
+PORTFOLIO_TEAM_WEIGHT = 3.0
+PORTFOLIO_LEAGUE_WEIGHT = 1.0
+PORTFOLIO_MARKET_WEIGHT = 0.5
+
 
 class BuilderV2BoardUnavailable(RuntimeError):
     def __init__(self, board: dict, refresh_started: bool):
@@ -121,6 +129,136 @@ def _recent_exposure(options: dict) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _pick_team_names(pick: dict) -> set[str]:
+    fixture = pick.get("_fixture") or {}
+    values = {
+        str(pick.get("home_team") or "").strip().casefold(),
+        str(pick.get("away_team") or "").strip().casefold(),
+    }
+
+    for side in ("home", "away"):
+        team = fixture.get(side) or {}
+        values.add(str(team.get("name") or "").strip().casefold())
+
+    return {value for value in values if value}
+
+
+def _pick_league_names(pick: dict) -> set[str]:
+    fixture = pick.get("_fixture") or {}
+    values = {
+        str(pick.get("league") or "").strip().casefold(),
+        str(fixture.get("league") or "").strip().casefold(),
+        str(fixture.get("league_slug") or "").strip().casefold(),
+    }
+    return {value for value in values if value}
+
+
+def _portfolio_penalty(pick: dict, options: dict) -> float:
+    """History exposure score, separate from football prediction quality."""
+    if not options.get("_build_another"):
+        return 0.0
+
+    exposure = _recent_exposure(options)
+    if not int(exposure.get("history_ticket_count") or 0):
+        return 0.0
+
+    team_counts = exposure.get("team_counts") or {}
+    league_counts = exposure.get("league_counts") or {}
+    market_counts = exposure.get("market_counts") or {}
+
+    team_exposure = sum(
+        int(team_counts.get(team, 0) or 0)
+        for team in _pick_team_names(pick)
+    )
+
+    league_exposure = max(
+        (
+            int(league_counts.get(league, 0) or 0)
+            for league in _pick_league_names(pick)
+        ),
+        default=0,
+    )
+
+    market = str(pick.get("market") or "").strip()
+    market_exposure = int(
+        market_counts.get(market, 0) or 0
+    )
+
+    return (
+        team_exposure * PORTFOLIO_TEAM_WEIGHT
+        + league_exposure * PORTFOLIO_LEAGUE_WEIGHT
+        + market_exposure * PORTFOLIO_MARKET_WEIGHT
+    )
+
+
+def _annotate_portfolio_pool(
+    pool: list[dict],
+    options: dict,
+) -> list[dict]:
+    out = []
+
+    for source in pool:
+        pick = dict(source)
+        pick["_portfolio_penalty"] = _portfolio_penalty(
+            pick,
+            options,
+        )
+        out.append(pick)
+
+    return out
+
+
+def _portfolio_order(
+    pool: list[dict],
+    options: dict,
+) -> list[dict]:
+    """Quality first, exposure second within a narrow comparable band."""
+    ranked = sorted(pool, key=_rank_key)
+
+    if (
+        not options.get("_build_another")
+        or not int(
+            _recent_exposure(options).get(
+                "history_ticket_count"
+            ) or 0
+        )
+    ):
+        return ranked
+
+    remaining = list(ranked)
+    ordered = []
+
+    while remaining:
+        strongest = remaining[0]
+        strongest_grade = _trust_grade(strongest)
+        minimum_comparable = (
+            _lower_bound(strongest)
+            - PORTFOLIO_COMPARABLE_LOWER_BOUND_DELTA
+        )
+
+        comparable = [
+            pick
+            for pick in remaining
+            if (
+                _trust_grade(pick) == strongest_grade
+                and _lower_bound(pick) >= minimum_comparable
+            )
+        ]
+
+        chosen = min(
+            comparable,
+            key=lambda pick: (
+                _portfolio_penalty(pick, options),
+                _rank_key(pick),
+            ),
+        )
+
+        ordered.append(chosen)
+        remaining.remove(chosen)
+
+    return ordered
+
+
 def _diversification_stage_names(options: dict) -> list[str]:
     """Fresh first; qualified repeats are a fallback, never a weaker gate."""
     if not options.get("_build_another"):
@@ -144,7 +282,10 @@ def _apply_diversification_stage(
     stage: str,
 ) -> list[dict]:
     if stage in {"normal", "no_history", "qualified_repeat_fallback"}:
-        return list(pool)
+        return _annotate_portfolio_pool(
+            list(pool),
+            options,
+        )
 
     exposure = _recent_exposure(options)
 
@@ -174,7 +315,10 @@ def _apply_diversification_stage(
 
         out.append(pick)
 
-    return out
+    return _annotate_portfolio_pool(
+        out,
+        options,
+    )
 
 
 def _diversification_metadata(
@@ -211,6 +355,38 @@ def _diversification_metadata(
 
     delivered = len(selected)
 
+    team_counts = exposure.get("team_counts") or {}
+    league_counts = exposure.get("league_counts") or {}
+    market_counts = exposure.get("market_counts") or {}
+
+    repeated_teams = {
+        team
+        for item in selected
+        for team in _pick_team_names(item)
+        if int(team_counts.get(team, 0) or 0) > 0
+    }
+
+    repeated_leagues = {
+        league
+        for item in selected
+        for league in _pick_league_names(item)
+        if int(league_counts.get(league, 0) or 0) > 0
+    }
+
+    repeated_markets = {
+        str(item.get("market") or "").strip()
+        for item in selected
+        if (
+            str(item.get("market") or "").strip()
+            and int(
+                market_counts.get(
+                    str(item.get("market") or "").strip(),
+                    0,
+                ) or 0
+            ) > 0
+        )
+    }
+
     return {
         "applied": bool(
             build_another
@@ -227,9 +403,15 @@ def _diversification_metadata(
         ),
         "repeated_selection_count": repeated_selections,
         "repeated_fixture_count": repeated_fixtures,
+        "repeated_team_count": len(repeated_teams),
+        "repeated_league_count": len(repeated_leagues),
+        "repeated_market_count": len(repeated_markets),
         # A repeated exact selection only appears in the final fallback.
         "unavoidable_reuse_count": repeated_selections,
         "quality_floor_preserved": True,
+        "portfolio_quality_delta": (
+            PORTFOLIO_COMPARABLE_LOWER_BOUND_DELTA
+        ),
     }
 
 
@@ -506,11 +688,19 @@ def list_candidates(options: dict) -> dict:
     }
 
 
-def _select_unique(pool: list[dict], limit: int) -> list[dict]:
+def _select_unique(
+    pool: list[dict],
+    limit: int,
+    options: dict | None = None,
+) -> list[dict]:
     selected = []
     seen_fixtures: set[str] = set()
     seen_teams: set[str] = set()
-    for pick in sorted(pool, key=_rank_key):
+
+    for pick in _portfolio_order(
+        pool,
+        options or {},
+    ):
         fixture_id = str(pick.get("match_id") or "")
         teams = _fixture_teams(pick)
         if fixture_id in seen_fixtures:
@@ -532,6 +722,7 @@ def _select_market_balanced(
     limit: int,
     requested_markets: list[str] | None,
     fallback_pool: list[dict] | None = None,
+    options: dict | None = None,
 ) -> tuple[list[dict], dict]:
     """Select Game Count picks while respecting the user's requested market mix.
 
@@ -550,7 +741,11 @@ def _select_market_balanced(
 
     # No explicit multi-market request: preserve the mature quality-first path.
     if len(markets) <= 1 and not fallback_pool:
-        selected = _select_unique(pool, limit)
+        selected = _select_unique(
+            pool,
+            limit,
+            options,
+        )
         delivered = collections.Counter(
             str(pick.get("market") or "unknown") for pick in selected
         )
@@ -580,7 +775,10 @@ def _select_market_balanced(
         for index, market in enumerate(markets)
     }
 
-    ranked = sorted(pool, key=_rank_key)
+    ranked = _portfolio_order(
+        pool,
+        options or {},
+    )
     buckets = {
         market: [
             pick for pick in ranked
@@ -673,7 +871,10 @@ def _select_market_balanced(
     # through the identical final Builder gates in _candidate_pool.
     if len(selected) < limit and fallback_pool:
         selected_ids = {str(pick.get("selection_id") or "") for pick in selected}
-        for pick in sorted(fallback_pool, key=_rank_key):
+        for pick in _portfolio_order(
+            fallback_pool,
+            options or {},
+        ):
             if len(selected) >= limit:
                 break
             if str(pick.get("market") or "") in markets:
@@ -1034,6 +1235,7 @@ def generate_v2(options: dict) -> dict:
                 requested,
                 list(options.get("markets") or []),
                 fallback_pool=stage_fallback,
+                options=options,
             )
 
             selected = candidate_selected
@@ -1101,6 +1303,7 @@ def generate_v2(options: dict) -> dict:
         candidate_selected = _select_unique(
             stage_pool,
             max_games,
+            options,
         )
 
         selected = candidate_selected

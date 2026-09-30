@@ -811,3 +811,44 @@ def test_dnb_push_reduces_payout_without_losing_accumulator():
 def test_builder_team_goal_cap_never_scales_with_target():
     for target in (10, 20, 30, 50, 70, 100):
         assert slip_builder._team_to_score_cap_for_target(target) == 2
+
+
+
+def test_verified_optimizer_uses_portfolio_only_as_equal_quality_tiebreak():
+    used = _pick(
+        "portfolio-used",
+        odds=2.0,
+        confidence=.80,
+    )
+    fresh = _pick(
+        "portfolio-fresh",
+        odds=2.0,
+        confidence=.80,
+    )
+
+    for pick in (used, fresh):
+        pick["selection_probability"] = .80
+        pick["evidence_adjusted_probability"] = .80
+
+    used["_portfolio_penalty"] = 10.0
+    fresh["_portfolio_penalty"] = 0.0
+
+    odds, joint, selected, status = slip_builder._verified_optimize(
+        [used, fresh],
+        target=2.0,
+        max_legs=1,
+        market_cap=10,
+        team_to_score_cap=10,
+        under_cap=10,
+    )
+
+    expected_probability = (
+        slip_builder._leg_settlement_probabilities(fresh)[0]
+    )
+
+    assert status in {"OPTIMAL", "BOUNDED_OPTIMAL"}
+    assert odds == pytest.approx(2.0)
+    assert joint == pytest.approx(expected_probability)
+    assert [pick["match_id"] for pick in selected] == [
+        "portfolio-fresh"
+    ]

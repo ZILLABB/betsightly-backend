@@ -1754,3 +1754,176 @@ def test_normal_builder_is_unchanged_by_diversification_helpers(monkeypatch):
     assert result["legs"] == 3
     assert result["diversification"]["build_another"] is False
     assert result["diversification"]["strategy_used"] == "normal"
+
+
+
+def test_portfolio_order_prefers_less_exposed_comparable_pick():
+    exposed = _pick(
+        2001,
+        probability=.800,
+        fixture="portfolio-exposed",
+    )
+    fresh = _pick(
+        2002,
+        probability=.797,
+        fixture="portfolio-fresh",
+    )
+
+    options = {
+        "_build_another": True,
+        "_recent_exposure": {
+            "history_ticket_count": 3,
+            "team_counts": {
+                "home 2001": 3,
+                "away 2001": 2,
+            },
+            "league_counts": {
+                "league": 5,
+            },
+            "market_counts": {
+                "over_1_5": 5,
+            },
+        },
+    }
+
+    ordered = builder_v2._portfolio_order(
+        [exposed, fresh],
+        options,
+    )
+
+    assert ordered[0]["selection_id"] == fresh["selection_id"]
+
+
+def test_portfolio_order_keeps_materially_stronger_pick_first():
+    exposed = _pick(
+        2011,
+        probability=.90,
+        fixture="portfolio-strong",
+    )
+    fresh = _pick(
+        2012,
+        probability=.80,
+        fixture="portfolio-weaker",
+    )
+
+    options = {
+        "_build_another": True,
+        "_recent_exposure": {
+            "history_ticket_count": 4,
+            "team_counts": {
+                "home 2011": 8,
+                "away 2011": 8,
+            },
+            "league_counts": {
+                "league": 10,
+            },
+            "market_counts": {
+                "over_1_5": 10,
+            },
+        },
+    }
+
+    ordered = builder_v2._portfolio_order(
+        [exposed, fresh],
+        options,
+    )
+
+    assert ordered[0]["selection_id"] == exposed["selection_id"]
+
+
+def test_strongest_build_another_prefers_comparable_fresh_portfolio(monkeypatch):
+    exposed = _pick(
+        2021,
+        probability=.800,
+        fixture="portfolio-used",
+    )
+    exposed["_fixture"]["league"] = "Used League"
+
+    fresh = _pick(
+        2022,
+        probability=.797,
+        fixture="portfolio-new",
+        market="over_2_5",
+    )
+    fresh["_fixture"]["league"] = "Fresh League"
+
+    _wire(monkeypatch, [exposed, fresh])
+
+    result = builder_v2.generate_v2({
+        "mode": "strongest",
+        "max_games": 1,
+        "horizon": "today",
+        "_build_another": True,
+        "_recent_exposure": {
+            "history_ticket_count": 4,
+            "exact_selection_ids": [],
+            "recent_fixture_ids": [],
+            "team_counts": {
+                "home 2021": 4,
+                "away 2021": 4,
+            },
+            "league_counts": {
+                "used league": 4,
+            },
+            "market_counts": {
+                "over_1_5": 4,
+            },
+        },
+    })
+
+    assert result["status"] == "success"
+    assert result["games"][0]["selection_id"] == fresh["selection_id"]
+    assert result["diversification"]["repeated_team_count"] == 0
+    assert result["diversification"]["repeated_league_count"] == 0
+    assert result["diversification"]["repeated_market_count"] == 0
+
+
+def test_strongest_keeps_materially_stronger_exposed_pick(monkeypatch):
+    strong = _pick(
+        2031,
+        probability=.90,
+        fixture="portfolio-elite",
+    )
+    strong["_fixture"]["league"] = "Used League"
+
+    fresh = _pick(
+        2032,
+        probability=.80,
+        fixture="portfolio-fresh",
+        market="over_2_5",
+    )
+    fresh["_fixture"]["league"] = "Fresh League"
+
+    _wire(monkeypatch, [strong, fresh])
+
+    result = builder_v2.generate_v2({
+        "mode": "strongest",
+        "max_games": 1,
+        "horizon": "today",
+        "_build_another": True,
+        "_recent_exposure": {
+            "history_ticket_count": 5,
+            "exact_selection_ids": [],
+            "recent_fixture_ids": [],
+            "team_counts": {
+                "home 2031": 4,
+                "away 2031": 4,
+            },
+            "league_counts": {
+                "used league": 4,
+            },
+            "market_counts": {
+                "over_1_5": 4,
+            },
+        },
+    })
+
+    assert result["status"] == "success"
+    assert result["games"][0]["selection_id"] == strong["selection_id"]
+
+    diversity = result["diversification"]
+
+    assert diversity["repeated_team_count"] == 2
+    assert diversity["repeated_league_count"] == 1
+    assert diversity["repeated_market_count"] == 1
+    assert diversity["quality_floor_preserved"] is True

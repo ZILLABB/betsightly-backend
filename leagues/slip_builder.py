@@ -521,6 +521,17 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
     log_odds = np.array([math.log(float(p["odds"])) for p in valid])
     risk = np.array([-math.log(max(1e-9, min(.999999, p)))
                      for p in probabilities])
+
+    # Portfolio exposure is deliberately a secondary optimization objective.
+    # The first solve still finds the minimum-risk football solution.
+    portfolio_cost = np.array([
+        max(
+            0.0,
+            float(pick.get("_portfolio_penalty") or 0.0),
+        )
+        for pick in valid
+    ])
+
     matrix = csr_matrix(np.asarray(rows, dtype=float))
     base_constraint = LinearConstraint(matrix, -np.inf, np.asarray(upper))
     target_constraint = LinearConstraint(
@@ -533,6 +544,38 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
         risk, integrality=np.ones(size), bounds=Bounds(0, 1),
         constraints=(base_constraint, target_constraint), options=options,
     )
+
+    # If several target-reaching combinations have the same optimum football
+    # risk, choose the one with less recent portfolio exposure. The extra
+    # constraint keeps the original optimum risk fixed, so diversification
+    # cannot buy novelty by accepting a weaker solution.
+    if (
+        reached.x is not None
+        and np.any(portfolio_cost > 0)
+    ):
+        best_risk = float(np.dot(risk, reached.x))
+
+        quality_constraint = LinearConstraint(
+            csr_matrix(risk.reshape(1, -1)),
+            -np.inf,
+            np.array([best_risk + 1e-8]),
+        )
+
+        diversified = milp(
+            portfolio_cost + risk * 1e-9,
+            integrality=np.ones(size),
+            bounds=Bounds(0, 1),
+            constraints=(
+                base_constraint,
+                target_constraint,
+                quality_constraint,
+            ),
+            options=options,
+        )
+
+        if diversified.x is not None:
+            reached = diversified
+
     result = reached
     if reached.x is None:
         # Verify the maximum possible odds instead of describing a greedy
