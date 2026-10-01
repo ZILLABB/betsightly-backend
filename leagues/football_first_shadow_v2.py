@@ -1,4 +1,4 @@
-﻿"""Prospective runtime-only V2 football-first shadow.
+"""Prospective runtime-only V2 football-first shadow.
 
 This model is observational only:
 - never changes predictor.predict()
@@ -346,7 +346,7 @@ def predict_fixture(
     )
     from leagues.football_first_runtime_v2 import (
         V2_CANDIDATE_FEATURE_COLUMNS,
-        runtime_context_vector,
+        runtime_candidate_context_vector,
     )
 
     slug = str(
@@ -440,7 +440,7 @@ def predict_fixture(
                 ),
         }
 
-    context = runtime_context_vector(
+    context = runtime_candidate_context_vector(
         fixture,
         history,
         cached_rates or {},

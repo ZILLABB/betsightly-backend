@@ -293,6 +293,45 @@ def _venue_values(
     )
 
 
+def _utc_calendar_day(
+    value,
+) -> pd.Timestamp:
+    """Normalize aware/naive inputs to one UTC-naive calendar day.
+
+    Live HistoryIndex rows can contain naive timestamps while provider
+    fixture kickoff values are timezone-aware.  Converting aware values to
+    UTC before dropping timezone information makes the comparison
+    deterministic and avoids mixing tz-aware and tz-naive timestamps.
+    """
+
+    timestamp = pd.Timestamp(
+        value
+    )
+
+    if pd.isna(
+        timestamp
+    ):
+        raise ValueError(
+            "invalid_rest_timestamp"
+        )
+
+    if (
+        timestamp.tzinfo
+        is not None
+    ):
+        timestamp = (
+            timestamp
+            .tz_convert(
+                "UTC"
+            )
+            .tz_localize(
+                None
+            )
+        )
+
+    return timestamp.normalize()
+
+
 def rest_snapshot(
     current_day,
     prior_days,
@@ -303,19 +342,21 @@ def rest_snapshot(
     inference can reproduce exactly the same feature.
     """
 
-    current = pd.Timestamp(
+    current = _utc_calendar_day(
         current_day
-    ).normalize()
+    )
 
-    previous = [
-        pd.Timestamp(
+    previous = []
+
+    for value in prior_days:
+        prior = _utc_calendar_day(
             value
-        ).normalize()
-        for value in prior_days
-        if pd.Timestamp(
-            value
-        ).normalize() < current
-    ]
+        )
+
+        if prior < current:
+            previous.append(
+                prior
+            )
 
     if not previous:
         return {
@@ -347,6 +388,122 @@ def rest_snapshot(
             1.0 if days < 4 else 0.0,
     }
 
+
+
+def runtime_candidate_context_vector(
+    fixture: dict,
+    index,
+    cached_rates: dict,
+) -> dict:
+    """Build only the context actually used by the frozen 32-feature V2.
+
+    The selected candidate uses base-rate and venue features but explicitly
+    excludes rest.  Rest therefore must not become a runtime dependency for
+    prospective V2 observations.
+    """
+
+    slug = str(
+        fixture.get(
+            "league_slug"
+        )
+        or ""
+    )
+
+    team_type = str(
+        fixture.get(
+            "team_type"
+        )
+        or "CLUB"
+    )
+
+    home = str(
+        (
+            fixture.get("home")
+            or {}
+        ).get("name")
+        or ""
+    )
+
+    away = str(
+        (
+            fixture.get("away")
+            or {}
+        ).get("name")
+        or ""
+    )
+
+    values = _base_values(
+        slug,
+        cached_rates,
+    )
+
+    home_form = index.team_form(
+        home,
+        "home",
+        team_type,
+    )
+
+    away_form = index.team_form(
+        away,
+        "away",
+        team_type,
+    )
+
+    values.update({
+        "runtime_home_venue_win_5":
+            float(
+                home_form[
+                    "venue_win_rate_5"
+                ]
+            ),
+
+        "runtime_home_venue_goals_5":
+            float(
+                home_form[
+                    "venue_goals_5"
+                ]
+            ),
+
+        "runtime_away_venue_win_5":
+            float(
+                away_form[
+                    "venue_win_rate_5"
+                ]
+            ),
+
+        "runtime_away_venue_goals_5":
+            float(
+                away_form[
+                    "venue_goals_5"
+                ]
+            ),
+    })
+
+    candidate_columns = [
+        *BASE_COLUMNS,
+        *VENUE_COLUMNS,
+    ]
+
+    return {
+        "status":
+            "READY",
+
+        "feature_version":
+            V2_CANDIDATE_VERSION,
+
+        "features":
+            values,
+
+        "vector": [
+            float(
+                values[
+                    column
+                ]
+            )
+            for column
+            in candidate_columns
+        ],
+    }
 
 def runtime_context_vector(
     fixture: dict,

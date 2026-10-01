@@ -1,4 +1,4 @@
-﻿import pandas as pd
+import pandas as pd
 import pytest
 
 from leagues import (
@@ -45,7 +45,7 @@ class _History:
                     "ga":
                         1,
                     "date":
-                        f"2026-09-{day:02d}T12:00:00+00:00",
+                        f"2026-09-{day:02d}T12:00:00",
                 }
                 for day
                 in range(
@@ -66,7 +66,7 @@ class _History:
                     "ga":
                         1,
                     "date":
-                        f"2026-09-{day:02d}T12:00:00+00:00",
+                        f"2026-09-{day:02d}T12:00:00",
                 }
                 for day
                 in range(

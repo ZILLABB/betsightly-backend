@@ -1,4 +1,4 @@
-﻿from collections import deque
+from collections import deque
 
 import pandas as pd
 import pytest
@@ -216,4 +216,48 @@ def test_rest_default_is_neutral_when_unseen():
             "short_rest"
         ]
         == 0.0
+    )
+
+
+
+def test_rest_snapshot_accepts_mixed_naive_and_aware_dates():
+    from leagues.football_first_runtime_v2 import (
+        rest_snapshot,
+    )
+
+    result = rest_snapshot(
+        pd.Timestamp(
+            "2026-10-01T15:00:00+00:00"
+        ),
+        [
+            pd.Timestamp(
+                "2026-09-28T12:00:00"
+            ),
+            pd.Timestamp(
+                "2026-09-25T12:00:00+01:00"
+            ),
+        ],
+    )
+
+    assert (
+        result[
+            "available"
+        ]
+        == 1.0
+    )
+
+    assert (
+        result[
+            "days_scaled"
+        ]
+        == pytest.approx(
+            3 / 30
+        )
+    )
+
+    assert (
+        result[
+            "short_rest"
+        ]
+        == 1.0
     )
