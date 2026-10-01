@@ -1232,7 +1232,7 @@ async def _legacy_slip_builder_generate(target: float, horizon: str = "week",
                 "status": "unavailable", "reason": "history_not_ready",
                 "retryable": True, "history": history,
                 "requested_target": round(float(target), 2),
-                "horizon": horizon, "builder_run_id": builder_run_id,
+                "horizon": horizon, "request_id": request_id,
             }
         refresh_started = start_prepared_board_refresh(
             days_ahead=7, force=True
