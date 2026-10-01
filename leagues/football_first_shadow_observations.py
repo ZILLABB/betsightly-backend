@@ -351,6 +351,7 @@ def settle_pending_observations(
     *,
     now: datetime | None = None,
     limit: int = 250,
+    model_version: str | None = None,
     db_engine=engine,
 ) -> dict:
     if not table_exists(db_engine):
@@ -358,19 +359,34 @@ def settle_pending_observations(
 
     current = _utc(now or datetime.now(timezone.utc))
     cutoff = current - timedelta(hours=3)
+
+    conditions = [
+        observations.c.status == "pending",
+        observations.c.kickoff <= cutoff,
+    ]
+
+    if model_version:
+        conditions.append(
+            observations.c.model_version
+            == str(model_version)
+        )
+
     with db_engine.begin() as conn:
         rows = conn.execute(
             select(observations)
-            .where(
-                observations.c.status == "pending",
-                observations.c.kickoff <= cutoff,
-            )
+            .where(*conditions)
             .order_by(observations.c.kickoff.asc())
             .limit(max(1, min(1000, int(limit))))
         ).mappings().all()
 
     if not rows:
-        return {"status": "SUCCESS", "checked": 0, "settled": 0, "pending": 0}
+        return {
+            "status": "SUCCESS",
+            "checked": 0,
+            "settled": 0,
+            "pending": 0,
+            "model_version": model_version,
+        }
 
     picks = [
         {
@@ -431,12 +447,14 @@ def settle_pending_observations(
         "settled": settled,
         "pending": unresolved,
         "source": source,
+        "model_version": model_version,
     }
 
 
 def start_settlement_async(
     *,
     force: bool = False,
+    model_version: str | None = None,
     db_engine=engine,
 ) -> dict:
     """Run settlement in a daemon thread without blocking predictions."""
@@ -473,7 +491,10 @@ def start_settlement_async(
 
     def worker():
         try:
-            settle_pending_observations(db_engine=db_engine)
+            settle_pending_observations(
+                model_version=model_version,
+                db_engine=db_engine,
+            )
         except Exception:
             pass
         finally:
@@ -488,28 +509,49 @@ def start_settlement_async(
 
     return {
         "status": "STARTED",
+        "model_version": model_version,
         "shadow_only": True,
     }
 
 
-def latest_review(*, db_engine=engine) -> dict | None:
+def latest_review(
+    *,
+    model_version: str | None = None,
+    db_engine=engine,
+) -> dict | None:
     if not table_exists(db_engine):
         return None
 
     ensure_table(db_engine)
+
+    query = select(reviews)
+
+    if model_version:
+        query = query.where(
+            reviews.c.model_version
+            == str(model_version)
+        )
+
     with db_engine.begin() as conn:
         row = conn.execute(
-            select(reviews)
+            query
             .order_by(reviews.c.created_at.desc())
             .limit(1)
         ).mappings().first()
+
     return dict(row) if row else None
 
 
 def review_packet(*, db_engine=engine) -> dict:
     report = shadow_report(db_engine=db_engine)
     comparison = report.get("comparison") or {}
-    review = latest_review(db_engine=db_engine)
+    review = latest_review(
+        model_version=(
+            report.get("model")
+            or {}
+        ).get("model_version"),
+        db_engine=db_engine,
+    )
 
     return {
         "status": "success",
@@ -785,7 +827,10 @@ def shadow_report(*, db_engine=engine) -> dict:
                 2,
             ),
         },
-        "latest_review": latest_review(db_engine=db_engine),
+        "latest_review": latest_review(
+            model_version=model.get("model_version"),
+            db_engine=db_engine,
+        ),
         "automatic_promotion": False,
         "live_adjustment_allowed": False,
     }

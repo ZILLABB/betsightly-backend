@@ -281,6 +281,141 @@ def football_first_shadow_record_review(
         raise HTTPException(500, str(e))
 
 
+@router.get("/football-first-shadow-v2")
+def football_first_shadow_v2_report():
+    """Read-only prospective V2 evidence report."""
+    try:
+        from leagues.football_first_shadow_v2_observations import (
+            shadow_report,
+        )
+
+        return shadow_report()
+
+    except Exception as e:
+        logger.error(
+            f"Football-first V2 shadow report failed: {e}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            500,
+            str(e),
+        )
+
+
+@router.post(
+    "/football-first-shadow-v2/settle",
+    dependencies=[
+        Depends(
+            require_api_key
+        )
+    ],
+)
+def football_first_shadow_v2_settle(
+    limit: int = 250,
+):
+    """Settle only the current V2 model-version observations."""
+    try:
+        from leagues.football_first_shadow_v2_observations import (
+            settle_pending_observations,
+        )
+
+        return (
+            settle_pending_observations(
+                limit=max(
+                    1,
+                    min(
+                        1000,
+                        int(
+                            limit
+                        ),
+                    ),
+                )
+            )
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Football-first V2 settlement failed: {e}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            500,
+            str(e),
+        )
+
+
+@router.get(
+    "/football-first-shadow-v2/review",
+    dependencies=[
+        Depends(
+            require_api_key
+        )
+    ],
+)
+def football_first_shadow_v2_review_packet():
+    """Return V2-only evidence and human-review gates."""
+    try:
+        from leagues.football_first_shadow_v2_observations import (
+            review_packet,
+        )
+
+        return review_packet()
+
+    except Exception as e:
+        logger.error(
+            f"Football-first V2 review packet failed: {e}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            500,
+            str(e),
+        )
+
+
+@router.post(
+    "/football-first-shadow-v2/review",
+    dependencies=[
+        Depends(
+            require_api_key
+        )
+    ],
+)
+def football_first_shadow_v2_record_review(
+    request: FootballFirstShadowReviewRequest,
+):
+    """Record a V2 human decision without changing the live model."""
+    try:
+        from leagues.football_first_shadow_v2_observations import (
+            record_review,
+        )
+
+        return record_review(
+            request.decision,
+            reviewer=request.reviewer,
+            note=request.note,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            409,
+            str(exc),
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Football-first V2 review decision failed: {e}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            500,
+            str(e),
+        )
+
+
 @router.get("/live-scores")
 def get_live_scores():
     """Scores for the fixtures on today's card, keyed by match_id.

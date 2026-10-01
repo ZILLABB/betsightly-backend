@@ -1,4 +1,4 @@
-﻿"""Prospective evidence wrapper for the frozen V2 shadow candidate.
+"""Prospective evidence wrapper for the frozen V2 shadow candidate.
 
 V1 and V2 share the immutable observation table, but observation keys include
 model_version, so each model owns an independent prospective evidence history.
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -638,11 +639,379 @@ def shadow_report(
     }
 
 
-# Shared settlement deliberately handles all model_version rows.
-settle_pending_observations = (
-    shared.settle_pending_observations
-)
+def _current_model_version() -> str:
+    return str(
+        (
+            shadow_v2.status()
+            or {}
+        ).get(
+            "model_version"
+        )
+        or ""
+    ).strip()
 
-start_settlement_async = (
-    shared.start_settlement_async
-)
+
+def latest_review(
+    *,
+    db_engine=engine,
+) -> dict | None:
+    """Return only the latest review for the frozen V2 candidate."""
+
+    model_version = (
+        _current_model_version()
+    )
+
+    if not model_version:
+        return None
+
+    return shared.latest_review(
+        model_version=model_version,
+        db_engine=db_engine,
+    )
+
+
+def review_packet(
+    *,
+    db_engine=engine,
+) -> dict:
+    """Human-review packet for V2 only.
+
+    Historical replay and V1 prospective evidence never count toward
+    the V2 promotion threshold.
+    """
+
+    report = shadow_report(
+        db_engine=db_engine
+    )
+
+    comparison = (
+        report.get(
+            "comparison"
+        )
+        or {}
+    )
+
+    model = (
+        report.get(
+            "model"
+        )
+        or {}
+    )
+
+    current_settled = int(
+        comparison.get(
+            "n"
+        )
+        or 0
+    )
+
+    eligible = (
+        comparison.get(
+            "status"
+        )
+        == "ELIGIBLE_FOR_HUMAN_REVIEW"
+    )
+
+    return {
+        "status":
+            "success",
+
+        "model":
+            model,
+
+        "evidence": {
+            "observations":
+                report.get(
+                    "observations"
+                ),
+
+            "comparison":
+                comparison,
+
+            "eligible_league_ids":
+                model.get(
+                    "eligible_league_ids"
+                )
+                or [],
+
+            "historical_replay_counts_toward_threshold":
+                False,
+
+            "v1_evidence_counts_toward_v2_threshold":
+                False,
+        },
+
+        "review_gate": {
+            "eligible":
+                eligible,
+
+            "minimum_settled":
+                MIN_PROSPECTIVE_REVIEW,
+
+            "current_settled":
+                current_settled,
+
+            "remaining_to_minimum":
+                max(
+                    0,
+                    MIN_PROSPECTIVE_REVIEW
+                    - current_settled,
+                ),
+
+            "required_conditions": [
+                "V2 settled prospective fixtures >= 300",
+                "paired Brier lower 95% confidence bound > 0",
+                "V2 log loss <= champion log loss",
+                "V2 calibration error <= champion calibration error",
+            ],
+        },
+
+        "allowed_decisions":
+            sorted(
+                shared.REVIEW_DECISIONS
+            ),
+
+        "latest_review":
+            latest_review(
+                db_engine=db_engine
+            ),
+
+        "promotion_effective":
+            False,
+
+        "automatic_promotion":
+            False,
+
+        "live_adjustment_allowed":
+            False,
+    }
+
+
+def record_review(
+    decision: str,
+    *,
+    reviewer: str | None = None,
+    note: str | None = None,
+    db_engine=engine,
+) -> dict:
+    """Record a human V2 decision without switching the live model."""
+
+    normalized = str(
+        decision
+        or ""
+    ).strip().upper()
+
+    if (
+        normalized
+        not in shared.REVIEW_DECISIONS
+    ):
+        raise ValueError(
+            "invalid_review_decision"
+        )
+
+    packet = review_packet(
+        db_engine=db_engine
+    )
+
+    gate = packet[
+        "review_gate"
+    ]
+
+    comparison = (
+        packet[
+            "evidence"
+        ].get(
+            "comparison"
+        )
+        or {}
+    )
+
+    model = (
+        packet.get(
+            "model"
+        )
+        or {}
+    )
+
+    if (
+        normalized
+        == "APPROVE_FOR_PROMOTION_IMPLEMENTATION"
+        and not gate[
+            "eligible"
+        ]
+    ):
+        raise ValueError(
+            "promotion_review_gate_not_met"
+        )
+
+    model_version = str(
+        model.get(
+            "model_version"
+        )
+        or ""
+    ).strip()
+
+    if not model_version:
+        raise ValueError(
+            "missing_v2_model_version"
+        )
+
+    shared.ensure_table(
+        db_engine
+    )
+
+    row = {
+        "review_id":
+            str(
+                uuid.uuid4()
+            ),
+
+        "model_version":
+            model_version,
+
+        "evidence_n":
+            int(
+                comparison.get(
+                    "n"
+                )
+                or 0
+            ),
+
+        "evidence_status":
+            str(
+                comparison.get(
+                    "status"
+                )
+                or "NO_PROSPECTIVE_EVIDENCE"
+            ),
+
+        "decision":
+            normalized,
+
+        "reviewer":
+            (
+                str(
+                    reviewer
+                )[:160]
+                if reviewer
+                else None
+            ),
+
+        "note":
+            (
+                str(
+                    note
+                )[:2000]
+                if note
+                else None
+            ),
+
+        "created_at":
+            datetime.now(
+                timezone.utc
+            ),
+    }
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            shared.reviews
+            .insert()
+            .values(
+                **row
+            )
+        )
+
+    return {
+        "status":
+            "RECORDED",
+
+        "review":
+            row,
+
+        "promotion_effective":
+            False,
+
+        "automatic_promotion":
+            False,
+
+        "live_adjustment_allowed":
+            False,
+
+        "next_action": (
+            "separate_code_review_and_deployment_required"
+            if normalized
+            == "APPROVE_FOR_PROMOTION_IMPLEMENTATION"
+            else "keep_current_champion"
+        ),
+    }
+
+
+def settle_pending_observations(
+    *,
+    now: datetime | None = None,
+    limit: int = 250,
+    db_engine=engine,
+) -> dict:
+    """Settle only rows belonging to the current V2 model version."""
+
+    model_version = (
+        _current_model_version()
+    )
+
+    if not model_version:
+        return {
+            "status":
+                "NO_MODEL_VERSION",
+
+            "checked":
+                0,
+
+            "settled":
+                0,
+
+            "pending":
+                0,
+        }
+
+    return (
+        shared
+        .settle_pending_observations(
+            now=now,
+            limit=limit,
+            model_version=model_version,
+            db_engine=db_engine,
+        )
+    )
+
+
+def start_settlement_async(
+    *,
+    force: bool = False,
+    db_engine=engine,
+) -> dict:
+    """Start V2-only settlement through the shared singleflight worker."""
+
+    model_version = (
+        _current_model_version()
+    )
+
+    if not model_version:
+        return {
+            "status":
+                "SKIPPED",
+
+            "reason":
+                "missing_v2_model_version",
+
+            "shadow_only":
+                True,
+        }
+
+    return (
+        shared
+        .start_settlement_async(
+            force=force,
+            model_version=model_version,
+            db_engine=db_engine,
+        )
+    )
