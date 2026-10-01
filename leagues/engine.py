@@ -642,6 +642,19 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         "errors": 0,
     }
 
+    football_first_shadow_v2_summary = {
+        "shadow_only": True,
+        "model_role": "v2_candidate",
+        "recorded": 0,
+        "existing": 0,
+        "skipped": 0,
+        "disabled": 0,
+        "errors": 0,
+        "selection_changed": False,
+        "probability_changed": False,
+        "publishing_changed": False,
+    }
+
     for fx in fixtures:
         base = rates_for(fx["league_slug"], cached_rates)
         fx["competition_historical_sample"] = int(base.get("matches") or 0)
@@ -690,6 +703,45 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
                 football_first_shadow_summary["errors"] += 1
                 logger.warning(
                     "football-first prospective shadow observation failed: %s",
+                    exc,
+                )
+
+        # V2 prospective evidence is fully separate by model_version.
+        # It uses the same immutable evidence table and settlement worker,
+        # but V1 observations never count toward the V2 evidence threshold.
+        if history is not None:
+            try:
+                from leagues.football_first_shadow_v2_observations import (
+                    observe_fixture as observe_football_first_v2_fixture,
+                )
+
+                v2_observation = observe_football_first_v2_fixture(
+                    fx,
+                    model,
+                    history,
+                    cached_rates=cached_rates,
+                    ratings=ratings,
+                    observed_at=now_dt,
+                )
+
+                v2_status = str(
+                    v2_observation.get("status")
+                    or "SKIPPED"
+                ).lower()
+
+                if v2_status == "recorded":
+                    football_first_shadow_v2_summary["recorded"] += 1
+                elif v2_status == "exists":
+                    football_first_shadow_v2_summary["existing"] += 1
+                elif v2_status == "disabled":
+                    football_first_shadow_v2_summary["disabled"] += 1
+                else:
+                    football_first_shadow_v2_summary["skipped"] += 1
+
+            except Exception as exc:
+                football_first_shadow_v2_summary["errors"] += 1
+                logger.warning(
+                    "football-first V2 prospective shadow observation failed: %s",
                     exc,
                 )
 
@@ -817,6 +869,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     )
     provider["football_first_shadow"] = (
         football_first_shadow_summary
+    )
+    provider["football_first_shadow_v2"] = (
+        football_first_shadow_v2_summary
     )
 
     # Preserve the evaluated environment before any product optimizer narrows
