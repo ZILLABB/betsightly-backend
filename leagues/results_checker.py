@@ -52,6 +52,30 @@ _last_successful_check: Optional[str] = None
 # explicit verified fixture status or market push semantics.
 MISSING_RESULT_GRACE = timedelta(hours=48)
 
+# Check free/primary score evidence every 15 minutes.
+#
+# Keyed fallback providers remain approximately hourly so faster settlement
+# does not multiply paid/quota-limited API usage.
+SETTLEMENT_POLL_SECONDS = max(
+    60,
+    int(
+        os.getenv(
+            "SETTLEMENT_POLL_SECONDS",
+            "900",
+        )
+    ),
+)
+
+SETTLEMENT_FALLBACK_SECONDS = max(
+    SETTLEMENT_POLL_SECONDS,
+    int(
+        os.getenv(
+            "SETTLEMENT_FALLBACK_SECONDS",
+            "3600",
+        )
+    ),
+)
+
 
 # ── ESPN scores fetcher (PRIMARY — no API key needed) ────────
 
@@ -393,7 +417,11 @@ def _known_score_slugs(picks: list[dict]) -> set[str] | None:
 
 
 
-def _collect_scores_for_picks(picks: list[dict]) -> tuple[Dict[str, Dict[str, Any]], str]:
+def _collect_scores_for_picks(
+    picks: list[dict],
+    *,
+    allow_fallback: bool = True,
+) -> tuple[Dict[str, Dict[str, Any]], str]:
     """Merge verified finals from supported sources without losing partial ESPN coverage.
 
     Fallback calls are limited to the unresolved picks' explicitly mapped
@@ -439,13 +467,23 @@ def _collect_scores_for_picks(picks: list[dict]) -> tuple[Dict[str, Dict[str, An
 
     unresolved = missing()
     api_keys = sport_keys(unresolved, set(APIFOOTBALL_LEAGUES), True)
-    if unresolved and api_keys and _get_apifootball_key():
+    if (
+        allow_fallback
+        and unresolved
+        and api_keys
+        and _get_apifootball_key()
+    ):
         merge(_collect_apifootball_scores(api_keys, dates[0], dates[-1]),
               "api-football")
 
     unresolved = missing()
     odds_keys = sport_keys(unresolved)
-    if unresolved and odds_keys and _get_odds_api_key():
+    if (
+        allow_fallback
+        and unresolved
+        and odds_keys
+        and _get_odds_api_key()
+    ):
         merge(_collect_oddsapi_scores(odds_keys), "odds-api")
 
     logger.info("Score collection picks=%s resolved=%s sources=%s fallback_leagues=%s",
@@ -454,7 +492,12 @@ def _collect_scores_for_picks(picks: list[dict]) -> tuple[Dict[str, Dict[str, An
     return finished, "+".join(sources) or "none"
 
 
-def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tuple[Dict[str, Dict[str, Any]], str]:
+def _collect_finished_scores(
+    checkable_rows,
+    has_club_picks: bool = True,
+    *,
+    allow_fallback: bool = True,
+) -> tuple[Dict[str, Dict[str, Any]], str]:
     """Collect finals for pending rollover picks using the shared source path."""
     picks = []
     for row in checkable_rows:
@@ -462,7 +505,10 @@ def _collect_finished_scores(checkable_rows, has_club_picks: bool = True) -> tup
             picks.extend(json.loads(row.picks or "[]"))
         except Exception:
             continue
-    return _collect_scores_for_picks(picks)
+    return _collect_scores_for_picks(
+        picks,
+        allow_fallback=allow_fallback,
+    )
 
 
 # ── Pick evaluation ──────────────────────────────────────────
@@ -700,30 +746,66 @@ def _lookup_settlement_score(scores: Dict[str, Dict[str, Any]], home: str,
 # ── Smart scheduling helpers ─────────────────────────────────
 
 def _get_checkable_rows(pending_rows) -> list:
-    """Return only rows whose ALL picks have already kicked off (commence_time < now)."""
+    """Rows with at least one unresolved leg whose kickoff has passed.
+
+    We no longer wait for every leg in a product before checking results.
+    That lets an accumulator become LOST as soon as an early losing leg has
+    a verified final result.
+    """
     now = datetime.now(timezone.utc)
     checkable = []
+
     for row in pending_rows:
         try:
-            picks = json.loads(row.picks or "[]")
+            picks = json.loads(
+                row.picks or "[]"
+            )
         except Exception:
             continue
+
         if not picks:
             continue
-        all_started = True
+
         for pick in picks:
-            ct = pick.get("commence_time", "")
-            if not ct:
+            if pick.get("status") in (
+                "won",
+                "lost",
+                "void",
+            ):
                 continue
+
+            raw = (
+                pick.get("commence_time")
+                or pick.get("kickoff")
+                or ""
+            )
+
+            if not raw:
+                continue
+
             try:
-                dt = datetime.fromisoformat(ct.replace("Z", "+00:00"))
-                if dt > now:
-                    all_started = False
-                    break
-            except Exception:
-                pass
-        if all_started:
-            checkable.append(row)
+                kickoff = datetime.fromisoformat(
+                    str(raw).replace(
+                        "Z",
+                        "+00:00",
+                    )
+                )
+
+                if kickoff.tzinfo is None:
+                    kickoff = kickoff.replace(
+                        tzinfo=timezone.utc
+                    )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                continue
+
+            if kickoff <= now:
+                checkable.append(row)
+                break
+
     return checkable
 
 
@@ -804,10 +886,12 @@ def _missing_result_expired(pick: dict, now: datetime | None = None) -> bool:
 
 def _rollover_day_status(results: list[str]) -> str:
     """Settle an accumulator correctly when one or more legs are void."""
-    if not results or any(result == "pending" for result in results):
+    if not results:
         return "pending"
     if any(result == "lost" for result in results):
         return "lost"
+    if any(result == "pending" for result in results):
+        return "pending"
     if all(result == "void" for result in results):
         return "void"
     if all(result in ("won", "void") for result in results):
@@ -871,7 +955,10 @@ def _sync_chain_to_db():
         logger.warning(f"Chain-to-DB sync failed: {e}")
 
 
-def check_all_pending() -> Dict[str, int]:
+def check_all_pending(
+    *,
+    allow_fallback: bool = True,
+) -> Dict[str, int]:
     """Scan all pending rollover days; mark won/lost where matches finished."""
     global _last_successful_check
     summary = {"checked_chain_days": 0, "marked_won": 0, "marked_lost": 0,
@@ -906,14 +993,20 @@ def check_all_pending() -> Dict[str, int]:
                 summary["still_pending"] = len(pending)
                 return summary
 
-            # A late fixture on one day must not hold up already-finished
-            # independent days in the chain.
-            ready = [row for row in checkable if _all_games_finished([row])]
-            summary["still_pending"] = len(pending) - len(ready)
-            if not ready:
-                return summary
+            # Ask providers for verified finals once at least one unresolved
+            # leg has kicked off. In-play matches simply remain pending.
+            ready = checkable
 
-            finished, source = _collect_finished_scores(ready, has_club_picks=True)
+            summary["still_pending"] = (
+                len(pending)
+                - len(ready)
+            )
+
+            finished, source = _collect_finished_scores(
+                ready,
+                has_club_picks=True,
+                allow_fallback=allow_fallback,
+            )
             summary["source"] = source
             summary["api_calls"] = len(finished)
             if not finished:
@@ -1018,55 +1111,142 @@ def check_all_pending() -> Dict[str, int]:
 
 
 def run_loop():
-    """Background thread: check every hour, call APIs only when games are done."""
-    time.sleep(60)
+    """Settle verified finals frequently without multiplying paid API calls."""
+    time.sleep(
+        min(
+            60,
+            SETTLEMENT_POLL_SECONDS,
+        )
+    )
+
     iteration = 0
+
+    fallback_every = max(
+        1,
+        int(
+            round(
+                SETTLEMENT_FALLBACK_SECONDS
+                / SETTLEMENT_POLL_SECONDS
+            )
+        ),
+    )
+
+    cleanup_every = max(
+        1,
+        int(
+            round(
+                (7 * 24 * 3600)
+                / SETTLEMENT_POLL_SECONDS
+            )
+        ),
+    )
+
     while True:
         iteration += 1
+
+        allow_fallback = (
+            iteration == 1
+            or iteration % fallback_every == 0
+        )
+
         try:
-            result = check_all_pending()
+            result = check_all_pending(
+                allow_fallback=allow_fallback
+            )
+
             if result.get("api_calls"):
-                logger.info(f"Results check used {result['source']} ({result['api_calls']} matches found)")
+                logger.info(
+                    "Results check used %s "
+                    "(%s matches found)",
+                    result["source"],
+                    result["api_calls"],
+                )
+
         except Exception as e:
-            logger.error(f"Results check loop iteration failed: {e}")
+            logger.error(
+                "Results check loop iteration "
+                f"failed: {e}"
+            )
+
         try:
-            settle_published_slips()
+            settle_published_slips(
+                allow_fallback=allow_fallback
+            )
+
         except Exception as e:
-            logger.error(f"Slip settlement failed: {e}")
+            logger.error(
+                f"Slip settlement failed: {e}"
+            )
+
         try:
-            settle_builder_predictions()
+            settle_builder_predictions(
+                allow_fallback=allow_fallback
+            )
+
         except Exception as e:
-            logger.error(f"Builder settlement failed: {e}")
+            logger.error(
+                f"Builder settlement failed: {e}"
+            )
+
         try:
             from leagues.football_first_shadow_observations import (
                 settle_pending_observations,
             )
+
             settle_pending_observations()
+
         except Exception as e:
             logger.error(
-                f"Football-first shadow settlement failed: {e}"
+                "Football-first shadow "
+                f"settlement failed: {e}"
             )
-        time.sleep(3600)
 
-        if iteration % 168 == 0:
+        if iteration % cleanup_every == 0:
             try:
-                from leagues.rollover_db import cleanup_old_chains
-                cleanup_old_chains(keep_recent_chains=3)
+                from leagues.rollover_db import (
+                    cleanup_old_chains,
+                )
+
+                cleanup_old_chains(
+                    keep_recent_chains=3
+                )
+
             except Exception as e:
-                logger.error(f"Rollover cleanup failed: {e}")
+                logger.error(
+                    f"Rollover cleanup failed: {e}"
+                )
+
+        time.sleep(
+            SETTLEMENT_POLL_SECONDS
+        )
 
 
 def start_background_loop():
     """Spawn the background results-checker thread."""
-    t = threading.Thread(target=run_loop, daemon=True)
+    t = threading.Thread(
+        target=run_loop,
+        daemon=True,
+        name="results-checker",
+    )
+
     t.start()
-    logger.info("Results checker started (hourly poll, API-Football primary, Odds API fallback)")
+
+    logger.info(
+        "Results checker started "
+        "(poll=%ss, fallback=%ss)",
+        SETTLEMENT_POLL_SECONDS,
+        SETTLEMENT_FALLBACK_SECONDS,
+    )
+
     return t
 
 
 # ── Category slip settlement ─────────────────────────────────
 
-def settle_published_slips() -> Dict[str, int]:
+def settle_published_slips(
+    *,
+    allow_fallback: bool = True,
+) -> Dict[str, int]:
     """Settle archived category slips (banker / 2 odds / 5 odds / ...).
 
     Only the rollover chain used to be settled, so the Results page had a
@@ -1087,7 +1267,10 @@ def settle_published_slips() -> Dict[str, int]:
     published_picks = [{**pick, "date": pick.get("date") or slip.date}
                        for slip in slips
                        for pick in _json.loads(slip.picks or "[]")]
-    scores, _ = _collect_scores_for_picks(published_picks)
+    scores, _ = _collect_scores_for_picks(
+        published_picks,
+        allow_fallback=allow_fallback,
+    )
 
     won = lost = still = 0
     for slip in slips:
@@ -1304,8 +1487,12 @@ def reconcile_published_slips(*, start_date: str = "2026-09-15",
     return report
 
 
-def settle_builder_predictions(scores: dict | None = None,
-                               now: datetime | None = None) -> Dict[str, int]:
+def settle_builder_predictions(
+    scores: dict | None = None,
+    now: datetime | None = None,
+    *,
+    allow_fallback: bool = True,
+) -> Dict[str, int]:
     """Settle unique Builder prediction sets with the canonical evaluator."""
     from leagues.builder_runs import pending_predictions, settle_prediction
 
@@ -1322,7 +1509,10 @@ def settle_builder_predictions(scores: dict | None = None,
         due_picks = [pick for pick in all_picks if
                      str(pick.get("kickoff") or pick.get("date") or "")[:10]
                      <= current.strftime("%Y-%m-%d")]
-        scores, _ = _collect_scores_for_picks(due_picks)
+        scores, _ = _collect_scores_for_picks(
+            due_picks,
+            allow_fallback=allow_fallback,
+        )
 
     for row in rows:
         picks = json.loads(row.get("picks") or "[]")

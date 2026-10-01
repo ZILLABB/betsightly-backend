@@ -62,6 +62,63 @@ LEGACY_PREDICTION_SETTLEMENT_ENABLED = os.getenv(
     "ENABLE_LEGACY_PREDICTION_SETTLEMENT", "false"
 ).strip().lower() in {"1", "true", "yes", "on"}
 
+# Explicit process ownership.
+#
+# Backward compatibility:
+# if no role is configured, the current production deployment continues
+# behaving as "all". Staging/Contabo can later separate the responsibilities.
+#
+# web       -> FastAPI only
+# scheduler -> generation + settlement + Growth
+# telegram  -> interactive Telegram polling
+# all       -> legacy combined process
+_VALID_PROCESS_ROLES = {
+    "web",
+    "scheduler",
+    "telegram",
+    "all",
+}
+
+PROCESS_ROLE = os.getenv(
+    "BETSIGHTLY_PROCESS_ROLE",
+    "",
+).strip().lower()
+
+if not PROCESS_ROLE:
+    PROCESS_ROLE = (
+        "all"
+        if BACKGROUND_JOBS_ENABLED
+        else "web"
+    )
+
+if PROCESS_ROLE not in _VALID_PROCESS_ROLES:
+    raise RuntimeError(
+        "Invalid BETSIGHTLY_PROCESS_ROLE: "
+        f"{PROCESS_ROLE}"
+    )
+
+
+def _role_owns(role: str) -> bool:
+    return (
+        PROCESS_ROLE == "all"
+        or PROCESS_ROLE == role
+    )
+
+
+SCHEDULER_JOBS_ENABLED = (
+    BACKGROUND_JOBS_ENABLED
+    and _role_owns("scheduler")
+)
+
+SETTLEMENT_JOBS_ENABLED = (
+    SCHEDULER_JOBS_ENABLED
+)
+
+TELEGRAM_POLLING_ENABLED = (
+    BACKGROUND_JOBS_ENABLED
+    and _role_owns("telegram")
+)
+
 # httpx logs full request URLs at INFO — the Telegram bot token is part of the
 # URL, so it would leak into production logs. Keep these loggers at WARNING.
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -233,7 +290,7 @@ def _start_current_results_checker(start=None):
 
 
 # Start background results checker (every 6h) — authoritative leagues records.
-if BACKGROUND_JOBS_ENABLED:
+if SETTLEMENT_JOBS_ENABLED:
     try:
         _start_current_results_checker()
     except Exception as e:
@@ -269,7 +326,10 @@ def _start_prediction_settlement_loop():
 
 
 def _legacy_prediction_settlement_should_start() -> bool:
-    return BACKGROUND_JOBS_ENABLED and LEGACY_PREDICTION_SETTLEMENT_ENABLED
+    return (
+        SETTLEMENT_JOBS_ENABLED
+        and LEGACY_PREDICTION_SETTLEMENT_ENABLED
+    )
 
 
 if _legacy_prediction_settlement_should_start():
@@ -325,7 +385,7 @@ def _start_telegram_bot_thread():
     logger.info("Telegram bot started in supervised background thread")
 
 
-if BACKGROUND_JOBS_ENABLED:
+if TELEGRAM_POLLING_ENABLED:
     try:
         _start_telegram_bot_thread()
     except Exception as e:
@@ -493,10 +553,15 @@ def _start_daily_generation_loop():
     logger.info("Daily generation loop started (15 min checks, publishes 08:00 WAT)")
 
 
-if BACKGROUND_JOBS_ENABLED:
+if SCHEDULER_JOBS_ENABLED:
     _start_daily_generation_loop()
 else:
-    logger.info("Background jobs disabled for this process")
+    logger.info(
+        "Daily scheduler disabled "
+        "role=%s background_jobs=%s",
+        PROCESS_ROLE,
+        BACKGROUND_JOBS_ENABLED,
+    )
 
 
 def _start_staging_v2_shadow_automation():
@@ -514,7 +579,10 @@ _v2_shadow_automation_status = {
         "NOT_APPLICABLE",
 }
 
-if _environment == "staging":
+if (
+    _environment == "staging"
+    and SCHEDULER_JOBS_ENABLED
+):
     try:
         _v2_shadow_automation_status = (
             _start_staging_v2_shadow_automation()
@@ -545,7 +613,11 @@ if _environment == "staging":
 
 log_runtime_memory(
     "startup_complete",
+    process_role=PROCESS_ROLE,
     background_jobs=BACKGROUND_JOBS_ENABLED,
+    scheduler_jobs=SCHEDULER_JOBS_ENABLED,
+    settlement_jobs=SETTLEMENT_JOBS_ENABLED,
+    telegram_polling=TELEGRAM_POLLING_ENABLED,
     legacy_prediction_settlement=LEGACY_PREDICTION_SETTLEMENT_ENABLED,
     v2_shadow_automation=(
         _v2_shadow_automation_status.get(
