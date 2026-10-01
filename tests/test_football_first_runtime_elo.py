@@ -124,3 +124,62 @@ def test_tournament_context_fails_closed_for_phase8_elo():
     )
     assert result["status"] == "UNSUPPORTED_CONTEXT"
     assert result["features"]["runtime_elo_available"] == 0.0
+
+
+
+def test_runtime_elo_uses_verified_alias_identity():
+    result = runtime_elo_feature_vector(
+        {
+            "league_slug": "eng.1",
+            "neutral_venue": False,
+            "home": {"name": "Man United"},
+            "away": {"name": "Liverpool"},
+        },
+        {
+            "eng.1": {
+                "Manchester United": {
+                    "rating": 1600.0,
+                    "matches": 10,
+                },
+                "Liverpool": {
+                    "rating": 1580.0,
+                    "matches": 10,
+                },
+            }
+        },
+    )
+
+    assert result["status"] == "READY"
+    assert (
+        result["features"]["runtime_elo_available"]
+        == 1.0
+    )
+
+
+def test_runtime_elo_fails_closed_outside_identity_allowlist():
+    result = runtime_elo_feature_vector(
+        {
+            "league_slug": "fin.1",
+            "neutral_venue": False,
+            "home": {"name": "HJK"},
+            "away": {"name": "KuPS"},
+        },
+        {
+            "fin.1": {
+                "HJK": {
+                    "rating": 1600.0,
+                    "matches": 10,
+                },
+                "KuPS": {
+                    "rating": 1580.0,
+                    "matches": 10,
+                },
+            }
+        },
+    )
+
+    assert result["status"] == "UNSUPPORTED_CONTEXT"
+    assert (
+        result["features"]["runtime_elo_available"]
+        == 0.0
+    )

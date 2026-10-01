@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from leagues.canonical_identity import normalize_team
+from leagues.elo_identity import lookup_rating_entry
 from leagues.competition_registry import competition_for
 from leagues.elo_core import (
     ELO_CORE_VERSION,
@@ -26,7 +27,7 @@ from leagues.football_first_runtime_core import (
 )
 from leagues.football_first_stability import _evaluate_target_fold, temporal_folds
 
-RUNTIME_ELO_FEATURE_VERSION = "football-first-runtime-elo-v1"
+RUNTIME_ELO_FEATURE_VERSION = "football-first-runtime-elo-v2"
 
 RUNTIME_ELO_FEATURE_COLUMNS = [
     "runtime_elo_available",
@@ -46,8 +47,23 @@ API_LEAGUE_TO_ESPN_SLUG = {
     265: "chi.1", 283: "rou.1", 292: "kor.1", 307: "sau.1",
 }
 
+# Phase 8B.2 verified provider-identity gate.
+# >=95% resolution, zero ambiguity.
+ELO_IDENTITY_PARITY_LEAGUE_IDS = frozenset({
+    39, 40, 61, 62, 71, 78, 79, 88, 94, 98, 103, 113, 119,
+    128, 135, 136, 140, 141, 144, 169, 179, 197, 203, 218,
+    253, 262,
+})
+
+ESPN_SLUG_TO_API_LEAGUE = {
+    slug: league_id
+    for league_id, slug in API_LEAGUE_TO_ESPN_SLUG.items()
+}
+
 
 def _eligible_domestic_slug(league_id: int) -> str | None:
+    if int(league_id) not in ELO_IDENTITY_PARITY_LEAGUE_IDS:
+        return None
     slug = API_LEAGUE_TO_ESPN_SLUG.get(int(league_id))
     if not slug:
         return None
@@ -69,9 +85,11 @@ def _team(name: str) -> str:
 
 def runtime_elo_feature_vector(fixture: dict, all_ratings: dict) -> dict:
     slug = str(fixture.get("league_slug") or "")
+    league_id = ESPN_SLUG_TO_API_LEAGUE.get(slug)
     meta = competition_for(slug)
     if (
         meta is None
+        or league_id not in ELO_IDENTITY_PARITY_LEAGUE_IDS
         or meta.team_type != "CLUB"
         or meta.competition_type != "LEAGUE"
         or meta.format != "LEAGUE"
@@ -94,8 +112,18 @@ def runtime_elo_feature_vector(fixture: dict, all_ratings: dict) -> dict:
     home_name = (fixture.get("home") or {}).get("name") or ""
     away_name = (fixture.get("away") or {}).get("name") or ""
     pool = all_ratings.get(slug) or {}
-    home = pool.get(home_name)
-    away = pool.get(away_name)
+
+    home_resolution = lookup_rating_entry(
+        home_name,
+        pool,
+    )
+    away_resolution = lookup_rating_entry(
+        away_name,
+        pool,
+    )
+
+    home = home_resolution.get("entry")
+    away = away_resolution.get("entry")
 
     snapshot = feature_snapshot(
         home.get("rating") if home else None,
@@ -233,9 +261,10 @@ def attach_historical_runtime_elo(
         "insufficient_evidence": insufficient,
         "window_rebuilds": window_rebuilds,
         "provider_identity_parity": False,
-        "provider_identity_blocker": (
-            "offline corpus uses API-Football/OpenFootball names while "
-            "live Elo is built from ESPN names"
+        "provider_identity_parity_within_allowlist": True,
+        "provider_identity_scope": "phase8b2_verified_allowlist_v3",
+        "identity_allowlist_league_ids": sorted(
+            ELO_IDENTITY_PARITY_LEAGUE_IDS
         ),
     }
 
@@ -344,7 +373,7 @@ def evaluate_runtime_elo_comparison(
         ),
         "runtime_artifact_ready": False,
         "runtime_artifact_blockers": [
-            "provider_identity_parity_not_closed",
+            "provider_identity_parity_limited_to_verified_allowlist",
             "historical_tournament_neutral_context_not_available",
             "prospective_v1_shadow_evidence_is_still_collecting",
         ],
