@@ -416,6 +416,73 @@ def football_first_shadow_v2_record_review(
         )
 
 
+@router.get(
+    "/football-first-shadow-v2/automation"
+)
+def football_first_shadow_v2_automation_status():
+    """Read-only health for staging prospective-evidence automation."""
+
+    try:
+        from leagues.football_first_shadow_v2_automation import (
+            status as automation_status,
+        )
+
+        from leagues.football_first_shadow_v2_observations import (
+            shadow_report,
+        )
+
+        report = (
+            shadow_report()
+        )
+
+        return {
+            "status":
+                "success",
+
+            "automation":
+                automation_status(),
+
+            "model":
+                report.get(
+                    "model"
+                ),
+
+            "observations":
+                report.get(
+                    "observations"
+                ),
+
+            "evidence_progress":
+                report.get(
+                    "evidence_progress"
+                ),
+
+            "comparison_status":
+                (
+                    report.get(
+                        "comparison"
+                    )
+                    or {}
+                ).get(
+                    "status"
+                ),
+
+            "automatic_promotion":
+                False,
+        }
+
+    except Exception as e:
+        logger.error(
+            f"Football-first V2 automation status failed: {e}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            500,
+            str(e),
+        )
+
+
 @router.get("/live-scores")
 def get_live_scores():
     """Scores for the fixtures on today's card, keyed by match_id.

@@ -483,10 +483,60 @@ if BACKGROUND_JOBS_ENABLED:
 else:
     logger.info("Background jobs disabled for this process")
 
+
+def _start_staging_v2_shadow_automation():
+    """Start only the staging V2 prospective-evidence worker."""
+
+    from leagues.football_first_shadow_v2_automation import (
+        start,
+    )
+
+    return start()
+
+
+_v2_shadow_automation_status = {
+    "status":
+        "NOT_APPLICABLE",
+}
+
+if _environment == "staging":
+    try:
+        _v2_shadow_automation_status = (
+            _start_staging_v2_shadow_automation()
+        )
+
+        logger.info(
+            "V2 staging automation startup: %s",
+            _v2_shadow_automation_status,
+        )
+
+    except Exception as exc:
+        _v2_shadow_automation_status = {
+            "status":
+                "ERROR",
+
+            "error_type":
+                type(
+                    exc
+                ).__name__,
+        }
+
+        logger.error(
+            "Could not start V2 staging evidence automation: %s",
+            exc,
+            exc_info=True,
+        )
+
+
 log_runtime_memory(
     "startup_complete",
     background_jobs=BACKGROUND_JOBS_ENABLED,
     legacy_prediction_settlement=LEGACY_PREDICTION_SETTLEMENT_ENABLED,
+    v2_shadow_automation=(
+        _v2_shadow_automation_status.get(
+            "status"
+        )
+    ),
 )
 
 
