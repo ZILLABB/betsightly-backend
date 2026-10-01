@@ -32,10 +32,7 @@ def _booking():
 def _db(monkeypatch):
     eng = create_engine("sqlite://")
     Base.metadata.create_all(eng, tables=[DailyCard.__table__, PublishedSlip.__table__])
-    # Mirrors the additive Alembic migration: recovery itself never creates
-    # schema at runtime.
-    with eng.begin() as conn:
-        conn.execute(text("CREATE TABLE tier_recovery_provenance (publish_date VARCHAR(10) NOT NULL, tier VARCHAR(24) NOT NULL, created_at VARCHAR(32) NOT NULL, snapshot_id VARCHAR(64), detail TEXT NOT NULL, PRIMARY KEY (publish_date,tier))"))
+    # Runtime recovery self-heals this additive provenance table.
     monkeypatch.setattr(recovery, "engine", eng)
     return eng
 
@@ -120,8 +117,6 @@ def test_recovered_slip_uses_normal_settlement_path(monkeypatch):
 def test_two_independent_threads_publish_empty_tier_once(monkeypatch, tmp_path):
     eng = create_engine(f"sqlite:///{tmp_path / 'recovery.sqlite'}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(eng, tables=[DailyCard.__table__, PublishedSlip.__table__])
-    with eng.begin() as conn:
-        conn.execute(text("CREATE TABLE tier_recovery_provenance (publish_date VARCHAR(10) NOT NULL, tier VARCHAR(24) NOT NULL, created_at VARCHAR(32) NOT NULL, snapshot_id VARCHAR(64), detail TEXT NOT NULL, PRIMARY KEY (publish_date,tier))"))
     monkeypatch.setattr(recovery, "engine", eng)
     _card(eng, {"10_odds": {"selected": False, "games": []}})
     gate = threading.Barrier(2)

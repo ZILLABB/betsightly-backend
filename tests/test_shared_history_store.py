@@ -19,6 +19,38 @@ def _create_schema(engine):
                           "lease_owner VARCHAR(36), lease_until FLOAT)"))
 
 
+def test_shared_store_self_creates_schema(tmp_path):
+    db = create_engine(
+        f"sqlite:///{(tmp_path / 'self-heal.db').as_posix()}"
+    )
+
+    payload = {
+        "_cache_schema": 2,
+        "_priors": {"global": {"matches": 1}},
+    }
+
+    with store.claim("base_rates", 2, engine=db) as owner:
+        assert owner
+
+        assert store.promote(
+            "base_rates",
+            2,
+            payload,
+            owner,
+            required="_priors",
+            engine=db,
+        )
+
+    assert store.read(
+        "base_rates",
+        2,
+        required="_priors",
+        engine=db,
+    ) == payload
+
+    db.dispose()
+
+
 def test_two_instances_share_only_promoted_complete_artifact(tmp_path):
     url = f"sqlite:///{(tmp_path / 'shared.db').as_posix()}"
     first = create_engine(url)

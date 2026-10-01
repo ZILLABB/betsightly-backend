@@ -8,6 +8,23 @@ from leagues import builder_runs as runs
 from leagues.booking import leg_fingerprint
 
 
+def test_postgres_v2_schema_reconciliation_covers_release_context():
+    sql = "\n".join(runs._postgres_v2_schema_statements())
+
+    for expected in (
+        "builder_runs ADD COLUMN IF NOT EXISTS mode",
+        "builder_runs ADD COLUMN IF NOT EXISTS fill_strategy",
+        "builder_runs ADD COLUMN IF NOT EXISTS requested_markets",
+        "builder_runs ADD COLUMN IF NOT EXISTS selected_markets",
+        "builder_runs ADD COLUMN IF NOT EXISTS requested_game_count",
+        "builder_runs ALTER COLUMN target_odds DROP NOT NULL",
+        "builder_predictions ADD COLUMN IF NOT EXISTS mode",
+        "builder_predictions ADD COLUMN IF NOT EXISTS board_context",
+        "builder_predictions ALTER COLUMN target_odds DROP NOT NULL",
+    ):
+        assert expected in sql
+
+
 def test_builder_runs_record_server_outcome_without_code(monkeypatch):
     db = create_engine("sqlite://", poolclass=StaticPool,
                        connect_args={"check_same_thread": False})

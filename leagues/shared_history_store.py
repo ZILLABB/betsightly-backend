@@ -33,8 +33,30 @@ def _db_epoch(engine) -> str:
     raise RuntimeError("unsupported history lease database")
 
 
+def ensure_table(*, engine=None) -> None:
+    """Create shared-history storage when an older DB predates the migration."""
+    db = _engine(engine)
+
+    with db.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS history_artifacts ("
+            "cache_key VARCHAR(120) PRIMARY KEY, "
+            "schema_version INTEGER NOT NULL, "
+            "payload TEXT, "
+            "payload_sha256 VARCHAR(64), "
+            "built_at FLOAT, "
+            "lease_owner VARCHAR(36), "
+            "lease_until FLOAT, "
+            "CONSTRAINT ck_history_artifact_payload_digest_pair CHECK ("
+            "(payload IS NULL AND payload_sha256 IS NULL) OR "
+            "(payload IS NOT NULL AND payload_sha256 IS NOT NULL)"
+            "))"
+        ))
+
+
 def read(cache_key: str, schema: int, *, required: str, engine=None):
     db = _engine(engine)
+    ensure_table(engine=db)
     with db.connect() as conn:
         row = conn.execute(text(
             "SELECT schema_version, payload, payload_sha256 FROM history_artifacts "
@@ -53,6 +75,7 @@ def read(cache_key: str, schema: int, *, required: str, engine=None):
 
 def lease_active(cache_key: str, *, engine=None) -> bool:
     db = _engine(engine)
+    ensure_table(engine=db)
     now = _db_epoch(db)
     with db.connect() as conn:
         row = conn.execute(text(
@@ -66,6 +89,7 @@ def lease_active(cache_key: str, *, engine=None) -> bool:
 def claim(cache_key: str, schema: int, *, lease_seconds: int = 900,
           engine=None):
     db = _engine(engine)
+    ensure_table(engine=db)
     owner = str(uuid.uuid4())
     now = _db_epoch(db)
     with db.begin() as conn:
@@ -103,6 +127,7 @@ def promote(cache_key: str, schema: int, data: dict, owner: str,
                          ensure_ascii=False)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     db = _engine(engine)
+    ensure_table(engine=db)
     now = _db_epoch(db)
     with db.begin() as conn:
         changed = conn.execute(text(

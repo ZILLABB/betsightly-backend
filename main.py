@@ -204,10 +204,25 @@ try:
     _cards_ensure_table()
     from leagues.builder_revisions import ensure_tables as _builder_revision_tables
     _builder_revision_tables()
+
     from leagues.decision_archive import ensure_tables as _decision_archive_tables
     _decision_archive_tables()
+
+    from leagues.builder_runs import ensure_table as _builder_runs_ensure_table
+    _builder_runs_ensure_table()
+
+    from leagues.ticket_history import ensure_tables as _ticket_history_ensure_tables
+    _ticket_history_ensure_tables()
+
+    from leagues.shared_history_store import ensure_table as _shared_history_ensure_table
+    _shared_history_ensure_table()
+
+    from leagues.prepared_board_store import ensure_table as _prepared_board_ensure_table
+    _prepared_board_ensure_table()
+
+    logger.info("Runtime data tables verified")
 except Exception as e:
-    logger.warning(f"Could not ensure rollover_days table: {e}")
+    logger.warning(f"Could not ensure runtime data tables: {e}")
 
 def _start_current_results_checker(start=None):
     """Start the authoritative leagues settlement loop."""

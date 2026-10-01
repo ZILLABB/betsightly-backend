@@ -44,6 +44,19 @@ def _require_exact_booking(record: dict, tier: str) -> None:
         raise ValueError("exact SportyBet booking/readback is required")
 
 
+def _ensure_provenance_table(conn) -> None:
+    conn.execute(text(
+        "CREATE TABLE IF NOT EXISTS tier_recovery_provenance ("
+        "publish_date VARCHAR(10) NOT NULL, "
+        "tier VARCHAR(24) NOT NULL, "
+        "created_at VARCHAR(32) NOT NULL, "
+        "snapshot_id VARCHAR(64), "
+        "detail TEXT NOT NULL, "
+        "PRIMARY KEY (publish_date, tier)"
+        ")"
+    ))
+
+
 def _store_booking(conn, publish_date: str, tier: str, record: dict) -> None:
     from leagues.booking import _ensure_table
     _ensure_table(conn)
@@ -87,6 +100,7 @@ def recover_empty_tier(*, publish_date: str, tier: str, candidate: dict,
     with _lock_for(publish_date, tier):
         try:
             with engine.begin() as conn:
+                _ensure_provenance_table(conn)
                 session = Session(bind=conn)
                 try:
                     card = (session.query(DailyCard)

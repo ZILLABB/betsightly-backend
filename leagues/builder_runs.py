@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, Integer, MetaData, String, Table,
-    Text, select,
+    Text, select, text,
 )
 
 from database import engine
@@ -79,10 +79,51 @@ builder_predictions = Table(
 )
 
 
+def _postgres_v2_schema_statements() -> tuple[str, ...]:
+    """Idempotent reconciliation for pre-V2 runtime-created Builder tables."""
+    return (
+        "ALTER TABLE builder_runs "
+        "ADD COLUMN IF NOT EXISTS mode VARCHAR(24) "
+        "NOT NULL DEFAULT 'target_odds'",
+
+        "ALTER TABLE builder_runs "
+        "ADD COLUMN IF NOT EXISTS fill_strategy VARCHAR(48)",
+
+        "ALTER TABLE builder_runs "
+        "ADD COLUMN IF NOT EXISTS requested_markets TEXT",
+
+        "ALTER TABLE builder_runs "
+        "ADD COLUMN IF NOT EXISTS selected_markets TEXT",
+
+        "ALTER TABLE builder_runs "
+        "ADD COLUMN IF NOT EXISTS requested_game_count INTEGER",
+
+        "ALTER TABLE builder_runs "
+        "ALTER COLUMN target_odds DROP NOT NULL",
+
+        "ALTER TABLE builder_predictions "
+        "ADD COLUMN IF NOT EXISTS mode VARCHAR(24) "
+        "NOT NULL DEFAULT 'target_odds'",
+
+        "ALTER TABLE builder_predictions "
+        "ADD COLUMN IF NOT EXISTS board_context TEXT",
+
+        "ALTER TABLE builder_predictions "
+        "ALTER COLUMN target_odds DROP NOT NULL",
+    )
+
+
 def ensure_table() -> None:
     metadata.create_all(
         engine, tables=[builder_runs, builder_predictions], checkfirst=True
     )
+
+    if engine.dialect.name != "postgresql":
+        return
+
+    with engine.begin() as conn:
+        for statement in _postgres_v2_schema_statements():
+            conn.execute(text(statement))
 
 
 def _failure_category(result: dict) -> str | None:
