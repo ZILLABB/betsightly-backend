@@ -3,19 +3,24 @@ from __future__ import annotations
 
 import math
 import os
+from leagues.market_registry import MARKETS
 
 RANKING_POLICY_VERSION = "fixture-ranked-v1.2"
 SELECTOR_VERSION = "canonical-recommendations-v1.2"
 MARKET_POLICY_VERSION = "market-trust-v1.1"
 
-TRUSTED_MARKETS = {"over_1_5", "under_3_5", "under_4_5", "home_or_draw",
-                   "away_or_draw", "dnb_home", "dnb_away"}
-EVIDENCE_ELIGIBLE_WINS = {"home_win", "away_win"}
-DEVELOPING_MARKETS = {"over_2_5", "home_over_0_5", "away_over_0_5"}
-RESTRICTED_MARKETS = {"under_2_5", "draw", "btts_yes", "btts_no",
-                      "home_over_1_5", "away_over_1_5"}
-DISABLED_PUBLIC_MARKETS = {"under_1_5", "over_3_5", "home_or_away"}
-TEAM_TO_SCORE = {"home_over_0_5", "away_over_0_5"}
+TRUSTED_MARKETS = {key for key, spec in MARKETS.items()
+                   if spec.public_policy == "TRUSTED"}
+EVIDENCE_ELIGIBLE_WINS = {key for key, spec in MARKETS.items()
+                          if spec.public_policy == "EVIDENCE_ELIGIBLE"}
+DEVELOPING_MARKETS = {key for key, spec in MARKETS.items()
+                      if spec.public_policy == "DEVELOPING"}
+RESTRICTED_MARKETS = {key for key, spec in MARKETS.items()
+                      if spec.public_policy == "RESTRICTED"}
+DISABLED_PUBLIC_MARKETS = {key for key, spec in MARKETS.items()
+                           if spec.public_policy == "DISABLED"}
+TEAM_TO_SCORE = {key for key, spec in MARKETS.items()
+                 if spec.exposure == "team_to_score" and spec.activation == "ACTIVE"}
 
 
 def _evidence(pick: dict) -> dict:
@@ -248,8 +253,21 @@ def canonical_fixture_recommendations(
             else:
                 rejected.append({"market": pick.get("market"), "model_rank": pick["model_rank"],
                                  "quality_score": pick["quality_score"], "reason": reason})
-        eligible, dominated = _remove_dominated(eligible)
-        rejected.extend(dominated)
+        # Normal public surfaces keep Pareto dominance pruning so a safer,
+        # equally-good expression represents the fixture.
+        #
+        # Explicit Builder structure is different. include_all_eligible means
+        # every market that independently passed evidence, policy and trust
+        # must remain available to the downstream selector. Otherwise a valid
+        # user-requested Home Win can disappear merely because Over 1.5 on the
+        # same fixture is safer, before Game Count gets a chance to honour the
+        # requested market structure.
+        if include_all_eligible:
+            dominated = []
+        else:
+            eligible, dominated = _remove_dominated(eligible)
+            rejected.extend(dominated)
+
         eligible.sort(key=lambda p: (-round(p["quality_score"] * 2) / 2,
                                      not bool(p.get("bookable")), -p["quality_score"]))
         if not eligible:

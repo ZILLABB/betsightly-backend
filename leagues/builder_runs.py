@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 import json
+import logging
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -24,8 +25,15 @@ builder_runs = Table(
     "builder_runs", metadata,
     Column("request_id", String(36), primary_key=True),
     Column("requested_at", DateTime(timezone=True), nullable=False, index=True),
-    Column("target_odds", Float, nullable=False),
+    Column("target_odds", Float, nullable=True),
+    Column("mode", String(24), nullable=False, server_default="target_odds"),
     Column("horizon", String(16), nullable=False),
+    # Request intent is operational provenance, not model input.  Keeping it
+    # alongside the produced market mix makes broader-fill runs auditable.
+    Column("fill_strategy", String(48)),
+    Column("requested_markets", Text),
+    Column("selected_markets", Text),
+    Column("requested_game_count", Integer),
     Column("refresh", Boolean, nullable=False, default=False),
     Column("result_status", String(24), nullable=False),
     Column("leg_count", Integer),
@@ -43,7 +51,9 @@ builder_predictions = Table(
     "builder_predictions", metadata,
     Column("selection_fingerprint", String(64), primary_key=True),
     Column("created_at", DateTime(timezone=True), nullable=False, index=True),
-    Column("target_odds", Float, nullable=False),
+    Column("target_odds", Float, nullable=True),
+    Column("mode", String(24), nullable=False, server_default="target_odds"),
+    Column("board_context", Text),
     Column("horizon", String(16), nullable=False),
     Column("generated_odds", Float, nullable=False),
     Column("actual_sportybet_odds", Float),
@@ -87,17 +97,27 @@ def _failure_category(result: dict) -> str | None:
     return None
 
 
-def record_run(target: float, horizon: str, refresh: bool, result: dict,
-               *, cached: bool = False, request_id: str | None = None) -> str:
+def record_run(target: float | None, horizon: str, refresh: bool, result: dict,
+               *, cached: bool = False, request_id: str | None = None,
+               mode: str = "target_odds", fill_strategy: str | None = None,
+               requested_markets: list[str] | None = None,
+               requested_game_count: int | None = None) -> str:
     """Persist one request outcome. Raises only to its caller, which logs and continues."""
     ensure_table()
     booking = result.get("booking") or {}
     produced = bool(booking.get("status") == "active" and booking.get("share_code"))
     request_id = request_id or str(uuid.uuid4())
+    selected_markets = sorted({str(game.get("market")) for game in result.get("games") or []
+                               if game.get("market")})
     row = {
         "request_id": request_id,
         "requested_at": datetime.now(timezone.utc),
-        "target_odds": float(target), "horizon": str(horizon)[:16],
+        "target_odds": float(target) if target is not None else None,
+        "mode": mode, "horizon": str(horizon)[:16],
+        "fill_strategy": str(fill_strategy)[:48] if fill_strategy else None,
+        "requested_markets": json.dumps(sorted({str(m) for m in requested_markets or []})),
+        "selected_markets": json.dumps(selected_markets),
+        "requested_game_count": int(requested_game_count) if requested_game_count is not None else None,
         "refresh": bool(refresh), "result_status": str(result.get("status") or "error")[:24],
         "leg_count": result.get("legs"), "generated_odds": result.get("odds"),
         "ticket_produced": produced,
@@ -113,10 +133,14 @@ def record_run(target: float, horizon: str, refresh: bool, result: dict,
         conn.execute(builder_runs.insert().values(**row))
     if result.get("status") == "success" and result.get("games"):
         try:
-            record_prediction(target, horizon, result)
-        except Exception:
-            # Outcome measurement must never break the user-facing Builder.
-            pass
+            record_prediction(target, horizon, result, mode=mode)
+        except Exception as exc:
+            # Outcome measurement must never break the user-facing Builder,
+            # but a failed archive must be observable without logging inputs.
+            logging.getLogger(__name__).error(
+                "builder_prediction_persistence_failed request_id=%s error_type=%s",
+                request_id, type(exc).__name__,
+            )
     return request_id
 
 
@@ -125,7 +149,8 @@ def _prediction_fingerprint(result: dict) -> str:
     return leg_fingerprint(result.get("games") or [])
 
 
-def record_prediction(target: float, horizon: str, result: dict) -> bool:
+def record_prediction(target: float | None, horizon: str, result: dict,
+                      *, mode: str = "target_odds") -> bool:
     """Persist one immutable generated selection set, not one row per click."""
     ensure_table()
     games = result.get("games") or []
@@ -136,7 +161,9 @@ def record_prediction(target: float, horizon: str, result: dict) -> bool:
     row = {
         "selection_fingerprint": fingerprint,
         "created_at": datetime.now(timezone.utc),
-        "target_odds": float(target),
+        "target_odds": float(target) if target is not None else None,
+        "mode": mode,
+        "board_context": json.dumps(result.get("board") or {}),
         "horizon": str(horizon)[:16],
         "generated_odds": float(result.get("odds") or 1.0),
         "actual_sportybet_odds": (
@@ -146,11 +173,11 @@ def record_prediction(target: float, horizon: str, result: dict) -> bool:
         ),
         "leg_count": len(games),
         "picks": json.dumps(games),
-        "hit_probability": result.get("hit_probability"),
+        "hit_probability": result.get("hit_probability", result.get("estimated_all_leg_probability")),
         "target_hit_probability": result.get("target_hit_probability"),
         "no_loss_probability": result.get("no_loss_probability"),
-        "expected_return": result.get("expected_return"),
-        "avg_confidence": result.get("avg_confidence"),
+        "expected_return": result.get("expected_return", result.get("estimated_expected_return")),
+        "avg_confidence": result.get("avg_confidence", result.get("average_probability")),
         "avg_evidence_probability": result.get("avg_evidence_probability"),
         "minimum_trust_score": result.get("minimum_trust_score"),
         "policy_version": PUBLISHED_SELECTION_POLICY_VERSION,
@@ -245,7 +272,8 @@ def settle_prediction(fingerprint: str, outcomes: list[str],
                 "final_status": status,
                 "all_win": bool(outcomes) and all(outcome == "won"
                                                      for outcome in outcomes),
-                "target_reached": settled_return >= float(row["target_odds"]),
+                "target_reached": (settled_return >= float(row["target_odds"])
+                                   if row["target_odds"] is not None else None),
                 "settled_at": datetime.now(timezone.utc),
                 "actual_settled_return": round(settled_return, 6),
                 "sportybet_settled_return": (
@@ -316,7 +344,7 @@ def performance(days: int = 90) -> dict:
     settled = [row for row in rows if row["final_status"] in
                ("won", "lost", "void")]
     by_target = {}
-    for target in sorted({row["target_odds"] for row in settled}):
+    for target in sorted({row["target_odds"] for row in settled if row["target_odds"] is not None}):
         by_target[str(int(target) if float(target).is_integer() else target)] = (
             _performance_rows([row for row in settled if row["target_odds"] == target])
         )
@@ -346,8 +374,9 @@ def summary(start: str, end: str) -> dict:
         )).mappings().all()
     targets, failures = defaultdict(Counter), Counter()
     for row in rows:
-        key = str(int(row["target_odds"]) if float(row["target_odds"]).is_integer()
-                  else row["target_odds"])
+        key = (str(int(row["target_odds"]) if float(row["target_odds"]).is_integer()
+                   else row["target_odds"]) if row["target_odds"] is not None
+               else row["mode"])
         targets[key]["requests"] += 1
         targets[key]["tickets"] += int(bool(row["ticket_produced"]))
         if row["failure_category"]:

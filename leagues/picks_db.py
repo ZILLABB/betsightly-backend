@@ -127,6 +127,8 @@ def archive_slip(date: str, category: str, games: list[dict],
             payload = json.dumps([
                 {
                     "match_id": g.get("match_id"),
+                    "board_snapshot_id": g.get("board_snapshot_id"),
+                    "match_context": g.get("match_context"),
                     "home_team": g.get("home_team"),
                     "away_team": g.get("away_team"),
                     "league": g.get("league"),
@@ -148,7 +150,12 @@ def archive_slip(date: str, category: str, games: list[dict],
                     "market_group": g.get("prediction_type"),
                     "odds": g.get("odds"),
                     "odds_are_real": g.get("odds_are_real", False),
+                    "odds_provider": g.get("odds_provider"),
+                    "bookable": g.get("bookable", False),
                     "confidence": g.get("confidence"),
+                    "selection_probability": g.get(
+                        "selection_probability"
+                    ),
                     # The uncorrected model probability. The calibrator has to
                     # refit against the number it corrects, or once calibrated
                     # legs start settling it would fit a shift on top of a

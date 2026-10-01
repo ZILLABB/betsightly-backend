@@ -1,0 +1,98 @@
+{
+  "schema": 2,
+  "baseline": {
+    "raw_rows": 66699,
+    "valid_finished_rows": 66699,
+    "trainable_samples": 64218,
+    "model_meta_samples": 64218,
+    "baseline_reproducible": true,
+    "complete_1x2_pct": 99.943,
+    "complete_ou25_pct": 58.0563,
+    "duplicate_fixture_keys": 0,
+    "conflicting_fixture_keys": 0,
+    "whole_date_split_ready": true
+  },
+  "football_history": {
+    "validated": true,
+    "unique_matches": 7775,
+    "covered_league_ids": [
+      1,
+      2,
+      3,
+      11,
+      13,
+      848
+    ],
+    "covered_competitions": 6,
+    "source_file_count": 65,
+    "historical_cutoff_date": "2026-09-26",
+    "conflicting_duplicates": 0,
+    "market_training_eligible": false,
+    "output_sha256": "36831c08c34d0ebd53dd8de70979e5d54a810b3575f0c75b5b11f200e2c1d40f"
+  },
+  "coverage": {
+    "missing_live_target_ids": [
+      1,
+      2,
+      3,
+      11,
+      13,
+      265,
+      292,
+      307,
+      848
+    ],
+    "missing_live_target_count": 9,
+    "verified_results_history_sources": 6,
+    "verified_odds_backed_gap_sources": 0,
+    "unresolved_gap_sources": 3
+  },
+  "decisions": [
+    {
+      "use_case": "current_deployed_ensemble_baseline",
+      "status": "READY",
+      "reason": "The current 66,699-row corpus reproduces the deployed 64,218 trainable samples exactly and has no duplicate/conflicting fixture keys or direct outcome columns in the feature list.",
+      "blockers": [],
+      "next_action": "Keep as the frozen benchmark; do not overwrite it while expanding data."
+    },
+    {
+      "use_case": "immediate_same_corpus_retrain",
+      "status": "NOT_NEEDED",
+      "reason": "Retraining the same unchanged corpus would not address the identified coverage or provenance gaps.",
+      "blockers": [],
+      "next_action": "Do not spend compute retraining the same 64,218 samples."
+    },
+    {
+      "use_case": "expanded_current_25_feature_market_ensemble",
+      "status": "BLOCKED",
+      "reason": "The current ensemble depends on bookmaker-price features. The expanded competitions do not yet have verified odds-backed history, and the legacy corpus cannot prove row-level price timing/source.",
+      "blockers": [
+        "legacy_rows_lack_exact_row_level_provenance",
+        "ou25_price_coverage_is_partial",
+        "no_new_gap_source_has_verified_bookmaker_odds",
+        "live_competition_coverage_gap"
+      ],
+      "next_action": "Build an odds-backed market_training dataset with explicit source/snapshot provenance before any expanded retrain."
+    },
+    {
+      "use_case": "football_history_expansion_for_form_elo_replay",
+      "status": "CONDITIONAL",
+      "reason": "The isolated football_history dataset is validated with 7,775 unique results across 6 missing live competitions. It contains no bookmaker-odds claim and remains isolated from the production market-feature corpus.",
+      "blockers": [
+        "3_live_competitions_still_unresolved"
+      ],
+      "next_action": "Use football_history for form/Elo/replay experiments; keep the three unresolved competitions fail-closed until verified sources exist."
+    },
+    {
+      "use_case": "football_first_challenger_model",
+      "status": "CONDITIONAL",
+      "reason": "The results-only football_history dataset is validated and the evaluation split is aligned to whole calendar dates. An isolated football-first challenger experiment can now be prepared without overwriting production models.",
+      "blockers": [
+        "3_competitions_unresolved"
+      ],
+      "next_action": "Prepare the football-first challenger dataset and offline experiment; keep production frozen and compare only on chronological holdouts."
+    }
+  ],
+  "generated_at": "2026-09-27T12:30:20.758867+00:00",
+  "overall_status": "CONDITIONAL"
+}

@@ -158,6 +158,179 @@ def build_ratings(slugs: dict[str, str]) -> dict:
     return out
 
 
+
+def recent_league_ratings(
+    slugs,
+    *,
+    days: int = 120,
+    now: datetime | None = None,
+) -> dict:
+    """Build league-scoped Elo from the supported monthly ESPN history cache.
+
+    This path exists primarily for supplemental shadow fixtures whose leagues
+    may be absent from the older checked-in Elo snapshot.
+
+    Important:
+      * only ordinary CLUB league competitions are accepted
+      * the existing Elo formula is reused unchanged
+      * no bookmaker prices are inputs
+      * history_months provides the same ESPN result identity used by
+        team-history and base-rate evidence
+      * this function does not mutate or persist the ordinary live Elo pool
+    """
+    from leagues.history_months import (
+        finished_matches,
+    )
+
+    now = now or datetime.now(
+        timezone.utc
+    )
+
+    if (
+        now.tzinfo is None
+        or now.utcoffset() is None
+    ):
+        raise ValueError(
+            "now must be timezone-aware"
+        )
+
+    now = now.astimezone(
+        timezone.utc
+    )
+
+    days = max(
+        30,
+        min(
+            240,
+            int(days),
+        ),
+    )
+
+    start = (
+        now
+        - timedelta(days=days)
+    ).strftime("%Y%m%d")
+
+    end = now.strftime(
+        "%Y%m%d"
+    )
+
+    output = {}
+
+    for slug in sorted(
+        set(
+            str(value)
+            for value in (slugs or [])
+            if str(value)
+        )
+    ):
+        meta = competition_for(
+            slug
+        )
+
+        # Supplemental shadow modelling currently accepts only this same
+        # context. Do not silently create Elo for cups, neutral-site formats
+        # or national-team competitions here.
+        if (
+            meta is None
+            or meta.team_type != "CLUB"
+            or meta.competition_type != "LEAGUE"
+            or meta.format != "LEAGUE"
+            or meta.possible_neutral_venue
+        ):
+            continue
+
+        try:
+            rows = finished_matches(
+                slug,
+                start,
+                end,
+            )
+
+        except Exception as exc:
+            logger.warning(
+                "shadow Elo history unavailable for %s: %s",
+                slug,
+                exc,
+            )
+            continue
+
+        matches = [
+            {
+                "date": row.get(
+                    "date",
+                    "",
+                ),
+                "home": row.get(
+                    "home",
+                    "",
+                ),
+                "away": row.get(
+                    "away",
+                    "",
+                ),
+                "hs": int(
+                    row.get("hs")
+                    or 0
+                ),
+                "as": int(
+                    row.get("as")
+                    or 0
+                ),
+                # Ordinary league fixtures are the only allowed input here.
+                "neutral": False,
+            }
+            for row in rows
+            if (
+                row.get("home")
+                and row.get("away")
+            )
+        ]
+
+        matches.sort(
+            key=lambda item: (
+                item.get("date")
+                or ""
+            )
+        )
+
+        if len(matches) < 10:
+            continue
+
+        league_ratings, counts = (
+            _run_elo(
+                matches
+            )
+        )
+
+        output[slug] = {
+            team: {
+                "rating": round(
+                    rating,
+                    1,
+                ),
+                "matches": counts.get(
+                    team,
+                    0,
+                ),
+            }
+            for team, rating
+            in league_ratings.items()
+        }
+
+    return output
+
+
+
+def cached_ratings() -> dict:
+    """Read existing ELO evidence without an ESPN refresh (diagnostic reads)."""
+    try:
+        value = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
 def get_ratings(slugs: dict[str, str] | None = None, force: bool = False) -> dict:
     """Cached ESPN-derived ELO, rebuilt every CACHE_TTL."""
     if not force and CACHE_PATH.exists():

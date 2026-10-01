@@ -1037,6 +1037,15 @@ def run_loop():
             settle_builder_predictions()
         except Exception as e:
             logger.error(f"Builder settlement failed: {e}")
+        try:
+            from leagues.football_first_shadow_observations import (
+                settle_pending_observations,
+            )
+            settle_pending_observations()
+        except Exception as e:
+            logger.error(
+                f"Football-first shadow settlement failed: {e}"
+            )
         time.sleep(3600)
 
         if iteration % 168 == 0:

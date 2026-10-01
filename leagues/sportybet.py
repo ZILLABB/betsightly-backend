@@ -36,6 +36,8 @@ import os
 import time
 import unicodedata
 import urllib.request
+from leagues.market_registry import (MARKET_TO_SPORTYBET, FIXED_SPORTYBET,
+                                     OVER_UNDER_SPORTYBET)
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +46,18 @@ OPER_ID = os.getenv("SPORTYBET_OPER_ID", "2")  # Nigeria
 
 # Markets worth pulling. Each costs nothing extra — they arrive on the same
 # response — but every one widens how many picks can carry a real price.
-_MARKET_IDS = "1,18,10,29,11,19,20"
+_MARKET_IDS = ",".join(dict.fromkeys(
+    mapping[0] for mapping in MARKET_TO_SPORTYBET.values()))
 
 _PAGE_SIZE = 100
 _MAX_PAGES = 40
 _CACHE_KEY = "sportybet_board"
 _CACHE_TTL_HOURS = 3.0
+
+# Increment whenever the persisted board-entry shape changes.
+# Old snapshots are then refetched automatically instead of being reused with
+# missing fields from a newer parser.
+_CACHE_SCHEMA_VERSION = 2
 try:
     KICKOFF_TOLERANCE_MINUTES = max(
         1, float(os.getenv("SPORTYBET_KICKOFF_TOLERANCE_MINUTES", "45")))
@@ -57,68 +65,12 @@ except ValueError:
     KICKOFF_TOLERANCE_MINUTES = 45.0
 
 
-# One canonical mapping used by pricing, candidate availability and booking.
-# Keeping these identifiers in two modules allowed the parser to say a market
-# existed while booking constructed a different selection tuple.
-MARKET_TO_SPORTYBET = {
-    "home_win":     ("1", "", "1"),
-    "draw":         ("1", "", "2"),
-    "away_win":     ("1", "", "3"),
-    "home_or_draw": ("10", "", "9"),
-    "home_or_away": ("10", "", "10"),
-    "away_or_draw": ("10", "", "11"),
-    "over_1_5":     ("18", "total=1.5", "12"),
-    "under_1_5":    ("18", "total=1.5", "13"),
-    "over_2_5":     ("18", "total=2.5", "12"),
-    "under_2_5":    ("18", "total=2.5", "13"),
-    "over_3_5":     ("18", "total=3.5", "12"),
-    "under_3_5":    ("18", "total=3.5", "13"),
-    "over_4_5":     ("18", "total=4.5", "12"),
-    "under_4_5":    ("18", "total=4.5", "13"),
-    "btts_yes":     ("29", "", "74"),
-    "btts_no":      ("29", "", "76"),
-    "dnb_home":     ("11", "", "4"),
-    "dnb_away":     ("11", "", "5"),
-    "home_over_0_5": ("19", "total=0.5", "12"),
-    "home_under_0_5": ("19", "total=0.5", "13"),
-    "home_over_1_5": ("19", "total=1.5", "12"),
-    "home_under_1_5": ("19", "total=1.5", "13"),
-    "away_over_0_5": ("20", "total=0.5", "12"),
-    "away_under_0_5": ("20", "total=0.5", "13"),
-    "away_over_1_5": ("20", "total=1.5", "12"),
-    "away_under_1_5": ("20", "total=1.5", "13"),
-}
-
-
 # ── Market vocabulary ──────────────────────────────────────
 # Verified against the live board: outcome ids are stable per market, and the
 # Over/Under market is distinguished by its `specifier` rather than its id.
 
-_FIXED = {
-    "1": {"1": "home_win", "2": "draw", "3": "away_win"},
-    "10": {"9": "home_or_draw", "10": "home_or_away", "11": "away_or_draw"},
-    "29": {"74": "btts_yes", "76": "btts_no"},
-    "11": {"4": "dnb_home", "5": "dnb_away"},
-}
-
-# Market 18 is the match total; 19 and 20 are the same structure per team, so
-# outcome ids repeat across all three and only the market id separates them.
-_OVER_UNDER = {
-    "18": {
-        "total=1.5": ("over_1_5", "under_1_5"),
-        "total=2.5": ("over_2_5", "under_2_5"),
-        "total=3.5": ("over_3_5", "under_3_5"),
-        "total=4.5": ("over_4_5", "under_4_5"),
-    },
-    "19": {
-        "total=0.5": ("home_over_0_5", "home_under_0_5"),
-        "total=1.5": ("home_over_1_5", "home_under_1_5"),
-    },
-    "20": {
-        "total=0.5": ("away_over_0_5", "away_under_0_5"),
-        "total=1.5": ("away_over_1_5", "away_under_1_5"),
-    },
-}
+_FIXED = FIXED_SPORTYBET
+_OVER_UNDER = OVER_UNDER_SPORTYBET
 
 # Double chance quotes three outcomes that each cover two of three results, so
 # the book's implied probabilities sum to 2.0 rather than 1.0 when the margin
@@ -456,9 +408,17 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
         metadata = cached.get("metadata") or {}
         # Old cache entries had no completeness metadata. Refetch them instead
         # of reusing a board which may have silently stopped at page twelve.
-        if (age_h < _CACHE_TTL_HOURS and cached.get("fixtures")
-                and metadata.get("is_complete") is True):
-            return _snapshot(cached["fixtures"], metadata)
+        if (
+            age_h < _CACHE_TTL_HOURS
+            and cached.get("fixtures")
+            and metadata.get("is_complete") is True
+            and metadata.get("cache_schema_version")
+            == _CACHE_SCHEMA_VERSION
+        ):
+            return _snapshot(
+                cached["fixtures"],
+                metadata,
+            )
 
     fixtures: dict[str, list[dict]] = {}
     declared_total = 0
@@ -506,6 +466,11 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
                         continue
                     parsed_records += 1
                     parsed["competition"] = tournament.get("name")
+                    parsed.update(
+                        _tournament_identity_metadata(
+                            tournament
+                        )
+                    )
                     key = (f"{_norm(parsed['home_team'])}|"
                            f"{_norm(parsed['away_team'])}")
                     bucket = fixtures.setdefault(key, [])
@@ -541,6 +506,7 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
         f"{unique_indexed_fixtures}|{page_count}".encode()
     ).hexdigest()[:16]
     metadata = {
+        "cache_schema_version": _CACHE_SCHEMA_VERSION,
         "snapshot_id": snapshot_id,
         "declared_total": declared_total,
         # fetched_total remains as a compatibility alias for old consumers.
@@ -658,7 +624,7 @@ def _tournament_name(value: str) -> bool:
 
 
 def match_fixture(board: dict, home: str, away: str, commence: str = "",
-                  league: str = "") -> dict:
+                  league: str = "", event_id: str | None = None) -> dict:
     """Resolve one provider fixture with explicit failure diagnostics."""
     meta = board_metadata(board)
     base = {"entry": None, "snapshot_id": meta.get("snapshot_id"),
@@ -670,6 +636,27 @@ def match_fixture(board: dict, home: str, away: str, commence: str = "",
 
     h, a = _norm(home), _norm(away)
     hs, as_ = _squad(home), _squad(away)
+    if event_id:
+        identified = [entry for _, entry in _board_entries(board)
+                      if str(entry.get("event_id") or "") == str(event_id)]
+        if len(identified) > 1:
+            return {**base, "status": "FIXTURE_MAPPING_FAILED",
+                    "failure_reason": "SportyBet event ID is ambiguous on the board"}
+        if identified:
+            entry = identified[0]
+            delta = _kickoff_delta_minutes(entry, commence)
+            if (entry.get("home_squad", "") != hs or
+                    entry.get("away_squad", "") != as_ or
+                    delta is None or delta > KICKOFF_TOLERANCE_MINUTES):
+                return {**base, "status": "FIXTURE_MAPPING_FAILED",
+                        "failure_reason": "stored SportyBet event ID conflicts with fixture identity"}
+            league_score = _league_score(league, entry.get("competition") or "")
+            if league and league_score == 0 and _tournament_name(league):
+                return {**base, "status": "FIXTURE_MAPPING_FAILED",
+                        "failure_reason": "stored SportyBet event ID conflicts with competition"}
+            return {**base, "status": "MATCHED", "entry": entry,
+                    "fixture_match_method": "stored_event_id",
+                    "fixture_match_confidence": 1.0}
     exact_key = f"{h}|{a}"
     exact_values = board.get(exact_key) or []
     if isinstance(exact_values, dict):
@@ -760,9 +747,10 @@ def match_fixture(board: dict, home: str, away: str, commence: str = "",
 
 
 def availability_for(board: dict, home: str, away: str, commence: str,
-                     league: str, market: str) -> dict:
+                     league: str, market: str,
+                     event_id: str | None = None) -> dict:
     """Exact fixture + market + outcome + active odds availability."""
-    matched = match_fixture(board, home, away, commence, league)
+    matched = match_fixture(board, home, away, commence, league, event_id)
     base = {
         "status": matched["status"], "sportybet_available": False,
         "event_id": None, "market_id": None, "outcome_id": None,
@@ -925,6 +913,1433 @@ def apply_to_fixtures(fixtures: list[dict], board: dict | None = None) -> int:
         fx["odds"] = odds
         matched += 1
     return matched
+
+
+def _competition_identity_key(
+    value: str | None,
+) -> str:
+    """Strict competition identity key.
+
+    Unlike `_league_score`, this retains every meaningful word and number.
+    It is deliberately unsuitable for fuzzy matching.
+
+    Examples:
+      FA Cup != NM Cup
+      Liga I != 2. Liga
+      Premier League == Premier League
+    """
+    value = str(
+        value or ""
+    ).strip()
+
+    if not value:
+        return ""
+
+    normalized = (
+        value
+        .lower()
+        .translate(_LETTERS)
+    )
+
+    normalized = unicodedata.normalize(
+        "NFKD",
+        normalized,
+    )
+
+    normalized = "".join(
+        char
+        for char in normalized
+        if not unicodedata.combining(
+            char
+        )
+    )
+
+    normalized = "".join(
+        char
+        if char.isalnum()
+        else " "
+        for char in normalized
+    )
+
+    return " ".join(
+        normalized.split()
+    )
+
+
+def _identity_value(
+    value,
+):
+    if isinstance(
+        value,
+        dict,
+    ):
+        return (
+            value.get("name")
+            or value.get("displayName")
+            or value.get("description")
+        )
+
+    return value
+
+
+def _identity_id(
+    value,
+):
+    if isinstance(
+        value,
+        dict,
+    ):
+        return (
+            value.get("id")
+            or value.get("categoryId")
+            or value.get("countryId")
+        )
+
+    return None
+
+
+def _tournament_identity_metadata(
+    tournament: dict,
+) -> dict:
+    """Preserve provider identity for future deterministic mappings."""
+    category = tournament.get(
+        "category"
+    )
+
+    country = tournament.get(
+        "country"
+    )
+
+    return {
+        "sportybet_tournament_id": (
+            tournament.get("id")
+            or tournament.get(
+                "tournamentId"
+            )
+        ),
+        "sportybet_category_id": (
+            tournament.get(
+                "categoryId"
+            )
+            or _identity_id(
+                category
+            )
+        ),
+        "sportybet_category": (
+            tournament.get(
+                "categoryName"
+            )
+            or _identity_value(
+                category
+            )
+        ),
+        "sportybet_country_id": (
+            tournament.get(
+                "countryId"
+            )
+            or _identity_id(
+                country
+            )
+        ),
+        "sportybet_country": (
+            tournament.get(
+                "countryName"
+            )
+            or _identity_value(
+                country
+            )
+        ),
+    }
+
+
+
+# Verified from the live Nigerian SportyBet football catalogue.
+#
+# Automatic supplemental mapping is keyed by BOTH provider tournament and
+# category identity. Names are descriptive only and never sufficient when a
+# provider identity is present.
+#
+# A mapping here does NOT make a fixture publishable. The existing history,
+# team identity, evidence, trust, safe-tier and exact-bookability gates still
+# apply downstream.
+_SPORTYBET_COMPETITION_IDS = {
+    # England
+    ("sr:tournament:17", "sr:category:1"): "eng.1",
+    ("sr:tournament:18", "sr:category:1"): "eng.2",
+    ("sr:tournament:24", "sr:category:1"): "eng.3",
+    ("sr:tournament:25", "sr:category:1"): "eng.4",
+    ("sr:tournament:21", "sr:category:1"): "eng.league_cup",
+
+    # Spain
+    ("sr:tournament:8", "sr:category:32"): "esp.1",
+    ("sr:tournament:54", "sr:category:32"): "esp.2",
+
+    # Germany
+    ("sr:tournament:35", "sr:category:30"): "ger.1",
+    ("sr:tournament:44", "sr:category:30"): "ger.2",
+    ("sr:tournament:217", "sr:category:30"): "ger.dfb_pokal",
+
+    # Italy
+    ("sr:tournament:23", "sr:category:31"): "ita.1",
+    ("sr:tournament:53", "sr:category:31"): "ita.2",
+
+    # France
+    ("sr:tournament:34", "sr:category:7"): "fra.1",
+    ("sr:tournament:182", "sr:category:7"): "fra.2",
+
+    # Portugal / Netherlands / Belgium / Turkey
+    ("sr:tournament:238", "sr:category:44"): "por.1",
+    ("sr:tournament:37", "sr:category:35"): "ned.1",
+    ("sr:tournament:38", "sr:category:33"): "bel.1",
+    ("sr:tournament:52", "sr:category:46"): "tur.1",
+
+    # Europe
+    ("sr:tournament:45", "sr:category:17"): "aut.1",
+    ("sr:tournament:185", "sr:category:67"): "gre.1",
+    ("sr:tournament:36", "sr:category:22"): "sco.1",
+    ("sr:tournament:20", "sr:category:5"): "nor.1",
+    ("sr:tournament:40", "sr:category:9"): "swe.1",
+    ("sr:tournament:202", "sr:category:47"): "pol.1",
+    ("sr:tournament:172", "sr:category:18"): "cze.1",
+    ("sr:tournament:152", "sr:category:77"): "rou.1",
+    ("sr:tournament:203", "sr:category:21"): "rus.1",
+    ("sr:tournament:210", "sr:category:152"): "srb.1",
+
+    # North America
+    ("sr:tournament:242", "sr:category:26"): "usa.1",
+    ("sr:tournament:1690", "sr:category:26"): "usa.nwsl",
+    ("sr:tournament:28163", "sr:category:26"): "usa.usl.1",
+    ("sr:tournament:27464", "sr:category:12"): "mex.1",
+    ("sr:tournament:27382", "sr:category:12"): "mex.2",
+
+    # South America
+    ("sr:tournament:325", "sr:category:13"): "bra.1",
+    ("sr:tournament:390", "sr:category:13"): "bra.2",
+    ("sr:tournament:155", "sr:category:48"): "arg.1",
+    ("sr:tournament:703", "sr:category:48"): "arg.2",
+    ("sr:tournament:27665", "sr:category:49"): "chi.1",
+    ("sr:tournament:27070", "sr:category:274"): "col.1",
+    ("sr:tournament:406", "sr:category:20"): "per.1",
+    ("sr:tournament:278", "sr:category:57"): "uru.1",
+    ("sr:tournament:240", "sr:category:165"): "ecu.1",
+    ("sr:tournament:27098", "sr:category:280"): "par.1",
+
+    # Asia / Oceania
+    ("sr:tournament:402", "sr:category:52"): "jpn.2",
+    ("sr:tournament:136", "sr:category:34"): "aus.1",
+
+    # UEFA / international
+    ("sr:tournament:7", "sr:category:393"): "uefa.champions",
+    ("sr:tournament:679", "sr:category:393"): "uefa.europa",
+    ("sr:tournament:34480", "sr:category:393"): "uefa.europa.conf",
+    ("sr:tournament:23755", "sr:category:4"): "uefa.nations",
+    ("sr:tournament:851", "sr:category:4"): "fifa.friendly",
+}
+
+
+def _provider_competition_mapping(
+    *,
+    tournament_id: str | None,
+    category_id: str | None,
+):
+    """Resolve only an explicitly verified provider identity."""
+    if not tournament_id or not category_id:
+        return None
+
+    return _SPORTYBET_COMPETITION_IDS.get(
+        (
+            str(tournament_id),
+            str(category_id),
+        )
+    )
+
+
+def registry_competition_match(
+    competition: str,
+    *,
+    tournament_id: str | None = None,
+    category_id: str | None = None,
+) -> dict:
+    """Strict automatic registry match.
+
+    Automatic mapping requires equality of the complete canonical competition
+    identity. `_league_score` remains diagnostic only.
+
+    Future aliases must be explicit and preferably scoped by SportyBet
+    tournament/category identity; fuzzy similarity never becomes an automatic
+    league mapping.
+    """
+    from leagues.competition_registry import (
+        competition_for,
+        provider_slugs,
+    )
+
+    # When SportyBet supplies stable provider identity, only our explicitly
+    # reviewed identity table may map it. We deliberately do NOT fall back to
+    # the display name for an unknown provider id: another country can use the
+    # exact same competition name.
+    if tournament_id or category_id:
+        slug = _provider_competition_mapping(
+            tournament_id=tournament_id,
+            category_id=category_id,
+        )
+
+        if slug:
+            registered = competition_for(
+                slug
+            )
+
+            if registered:
+                return {
+                    "status": "MAPPED_EXACT",
+                    "match_basis": "sportybet_provider_identity",
+                    "sportybet_competition": str(
+                        competition or ""
+                    ).strip() or None,
+                    "sportybet_tournament_id": str(
+                        tournament_id
+                    ),
+                    "sportybet_category_id": str(
+                        category_id
+                    ),
+                    "league_slug": slug,
+                    "league": registered.display_name,
+                    "best_candidate": registered.display_name,
+                    "best_score": 1.0,
+                }
+
+        return {
+            "status": "UNMAPPED",
+            "match_basis": None,
+            "sportybet_competition": str(
+                competition or ""
+            ).strip() or None,
+            "sportybet_tournament_id": (
+                str(tournament_id)
+                if tournament_id
+                else None
+            ),
+            "sportybet_category_id": (
+                str(category_id)
+                if category_id
+                else None
+            ),
+            "league_slug": None,
+            "league": None,
+            "best_candidate": None,
+            "best_score": 0.0,
+        }
+
+    competition = str(
+        competition or ""
+    ).strip()
+
+    wanted_key = (
+        _competition_identity_key(
+            competition
+        )
+    )
+
+    if not wanted_key:
+        return {
+            "status": "UNMAPPED",
+            "match_basis": None,
+            "sportybet_competition": None,
+            "league_slug": None,
+            "league": None,
+            "best_candidate": None,
+            "best_score": 0.0,
+        }
+
+    candidates = []
+
+    strict = []
+
+    for slug, name in provider_slugs().items():
+        score = _league_score(
+            name,
+            competition,
+        )
+
+        candidates.append(
+            (
+                score,
+                slug,
+                name,
+            )
+        )
+
+        if (
+            _competition_identity_key(
+                name
+            )
+            == wanted_key
+        ):
+            strict.append(
+                (
+                    slug,
+                    name,
+                )
+            )
+
+    candidates.sort(
+        reverse=True,
+        key=lambda item: (
+            item[0],
+            item[1],
+        ),
+    )
+
+    if len(strict) == 1:
+        slug, name = strict[0]
+
+        return {
+            "status": "MAPPED_EXACT",
+            "match_basis": (
+                "canonical_full_name"
+            ),
+            "sportybet_competition": (
+                competition
+            ),
+            "league_slug": slug,
+            "league": name,
+            "best_candidate": name,
+            "best_score": 1.0,
+        }
+
+    if len(strict) > 1:
+        return {
+            "status": "AMBIGUOUS",
+            "match_basis": (
+                "duplicate_canonical_name"
+            ),
+            "sportybet_competition": (
+                competition
+            ),
+            "league_slug": None,
+            "league": None,
+            "best_candidate": (
+                strict[0][1]
+            ),
+            "best_score": 1.0,
+        }
+
+    best = (
+        candidates[0]
+        if candidates
+        else (
+            0.0,
+            None,
+            None,
+        )
+    )
+
+    return {
+        "status": "UNMAPPED",
+        "match_basis": None,
+        "sportybet_competition": competition,
+        "league_slug": None,
+        "league": None,
+        # Diagnostic only. Never promotes automatically.
+        "best_candidate": best[2],
+        "best_score": round(
+            float(best[0]),
+            4,
+        ),
+    }
+
+def coverage_against_fixtures(
+    fixtures: list[dict],
+    board: dict | None = None,
+    *,
+    now=None,
+    days_ahead: int = 7,
+    sample_limit: int = 20,
+) -> dict:
+    """Read-only comparison of ESPN's fixture universe with SportyBet.
+
+    It never creates a prediction or adds a SportyBet-only match to the live
+    pool. The purpose is to quantify the coverage gap before widening input
+    sources.
+    """
+    from collections import Counter
+    from datetime import (
+        datetime,
+        timedelta,
+        timezone,
+    )
+
+    if board is None:
+        board = fetch_board()
+
+    meta = board_metadata(
+        board
+    )
+
+    now = (
+        now
+        or datetime.now(
+            timezone.utc
+        )
+    )
+
+    if now.tzinfo is None:
+        now = now.replace(
+            tzinfo=timezone.utc
+        )
+
+    now = now.astimezone(
+        timezone.utc
+    )
+
+    days_ahead = max(
+        1,
+        min(
+            14,
+            int(days_ahead),
+        ),
+    )
+
+    end = now + timedelta(
+        days=days_ahead
+    )
+
+    horizon_entries = []
+
+    for _, entry in _board_entries(
+        board
+    ):
+        try:
+            kickoff = datetime.fromtimestamp(
+                float(
+                    entry.get(
+                        "kickoff_ms"
+                    )
+                ) / 1000.0,
+                tz=timezone.utc,
+            )
+
+        except (
+            TypeError,
+            ValueError,
+            OSError,
+        ):
+            continue
+
+        if now <= kickoff <= end:
+            horizon_entries.append(
+                entry
+            )
+
+    horizon_ids = {
+        str(
+            entry.get("event_id")
+            or ""
+        )
+        for entry in horizon_entries
+        if str(
+            entry.get("event_id")
+            or ""
+        )
+    }
+
+    matched_event_ids = set()
+
+    espn_in_horizon = []
+
+    for fixture in fixtures:
+        commence = str(
+            fixture.get(
+                "commence_time"
+            )
+            or ""
+        )
+
+        try:
+            kickoff = datetime.fromisoformat(
+                commence.replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+
+            if kickoff.tzinfo is None:
+                kickoff = kickoff.replace(
+                    tzinfo=timezone.utc
+                )
+
+            kickoff = kickoff.astimezone(
+                timezone.utc
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            continue
+
+        if not (
+            now
+            <= kickoff
+            <= end
+        ):
+            continue
+
+        espn_in_horizon.append(
+            fixture
+        )
+
+        # apply_to_fixtures() normally ran immediately before this audit,
+        # so reuse its exact match instead of resolving twice.
+        event_id = (
+            (
+                fixture.get("odds")
+                or {}
+            ).get(
+                "sportybet_event_id"
+            )
+        )
+
+        if not event_id:
+            try:
+                matched = match_fixture(
+                    board,
+                    (
+                        fixture.get("home")
+                        or {}
+                    ).get("name", ""),
+                    (
+                        fixture.get("away")
+                        or {}
+                    ).get("name", ""),
+                    commence,
+                    fixture.get(
+                        "league",
+                        "",
+                    ),
+                )
+
+                entry = matched.get(
+                    "entry"
+                )
+
+                event_id = (
+                    entry.get(
+                        "event_id"
+                    )
+                    if entry
+                    else None
+                )
+
+            except Exception:
+                event_id = None
+
+        if event_id:
+            matched_event_ids.add(
+                str(event_id)
+            )
+
+    matched_event_ids &= horizon_ids
+
+    sporty_only = [
+        entry
+        for entry in horizon_entries
+        if str(
+            entry.get("event_id")
+            or ""
+        )
+        not in matched_event_ids
+    ]
+
+    competition_counts = Counter(
+        (
+            str(
+                entry.get(
+                    "sportybet_tournament_id"
+                )
+                or ""
+            ),
+            str(
+                entry.get(
+                    "sportybet_category_id"
+                )
+                or ""
+            ),
+            str(
+                entry.get(
+                    "competition"
+                )
+                or "unknown"
+            ),
+            str(
+                entry.get(
+                    "sportybet_category"
+                )
+                or ""
+            ),
+        )
+        for entry in sporty_only
+    )
+
+    mapped_competitions = {}
+    mapped_exact_fixture_count = 0
+    unmapped_fixture_count = 0
+    ambiguous_fixture_count = 0
+
+    for identity, count in competition_counts.items():
+        (
+            tournament_id,
+            category_id,
+            competition,
+            category,
+        ) = identity
+
+        mapping = registry_competition_match(
+            competition,
+            tournament_id=(
+                tournament_id
+                or None
+            ),
+            category_id=(
+                category_id
+                or None
+            ),
+        )
+
+        mapped_competitions[
+            identity
+        ] = {
+            **mapping,
+            "sportybet_tournament_id": (
+                tournament_id
+                or None
+            ),
+            "sportybet_category_id": (
+                category_id
+                or None
+            ),
+            "sportybet_category": (
+                category
+                or None
+            ),
+            "fixture_count": count,
+        }
+
+        if mapping["status"] == "MAPPED_EXACT":
+            mapped_exact_fixture_count += count
+
+        elif mapping["status"] == "AMBIGUOUS":
+            ambiguous_fixture_count += count
+
+        else:
+            unmapped_fixture_count += count
+
+    samples = []
+
+    for entry in sporty_only:
+        competition = str(
+            entry.get(
+                "competition"
+            )
+            or "unknown"
+        )
+
+        identity = (
+            str(
+                entry.get(
+                    "sportybet_tournament_id"
+                )
+                or ""
+            ),
+            str(
+                entry.get(
+                    "sportybet_category_id"
+                )
+                or ""
+            ),
+            competition,
+            str(
+                entry.get(
+                    "sportybet_category"
+                )
+                or ""
+            ),
+        )
+
+        mapping = mapped_competitions.get(
+            identity
+        ) or registry_competition_match(
+            competition,
+            tournament_id=(
+                entry.get(
+                    "sportybet_tournament_id"
+                )
+            ),
+            category_id=(
+                entry.get(
+                    "sportybet_category_id"
+                )
+            ),
+        )
+
+        try:
+            kickoff = datetime.fromtimestamp(
+                float(
+                    entry.get(
+                        "kickoff_ms"
+                    )
+                ) / 1000.0,
+                tz=timezone.utc,
+            ).isoformat()
+
+        except (
+            TypeError,
+            ValueError,
+            OSError,
+        ):
+            kickoff = None
+
+        samples.append({
+            "event_id": entry.get(
+                "event_id"
+            ),
+            "home_team": entry.get(
+                "home_team"
+            ),
+            "away_team": entry.get(
+                "away_team"
+            ),
+            "kickoff": kickoff,
+            "competition": competition,
+            "sportybet_tournament_id": (
+                entry.get(
+                    "sportybet_tournament_id"
+                )
+            ),
+            "sportybet_category_id": (
+                entry.get(
+                    "sportybet_category_id"
+                )
+            ),
+            "sportybet_category": (
+                entry.get(
+                    "sportybet_category"
+                )
+            ),
+            "sportybet_country_id": (
+                entry.get(
+                    "sportybet_country_id"
+                )
+            ),
+            "sportybet_country": (
+                entry.get(
+                    "sportybet_country"
+                )
+            ),
+            "competition_mapping_status": (
+                mapping.get("status")
+            ),
+            "competition_mapping_basis": (
+                mapping.get(
+                    "match_basis"
+                )
+            ),
+            "mapped_league_slug": (
+                mapping.get(
+                    "league_slug"
+                )
+            ),
+            "mapped_league": (
+                mapping.get("league")
+            ),
+            "best_mapping_candidate": (
+                mapping.get(
+                    "best_candidate"
+                )
+            ),
+            "best_mapping_score": (
+                mapping.get(
+                    "best_score"
+                )
+            ),
+        })
+
+    samples.sort(
+        key=lambda item: (
+            item.get("kickoff")
+            or "",
+            item.get("competition")
+            or "",
+            str(
+                item.get(
+                    "event_id"
+                )
+                or ""
+            ),
+        )
+    )
+
+    overlap = len(
+        matched_event_ids
+    )
+
+    sporty_count = len(
+        horizon_entries
+    )
+
+    return {
+        "status": "success",
+        "read_only": True,
+        "publishing_changed": False,
+        "model_inputs_changed": False,
+        "requested_days": days_ahead,
+        "sportybet_snapshot_id": (
+            meta.get(
+                "snapshot_id"
+            )
+        ),
+        "sportybet_board_complete": bool(
+            meta.get(
+                "is_complete"
+            )
+        ),
+        "espn_fixture_count": len(
+            espn_in_horizon
+        ),
+        "sportybet_fixture_count": sporty_count,
+        "matched_fixture_count": overlap,
+        "sportybet_only_fixture_count": len(
+            sporty_only
+        ),
+        "sportybet_overlap_rate": (
+            round(
+                overlap / sporty_count,
+                4,
+            )
+            if sporty_count
+            else 0.0
+        ),
+        "exact_registry_mapped_sportybet_only": (
+            mapped_exact_fixture_count
+        ),
+        "ambiguous_registry_sportybet_only": (
+            ambiguous_fixture_count
+        ),
+        "unmapped_registry_sportybet_only": (
+            unmapped_fixture_count
+        ),
+        "sportybet_only_competitions": sorted(
+            mapped_competitions.values(),
+            key=lambda item: (
+                -int(
+                    item.get(
+                        "fixture_count"
+                    )
+                    or 0
+                ),
+                str(
+                    item.get(
+                        "sportybet_category"
+                    )
+                    or ""
+                ),
+                str(
+                    item.get(
+                        "sportybet_competition"
+                    )
+                    or ""
+                ),
+                str(
+                    item.get(
+                        "sportybet_tournament_id"
+                    )
+                    or ""
+                ),
+            ),
+        ),
+        "sportybet_only_samples": samples[
+            :max(
+                0,
+                int(sample_limit),
+            )
+        ],
+        "next_gate": (
+            "only exact registry-mapped SportyBet-only fixtures may enter "
+            "the future shadow-supplemental fixture experiment"
+        ),
+    }
+
+
+def _history_team_identity(
+    history,
+    team: str,
+    team_type: str,
+) -> dict:
+    """Strict normalized lookup into existing ESPN team history."""
+    if history is None:
+        return {
+            "status": "UNAVAILABLE",
+            "team": None,
+            "matches": 0,
+        }
+
+    wanted = _norm(
+        team
+    )
+
+    matches = []
+
+    for key, rows in getattr(
+        history,
+        "by_team",
+        {},
+    ).items():
+        try:
+            current_type, current_team = key
+        except (TypeError, ValueError):
+            continue
+
+        if current_type != team_type:
+            continue
+
+        if _norm(current_team) != wanted:
+            continue
+
+        matches.append({
+            "team": current_team,
+            "matches": len(
+                rows or []
+            ),
+        })
+
+    if not matches:
+        return {
+            "status": "NOT_FOUND",
+            "team": None,
+            "matches": 0,
+        }
+
+    if len(matches) > 1:
+        return {
+            "status": "AMBIGUOUS",
+            "team": None,
+            "matches": max(
+                item["matches"]
+                for item in matches
+            ),
+        }
+
+    return {
+        "status": "MATCHED",
+        **matches[0],
+    }
+
+
+def shadow_supplemental_readiness(
+    fixtures: list[dict],
+    board: dict | None = None,
+    *,
+    cached_rates: dict | None = None,
+    history=None,
+    now=None,
+    days_ahead: int = 7,
+    sample_limit: int = 25,
+) -> dict:
+    """Evaluate SportyBet-only fixtures without adding them to live picks.
+
+    A fixture can become READY_FOR_SHADOW_MODEL only when:
+      * SportyBet competition maps exactly to an enabled BetSightly competition
+      * it is a senior fixture
+      * that competition has real historical results
+      * both teams resolve uniquely into existing ESPN history
+      * each team has enough previous games for real form features
+      * at least one currently supported SportyBet selection is priced
+
+    This function never invokes the predictor and never mutates `fixtures`.
+    """
+    from collections import Counter
+
+    from leagues.base_rates import MIN_SAMPLE
+    from leagues.competition_registry import (
+        competition_for,
+    )
+
+    if board is None:
+        board = fetch_board()
+
+    cached_rates = cached_rates or {}
+
+    coverage = coverage_against_fixtures(
+        fixtures,
+        board,
+        now=now,
+        days_ahead=days_ahead,
+        sample_limit=100000,
+    )
+
+    missing_ids = {
+        str(
+            item.get("event_id")
+            or ""
+        )
+        for item in (
+            coverage.get(
+                "sportybet_only_samples"
+            )
+            or []
+        )
+        if str(
+            item.get("event_id")
+            or ""
+        )
+    }
+
+    entries_by_id = {
+        str(
+            entry.get("event_id")
+            or ""
+        ): entry
+        for _, entry in _board_entries(
+            board
+        )
+        if str(
+            entry.get("event_id")
+            or ""
+        )
+        in missing_ids
+    }
+
+    states = Counter()
+    results = []
+
+    for sample in (
+        coverage.get(
+            "sportybet_only_samples"
+        )
+        or []
+    ):
+        event_id = str(
+            sample.get(
+                "event_id"
+            )
+            or ""
+        )
+
+        entry = entries_by_id.get(
+            event_id
+        )
+
+        mapping_status = sample.get(
+            "competition_mapping_status"
+        )
+
+        slug = sample.get(
+            "mapped_league_slug"
+        )
+
+        competition = (
+            competition_for(slug)
+            if slug
+            else None
+        )
+
+        direct_history = int(
+            (
+                cached_rates.get(
+                    slug,
+                    {},
+                )
+                if slug
+                else {}
+            ).get(
+                "matches"
+            )
+            or 0
+        )
+
+        home_name = (
+            entry.get("home_team")
+            if entry
+            else sample.get(
+                "home_team"
+            )
+        )
+
+        away_name = (
+            entry.get("away_team")
+            if entry
+            else sample.get(
+                "away_team"
+            )
+        )
+
+        team_type = (
+            competition.team_type
+            if competition
+            else None
+        )
+
+        if team_type:
+            home_history = (
+                _history_team_identity(
+                    history,
+                    home_name,
+                    team_type,
+                )
+            )
+
+            away_history = (
+                _history_team_identity(
+                    history,
+                    away_name,
+                    team_type,
+                )
+            )
+
+        else:
+            home_history = {
+                "status": "UNAVAILABLE",
+                "team": None,
+                "matches": 0,
+            }
+
+            away_history = dict(
+                home_history
+            )
+
+        home_squad = (
+            entry.get(
+                "home_squad"
+            )
+            if entry
+            else None
+        )
+
+        away_squad = (
+            entry.get(
+                "away_squad"
+            )
+            if entry
+            else None
+        )
+
+        senior_fixture = (
+            home_squad in (
+                "",
+                None,
+            )
+            and away_squad in (
+                "",
+                None,
+            )
+        )
+
+        priced_markets = []
+
+        if entry:
+            for market, price in (
+                entry.get("prices")
+                or {}
+            ).items():
+                if market not in MARKET_TO_SPORTYBET:
+                    continue
+
+                try:
+                    price = float(
+                        price
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    continue
+
+                if price > 1.0:
+                    priced_markets.append(
+                        market
+                    )
+
+        priced_markets = sorted(
+            set(
+                priced_markets
+            )
+        )
+
+        if mapping_status != "MAPPED_EXACT":
+            state = "UNMAPPED_COMPETITION"
+
+        elif competition is None:
+            state = "UNMAPPED_COMPETITION"
+
+        elif not senior_fixture:
+            state = "UNSUPPORTED_SQUAD"
+
+        elif direct_history < MIN_SAMPLE:
+            state = (
+                "INSUFFICIENT_COMPETITION_HISTORY"
+            )
+
+        elif (
+            home_history["status"]
+            != "MATCHED"
+            or away_history["status"]
+            != "MATCHED"
+        ):
+            state = (
+                "TEAM_IDENTITY_NOT_READY"
+            )
+
+        elif (
+            home_history["matches"] < 3
+            or away_history["matches"] < 3
+        ):
+            # Three matches is the existing threshold at which the ML
+            # feature-provenance code stops describing a side as neutral-only.
+            state = (
+                "INSUFFICIENT_TEAM_HISTORY"
+            )
+
+        elif not priced_markets:
+            state = "NO_SUPPORTED_PRICE"
+
+        else:
+            state = (
+                "READY_FOR_SHADOW_MODEL"
+            )
+
+        states[state] += 1
+
+        results.append({
+            "event_id": event_id,
+            "home_team": home_name,
+            "away_team": away_name,
+            "kickoff": sample.get(
+                "kickoff"
+            ),
+            "competition": sample.get(
+                "competition"
+            ),
+            "league_slug": slug,
+            "league": sample.get(
+                "mapped_league"
+            ),
+            "team_type": team_type,
+            "readiness": state,
+            "competition_history_matches": (
+                direct_history
+            ),
+            "home_history": home_history,
+            "away_history": away_history,
+            "priced_market_count": len(
+                priced_markets
+            ),
+            "priced_markets": priced_markets,
+            "senior_fixture": senior_fixture,
+        })
+
+    results.sort(
+        key=lambda item: (
+            item["readiness"]
+            != "READY_FOR_SHADOW_MODEL",
+            item.get("kickoff")
+            or "",
+            str(
+                item.get("event_id")
+                or ""
+            ),
+        )
+    )
+
+    ready = [
+        item
+        for item in results
+        if (
+            item["readiness"]
+            == "READY_FOR_SHADOW_MODEL"
+        )
+    ]
+
+    by_league = {}
+    identity_not_ready = []
+
+    for item in results:
+        slug = str(item.get("league_slug") or "UNMAPPED")
+        league_bucket = by_league.setdefault(
+            slug,
+            {
+                "competition": item.get("competition"),
+                "evaluated": 0,
+                "ready": 0,
+                "readiness_counts": {},
+            },
+        )
+        league_bucket["evaluated"] += 1
+        state = str(item.get("readiness") or "UNKNOWN")
+        league_bucket["readiness_counts"][state] = (
+            int(league_bucket["readiness_counts"].get(state) or 0) + 1
+        )
+        if state == "READY_FOR_SHADOW_MODEL":
+            league_bucket["ready"] += 1
+        elif state == "TEAM_IDENTITY_NOT_READY":
+            identity_not_ready.append({
+                "event_id": item.get("event_id"),
+                "home_team": item.get("home_team"),
+                "away_team": item.get("away_team"),
+                "league_slug": item.get("league_slug"),
+                "competition": item.get("competition"),
+                "home_history_status": (
+                    item.get("home_history") or {}
+                ).get("status"),
+                "away_history_status": (
+                    item.get("away_history") or {}
+                ).get("status"),
+            })
+
+    return {
+        "status": "success",
+        "shadow_only": True,
+        "read_only": True,
+        "publishing_changed": False,
+        "prediction_pool_changed": False,
+        "predictor_invoked": False,
+        "sportybet_only_fixture_count": (
+            coverage.get(
+                "sportybet_only_fixture_count",
+                0,
+            )
+        ),
+        "evaluated_fixture_count": len(
+            results
+        ),
+        "ready_for_shadow_model_count": len(
+            ready
+        ),
+        "readiness_counts": dict(
+            states
+        ),
+        "readiness_by_league": {
+            slug: by_league[slug]
+            for slug in sorted(by_league)
+        },
+        "identity_not_ready_samples": identity_not_ready[
+            :max(0, int(sample_limit))
+        ],
+        "minimum_competition_history_matches": (
+            MIN_SAMPLE
+        ),
+        "minimum_team_history_matches": 3,
+        "samples": results[
+            :max(
+                0,
+                int(sample_limit),
+            )
+        ],
+        "next_gate": (
+            "READY_FOR_SHADOW_MODEL fixtures may be modelled only in an "
+            "isolated supplemental shadow experiment; they remain excluded "
+            "from the public Builder and official track record"
+        ),
+    }
 
 
 def board_status() -> dict:

@@ -96,7 +96,12 @@ app = FastAPI(
 @app.middleware("http")
 async def trace_important_requests(request: Request, call_next):
     """Log arrival of expensive public requests without request credentials."""
-    if request.url.path == "/api/leagues/slip-builder/generate":
+    if request.url.path in {
+        "/api/leagues/slip-builder/generate",
+        "/api/leagues/slip-builder/v2/generate",
+        "/api/leagues/slip-builder/v2/manual",
+        "/api/leagues/slip-builder/v2/candidates",
+    }:
         raw_cf_ray = request.headers.get("cf-ray", "")
         cf_ray = "".join(
             char for char in raw_cf_ray[:128]
@@ -344,6 +349,19 @@ def _ensure_today_generated():
             step="accumulator_feed", error_type=type(e).__name__,
         )
 
+    # Booking editions can expire independently of the locked prediction
+    # card. Recheck in this background loop, never in a public GET.
+    try:
+        from leagues.booking import refresh_due_bookings
+        booking_refresh = refresh_due_bookings()
+        if booking_refresh.get("status") == "refreshed":
+            logger.info("Live booking refresh booked=%s failed=%s skipped=%s",
+                        len(booking_refresh.get("booked") or []),
+                        len(booking_refresh.get("failed") or []),
+                        len(booking_refresh.get("skipped") or []))
+    except Exception as e:
+        logger.error("Daily loop: live booking refresh failed: %s", e)
+
     # Subscriber alerts used to fire from here, guarded by a dict held in
     # process memory. That dict is empty in a new process, so every deploy and
     # every restart announced the day again — one notification per push, and
@@ -392,13 +410,15 @@ def _start_daily_generation_loop():
     def _run():
         _time.sleep(5)  # let the server finish booting first
         try:
-            from leagues.engine import start_prepared_board_refresh
-            start_prepared_board_refresh(days_ahead=7, force=False)
+            from leagues.engine import start_history_prewarm
+            start_history_prewarm()
         except Exception as e:
             logger.error(f"Weekly board prewarm failed to start: {e}")
         last_published = None
         while True:
             try:
+                from leagues.engine import start_history_prewarm
+                start_history_prewarm()
                 now = datetime.now(_tz.utc)
                 wat = now + _td(hours=1)
                 wat_day = wat.strftime("%Y-%m-%d")
@@ -430,7 +450,15 @@ def _start_daily_generation_loop():
                             logger.info(
                                 f"Daily run for {wat_day}: {report.get('status')} "
                                 f"(failed: {report.get('failed') or 'none'})")
-                        if not skipped_in_flight:
+                        # A partial run whose card step failed because history
+                        # was absent must be retried after prewarm completes.
+                        # The DB claim accepts a retry of partial runs; this
+                        # in-process shortcut must not suppress it all day.
+                        card_complete = bool(
+                            (report.get("steps") or {}).get("card", {}).get("ok")
+                        )
+                        if not skipped_in_flight and (
+                                report.get("status") == "skipped" or card_complete):
                             last_published = wat_day
                     except Exception as e:
                         logger.error(f"Daily run failed: {e}")
@@ -455,10 +483,60 @@ if BACKGROUND_JOBS_ENABLED:
 else:
     logger.info("Background jobs disabled for this process")
 
+
+def _start_staging_v2_shadow_automation():
+    """Start only the staging V2 prospective-evidence worker."""
+
+    from leagues.football_first_shadow_v2_automation import (
+        start,
+    )
+
+    return start()
+
+
+_v2_shadow_automation_status = {
+    "status":
+        "NOT_APPLICABLE",
+}
+
+if _environment == "staging":
+    try:
+        _v2_shadow_automation_status = (
+            _start_staging_v2_shadow_automation()
+        )
+
+        logger.info(
+            "V2 staging automation startup: %s",
+            _v2_shadow_automation_status,
+        )
+
+    except Exception as exc:
+        _v2_shadow_automation_status = {
+            "status":
+                "ERROR",
+
+            "error_type":
+                type(
+                    exc
+                ).__name__,
+        }
+
+        logger.error(
+            "Could not start V2 staging evidence automation: %s",
+            exc,
+            exc_info=True,
+        )
+
+
 log_runtime_memory(
     "startup_complete",
     background_jobs=BACKGROUND_JOBS_ENABLED,
     legacy_prediction_settlement=LEGACY_PREDICTION_SETTLEMENT_ENABLED,
+    v2_shadow_automation=(
+        _v2_shadow_automation_status.get(
+            "status"
+        )
+    ),
 )
 
 

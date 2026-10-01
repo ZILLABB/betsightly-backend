@@ -1,0 +1,138 @@
+{
+  "artifact": {
+    "bytes": 1563,
+    "path": "models/football_first_shadow/match_result.joblib",
+    "sha256": "47574c1e77cb62ff22c8d12f5a3d7ac8abd7d99768ce4f466b8fc46ee60a9e03"
+  },
+  "automatic_promotion": false,
+  "class_mapping": {
+    "0": "away_win",
+    "1": "draw",
+    "2": "home_win"
+  },
+  "combined_results": {
+    "conflicting_duplicates": 0,
+    "duplicate_rows": 0,
+    "input_normalized_rows": 74474,
+    "league_count": 35,
+    "max_date": "2026-06-01",
+    "min_date": "2012-01-24",
+    "same_score_duplicates_removed": 0,
+    "source_counts": {
+      "football_history": 7775,
+      "legacy_training_baseline": 66699
+    },
+    "unique_rows": 74474
+  },
+  "feature_columns": [
+    "home_win_rate_5",
+    "home_win_rate_10",
+    "home_draw_rate_5",
+    "home_goals_scored_5",
+    "home_goals_conceded_5",
+    "away_win_rate_5",
+    "away_win_rate_10",
+    "away_draw_rate_5",
+    "away_goals_scored_5",
+    "away_goals_conceded_5",
+    "h2h_home_win_rate",
+    "h2h_avg_goals",
+    "h2h_btts_rate",
+    "h2h_meetings",
+    "national_team_match"
+  ],
+  "feature_version": "football-first-runtime-core-v1",
+  "live_adjustment_allowed": false,
+  "model_version": "football-first-match-result-runtime-core-v1-20260601",
+  "prospective_observation_started_at": null,
+  "publishable": false,
+  "raw_feature_build": {
+    "feature_count": 28,
+    "input_matches": 74474,
+    "national_team_samples": 49,
+    "source_counts": {
+      "football_history": 5652,
+      "legacy_training_baseline": 64300
+    },
+    "trainable_samples": 69952,
+    "warmup_skipped": 4522
+  },
+  "runtime": {
+    "joblib": "1.6.0",
+    "python": "3.12.10",
+    "scikit_learn": "1.8.0"
+  },
+  "runtime_core": {
+    "feature_columns": [
+      "home_win_rate_5",
+      "home_win_rate_10",
+      "home_draw_rate_5",
+      "home_goals_scored_5",
+      "home_goals_conceded_5",
+      "away_win_rate_5",
+      "away_win_rate_10",
+      "away_draw_rate_5",
+      "away_goals_scored_5",
+      "away_goals_conceded_5",
+      "h2h_home_win_rate",
+      "h2h_avg_goals",
+      "h2h_btts_rate",
+      "h2h_meetings",
+      "national_team_match"
+    ],
+    "feature_count": 15
+  },
+  "schema": 2,
+  "selected_family": "logistic",
+  "shadow_only": true,
+  "source_files": {
+    "football_history": {
+      "path": "data/football_history/openfootball_matches.csv",
+      "sha256": "36831c08c34d0ebd53dd8de70979e5d54a810b3575f0c75b5b11f200e2c1d40f"
+    },
+    "legacy": {
+      "path": "data/api-football/matches.csv",
+      "sha256": "4b66f1e69b8c78eaf2f31daceb6b2ad3279590fedf3095d746114714b8e9b98b"
+    }
+  },
+  "target": "match_result",
+  "trained_at": "2026-09-30T19:37:12.648091+00:00",
+  "trained_samples": 69952,
+  "training_cutoff": "2026-06-01",
+  "walk_forward_family_selection": {
+    "folds": [
+      {
+        "fold": 1,
+        "log_loss_skill_vs_prior": 0.036747,
+        "selected_family": "logistic",
+        "test_end": "2023-10-18",
+        "test_start": "2022-12-12"
+      },
+      {
+        "fold": 2,
+        "log_loss_skill_vs_prior": 0.036027,
+        "selected_family": "hist_gradient_boosting",
+        "test_end": "2024-08-26",
+        "test_start": "2023-10-19"
+      },
+      {
+        "fold": 3,
+        "log_loss_skill_vs_prior": 0.031131,
+        "selected_family": "logistic",
+        "test_end": "2025-07-20",
+        "test_start": "2024-08-27"
+      },
+      {
+        "fold": 4,
+        "log_loss_skill_vs_prior": 0.032632,
+        "selected_family": "logistic",
+        "test_end": "2026-06-01",
+        "test_start": "2025-07-21"
+      }
+    ],
+    "selection_counts": {
+      "hist_gradient_boosting": 1,
+      "logistic": 3
+    }
+  }
+}

@@ -81,7 +81,10 @@ def test_under_lines_are_independent_and_restricted_line_cannot_block_public_ran
         _pick("under_2_5", .92, 1.25), _pick("under_3_5", .84, 1.3),
         _pick("under_4_5", .81, 1.4),
     ])
-    assert ranked[0]["market"] == "under_3_5"
+    # The registry keeps Under 3.5 in shadow until line-specific live or
+    # bookmaker evidence justifies promotion; synthetic SUPPORTED metadata
+    # cannot override the market-wide activation policy.
+    assert ranked[0]["market"] == "under_4_5"
     assert ranked[0]["public_rank"] == 1
     assert ranked[0]["model_rank"] > 1
 
@@ -111,3 +114,29 @@ def test_feature_flag_preserves_old_selector(monkeypatch):
     original = [_pick("under_2_5", .90, 1.3)]
     monkeypatch.setenv("FIXTURE_RANKED_SELECTOR", "0")
     assert canonical_fixture_recommendations(original) is original
+
+
+def test_include_all_eligible_preserves_dominated_public_market():
+    picks = [
+        _pick("over_1_5", .82, 1.35),
+        _pick("under_4_5", .76, 1.20),
+    ]
+
+    canonical = canonical_fixture_recommendations(picks)
+
+    assert [pick["market"] for pick in canonical] == [
+        "over_1_5",
+    ]
+
+    expanded = canonical_fixture_recommendations(
+        picks,
+        include_all_eligible=True,
+    )
+
+    assert {
+        pick["market"]
+        for pick in expanded
+    } == {
+        "over_1_5",
+        "under_4_5",
+    }

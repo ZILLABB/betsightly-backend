@@ -6,33 +6,14 @@ import json
 import math
 from functools import lru_cache
 from pathlib import Path
+from leagues.market_registry import MARKETS
 
 ROOT = Path(__file__).resolve().parent.parent / "data" / "replay"
 
-PROMOTED = {
-    "over_1_5",
-    "over_2_5",
-    "under_4_5",
-    "home_or_draw",
-    "away_or_draw",
-    "home_or_away",
-    "dnb_home",
-    "dnb_away",
-    "home_over_0_5",
-    "away_over_0_5",
-    "home_over_1_5",
-    "away_over_1_5",
-    "home_win",
-    "away_win",
-}
-
-RESTRICTED = {
-    "btts_yes",
-    "btts_no",
-    "draw",
-    "under_2_5",
-    "under_3_5",
-}
+PROMOTED = {key for key, spec in MARKETS.items()
+            if spec.evidence_policy == "PROMOTED"}
+RESTRICTED = {key for key, spec in MARKETS.items()
+              if spec.evidence_policy == "RESTRICTED"}
 
 # Two hundred observations gives useful binomial resolution, while uncertainty
 # below still widens automatically.

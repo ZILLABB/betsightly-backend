@@ -25,7 +25,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
 from leagues.competition_registry import regulation_score
 from leagues.cache_paths import cache_path
 
@@ -33,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 CACHE_PATH = cache_path(Path(__file__).parent / "data" / "league_base_rates.json")
 CACHE_TTL = 7 * 24 * 3600          # recompute weekly
+HISTORY_CACHE_SCHEMA = 2  # ESPN monthly queries; schema 1 used rejected date ranges
 LOOKBACK_DAYS = 45                 # sample window
 MIN_SAMPLE = 10                    # below this, use global defaults
 MIN_PRIOR_SAMPLE = 20
@@ -82,55 +82,72 @@ def _as_rates(sample: dict) -> dict:
     }
 
 
-def _fetch_finished_range(slug: str, start: str, end: str) -> list[tuple[int, int]]:
-    """Finished (home, away) scores for a whole date range in one request.
+def _fetch_finished_range(slug: str, start: str, end: str, *,
+                          as_of: datetime | None = None) -> list[tuple[int, int]]:
+    """Finished scores with ESPN primary and verified league-prior fallback.
 
-    ESPN accepts dates=YYYYMMDD-YYYYMMDD, so a 45-day window costs one call
-    per league instead of 45 — the difference between a ~35-minute refresh
-    and a few seconds.
+    The OpenFootball fallback is competition-level only. It is never fed
+    into current team form and is disabled for as-of replay.
     """
+    from leagues.espn_history_fetch import HistoryMonthUnavailable
+    from leagues.history_months import finished_matches
+
     try:
-        resp = requests.get(
-            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
-            params={"dates": f"{start}-{end}", "limit": 500}, timeout=25,
+        rows = finished_matches(slug, start, end, as_of=as_of)
+    except HistoryMonthUnavailable as exc:
+        if as_of is not None or not exc.permanent:
+            raise
+        from leagues.openfootball_runtime_priors import finished_scores
+        fallback = finished_scores(slug)
+        if fallback:
+            logger.info(
+                "base-rate history fallback: slug=%s source=OpenFootball matches=%s",
+                slug, len(fallback),
+            )
+            return fallback
+        raise
+
+    scores = [(row["hs"], row["as"]) for row in rows]
+    if scores or as_of is not None:
+        return scores
+
+    from leagues.openfootball_runtime_priors import finished_scores
+    fallback = finished_scores(slug)
+    if fallback:
+        logger.info(
+            "base-rate empty ESPN fallback: slug=%s source=OpenFootball matches=%s",
+            slug, len(fallback),
         )
-        if resp.status_code != 200:
-            return []
-        events = resp.json().get("events", [])
-    except Exception:
-        return []
-
-    out = []
-    for ev in events:
-        comp = (ev.get("competitions") or [{}])[0]
-        if not comp.get("status", {}).get("type", {}).get("completed"):
-            continue
-        teams = comp.get("competitors", [])
-        home = next((t for t in teams if t.get("homeAway") == "home"), None)
-        away = next((t for t in teams if t.get("homeAway") == "away"), None)
-        if not home or not away:
-            continue
-        score = regulation_score(comp)
-        if not score:
-            continue
-        out.append((score["home_score"], score["away_score"]))
-    return out
+        return fallback
+    return scores
 
 
-def compute_base_rates(slugs: dict[str, str]) -> dict:
+def compute_base_rates(slugs: dict[str, str], *,
+                       as_of: datetime | None = None) -> dict:
     """Measure base rates for each league slug. Leagues run in parallel."""
-    now = datetime.now(timezone.utc)
+    now = as_of or datetime.now(timezone.utc)
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("as_of must be timezone-aware")
+    now = now.astimezone(timezone.utc)
     start = (now - timedelta(days=LOOKBACK_DAYS)).strftime("%Y%m%d")
     end = (now - timedelta(days=1)).strftime("%Y%m%d")
 
+    from leagues.espn_history_fetch import HistoryMonthUnavailable
     raw = {}
+    failed_leagues = []
+    unavailable_leagues = []
     with ThreadPoolExecutor(max_workers=12) as pool:
-        futures = {pool.submit(_fetch_finished_range, slug, start, end): slug for slug in slugs}
+        futures = {pool.submit(_fetch_finished_range, slug, start, end,
+                               as_of=as_of): slug for slug in slugs}
         for fut in as_completed(futures):
             slug = futures[fut]
             try:
                 results = fut.result()
+            except HistoryMonthUnavailable as exc:
+                (unavailable_leagues if exc.permanent else failed_leagues).append(slug)
+                continue
             except Exception:
+                failed_leagues.append(slug)
                 continue
             s = _empty()
             for hs, as_ in results:
@@ -176,43 +193,83 @@ def compute_base_rates(slugs: dict[str, str]) -> dict:
         for key in keys:
             _merge(prior_samples[key], sample)
     rates["_priors"] = {key: _as_rates(sample) for key, sample in prior_samples.items()}
+    rates["_cache_schema"] = HISTORY_CACHE_SCHEMA
+    rates["_built_at"] = now.isoformat()
+    rates["_failed_leagues"] = sorted(failed_leagues)
+    rates["_unavailable_leagues"] = sorted(unavailable_leagues)
+    try:
+        from leagues.openfootball_runtime_priors import status as fallback_status
+        rates["_history_fallback"] = fallback_status()
+    except Exception:
+        rates["_history_fallback"] = {}
     return rates
 
 
-def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False) -> dict:
+def get_base_rates(slugs: dict[str, str] | None = None, force: bool = False,
+                   *, as_of: datetime | None = None,
+                   allow_refresh: bool = True) -> dict:
     """Cached per-league base rates. Recomputed weekly."""
-    if not force and CACHE_PATH.exists():
+    from leagues.history_cache_io import (local_refresh_claim, read_complete,
+                                          replace_complete)
+    from leagues import shared_history_store
+    complete = read_complete(CACHE_PATH, HISTORY_CACHE_SCHEMA,
+                             required="_priors") if as_of is None else None
+    if as_of is None and shared_history_store.production_shared():
         try:
-            age = time.time() - CACHE_PATH.stat().st_mtime
+            complete = (shared_history_store.read("base_rates", HISTORY_CACHE_SCHEMA,
+                                                  required="_priors") or complete)
+        except Exception as exc:
+            logger.warning("Shared base-rate cache unavailable: %s", exc)
+    if as_of is None and not force and complete:
+        try:
+            built = complete.get("_built_at")
+            age = (time.time() - datetime.fromisoformat(built).timestamp()
+                   if built else time.time() - CACHE_PATH.stat().st_mtime)
             if age < CACHE_TTL:
-                cached = json.loads(CACHE_PATH.read_text())
-                if cached.get("_priors"):
-                    return cached
-                logger.info("Base-rate cache predates competition priors; rebuilding")
+                return complete
         except Exception:
             pass
+    if as_of is None and not allow_refresh:
+        return complete or {}
 
     if slugs is None:
         from leagues.espn_source import ESPN_CLUB_LEAGUES
         slugs = ESPN_CLUB_LEAGUES
 
-    try:
-        rates = compute_base_rates(slugs)
+    def refresh(owner=None):
+        rates = compute_base_rates(slugs, as_of=as_of)
         if rates:
-            CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            CACHE_PATH.write_text(json.dumps(rates, indent=2))
-            logger.info(f"Base rates computed for {len(rates)} leagues")
+            if as_of is None and rates.get("_failed_leagues"):
+                logger.warning("Base-rate refresh incomplete: %s leagues failed",
+                               len(rates["_failed_leagues"]))
+                return complete or rates
+            elif as_of is None:
+                if owner:
+                    if not shared_history_store.promote(
+                            "base_rates", HISTORY_CACHE_SCHEMA, rates, owner,
+                            required="_priors"):
+                        return complete or {}
+                replace_complete(CACHE_PATH, rates, HISTORY_CACHE_SCHEMA,
+                                 required="_priors")
+                logger.info(f"Base rates computed for {len(rates)} leagues")
             return rates
+        return complete or {}
+
+    try:
+        if as_of is not None:
+            return refresh()
+        if shared_history_store.production_shared():
+            with shared_history_store.claim("base_rates", HISTORY_CACHE_SCHEMA) as owner:
+                return refresh(owner) if owner else complete or {}
+        with local_refresh_claim(CACHE_PATH) as acquired:
+            if not acquired:
+                return complete or {}
+            return refresh()
     except Exception as e:
         logger.error(f"Base-rate computation failed: {e}")
 
     # Fall back to whatever is cached, even if stale
-    if CACHE_PATH.exists():
-        try:
-            return json.loads(CACHE_PATH.read_text())
-        except Exception:
-            pass
-    return {}
+    return complete or {}
 
 
 # Strength of the pull toward global averages, in "virtual matches". A league

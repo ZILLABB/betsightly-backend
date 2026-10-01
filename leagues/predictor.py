@@ -184,7 +184,25 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
     # ── Derived markets ────────────────────────────────────
     total_lam = home_lam + away_lam
     p_o15 = _p_over(1.5, total_lam)
-    p_o25 = odds.get("implied_over") or _p_over(2.5, total_lam)
+
+    # `implied_over` belongs to whatever total line the provider supplied.
+    # It is an Over 2.5 probability only when that quoted line is exactly 2.5.
+    # For any other line, use the total-goals mean inferred from that quote
+    # and derive P(Over 2.5) from the same Poisson distribution.
+    try:
+        quoted_ou_line = float(ou_line)
+    except (TypeError, ValueError):
+        quoted_ou_line = 2.5
+
+    p_o25 = (
+        float(market_over)
+        if (
+            market_over is not None
+            and abs(quoted_ou_line - 2.5) < 1e-9
+        )
+        else _p_over(2.5, total_lam)
+    )
+
     p_o35 = _p_over(3.5, total_lam)
     p_btts = (1.0 - math.exp(-home_lam)) * (1.0 - math.exp(-away_lam))
 
@@ -250,8 +268,20 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
         "btts_no":    min(cap, 1.0 - p_btts),
     }
 
+    # Already mapped at SportyBet, but not yet validated for public use.
+    # Keep these uncapped mathematical probabilities separate from publishable
+    # probabilities so they can be replayed without entering any product pool.
+    shadow_markets = {
+        "over_4_5": p_o45,
+        "home_under_0_5": 1.0 - p_h05,
+        "home_under_1_5": 1.0 - p_h15,
+        "away_under_0_5": 1.0 - p_a05,
+        "away_under_1_5": 1.0 - p_a15,
+    }
+
     return {
         "probabilities": {k: round(v, 4) for k, v in markets.items()},
+        "shadow_probabilities": {k: round(v, 4) for k, v in shadow_markets.items()},
         "expected_goals": {
             "home": round(home_lam, 2),
             "away": round(away_lam, 2),

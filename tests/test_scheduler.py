@@ -72,19 +72,89 @@ def test_a_stale_claim_can_be_taken_over(run_date):
     S._claim(run_date, force=False)
     stale = "1999-01-01T00:00:00+00:00"
     with engine.begin() as conn:
-        conn.execute(text("UPDATE daily_runs SET started_at = :t WHERE run_date = :d"),
+        conn.execute(text("UPDATE daily_runs SET started_at = :t, heartbeat_at = :t "
+                          "WHERE run_date = :d"),
                      {"d": run_date, "t": stale})
     claimed, _ = S._claim(run_date, force=False)
     assert claimed
 
 
-def test_an_unparseable_claim_time_does_not_wedge_the_day(run_date):
+def test_live_heartbeat_keeps_a_slow_run_claimed(run_date):
+    """An old start time is not enough to steal a worker that is still alive."""
     S._claim(run_date, force=False)
     with engine.begin() as conn:
         conn.execute(text("UPDATE daily_runs SET started_at = :t WHERE run_date = :d"),
+                     {"d": run_date, "t": "1999-01-01T00:00:00+00:00"})
+    claimed, why = S._claim(run_date, force=False)
+    assert not claimed
+    assert "already running" in why
+
+
+def test_an_unparseable_claim_time_does_not_wedge_the_day(run_date):
+    S._claim(run_date, force=False)
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE daily_runs SET started_at = :t, heartbeat_at = :t "
+                          "WHERE run_date = :d"),
                      {"d": run_date, "t": "not-a-timestamp"})
     claimed, _ = S._claim(run_date, force=False)
     assert claimed
+
+
+def test_manual_start_claims_then_detaches_long_generation(monkeypatch, run_date):
+    """The HTTP path returns before a seven-day pipeline is allowed to run."""
+    monkeypatch.setattr("leagues.daily_feed._publish_date", lambda: run_date)
+    calls = []
+    threads = []
+
+    class DeferredThread:
+        def __init__(self, *, target, daemon, name):
+            self.target = target
+            self.daemon = daemon
+            self.name = name
+            self.started = False
+            threads.append(self)
+
+        def start(self):
+            self.started = True
+
+    monkeypatch.setattr(S.threading, "Thread", DeferredThread)
+    monkeypatch.setattr(
+        S, "run_daily_job",
+        lambda **kwargs: calls.append(kwargs) or {"status": "complete"},
+    )
+
+    result = S.start_daily_job(force=False, publish=False)
+
+    assert result["status"] == "accepted"
+    assert result["queued"] is True
+    assert calls == []
+    assert len(threads) == 1 and threads[0].started
+    threads[0].target()
+    assert calls == [{"force": False, "publish": False,
+                      "_claimed_run_date": run_date}]
+
+
+def test_detached_unhandled_failure_finishes_the_claim(monkeypatch, run_date):
+    """A crash before normal step bookkeeping cannot leave ``running`` forever."""
+    monkeypatch.setattr("leagues.daily_feed._publish_date", lambda: run_date)
+
+    class ImmediateThread:
+        def __init__(self, *, target, daemon, name):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(S.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        S, "run_daily_job",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("crashed")),
+    )
+
+    result = S.start_daily_job(publish=False)
+    assert result["status"] == "accepted"
+    row = next(r for r in S.last_runs(50) if r["run_date"] == run_date)
+    assert row["status"] == "failed"
 
 
 # ── Step isolation ─────────────────────────────────────────

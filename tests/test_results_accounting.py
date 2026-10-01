@@ -110,7 +110,18 @@ def test_published_slips_migration_and_new_rows_include_policy_version(monkeypat
     assert picks_db.archive_slip(
         "2026-09-09",
         "2_odds",
-        [{"match_id": "m1", "status": "pending"}],
+        [{
+            "match_id": "m1",
+            "status": "pending",
+            "board_snapshot_id": "snapshot-1",
+            "match_context": {
+                "version": "match_context_v1",
+                "shadow_only": True,
+            },
+            "selection_probability": .71,
+            "odds_provider": "SportyBet",
+            "bookable": True,
+        }],
         2.1,
         0.6,
     )
@@ -124,6 +135,15 @@ def test_published_slips_migration_and_new_rows_include_policy_version(monkeypat
     # West Coast (the repository's test dates straddle that boundary).
     history = picks_db.get_history(limit_days=3, as_of="2026-09-10")
     assert history[0]["policy_version"] == "selection-policy-v1.1"
+
+    archived_leg = history[0]["picks"][0]
+
+    assert archived_leg["board_snapshot_id"] == "snapshot-1"
+    assert archived_leg["match_context"]["shadow_only"] is True
+    assert archived_leg["selection_probability"] == .71
+    assert archived_leg["odds_provider"] == "SportyBet"
+    assert archived_leg["bookable"] is True
+
     assert history[1]["policy_version"] is None
 
 

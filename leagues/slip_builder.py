@@ -91,7 +91,10 @@ MAX_BUILDER_MARKET_CAP = 7
 _COST_TIE_BAND = 0.02
 
 
-DNB_MARKETS = {"dnb_home", "dnb_away"}
+from leagues.market_registry import MARKETS as MARKET_REGISTRY
+
+DNB_MARKETS = {key for key, spec in MARKET_REGISTRY.items()
+               if spec.can_void and spec.group == "dnb"}
 
 
 def _selection_id(pick: dict) -> str:
@@ -330,10 +333,15 @@ def _order_key(pick: dict):
     return (round(_cost(pick) / _COST_TIE_BAND), not pick.get("bookable"), margin)
 
 
-def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
+def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False,
+          allow_pipeline_fallback: bool = False) -> list:
     """Every Builder-qualified pick within the requested horizon."""
     from leagues.calibrator import fit_calibration
-    from leagues.engine import prepared_pipeline, run_pipeline
+    from leagues.engine import (
+        prepared_builder_supplemental_picks,
+        prepared_pipeline,
+        run_pipeline,
+    )
     from leagues.picks import (
         MIN_CANDIDATE_CONFIDENCE,
         MIN_PUBLISHABLE_CONFIDENCE,
@@ -351,7 +359,7 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
         _, fixtures = run_pipeline(days_ahead=POOL_DAYS, force=True)
     else:
         _, fixtures = prepared_pipeline(days_ahead=POOL_DAYS)
-        if not fixtures:
+        if not fixtures and allow_pipeline_fallback:
             # Direct/admin callers retain a safe fallback. The public API
             # checks board readiness first and never reaches this cold path.
             _, fixtures = run_pipeline(days_ahead=POOL_DAYS, force=False)
@@ -373,6 +381,14 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False) -> list:
                 market_floor_overrides=BUILDER_MARKET_FLOORS,
             )
         )
+
+    # Batch 6I: add only the exact fixture/market pairs approved by 6H.
+    # Never rebuild every market from supplemental fixtures here.
+    picks.extend(
+        prepared_builder_supplemental_picks(
+            days_ahead=POOL_DAYS
+        )
+    )
 
     from leagues.availability import kickoff_lifecycle
 
@@ -418,7 +434,8 @@ def _horizon_end(now_dt: datetime, horizon: str) -> datetime:
     """
     if now_dt.tzinfo is None:
         now_dt = now_dt.replace(tzinfo=timezone.utc)
-    days = HORIZONS.get(horizon, POOL_DAYS)
+    v2_days = {"3_days": 3, "7_days": 7}
+    days = HORIZONS.get(horizon, v2_days.get(horizon, POOL_DAYS))
     wat_date = now_dt.astimezone(WAT).date() + timedelta(days=days - 1)
     return datetime.combine(wat_date, time.max, tzinfo=WAT).astimezone(timezone.utc)
 
@@ -516,6 +533,17 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
     log_odds = np.array([math.log(float(p["odds"])) for p in valid])
     risk = np.array([-math.log(max(1e-9, min(.999999, p)))
                      for p in probabilities])
+
+    # Portfolio exposure is deliberately a secondary optimization objective.
+    # The first solve still finds the minimum-risk football solution.
+    portfolio_cost = np.array([
+        max(
+            0.0,
+            float(pick.get("_portfolio_penalty") or 0.0),
+        )
+        for pick in valid
+    ])
+
     matrix = csr_matrix(np.asarray(rows, dtype=float))
     base_constraint = LinearConstraint(matrix, -np.inf, np.asarray(upper))
     target_constraint = LinearConstraint(
@@ -528,6 +556,38 @@ def _verified_optimize(candidates: list[dict], target: float, max_legs: int,
         risk, integrality=np.ones(size), bounds=Bounds(0, 1),
         constraints=(base_constraint, target_constraint), options=options,
     )
+
+    # If several target-reaching combinations have the same optimum football
+    # risk, choose the one with less recent portfolio exposure. The extra
+    # constraint keeps the original optimum risk fixed, so diversification
+    # cannot buy novelty by accepting a weaker solution.
+    if (
+        reached.x is not None
+        and np.any(portfolio_cost > 0)
+    ):
+        best_risk = float(np.dot(risk, reached.x))
+
+        quality_constraint = LinearConstraint(
+            csr_matrix(risk.reshape(1, -1)),
+            -np.inf,
+            np.array([best_risk + 1e-8]),
+        )
+
+        diversified = milp(
+            portfolio_cost + risk * 1e-9,
+            integrality=np.ones(size),
+            bounds=Bounds(0, 1),
+            constraints=(
+                base_constraint,
+                target_constraint,
+                quality_constraint,
+            ),
+            options=options,
+        )
+
+        if diversified.x is not None:
+            reached = diversified
+
     result = reached
     if reached.x is None:
         # Verify the maximum possible odds instead of describing a greedy
@@ -645,10 +705,11 @@ def _constraint_counterfactuals(candidates: list[dict], target: float,
 
 def approved_builder_candidates(
     pool: list[dict], *, require_bookable: bool = True,
+    include_all_eligible: bool = False,
 ) -> tuple[list[dict], collections.Counter]:
-    """Apply the shared trust and canonical-ranking policy exactly once."""
-    from leagues.fixture_ranker import builder_fixture_candidates
-    from leagues.leg_trust import evaluate_leg_trust
+    """Apply shared trust and canonical ranking exactly once."""
+    from leagues.fixture_ranker import canonical_fixture_recommendations
+    from leagues.leg_trust import evaluate_leg_trust, reprice_for_live_sportybet
     from leagues.selection_quality import attach_selection_quality
 
     rejections: collections.Counter = collections.Counter()
@@ -659,6 +720,9 @@ def approved_builder_candidates(
             continue
         pick = dict(source)
         pick["selection_id"] = _selection_id(pick)
+        # Exact SportyBet price is a trust input, never a late display-only
+        # decoration. Reprice before trust, quality and optimizer admission.
+        reprice_for_live_sportybet(pick)
         decision = evaluate_leg_trust(pick)
         pick["trust"] = decision
         pick["evidence_adjusted_probability"] = decision[
@@ -677,7 +741,10 @@ def approved_builder_candidates(
             rejections.update(
                 decision["rejection_reasons"] or ["trust_grade_below_b"]
             )
-    return builder_fixture_candidates(trusted), rejections
+    return canonical_fixture_recommendations(
+        trusted,
+        include_all_eligible=include_all_eligible,
+    ), rejections
 
 
 def build_slip(
@@ -688,6 +755,7 @@ def build_slip(
     team_to_score_cap: int | None = None,
     horizon: str = DEFAULT_HORIZON,
     require_bookable: bool = True,
+    preapproved_pool: bool = False,
     locked_selection_ids: set[str] | None = None,
     excluded_fixture_ids: set[str] | None = None,
     excluded_selection_ids: set[str] | None = None,
@@ -753,9 +821,17 @@ def build_slip(
     diagnostics["after_bookability"] = len(pool)
     diagnostics["market_distribution_after_bookability"] = _market_distribution(pool)
 
-    canonical_candidates, trust_rejections = approved_builder_candidates(
-        pool, require_bookable=require_bookable
-    )
+    if preapproved_pool:
+        # Builder V2 has already applied live SportyBet repricing, trust,
+        # capability, probability and canonical fixture ranking. Re-running
+        # approval here can reinterpret informational quality reason codes as
+        # fresh trust rejections and incorrectly empty a valid V2 pool.
+        canonical_candidates = [dict(pick) for pick in pool]
+        trust_rejections = collections.Counter()
+    else:
+        canonical_candidates, trust_rejections = approved_builder_candidates(
+            pool, require_bookable=require_bookable
+        )
     diagnostics["after_trust"] = len(canonical_candidates)
     diagnostics["market_distribution_after_trust"] = _market_distribution(
         canonical_candidates
@@ -776,6 +852,11 @@ def build_slip(
     candidates = [p for p in canonical_candidates
                   if (float(p.get("odds") or 0) >= MIN_USEFUL_ODDS
                       or _selection_id(p) in required_selection_ids)]
+    diagnostics["min_useful_odds"] = MIN_USEFUL_ODDS
+    diagnostics["below_min_useful_odds_count"] = max(
+        0,
+        len(canonical_candidates) - len(candidates),
+    )
     diagnostics["after_min_useful_odds"] = len(candidates)
     diagnostics["after_policy"] = len(candidates)
     diagnostics["optimizer_candidate_count"] = len(candidates)
@@ -1096,9 +1177,36 @@ def build_slip(
         diagnostics["saturated_constraints"].append(
             "same_team_fixture_diversity"
         )
-    diagnostics["binding_constraints"] = list(
-        diagnostics["saturated_constraints"]
-    )
+    # "Saturated" is descriptive; "binding" must be causal. A market
+    # group can be full at the chosen cap without preventing a better result.
+    # We already solved progressively through wider market caps above, so use
+    # those actual counterfactual outcomes before blaming market concentration.
+    binding_constraints = list(diagnostics["saturated_constraints"])
+
+    market_saturation = [
+        item
+        for item in binding_constraints
+        if item.startswith("market_group:")
+    ]
+
+    if market_saturation and len(market_cap_attempts) > 1:
+        baseline_reachable = float(
+            market_cap_attempts[0].get("best_reachable") or 0.0
+        )
+        wider_cap_helped = any(
+            float(attempt.get("best_reachable") or 0.0)
+            > baseline_reachable + 1e-9
+            for attempt in market_cap_attempts[1:]
+        )
+
+        if not wider_cap_helped:
+            binding_constraints = [
+                item
+                for item in binding_constraints
+                if not item.startswith("market_group:")
+            ]
+
+    diagnostics["binding_constraints"] = binding_constraints
 
     # Calculate the full positive-payout distribution before classifying a
     # miss: a best-available ticket is publishable only when it passes the same
@@ -1141,10 +1249,10 @@ def build_slip(
         }
         result_status = status_by_primary.get(
             primary,
-            "CURRENT_CONSTRAINTS_CAPPED" if diagnostics["saturated_constraints"]
+            "CURRENT_CONSTRAINTS_CAPPED" if diagnostics["binding_constraints"]
             else "QUALITY_CAPPED",
         )
-        binding = diagnostics["saturated_constraints"]
+        binding = diagnostics["binding_constraints"]
         description = ("The strongest verified combination" if verified
                        else "The current search found a qualifying combination")
         if result_status in {
@@ -1191,7 +1299,9 @@ def build_slip(
             "fixture_count": diagnostics.get("fixture_count", 0),
             "market_distribution": diagnostics.get("market_distribution_after_canonical_ranking", {}),
             "binding_constraints": binding,
-            "saturated_constraints": binding,
+            "saturated_constraints": list(
+                diagnostics["saturated_constraints"]
+            ),
             "primary_binding_constraint": primary,
             "secondary_binding_constraints": (
                 (counterfactuals or {}).get("secondary_binding_constraints", [])
@@ -1330,6 +1440,7 @@ def build_slip(
 def prepared_bookable_pool(
     horizon: str = DEFAULT_HORIZON, force: bool = False,
     refresh_sportybet: bool = False,
+    allow_pipeline_fallback: bool = False,
 ) -> tuple[dict, list[dict], dict[str, int]]:
     """Return the current approved-input board without refreshing ESPN.
 
@@ -1345,8 +1456,18 @@ def prepared_bookable_pool(
         return round((monotonic_time.perf_counter() - stage) * 1000)
 
     stage = monotonic_time.perf_counter()
-    qualified_pool = _pool(horizon, force=force)
-    timings = {"candidate_retrieval": elapsed_ms(stage)}
+    qualified_pool = _pool(
+        horizon, force=force, allow_pipeline_fallback=allow_pipeline_fallback,
+    )
+    timings = {
+        "candidate_retrieval": elapsed_ms(stage),
+        "qualified_pool_count": len(qualified_pool),
+        "supplemental_qualified_count": sum(
+            1
+            for pick in qualified_pool
+            if pick.get("_staging_supplemental")
+        ),
+    }
 
     stage = monotonic_time.perf_counter()
     try:
@@ -1360,6 +1481,7 @@ def prepared_bookable_pool(
 
     snapshot_id = sportybet.board_metadata(board).get("snapshot_id")
     bookable_pool = []
+    supplemental_bookability_rejections: collections.Counter = collections.Counter()
     stage = monotonic_time.perf_counter()
     for pick in qualified_pool:
         try:
@@ -1377,6 +1499,14 @@ def prepared_bookable_pool(
         except (KeyError, TypeError, ValueError):
             continue
         if not availability.get("sportybet_available"):
+            if pick.get("_staging_supplemental"):
+                supplemental_bookability_rejections.update([
+                    str(
+                        availability.get("status")
+                        or availability.get("failure_reason")
+                        or "SPORTYBET_UNAVAILABLE"
+                    )
+                ])
             continue
         candidate = dict(pick)
         candidate["selection_id"] = _selection_id(candidate)
@@ -1386,6 +1516,14 @@ def prepared_bookable_pool(
         candidate["odds_are_real"] = True
         bookable_pool.append(candidate)
     timings["fixture_matching"] = elapsed_ms(stage)
+    timings["supplemental_bookable_count"] = sum(
+        1
+        for pick in bookable_pool
+        if pick.get("_staging_supplemental")
+    )
+    timings["supplemental_bookability_rejections"] = dict(
+        supplemental_bookability_rejections
+    )
     timings["board_lookup"] = round(
         (monotonic_time.perf_counter() - started) * 1000
     )
@@ -1455,9 +1593,23 @@ def _public_result_from_build(
     try:
         from leagues.booking import create_or_reuse_generated_booking
 
-        out["booking"] = create_or_reuse_generated_booking(
+        booking = create_or_reuse_generated_booking(
             games, board, predicted_odds=built["odds"], force=force_booking
         )
+        exact_booking = bool(
+            booking.get("status") == "active"
+            and booking.get("booking_status") in {"FULL", "REBUILT_FULL"}
+            and str(booking.get("readback_validation") or "").upper() == "PASSED"
+            and booking.get("share_code")
+        )
+        if not exact_booking:
+            booking = {
+                **booking,
+                "share_code": None,
+                "share_url": None,
+                "actionable": False,
+            }
+        out["booking"] = booking
     except Exception as exc:
         logger.warning("slip booking failed: %s", exc)
         out["booking"] = {

@@ -289,9 +289,13 @@ def test_competition_coverage_exposes_provider_failure(monkeypatch):
     from leagues import base_rates, elo_engine, engine, espn_source
     from leagues.api import competition_coverage
 
-    monkeypatch.setattr(engine, "run_pipeline", lambda **kwargs: ([], []))
-    monkeypatch.setattr(base_rates, "get_base_rates", lambda: {})
-    monkeypatch.setattr(elo_engine, "get_ratings", lambda: {})
+    monkeypatch.setattr(engine, "run_pipeline", lambda **kwargs: (_ for _ in ()).throw(
+        AssertionError("read-only coverage must not rebuild the pipeline")))
+    monkeypatch.setattr(engine, "prepared_board", lambda horizon: (
+        [], [{"match_id": "future", "league_slug": "uefa.champions"}],
+        {"ready": True, "stale": False}))
+    monkeypatch.setattr(base_rates, "get_base_rates", lambda **kwargs: {})
+    monkeypatch.setattr(elo_engine, "cached_ratings", lambda: {})
     monkeypatch.setattr(espn_source, "fetch_health", lambda: {
         "uefa.champions": {"provider_active": False, "error": "timeout"}
     })

@@ -84,6 +84,22 @@ def test_engine_wide_cache_can_serve_narrower_window(monkeypatch):
     assert [pick["match_id"] for pick in picks] == ["today"]
 
 
+def test_prepared_board_keeps_high_coverage_degraded_board_over_newer_partial(monkeypatch):
+    now = time.time()
+    now_dt = datetime.now(timezone.utc)
+    monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    healthyish = [_fixture(now_dt, 4, f"good-{i}") for i in range(99)]
+    partial = [_fixture(now_dt, 4, f"partial-{i}") for i in range(48)]
+    engine._store_cache_entry(7, [], healthyish, now - 30, now_dt,
+                              {"complete": False, "successful_league_count": 99,
+                               "requested_league_count": 116})
+    engine._store_cache_entry(8, [], partial, now, now_dt,
+                              {"complete": False, "successful_league_count": 48,
+                               "requested_league_count": 116})
+    _, fixtures = engine.prepared_pipeline(7)
+    assert len(fixtures) == 99
+
+
 def test_engine_force_refresh_bypasses_covering_cache(monkeypatch):
     monkeypatch.setattr(engine, "_CACHE", {"entries": {}})
     calls = []
@@ -210,6 +226,34 @@ def test_provider_retries_only_failed_leagues_and_deduplicates(monkeypatch, tmp_
     assert metadata["successful_league_count"] == 2
     assert metadata["requested_league_count"] == 2
     assert metadata["failed_league_count"] == 0
+
+
+def test_failed_league_refresh_keeps_future_last_known_good_not_started(monkeypatch, tmp_path):
+    now = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(espn_source, "CACHE_PATH", tmp_path / "fixtures.json")
+    monkeypatch.setattr(espn_source, "ESPN_CLUB_LEAGUES", {"a": "A", "b": "B"})
+    future = _fixture(now, 6, "remember")
+    future["league_slug"] = "b"
+    started = _fixture(now, -1, "started")
+    started["league_slug"] = "b"
+    espn_source.CACHE_PATH.write_text(json.dumps({
+        "metadata": {"coverage_start": now.isoformat(),
+                     "coverage_end": (now + timedelta(days=7)).isoformat()},
+        "fixtures": [future, started],
+    }), encoding="utf-8")
+
+    def fetch(slug, _range):
+        espn_source._FETCH_HEALTH[slug] = {
+            "request_succeeded": slug == "a", "provider_active": slug == "a",
+        }
+        return [_fixture(now, 8, "fresh-a")] if slug == "a" else []
+
+    monkeypatch.setattr(espn_source, "_fetch_league", fetch)
+    fixtures = espn_source.get_fixtures(days_ahead=7, force=True, now=now)
+    homes = {fixture["home"]["name"] for fixture in fixtures}
+    assert "Home remember" in homes
+    assert "Home started" not in homes
+    assert espn_source.cache_metadata()["recovered_leagues"] == ["b"]
 
 
 def test_valid_empty_league_is_success_and_is_not_retried(monkeypatch, tmp_path):
@@ -347,6 +391,26 @@ def test_expired_complete_board_yields_to_new_degraded_board(monkeypatch):
     assert [pick["match_id"] for pick in picks] == ["degraded"]
 
 
+def test_stale_complete_board_yields_to_fresh_actionable_degraded_board(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
+    engine._store_cache_entry(
+        7, [{"match_id": "old"}], [_fixture(now, 2, "old")],
+        time.time() - engine._TTL - 10, now, {"complete": True},
+        decision_snapshot_id="old-id",
+    )
+    engine._store_cache_entry(
+        7, [{"match_id": "new"}], [_fixture(now, 3, "new")],
+        time.time(), now, {"complete": False},
+        decision_snapshot_id="new-id",
+    )
+    picks, _, board = engine.prepared_board(7)
+    assert board["board_snapshot_id"] == "new-id"
+    assert board["degraded"] is True
+    assert board["stale"] is False
+    assert [pick["match_id"] for pick in picks] == ["new"]
+
+
 def test_started_complete_board_does_not_mask_actionable_degraded_board(monkeypatch):
     now = datetime.now(timezone.utc)
     monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
@@ -388,6 +452,10 @@ def test_prepared_horizons_share_source_but_filter_independently(monkeypatch):
 
 def test_cold_builder_click_returns_controlled_refresh_state(monkeypatch):
     from leagues import api, slip_builder
+    from leagues import history_readiness
+
+    monkeypatch.setattr(history_readiness, "status",
+                        lambda: {"state": "READY", "usable": True})
 
     monkeypatch.setattr(
         engine, "prepared_board_status",
@@ -414,7 +482,7 @@ def test_cold_builder_click_returns_controlled_refresh_state(monkeypatch):
 
 
 def test_builder_refresh_reuses_ready_board(monkeypatch):
-    from leagues import api, builder_runs, slip_builder
+    from leagues import api, builder_runs, builder_v2
 
     async def run_inline(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -424,13 +492,10 @@ def test_builder_refresh_reuses_ready_board(monkeypatch):
         lambda days_ahead=7: {"ready": True, "requested_days": days_ahead},
     )
     calls = []
-    monkeypatch.setattr(
-        slip_builder, "generate",
-        lambda target, horizon="week", force=False: (
-            calls.append((target, horizon, force))
-            or {"status": "success", "games": [], "requested_target": target}
-        ),
-    )
+    monkeypatch.setattr(builder_v2, "generate_v2", lambda payload: (
+        calls.append(payload) or {"status": "success", "games": [],
+                                  "requested_target": payload["target_odds"]}
+    ))
     monkeypatch.setattr(builder_runs, "record_run", lambda *args, **kwargs: None)
     monkeypatch.setattr(asyncio, "to_thread", run_inline)
 
@@ -439,11 +504,20 @@ def test_builder_refresh_reuses_ready_board(monkeypatch):
     )
 
     assert result["status"] == "success"
-    assert calls == [(20, "week", False)]
+    assert calls == [{
+        "mode": "target_odds", "target_odds": 20, "horizon": "7_days",
+        "refresh": True, "markets": [], "min_odds": None, "max_odds": None,
+        "min_probability": None, "min_trust_grade": "B",
+        "include_leagues": [], "exclude_leagues": [], "exclude_fixture_ids": [],
+        "exclude_team_ids": [], "require_bookable": True, "game_count": None,
+        "max_games": None, "fill_strategy": "strict_selected_markets",
+    }]
 
 
 def test_builder_serves_stale_board_while_starting_background_refresh(monkeypatch):
     from leagues import api, builder_runs, slip_builder
+
+    monkeypatch.setenv("BUILDER_ENGINE", "legacy")
 
     async def run_inline(fn, *args, **kwargs):
         return fn(*args, **kwargs)

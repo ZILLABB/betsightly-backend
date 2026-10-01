@@ -17,6 +17,7 @@ league is fetched in one ranged request.
 """
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -29,6 +30,8 @@ _PREPARED_STALE_TTL = 6 * 3600
 _PIPELINE_LOCK = threading.Lock()
 _PREWARM_LOCK = threading.Lock()
 _PREWARMING = False
+_PERSISTENCE_LOCK = threading.Lock()
+_PERSISTENCE_HYDRATED = False
 
 
 def _parse_kickoff(value: str) -> datetime | None:
@@ -59,9 +62,101 @@ def _filter_cached(entry: dict, days_ahead: int,
     return picks, fixtures
 
 
+def _hydrate_persisted_cache() -> None:
+    """Hydrate the process cache once from the optional persistent store."""
+    global _PERSISTENCE_HYDRATED
+
+    if _PERSISTENCE_HYDRATED:
+        return
+
+    with _PERSISTENCE_LOCK:
+        if _PERSISTENCE_HYDRATED:
+            return
+
+        from leagues import prepared_board_store
+
+        if not prepared_board_store.enabled():
+            _PERSISTENCE_HYDRATED = True
+            return
+
+        try:
+            rows = prepared_board_store.load_entries()
+        except Exception as exc:
+            logger.warning(
+                "prepared board persistence hydrate failed: %s",
+                exc,
+                exc_info=True,
+            )
+            return
+
+        for row in rows:
+            entry = row.get("entry")
+
+            if not isinstance(entry, dict):
+                continue
+
+            horizon = int(
+                row.get("horizon_days")
+                or (
+                    entry.get("metadata")
+                    or {}
+                ).get("requested_days")
+                or 0
+            )
+
+            if horizon <= 0:
+                continue
+
+            metadata = entry.setdefault(
+                "metadata",
+                {},
+            )
+            metadata[
+                "_restored_from_persistence"
+            ] = True
+
+            slot = str(
+                row.get("slot")
+                or "latest"
+            )
+
+            bucket_name = (
+                "healthy_entries"
+                if slot == "healthy"
+                else "entries"
+            )
+
+            bucket = _CACHE.setdefault(
+                bucket_name,
+                {},
+            )
+
+            current = bucket.get(
+                horizon
+            )
+
+            if (
+                current is None
+                or float(
+                    entry.get("ts")
+                    or 0
+                )
+                > float(
+                    current.get("ts")
+                    or 0
+                )
+            ):
+                bucket[
+                    horizon
+                ] = entry
+
+        _PERSISTENCE_HYDRATED = True
+
+
 def _covering_entry(days_ahead: int, now_ts: float,
                     require_complete: bool = False,
                     allow_stale: bool = False) -> dict | None:
+    _hydrate_persisted_cache()
     now_dt = datetime.fromtimestamp(now_ts, timezone.utc)
     requested_end = now_dt + timedelta(days=days_ahead)
 
@@ -90,15 +185,27 @@ def _covering_entry(days_ahead: int, now_ts: float,
     if not valid:
         return None
     # Prefer a healthy board while it remains within the explicit stale-safe
-    # window. Within the same health class, newest wins; requested horizon is
-    # only the final tie-breaker. This prevents a smaller, older degraded board
-    # from masking a newer complete covering board.
+    # window.  A degraded refresh is not automatically better merely because
+    # it is newer: replacing 99/116 working leagues with a 48/116 response
+    # makes the Builder materially worse.  Coverage wins within the degraded
+    # class, then freshness decides between equally useful boards.
+    def board_quality(item: dict) -> tuple[float, int]:
+        provider = item["metadata"].get("provider") or {}
+        requested = int(provider.get("requested_league_count")
+                        or len(provider.get("leagues_requested") or []) or 0)
+        successful = int(provider.get("successful_league_count")
+                         or len(provider.get("successful_leagues") or []) or 0)
+        coverage = successful / requested if requested else 0.0
+        return coverage, int(item["metadata"].get("fixture_count") or 0)
+
     return max(
         valid,
         key=lambda item: (
+            now_ts - item["ts"] < _TTL,
             bool((item["metadata"].get("provider") or {}).get(
                 "complete", True
             )),
+            *board_quality(item),
             float(item["ts"]),
             -int(item["metadata"]["requested_days"]),
         ),
@@ -108,11 +215,16 @@ def _covering_entry(days_ahead: int, now_ts: float,
 def _store_cache_entry(days_ahead: int, picks: list[dict],
                        fixtures: list[dict], now: float,
                        now_dt: datetime, provider: dict,
-                       decision_snapshot_id: str | None = None) -> None:
+                       decision_snapshot_id: str | None = None,
+                       builder_supplemental_picks: list[dict] | None = None,
+                       ) -> None:
     """Store one evaluated horizon; kept small so coverage rules are testable."""
     entry = {
         "picks": picks,
         "fixtures": fixtures,
+        "builder_supplemental_picks": list(
+            builder_supplemental_picks or []
+        ),
         "ts": now,
         "metadata": {
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -125,8 +237,34 @@ def _store_cache_entry(days_ahead: int, picks: list[dict],
         },
     }
     _CACHE.setdefault("entries", {})[days_ahead] = entry
-    if provider.get("complete", True):
-        _CACHE.setdefault("healthy_entries", {})[days_ahead] = entry
+    healthy = bool(
+        provider.get(
+            "complete",
+            True,
+        )
+    )
+
+    if healthy:
+        _CACHE.setdefault(
+            "healthy_entries",
+            {},
+        )[days_ahead] = entry
+
+    try:
+        from leagues import prepared_board_store
+
+        if prepared_board_store.enabled():
+            prepared_board_store.persist_entry(
+                days_ahead,
+                entry,
+                healthy=healthy,
+            )
+    except Exception as exc:
+        logger.warning(
+            "prepared board persistence save failed: %s",
+            exc,
+            exc_info=True,
+        )
 
 
 def prepared_board_status(days_ahead: int = 7) -> dict:
@@ -139,6 +277,11 @@ def prepared_board_status(days_ahead: int = 7) -> dict:
     """
     now = time.time()
     entry = _covering_entry(days_ahead, now, allow_stale=True)
+    return _status_for_entry(entry, days_ahead, now)
+
+
+def _status_for_entry(entry: dict | None, days_ahead: int, now: float) -> dict:
+    """Describe the exact entry whose evaluated picks a caller receives."""
     if not entry:
         return {"ready": False, "requested_days": days_ahead}
     provider = entry["metadata"].get("provider") or {}
@@ -163,13 +306,28 @@ def prepared_board_status(days_ahead: int = 7) -> dict:
         "age_seconds": age_seconds,
         "stale": bool(age_seconds >= _TTL),
         "board_source": (
-            "stale_fallback" if age_seconds >= _TTL else "cache"
+            (
+                "persistent_stale_fallback"
+                if age_seconds >= _TTL
+                else "persistent_cache"
+            )
+            if entry["metadata"].get(
+                "_restored_from_persistence"
+            )
+            else (
+                "stale_fallback"
+                if age_seconds >= _TTL
+                else "cache"
+            )
         ),
         "board_snapshot_id": entry["metadata"].get(
             "decision_snapshot_id"
         ),
         "raw_fixture_count": int(provider.get("fixture_count") or 0),
         "evaluated_fixture_count": len(entry.get("fixtures") or []),
+        "builder_supplemental_candidate_count": len(
+            entry.get("builder_supplemental_picks") or []
+        ),
         "refreshing": bool(_PREWARMING),
     }
 
@@ -181,8 +339,69 @@ def prepared_pipeline(days_ahead: int = 7) -> tuple[list[dict], list[dict]]:
     says it is ready. Normal pipeline calls still require complete provider
     coverage and therefore retry partial ESPN caches on scheduled refreshes.
     """
+    picks, fixtures, _ = prepared_board(days_ahead)
+    return picks, fixtures
+
+
+def prepared_builder_supplemental_picks(
+    days_ahead: int = 7,
+) -> list[dict]:
+    """Read staging-only supplemental picks without altering prepared_pipeline."""
     now = time.time()
-    now_dt = datetime.now(timezone.utc)
+    now_dt = datetime.fromtimestamp(
+        now,
+        timezone.utc,
+    )
+    end = now_dt + timedelta(
+        days=days_ahead
+    )
+
+    entry = _covering_entry(
+        days_ahead,
+        now,
+        require_complete=False,
+        allow_stale=True,
+    )
+
+    if not entry:
+        return []
+
+    out = []
+
+    for source in (
+        entry.get(
+            "builder_supplemental_picks"
+        )
+        or []
+    ):
+        fixture = source.get(
+            "_fixture"
+        ) or {}
+
+        kickoff = _parse_kickoff(
+            fixture.get(
+                "commence_time"
+            )
+        )
+
+        if (
+            kickoff is None
+            or kickoff < now_dt
+            or kickoff > end
+        ):
+            continue
+
+        out.append(
+            dict(source)
+        )
+
+    return out
+
+
+def prepared_board(days_ahead: int = 7) -> tuple[list[dict], list[dict], dict]:
+    """One no-network evaluated snapshot and its matching provenance."""
+    now = time.time()
+    now_dt = datetime.fromtimestamp(now, timezone.utc)
     # Interactive requests may safely keep using the last evaluated board
     # while its replacement is prepared. Kickoff filtering below removes games
     # that have since started; selection policy and bookability are re-applied.
@@ -190,8 +409,9 @@ def prepared_pipeline(days_ahead: int = 7) -> tuple[list[dict], list[dict]]:
         days_ahead, now, require_complete=False, allow_stale=True,
     )
     if not entry:
-        return [], []
-    return _filter_cached(entry, days_ahead, now_dt)
+        return [], [], _status_for_entry(None, days_ahead, now)
+    picks, fixtures = _filter_cached(entry, days_ahead, now_dt)
+    return picks, fixtures, _status_for_entry(entry, days_ahead, now)
 
 
 def start_prepared_board_refresh(days_ahead: int = 7,
@@ -216,6 +436,43 @@ def start_prepared_board_refresh(days_ahead: int = 7,
     threading.Thread(
         target=_work, daemon=True, name="weekly-board-prewarm"
     ).start()
+    return True
+
+
+_HISTORY_PREWARM_LOCK = threading.Lock()
+_HISTORY_PREWARMING = False
+
+
+def start_history_prewarm() -> bool:
+    """Refresh historical inputs off the publication and request paths.
+
+    Each artifact has a filesystem process claim. This is not a distributed
+    lease across separate Render instances; staging must verify topology.
+    """
+    global _HISTORY_PREWARMING
+    with _HISTORY_PREWARM_LOCK:
+        if _HISTORY_PREWARMING:
+            return False
+        _HISTORY_PREWARMING = True
+
+    def _work():
+        global _HISTORY_PREWARMING
+        try:
+            from leagues.base_rates import get_base_rates
+            from leagues.team_history import load
+            get_base_rates()
+            load()
+            from leagues.history_readiness import status
+            if status()["usable"] and not prepared_board_status(days_ahead=7).get("ready"):
+                start_prepared_board_refresh(days_ahead=7, force=False)
+        except Exception as exc:
+            logger.warning("history prewarm failed: %s", exc, exc_info=True)
+        finally:
+            with _HISTORY_PREWARM_LOCK:
+                _HISTORY_PREWARMING = False
+
+    threading.Thread(target=_work, daemon=True,
+                     name="history-prewarm").start()
     return True
 
 
@@ -244,11 +501,30 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
                 days_ahead, now, require_complete=True)):
             return _filter_cached(cached, days_ahead, now_dt)
 
-        return _build_pipeline(days_ahead, force, now, now_dt)
+        from utils.runtime_metrics import log_runtime_memory
+        started = time.perf_counter()
+        log_runtime_memory("prediction_board_start", horizon=days_ahead,
+                           forced=force)
+        try:
+            picks, fixtures = _build_pipeline(days_ahead, force, now, now_dt)
+        except Exception:
+            log_runtime_memory("prediction_board_error", level=logging.ERROR,
+                               horizon=days_ahead, forced=force,
+                               elapsed_ms=round((time.perf_counter() - started) * 1000))
+            raise
+        log_runtime_memory("prediction_board_end", horizon=days_ahead,
+                           forced=force, fixture_count=len(fixtures),
+                           pick_count=len(picks),
+                           elapsed_ms=round((time.perf_counter() - started) * 1000))
+        return picks, fixtures
 
 
 def _build_pipeline(days_ahead: int, force: bool, now: float,
                     now_dt: datetime) -> tuple[list[dict], list[dict]]:
+    from leagues.history_readiness import HistoryNotReady, status
+    if not status()["usable"] and os.getenv(
+            "ENVIRONMENT", "").lower() in {"production", "staging"}:
+        raise HistoryNotReady("historical evidence is not ready")
     from leagues.espn_source import (
         ESPN_CLUB_LEAGUES, cache_metadata as espn_cache_metadata,
         get_fixtures,
@@ -266,13 +542,44 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     # book that is unreachable leaves the fixtures exactly as ESPN supplied
     # them, and the card falls back to estimated prices as it always has.
     sb_matched = 0
+    sportybet_coverage = {}
+    sportybet_board = None
+
     try:
         from leagues import sportybet
-        sb_matched = sportybet.apply_to_fixtures(fixtures)
-    except Exception as e:
-        logger.warning(f"SportyBet pricing unavailable: {e}")
 
-    cached_rates = get_base_rates(ESPN_CLUB_LEAGUES)
+        sportybet_board = sportybet.fetch_board()
+
+        sb_matched = sportybet.apply_to_fixtures(
+            fixtures,
+            board=sportybet_board,
+        )
+
+        sportybet_coverage = (
+            sportybet.coverage_against_fixtures(
+                fixtures,
+                sportybet_board,
+                now=now_dt,
+                days_ahead=days_ahead,
+            )
+        )
+
+    except Exception as e:
+        logger.warning(
+            f"SportyBet pricing unavailable: {e}"
+        )
+
+        sportybet_coverage = {
+            "status": "unavailable",
+            "read_only": True,
+            "publishing_changed": False,
+            "model_inputs_changed": False,
+            "error_type": type(e).__name__,
+        }
+
+    # Requests and the 08:00 publication path only consume completed history.
+    # Cold ESPN refresh runs independently in start_history_prewarm().
+    cached_rates = get_base_rates(ESPN_CLUB_LEAGUES, allow_refresh=False)
     try:
         from leagues.elo_engine import get_ratings
         ratings = get_ratings(ESPN_CLUB_LEAGUES)
@@ -287,13 +594,66 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     # on each pick and evaluated against results, and does not move a published
     # number. Built once per run because the history index is a 15s fetch.
     try:
-        history = HistoryIndex()
+        from leagues.team_history import load as load_team_history
+        history = HistoryIndex(load_team_history(allow_refresh=False))
     except Exception as e:
         logger.warning(f"team history unavailable, ML second opinion off: {e}")
         history = None
 
+    sportybet_shadow_supplemental = {}
+
+    try:
+        if sportybet_board:
+            from leagues import sportybet
+
+            sportybet_shadow_supplemental = (
+                sportybet.shadow_supplemental_readiness(
+                    fixtures,
+                    sportybet_board,
+                    cached_rates=cached_rates,
+                    history=history,
+                    now=now_dt,
+                    days_ahead=days_ahead,
+                )
+            )
+
+    except Exception as e:
+        logger.warning(
+            "SportyBet supplemental shadow audit unavailable: %s",
+            e,
+        )
+
+        sportybet_shadow_supplemental = {
+            "status": "unavailable",
+            "shadow_only": True,
+            "publishing_changed": False,
+            "prediction_pool_changed": False,
+            "error_type": type(e).__name__,
+        }
+
     all_picks: list[dict] = []
     priced = unpriced = with_elo = 0
+    football_first_shadow_summary = {
+        "shadow_only": True,
+        "recorded": 0,
+        "existing": 0,
+        "skipped": 0,
+        "disabled": 0,
+        "errors": 0,
+    }
+
+    football_first_shadow_v2_summary = {
+        "shadow_only": True,
+        "model_role": "v2_candidate",
+        "recorded": 0,
+        "existing": 0,
+        "skipped": 0,
+        "disabled": 0,
+        "errors": 0,
+        "selection_changed": False,
+        "probability_changed": False,
+        "publishing_changed": False,
+    }
 
     for fx in fixtures:
         base = rates_for(fx["league_slug"], cached_rates)
@@ -303,6 +663,7 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         if elo:
             with_elo += 1
         model = predict(fx, base, elo)
+        model["elo_probabilities"] = elo
         if history is not None:
             try:
                 model["ml"] = ml_models.predict_fixture(fx, history)
@@ -312,9 +673,180 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
             priced += 1
         else:
             unpriced += 1
+
+        # Prospective football-first evidence is a second opinion only.
+        # It stores immutable pre-kickoff probabilities in its own table and
+        # cannot change this model, any pick, publication, Builder or booking.
+        if history is not None:
+            try:
+                from leagues.football_first_shadow_observations import (
+                    observe_fixture as observe_football_first_fixture,
+                )
+                shadow_observation = observe_football_first_fixture(
+                    fx,
+                    model,
+                    history,
+                    observed_at=now_dt,
+                )
+                shadow_status = str(
+                    shadow_observation.get("status") or "SKIPPED"
+                ).lower()
+                if shadow_status == "recorded":
+                    football_first_shadow_summary["recorded"] += 1
+                elif shadow_status == "exists":
+                    football_first_shadow_summary["existing"] += 1
+                elif shadow_status == "disabled":
+                    football_first_shadow_summary["disabled"] += 1
+                else:
+                    football_first_shadow_summary["skipped"] += 1
+            except Exception as exc:
+                football_first_shadow_summary["errors"] += 1
+                logger.warning(
+                    "football-first prospective shadow observation failed: %s",
+                    exc,
+                )
+
+        # V2 prospective evidence is fully separate by model_version.
+        # It uses the same immutable evidence table and settlement worker,
+        # but V1 observations never count toward the V2 evidence threshold.
+        if history is not None:
+            try:
+                from leagues.football_first_shadow_v2_observations import (
+                    observe_fixture as observe_football_first_v2_fixture,
+                )
+
+                v2_observation = observe_football_first_v2_fixture(
+                    fx,
+                    model,
+                    history,
+                    cached_rates=cached_rates,
+                    ratings=ratings,
+                    observed_at=now_dt,
+                )
+
+                v2_status = str(
+                    v2_observation.get("status")
+                    or "SKIPPED"
+                ).lower()
+
+                if v2_status == "recorded":
+                    football_first_shadow_v2_summary["recorded"] += 1
+                elif v2_status == "exists":
+                    football_first_shadow_v2_summary["existing"] += 1
+                elif v2_status == "disabled":
+                    football_first_shadow_v2_summary["disabled"] += 1
+                else:
+                    football_first_shadow_v2_summary["skipped"] += 1
+
+            except Exception as exc:
+                football_first_shadow_v2_summary["errors"] += 1
+                logger.warning(
+                    "football-first V2 prospective shadow observation failed: %s",
+                    exc,
+                )
+
         fx["_model"] = model
         all_picks.extend(build_picks(
             fx, model, min_confidence=MIN_CANDIDATE_CONFIDENCE, fit=fit))
+
+    # SportyBet-only supplemental fixtures are modelled in isolation.
+    # They never enter all_picks or fixtures and therefore cannot silently
+    # widen public Predictions, publication, official records, or settlement.
+    # A separate staging-only path may expose only 6H-approved exact picks to
+    # the interactive Builder when both supplemental feature flags are enabled.
+    sportybet_shadow_model = {}
+    sportybet_staging_builder_picks = []
+
+    try:
+        if (
+            sportybet_board
+            and sportybet_shadow_supplemental
+        ):
+            from leagues.sportybet_shadow import (
+                evaluate_shadow_supplemental,
+            )
+
+            sportybet_shadow_model = (
+                evaluate_shadow_supplemental(
+                    sportybet_shadow_supplemental,
+                    sportybet_board,
+                    cached_rates=cached_rates,
+                    history=history,
+                    ratings=ratings,
+                    fit=fit,
+                    live_picks=all_picks,
+                )
+            )
+
+            sportybet_staging_builder_picks = (
+                sportybet_shadow_model.pop(
+                    "_staging_builder_candidates",
+                    [],
+                )
+            )
+
+            merge_report = dict(
+                sportybet_shadow_model.get(
+                    "staging_builder_merge"
+                )
+                or {}
+            )
+
+            if sportybet_staging_builder_picks:
+                merge_report.update({
+                    "merge_executed": True,
+                    "builder_pool_changed": True,
+                    "merged_candidate_count": len(
+                        sportybet_staging_builder_picks
+                    ),
+                    "prediction_pool_changed": False,
+                    "publishing_changed": False,
+                    "official_record_changed": False,
+                    "production_merge_allowed": False,
+                })
+
+                sportybet_shadow_model[
+                    "staging_builder_merge"
+                ] = merge_report
+
+    except Exception as e:
+        logger.warning(
+            "SportyBet supplemental shadow model unavailable: %s",
+            e,
+        )
+
+        sportybet_shadow_model = {
+            "status": "unavailable",
+            "shadow_only": True,
+            "publishing_changed": False,
+            "prediction_pool_changed": False,
+            "official_record_changed": False,
+            "error_type": type(e).__name__,
+        }
+
+    # Match context is attached only after normal predictions and candidate
+    # picks already exist. It is shadow data and cannot change this run's
+    # prediction probability, trust, quality or SportyBet bookability.
+    context_summary = {}
+
+    try:
+        from leagues.match_context import enrich_prepared_context
+
+        context_summary = enrich_prepared_context(
+            fixtures,
+            all_picks,
+            history=history,
+        )
+
+    except Exception as e:
+        logger.warning(
+            "match context enrichment unavailable: %s",
+            e,
+        )
+        context_summary = {
+            "shadow_only": True,
+            "status": "unavailable",
+        }
 
     logger.info(
         f"Pipeline: {len(fixtures)} fixtures ({priced} priced, {unpriced} base-rate only, "
@@ -324,7 +856,24 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         f"(calibrated on {fit.get('n', 0)} settled legs)"
     )
 
-    provider = espn_cache_metadata()
+    provider = dict(
+        espn_cache_metadata() or {}
+    )
+    provider["match_context"] = context_summary
+    provider["sportybet_coverage"] = sportybet_coverage
+    provider["sportybet_shadow_supplemental"] = (
+        sportybet_shadow_supplemental
+    )
+    provider["sportybet_shadow_model"] = (
+        sportybet_shadow_model
+    )
+    provider["football_first_shadow"] = (
+        football_first_shadow_summary
+    )
+    provider["football_first_shadow_v2"] = (
+        football_first_shadow_v2_summary
+    )
+
     # Preserve the evaluated environment before any product optimizer narrows
     # it. Archiving is observability: failure is logged and never blocks picks.
     decision_snapshot_id = None
@@ -340,13 +889,31 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     _store_cache_entry(
         days_ahead, all_picks, fixtures, now, now_dt, provider,
         decision_snapshot_id=decision_snapshot_id,
+        builder_supplemental_picks=(
+            sportybet_staging_builder_picks
+        ),
     )
+
+    # Settlement is isolated from this freshly generated prediction board.
+    try:
+        from leagues.football_first_shadow_observations import (
+            start_settlement_async,
+        )
+        settlement_trigger = start_settlement_async()
+        logger.info(
+            "football_first_shadow_settlement %s",
+            settlement_trigger,
+        )
+    except Exception as exc:
+        logger.warning(
+            "football-first shadow settlement trigger failed: %s",
+            exc,
+        )
+
     return all_picks, fixtures
 
 
-def picks_for_date(date_str: str, all_picks: list[dict] | None = None) -> list[dict]:
-    """Picks whose fixture kicks off on the WAT calendar `date_str`."""
-    if all_picks is None:
-        all_picks, _ = run_pipeline()
+def picks_for_date(date_str: str, all_picks: list[dict]) -> list[dict]:
+    """Filter an explicit evaluated board by WAT day; never fetch implicitly."""
     return [p for p in all_picks
             if kickoff_wat_date(p["_fixture"].get("commence_time")) == date_str]

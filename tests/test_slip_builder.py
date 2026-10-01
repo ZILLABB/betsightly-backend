@@ -116,6 +116,44 @@ def test_slip_builder_requires_exact_sportybet_bookability():
     assert "SportyBet-bookable" in built["reason"]
 
 
+def test_preapproved_v2_pool_is_not_approved_twice(monkeypatch):
+    pick = _pick("preapproved", odds=2.0, confidence=.80)
+    pick.update({
+        "selection_id": "preapproved-over15",
+        "selection_probability": .80,
+        "evidence_adjusted_probability": .80,
+        "risk_adjusted_return": 1.60,
+        "quality_score": 80.0,
+        "market_trust_state": "TRUSTED",
+        "price_quality_reason_codes": ["PRICE_NEGATIVE"],
+        "trust": {
+            "trust_grade": "A",
+            "trust_score": 90,
+            "evidence_adjusted_probability": .80,
+            "lower_reliability_bound": .76,
+            "evidence_strength": .9,
+        },
+    })
+
+    monkeypatch.setattr(
+        slip_builder,
+        "approved_builder_candidates",
+        lambda *args, **kwargs: pytest.fail(
+            "preapproved V2 pool must not be approved twice"
+        ),
+    )
+
+    built = build_slip(
+        2.0,
+        pool=[pick],
+        market_cap=10,
+        preapproved_pool=True,
+    )
+
+    assert built["ok"], built
+    assert built["odds"] >= 2.0
+
+
 def test_builder_caps_actual_home_and_away_team_goal_picks_together(monkeypatch):
     monkeypatch.setattr("leagues.leg_trust.evaluate_leg_trust", _accept_trust)
     team_goals = [
@@ -450,6 +488,48 @@ def test_saturated_leg_ceiling_is_not_called_causal_without_counterfactual_gain(
     assert "strongest verified combination" in built["reason"]
 
 
+
+
+def test_noncausal_market_saturation_is_not_reported_as_binding(monkeypatch):
+    monkeypatch.setattr(
+        "leagues.leg_trust.evaluate_leg_trust",
+        _accept_trust,
+    )
+
+    picks = [
+        _pick(
+            f"thin-goals-{i}",
+            odds=1.20,
+            confidence=.80,
+            market="over_1_5",
+            market_group="goals",
+        )
+        for i in range(3)
+    ]
+
+    built = build_slip(
+        2.0,
+        pool=picks,
+        max_legs=16,
+    )
+
+    assert not built["ok"]
+    assert built["best_reachable"] == pytest.approx(1.73)
+    assert built["result_status"] == "QUALITY_CAPPED"
+
+    # Three selected legs mechanically fill the original cap, but widening
+    # that cap cannot add a fourth candidate and therefore changes nothing.
+    assert "market_group:goals" in built["saturated_constraints"]
+    assert "market_group:goals" not in built["binding_constraints"]
+
+    attempts = built["selection_diagnostics"]["market_cap_attempts"]
+    assert [attempt["market_cap"] for attempt in attempts] == [3, 4, 5, 6, 7]
+    assert {
+        attempt["best_reachable"]
+        for attempt in attempts
+    } == {1.73}
+
+
 def test_tier_selector_cannot_bypass_team_goal_cap_by_switching_sides():
     team_goals = [
         _pick(
@@ -536,6 +616,8 @@ def test_generate_reuses_availability_from_same_board_snapshot(monkeypatch):
         "leagues.booking.create_or_reuse_generated_booking",
         lambda *a, **k: {
             "status": "active",
+            "booking_status": "FULL",
+            "readback_validation": "PASSED",
             "share_code": "ABC123",
             "timing_ms": {"validation_readback": 4},
         },
@@ -632,7 +714,7 @@ def test_progressive_ladder_returns_and_books_cap_seven_best_available(monkeypat
         "leagues.booking.create_or_reuse_generated_booking",
         lambda games, board, **kwargs: {
             "status": "active", "booking_status": "FULL",
-            "validation_status": "PASSED", "share_code": "BEST121",
+            "readback_validation": "PASSED", "share_code": "BEST121",
         },
     )
 
@@ -644,7 +726,7 @@ def test_progressive_ladder_returns_and_books_cap_seven_best_available(monkeypat
     assert result["odds"] == pytest.approx(121)
     assert result["market_cap_used"] == 7
     assert result["booking"]["share_code"] == "BEST121"
-    assert result["booking"]["validation_status"] == "PASSED"
+    assert result["booking"]["readback_validation"] == "PASSED"
 
 
 def test_capped_generate_exposes_safe_game_diagnostics_not_internal_picks(
@@ -729,3 +811,44 @@ def test_dnb_push_reduces_payout_without_losing_accumulator():
 def test_builder_team_goal_cap_never_scales_with_target():
     for target in (10, 20, 30, 50, 70, 100):
         assert slip_builder._team_to_score_cap_for_target(target) == 2
+
+
+
+def test_verified_optimizer_uses_portfolio_only_as_equal_quality_tiebreak():
+    used = _pick(
+        "portfolio-used",
+        odds=2.0,
+        confidence=.80,
+    )
+    fresh = _pick(
+        "portfolio-fresh",
+        odds=2.0,
+        confidence=.80,
+    )
+
+    for pick in (used, fresh):
+        pick["selection_probability"] = .80
+        pick["evidence_adjusted_probability"] = .80
+
+    used["_portfolio_penalty"] = 10.0
+    fresh["_portfolio_penalty"] = 0.0
+
+    odds, joint, selected, status = slip_builder._verified_optimize(
+        [used, fresh],
+        target=2.0,
+        max_legs=1,
+        market_cap=10,
+        team_to_score_cap=10,
+        under_cap=10,
+    )
+
+    expected_probability = (
+        slip_builder._leg_settlement_probabilities(fresh)[0]
+    )
+
+    assert status in {"OPTIMAL", "BOUNDED_OPTIMAL"}
+    assert odds == pytest.approx(2.0)
+    assert joint == pytest.approx(expected_probability)
+    assert [pick["match_id"] for pick in selected] == [
+        "portfolio-fresh"
+    ]

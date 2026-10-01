@@ -1,0 +1,769 @@
+{
+  "complete": false,
+  "experiment": "phase8_missing_target_espn_backfill_v2",
+  "league_ids": [
+    265,
+    292,
+    307
+  ],
+  "leagues": [
+    {
+      "competition": "Primera Divisi\u00f3n Chile",
+      "complete": true,
+      "league_id": 265,
+      "league_slug": "chi.1",
+      "rows": 1832,
+      "successful_months": 90,
+      "unavailable_month_count": 0,
+      "unavailable_months": []
+    },
+    {
+      "competition": "K League 1",
+      "complete": false,
+      "league_id": 292,
+      "league_slug": "kor.1",
+      "rows": 0,
+      "successful_months": 0,
+      "unavailable_month_count": 90,
+      "unavailable_months": [
+        {
+          "error": "kor.1 201901 unsupported",
+          "month": "201901"
+        },
+        {
+          "error": "kor.1 201902 unsupported",
+          "month": "201902"
+        },
+        {
+          "error": "kor.1 201903 unsupported",
+          "month": "201903"
+        },
+        {
+          "error": "kor.1 201904 unsupported",
+          "month": "201904"
+        },
+        {
+          "error": "kor.1 201905 unsupported",
+          "month": "201905"
+        },
+        {
+          "error": "kor.1 201906 unsupported",
+          "month": "201906"
+        },
+        {
+          "error": "kor.1 201907 unsupported",
+          "month": "201907"
+        },
+        {
+          "error": "kor.1 201908 unsupported",
+          "month": "201908"
+        },
+        {
+          "error": "kor.1 201909 unsupported",
+          "month": "201909"
+        },
+        {
+          "error": "kor.1 201910 unsupported",
+          "month": "201910"
+        },
+        {
+          "error": "kor.1 201911 unsupported",
+          "month": "201911"
+        },
+        {
+          "error": "kor.1 201912 unsupported",
+          "month": "201912"
+        },
+        {
+          "error": "kor.1 202001 unsupported",
+          "month": "202001"
+        },
+        {
+          "error": "kor.1 202002 unsupported",
+          "month": "202002"
+        },
+        {
+          "error": "kor.1 202003 unsupported",
+          "month": "202003"
+        },
+        {
+          "error": "kor.1 202004 unsupported",
+          "month": "202004"
+        },
+        {
+          "error": "kor.1 202005 unsupported",
+          "month": "202005"
+        },
+        {
+          "error": "kor.1 202006 unsupported",
+          "month": "202006"
+        },
+        {
+          "error": "kor.1 202007 unsupported",
+          "month": "202007"
+        },
+        {
+          "error": "kor.1 202008 unsupported",
+          "month": "202008"
+        },
+        {
+          "error": "kor.1 202009 unsupported",
+          "month": "202009"
+        },
+        {
+          "error": "kor.1 202010 unsupported",
+          "month": "202010"
+        },
+        {
+          "error": "kor.1 202011 unsupported",
+          "month": "202011"
+        },
+        {
+          "error": "kor.1 202012 unsupported",
+          "month": "202012"
+        },
+        {
+          "error": "kor.1 202101 unsupported",
+          "month": "202101"
+        },
+        {
+          "error": "kor.1 202102 unsupported",
+          "month": "202102"
+        },
+        {
+          "error": "kor.1 202103 unsupported",
+          "month": "202103"
+        },
+        {
+          "error": "kor.1 202104 unsupported",
+          "month": "202104"
+        },
+        {
+          "error": "kor.1 202105 unsupported",
+          "month": "202105"
+        },
+        {
+          "error": "kor.1 202106 unsupported",
+          "month": "202106"
+        },
+        {
+          "error": "kor.1 202107 unsupported",
+          "month": "202107"
+        },
+        {
+          "error": "kor.1 202108 unsupported",
+          "month": "202108"
+        },
+        {
+          "error": "kor.1 202109 unsupported",
+          "month": "202109"
+        },
+        {
+          "error": "kor.1 202110 unsupported",
+          "month": "202110"
+        },
+        {
+          "error": "kor.1 202111 unsupported",
+          "month": "202111"
+        },
+        {
+          "error": "kor.1 202112 unsupported",
+          "month": "202112"
+        },
+        {
+          "error": "kor.1 202201 unsupported",
+          "month": "202201"
+        },
+        {
+          "error": "kor.1 202202 unsupported",
+          "month": "202202"
+        },
+        {
+          "error": "kor.1 202203 unsupported",
+          "month": "202203"
+        },
+        {
+          "error": "kor.1 202204 unsupported",
+          "month": "202204"
+        },
+        {
+          "error": "kor.1 202205 unsupported",
+          "month": "202205"
+        },
+        {
+          "error": "kor.1 202206 unsupported",
+          "month": "202206"
+        },
+        {
+          "error": "kor.1 202207 unsupported",
+          "month": "202207"
+        },
+        {
+          "error": "kor.1 202208 unsupported",
+          "month": "202208"
+        },
+        {
+          "error": "kor.1 202209 unsupported",
+          "month": "202209"
+        },
+        {
+          "error": "kor.1 202210 unsupported",
+          "month": "202210"
+        },
+        {
+          "error": "kor.1 202211 unsupported",
+          "month": "202211"
+        },
+        {
+          "error": "kor.1 202212 unsupported",
+          "month": "202212"
+        },
+        {
+          "error": "kor.1 202301 unsupported",
+          "month": "202301"
+        },
+        {
+          "error": "kor.1 202302 unsupported",
+          "month": "202302"
+        },
+        {
+          "error": "kor.1 202303 unsupported",
+          "month": "202303"
+        },
+        {
+          "error": "kor.1 202304 unsupported",
+          "month": "202304"
+        },
+        {
+          "error": "kor.1 202305 unsupported",
+          "month": "202305"
+        },
+        {
+          "error": "kor.1 202306 unsupported",
+          "month": "202306"
+        },
+        {
+          "error": "kor.1 202307 unsupported",
+          "month": "202307"
+        },
+        {
+          "error": "kor.1 202308 unsupported",
+          "month": "202308"
+        },
+        {
+          "error": "kor.1 202309 unsupported",
+          "month": "202309"
+        },
+        {
+          "error": "kor.1 202310 unsupported",
+          "month": "202310"
+        },
+        {
+          "error": "kor.1 202311 unsupported",
+          "month": "202311"
+        },
+        {
+          "error": "kor.1 202312 unsupported",
+          "month": "202312"
+        },
+        {
+          "error": "kor.1 202401 unsupported",
+          "month": "202401"
+        },
+        {
+          "error": "kor.1 202402 unsupported",
+          "month": "202402"
+        },
+        {
+          "error": "kor.1 202403 unsupported",
+          "month": "202403"
+        },
+        {
+          "error": "kor.1 202404 unsupported",
+          "month": "202404"
+        },
+        {
+          "error": "kor.1 202405 unsupported",
+          "month": "202405"
+        },
+        {
+          "error": "kor.1 202406 unsupported",
+          "month": "202406"
+        },
+        {
+          "error": "kor.1 202407 unsupported",
+          "month": "202407"
+        },
+        {
+          "error": "kor.1 202408 unsupported",
+          "month": "202408"
+        },
+        {
+          "error": "kor.1 202409 unsupported",
+          "month": "202409"
+        },
+        {
+          "error": "kor.1 202410 unsupported",
+          "month": "202410"
+        },
+        {
+          "error": "kor.1 202411 unsupported",
+          "month": "202411"
+        },
+        {
+          "error": "kor.1 202412 unsupported",
+          "month": "202412"
+        },
+        {
+          "error": "kor.1 202501 unsupported",
+          "month": "202501"
+        },
+        {
+          "error": "kor.1 202502 unsupported",
+          "month": "202502"
+        },
+        {
+          "error": "kor.1 202503 unsupported",
+          "month": "202503"
+        },
+        {
+          "error": "kor.1 202504 unsupported",
+          "month": "202504"
+        },
+        {
+          "error": "kor.1 202505 unsupported",
+          "month": "202505"
+        },
+        {
+          "error": "kor.1 202506 unsupported",
+          "month": "202506"
+        },
+        {
+          "error": "kor.1 202507 unsupported",
+          "month": "202507"
+        },
+        {
+          "error": "kor.1 202508 unsupported",
+          "month": "202508"
+        },
+        {
+          "error": "kor.1 202509 unsupported",
+          "month": "202509"
+        },
+        {
+          "error": "kor.1 202510 unsupported",
+          "month": "202510"
+        },
+        {
+          "error": "kor.1 202511 unsupported",
+          "month": "202511"
+        },
+        {
+          "error": "kor.1 202512 unsupported",
+          "month": "202512"
+        },
+        {
+          "error": "kor.1 202601 unsupported",
+          "month": "202601"
+        },
+        {
+          "error": "kor.1 202602 unsupported",
+          "month": "202602"
+        },
+        {
+          "error": "kor.1 202603 unsupported",
+          "month": "202603"
+        },
+        {
+          "error": "kor.1 202604 unsupported",
+          "month": "202604"
+        },
+        {
+          "error": "kor.1 202605 unsupported",
+          "month": "202605"
+        },
+        {
+          "error": "kor.1 202606 unsupported",
+          "month": "202606"
+        }
+      ]
+    },
+    {
+      "competition": "Saudi Pro League",
+      "complete": false,
+      "league_id": 307,
+      "league_slug": "sau.1",
+      "rows": 0,
+      "successful_months": 0,
+      "unavailable_month_count": 90,
+      "unavailable_months": [
+        {
+          "error": "sau.1 201901 unsupported",
+          "month": "201901"
+        },
+        {
+          "error": "sau.1 201902 unsupported",
+          "month": "201902"
+        },
+        {
+          "error": "sau.1 201903 unsupported",
+          "month": "201903"
+        },
+        {
+          "error": "sau.1 201904 unsupported",
+          "month": "201904"
+        },
+        {
+          "error": "sau.1 201905 unsupported",
+          "month": "201905"
+        },
+        {
+          "error": "sau.1 201906 unsupported",
+          "month": "201906"
+        },
+        {
+          "error": "sau.1 201907 unsupported",
+          "month": "201907"
+        },
+        {
+          "error": "sau.1 201908 unsupported",
+          "month": "201908"
+        },
+        {
+          "error": "sau.1 201909 unsupported",
+          "month": "201909"
+        },
+        {
+          "error": "sau.1 201910 unsupported",
+          "month": "201910"
+        },
+        {
+          "error": "sau.1 201911 unsupported",
+          "month": "201911"
+        },
+        {
+          "error": "sau.1 201912 unsupported",
+          "month": "201912"
+        },
+        {
+          "error": "sau.1 202001 unsupported",
+          "month": "202001"
+        },
+        {
+          "error": "sau.1 202002 unsupported",
+          "month": "202002"
+        },
+        {
+          "error": "sau.1 202003 unsupported",
+          "month": "202003"
+        },
+        {
+          "error": "sau.1 202004 unsupported",
+          "month": "202004"
+        },
+        {
+          "error": "sau.1 202005 unsupported",
+          "month": "202005"
+        },
+        {
+          "error": "sau.1 202006 unsupported",
+          "month": "202006"
+        },
+        {
+          "error": "sau.1 202007 unsupported",
+          "month": "202007"
+        },
+        {
+          "error": "sau.1 202008 unsupported",
+          "month": "202008"
+        },
+        {
+          "error": "sau.1 202009 unsupported",
+          "month": "202009"
+        },
+        {
+          "error": "sau.1 202010 unsupported",
+          "month": "202010"
+        },
+        {
+          "error": "sau.1 202011 unsupported",
+          "month": "202011"
+        },
+        {
+          "error": "sau.1 202012 unsupported",
+          "month": "202012"
+        },
+        {
+          "error": "sau.1 202101 unsupported",
+          "month": "202101"
+        },
+        {
+          "error": "sau.1 202102 unsupported",
+          "month": "202102"
+        },
+        {
+          "error": "sau.1 202103 unsupported",
+          "month": "202103"
+        },
+        {
+          "error": "sau.1 202104 unsupported",
+          "month": "202104"
+        },
+        {
+          "error": "sau.1 202105 unsupported",
+          "month": "202105"
+        },
+        {
+          "error": "sau.1 202106 unsupported",
+          "month": "202106"
+        },
+        {
+          "error": "sau.1 202107 unsupported",
+          "month": "202107"
+        },
+        {
+          "error": "sau.1 202108 unsupported",
+          "month": "202108"
+        },
+        {
+          "error": "sau.1 202109 unsupported",
+          "month": "202109"
+        },
+        {
+          "error": "sau.1 202110 unsupported",
+          "month": "202110"
+        },
+        {
+          "error": "sau.1 202111 unsupported",
+          "month": "202111"
+        },
+        {
+          "error": "sau.1 202112 unsupported",
+          "month": "202112"
+        },
+        {
+          "error": "sau.1 202201 unsupported",
+          "month": "202201"
+        },
+        {
+          "error": "sau.1 202202 unsupported",
+          "month": "202202"
+        },
+        {
+          "error": "sau.1 202203 unsupported",
+          "month": "202203"
+        },
+        {
+          "error": "sau.1 202204 unsupported",
+          "month": "202204"
+        },
+        {
+          "error": "sau.1 202205 unsupported",
+          "month": "202205"
+        },
+        {
+          "error": "sau.1 202206 unsupported",
+          "month": "202206"
+        },
+        {
+          "error": "sau.1 202207 unsupported",
+          "month": "202207"
+        },
+        {
+          "error": "sau.1 202208 unsupported",
+          "month": "202208"
+        },
+        {
+          "error": "sau.1 202209 unsupported",
+          "month": "202209"
+        },
+        {
+          "error": "sau.1 202210 unsupported",
+          "month": "202210"
+        },
+        {
+          "error": "sau.1 202211 unsupported",
+          "month": "202211"
+        },
+        {
+          "error": "sau.1 202212 unsupported",
+          "month": "202212"
+        },
+        {
+          "error": "sau.1 202301 unsupported",
+          "month": "202301"
+        },
+        {
+          "error": "sau.1 202302 unsupported",
+          "month": "202302"
+        },
+        {
+          "error": "sau.1 202303 unsupported",
+          "month": "202303"
+        },
+        {
+          "error": "sau.1 202304 unsupported",
+          "month": "202304"
+        },
+        {
+          "error": "sau.1 202305 unsupported",
+          "month": "202305"
+        },
+        {
+          "error": "sau.1 202306 unsupported",
+          "month": "202306"
+        },
+        {
+          "error": "sau.1 202307 unsupported",
+          "month": "202307"
+        },
+        {
+          "error": "sau.1 202308 unsupported",
+          "month": "202308"
+        },
+        {
+          "error": "sau.1 202309 unsupported",
+          "month": "202309"
+        },
+        {
+          "error": "sau.1 202310 unsupported",
+          "month": "202310"
+        },
+        {
+          "error": "sau.1 202311 unsupported",
+          "month": "202311"
+        },
+        {
+          "error": "sau.1 202312 unsupported",
+          "month": "202312"
+        },
+        {
+          "error": "sau.1 202401 unsupported",
+          "month": "202401"
+        },
+        {
+          "error": "sau.1 202402 unsupported",
+          "month": "202402"
+        },
+        {
+          "error": "sau.1 202403 unsupported",
+          "month": "202403"
+        },
+        {
+          "error": "sau.1 202404 unsupported",
+          "month": "202404"
+        },
+        {
+          "error": "sau.1 202405 unsupported",
+          "month": "202405"
+        },
+        {
+          "error": "sau.1 202406 unsupported",
+          "month": "202406"
+        },
+        {
+          "error": "sau.1 202407 unsupported",
+          "month": "202407"
+        },
+        {
+          "error": "sau.1 202408 unsupported",
+          "month": "202408"
+        },
+        {
+          "error": "sau.1 202409 unsupported",
+          "month": "202409"
+        },
+        {
+          "error": "sau.1 202410 unsupported",
+          "month": "202410"
+        },
+        {
+          "error": "sau.1 202411 unsupported",
+          "month": "202411"
+        },
+        {
+          "error": "sau.1 202412 unsupported",
+          "month": "202412"
+        },
+        {
+          "error": "sau.1 202501 unsupported",
+          "month": "202501"
+        },
+        {
+          "error": "sau.1 202502 unsupported",
+          "month": "202502"
+        },
+        {
+          "error": "sau.1 202503 unsupported",
+          "month": "202503"
+        },
+        {
+          "error": "sau.1 202504 unsupported",
+          "month": "202504"
+        },
+        {
+          "error": "sau.1 202505 unsupported",
+          "month": "202505"
+        },
+        {
+          "error": "sau.1 202506 unsupported",
+          "month": "202506"
+        },
+        {
+          "error": "sau.1 202507 unsupported",
+          "month": "202507"
+        },
+        {
+          "error": "sau.1 202508 unsupported",
+          "month": "202508"
+        },
+        {
+          "error": "sau.1 202509 unsupported",
+          "month": "202509"
+        },
+        {
+          "error": "sau.1 202510 unsupported",
+          "month": "202510"
+        },
+        {
+          "error": "sau.1 202511 unsupported",
+          "month": "202511"
+        },
+        {
+          "error": "sau.1 202512 unsupported",
+          "month": "202512"
+        },
+        {
+          "error": "sau.1 202601 unsupported",
+          "month": "202601"
+        },
+        {
+          "error": "sau.1 202602 unsupported",
+          "month": "202602"
+        },
+        {
+          "error": "sau.1 202603 unsupported",
+          "month": "202603"
+        },
+        {
+          "error": "sau.1 202604 unsupported",
+          "month": "202604"
+        },
+        {
+          "error": "sau.1 202605 unsupported",
+          "month": "202605"
+        },
+        {
+          "error": "sau.1 202606 unsupported",
+          "month": "202606"
+        }
+      ]
+    }
+  ],
+  "rows": 1832,
+  "schema": 1,
+  "window": {
+    "end": "2026-06-01",
+    "start": "2019-01-01"
+  }
+}

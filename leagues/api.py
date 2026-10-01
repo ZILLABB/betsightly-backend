@@ -29,6 +29,63 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Leagues"])
 
 
+@router.get(
+    "/slip-builder/v2/staging-evidence-status",
+    dependencies=[Depends(require_api_key)],
+)
+async def staging_v2_evidence_status():
+    """Read-only staging V2 worker state and supplemental blocker counts."""
+    from leagues.football_first_shadow_v2_automation import status
+    return status()
+
+
+@router.post(
+    "/slip-builder/v2/staging-evidence-refresh",
+    dependencies=[Depends(require_api_key)],
+)
+async def staging_v2_evidence_refresh(force_history: bool = False):
+    """Trigger one non-blocking staging-only V2 evidence cycle."""
+    from leagues.football_first_shadow_v2_automation import trigger_once
+    return trigger_once(force_history=bool(force_history))
+
+
+@router.get(
+    "/slip-builder/v2/shadow-board-status",
+    dependencies=[Depends(require_api_key)],
+)
+async def sportybet_first_shadow_board_status():
+    """Read-only SportyBet-first shadow inventory health.
+
+    This endpoint never refreshes providers and the shadow inventory cannot
+    publish, book, settle, or replace the production prepared board.
+    """
+    from leagues.sportybet_inventory import status
+
+    return status()
+
+
+@router.get(
+    "/slip-builder/v2/shadow-board-compare",
+    dependencies=[Depends(require_api_key)],
+)
+async def sportybet_first_shadow_board_compare():
+    """Cache-only SportyBet-first coverage/support comparison."""
+    from leagues.sportybet_shadow_compare import status
+
+    return status()
+
+
+@router.get(
+    "/slip-builder/v2/shadow-prediction-board-status",
+    dependencies=[Depends(require_api_key)],
+)
+async def sportybet_first_shadow_prediction_board_status():
+    """Read-only current-engine overlap on the SportyBet-first shadow board."""
+    from leagues.sportybet_shadow_board import status
+
+    return status()
+
+
 @router.get("/decision-quality", dependencies=[Depends(require_api_key)])
 async def decision_quality_report(days: int = 30):
     """Admin-gated, read-only readiness and decision-memory report."""
@@ -51,17 +108,28 @@ async def replay_decision_snapshot(snapshot_id: str,
 @router.get("/daily-accumulators")
 def get_daily_accumulators():
     """Daily accumulator picks (2 odds / 5 odds / 10 odds / over 1.5 / rollover)."""
+    from leagues.history_readiness import HistoryNotReady
     try:
         from leagues.daily_feed import build_daily_accumulators
-        result = build_daily_accumulators()
+        result = build_daily_accumulators(allow_generation=False)
         if not result:
             raise HTTPException(404, "No predictions available")
         return result
     except HTTPException:
         raise
+    except HistoryNotReady:
+        from leagues.history_readiness import status
+        raise HTTPException(503, {"reason": "history_not_ready", "history": status()})
     except Exception as e:
         logger.error(f"Error building daily accumulators: {e}", exc_info=True)
         raise HTTPException(500, str(e))
+
+
+@router.get("/history-readiness")
+def get_history_readiness():
+    """Credential-free evidence readiness, without provider or database URLs."""
+    from leagues.history_readiness import status
+    return status()
 
 
 @router.get("/ml-shadow")
@@ -154,6 +222,287 @@ async def ml_shadow(days: int = 60):
         raise HTTPException(500, str(e))
 
 
+class FootballFirstShadowReviewRequest(BaseModel):
+    decision: str
+    reviewer: str | None = None
+    note: str | None = None
+
+
+@router.get("/football-first-shadow")
+def football_first_shadow_report():
+    try:
+        from leagues.football_first_shadow_observations import shadow_report
+        return shadow_report()
+    except Exception as e:
+        logger.error(
+            f"Football-first shadow report failed: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(500, str(e))
+
+
+@router.post(
+    "/football-first-shadow/settle",
+    dependencies=[Depends(require_api_key)],
+)
+def football_first_shadow_settle(limit: int = 250):
+    try:
+        from leagues.football_first_shadow_observations import (
+            settle_pending_observations,
+        )
+        return settle_pending_observations(
+            limit=max(1, min(1000, int(limit)))
+        )
+    except Exception as e:
+        logger.error(
+            f"Football-first shadow settlement failed: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(500, str(e))
+
+
+@router.get(
+    "/football-first-shadow/review",
+    dependencies=[Depends(require_api_key)],
+)
+def football_first_shadow_review_packet():
+    try:
+        from leagues.football_first_shadow_observations import review_packet
+        return review_packet()
+    except Exception as e:
+        logger.error(
+            f"Football-first shadow review packet failed: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(500, str(e))
+
+
+@router.post(
+    "/football-first-shadow/review",
+    dependencies=[Depends(require_api_key)],
+)
+def football_first_shadow_record_review(
+    request: FootballFirstShadowReviewRequest,
+):
+    try:
+        from leagues.football_first_shadow_observations import record_review
+        return record_review(
+            request.decision,
+            reviewer=request.reviewer,
+            note=request.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    except Exception as e:
+        logger.error(
+            f"Football-first shadow review decision failed: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(500, str(e))
+
+
+@router.get("/football-first-shadow-v2")
+def football_first_shadow_v2_report():
+    """Read-only prospective V2 evidence report."""
+    try:
+        from leagues.football_first_shadow_v2_observations import (
+            shadow_report,
+        )
+
+        return shadow_report()
+
+    except Exception as e:
+        logger.error(
+            f"Football-first V2 shadow report failed: {e}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            500,
+            str(e),
+        )
+
+
+@router.post(
+    "/football-first-shadow-v2/settle",
+    dependencies=[
+        Depends(
+            require_api_key
+        )
+    ],
+)
+def football_first_shadow_v2_settle(
+    limit: int = 250,
+):
+    """Settle only the current V2 model-version observations."""
+    try:
+        from leagues.football_first_shadow_v2_observations import (
+            settle_pending_observations,
+        )
+
+        return (
+            settle_pending_observations(
+                limit=max(
+                    1,
+                    min(
+                        1000,
+                        int(
+                            limit
+                        ),
+                    ),
+                )
+            )
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Football-first V2 settlement failed: {e}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            500,
+            str(e),
+        )
+
+
+@router.get(
+    "/football-first-shadow-v2/review",
+    dependencies=[
+        Depends(
+            require_api_key
+        )
+    ],
+)
+def football_first_shadow_v2_review_packet():
+    """Return V2-only evidence and human-review gates."""
+    try:
+        from leagues.football_first_shadow_v2_observations import (
+            review_packet,
+        )
+
+        return review_packet()
+
+    except Exception as e:
+        logger.error(
+            f"Football-first V2 review packet failed: {e}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            500,
+            str(e),
+        )
+
+
+@router.post(
+    "/football-first-shadow-v2/review",
+    dependencies=[
+        Depends(
+            require_api_key
+        )
+    ],
+)
+def football_first_shadow_v2_record_review(
+    request: FootballFirstShadowReviewRequest,
+):
+    """Record a V2 human decision without changing the live model."""
+    try:
+        from leagues.football_first_shadow_v2_observations import (
+            record_review,
+        )
+
+        return record_review(
+            request.decision,
+            reviewer=request.reviewer,
+            note=request.note,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            409,
+            str(exc),
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Football-first V2 review decision failed: {e}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            500,
+            str(e),
+        )
+
+
+@router.get(
+    "/football-first-shadow-v2/automation"
+)
+def football_first_shadow_v2_automation_status():
+    """Read-only health for staging prospective-evidence automation."""
+
+    try:
+        from leagues.football_first_shadow_v2_automation import (
+            status as automation_status,
+        )
+
+        from leagues.football_first_shadow_v2_observations import (
+            shadow_report,
+        )
+
+        report = (
+            shadow_report()
+        )
+
+        return {
+            "status":
+                "success",
+
+            "automation":
+                automation_status(),
+
+            "model":
+                report.get(
+                    "model"
+                ),
+
+            "observations":
+                report.get(
+                    "observations"
+                ),
+
+            "evidence_progress":
+                report.get(
+                    "evidence_progress"
+                ),
+
+            "comparison_status":
+                (
+                    report.get(
+                        "comparison"
+                    )
+                    or {}
+                ).get(
+                    "status"
+                ),
+
+            "automatic_promotion":
+                False,
+        }
+
+    except Exception as e:
+        logger.error(
+            f"Football-first V2 automation status failed: {e}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            500,
+            str(e),
+        )
+
+
 @router.get("/live-scores")
 def get_live_scores():
     """Scores for the fixtures on today's card, keyed by match_id.
@@ -186,11 +535,15 @@ def get_bookable_now():
     """
     try:
         from leagues.daily_feed import build_bookable_now
-        result = build_bookable_now()
+        picks, _, board = _public_prepared_board(2)
+        result = build_bookable_now(all_picks=picks)
         if not result:
             return {"status": "success", "available": False,
-                    "reason": "No fixtures left to bet on today."}
-        return {"status": "success", "available": True, **result}
+                    "reason": "No fixtures left to bet on today.", "board": board}
+        return {"status": "success", "available": True, **result,
+                "board": board}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Bookable-now build failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
@@ -207,6 +560,19 @@ async def trigger_results_check():
         summary = check_all_pending()
         slips = settle_published_slips()
         builders = settle_builder_predictions()
+        try:
+            from leagues.football_first_shadow_observations import (
+                settle_pending_observations,
+            )
+            football_first_shadow = settle_pending_observations()
+        except Exception as e:
+            logger.warning(
+                f"football-first shadow settlement during check-results failed: {e}"
+            )
+            football_first_shadow = {
+                "status": "ERROR",
+                "error_type": type(e).__name__,
+            }
         # Newly settled legs are exactly what the calibration is fitted on, so
         # refit now rather than serving a stale correction for up to six hours.
         try:
@@ -215,8 +581,13 @@ async def trigger_results_check():
             summary["calibration_legs"] = fit.get("n", 0)
         except Exception as e:
             logger.warning(f"calibration refit after settlement failed: {e}")
-        return {"status": "success", **summary, "slips": slips,
-                "builders": builders}
+        return {
+            "status": "success",
+            **summary,
+            "slips": slips,
+            "builders": builders,
+            "football_first_shadow": football_first_shadow,
+        }
     except Exception as e:
         logger.error(f"Results check trigger failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
@@ -232,8 +603,8 @@ async def trigger_daily_run(force: bool = False, publish: bool = True):
     returns `skipped` rather than repeating the work.
     """
     try:
-        from leagues.scheduler import run_daily_job
-        return run_daily_job(force=force, publish=publish)
+        from leagues.scheduler import start_daily_job
+        return start_daily_job(force=force, publish=publish)
     except Exception as e:
         logger.error(f"Daily run failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
@@ -259,7 +630,7 @@ async def trigger_tier_booking(force: bool = False):
     try:
         from leagues.booking import book_card
         from leagues.daily_feed import build_daily_accumulators, _publish_date
-        card = build_daily_accumulators()
+        card = build_daily_accumulators(allow_generation=False)
         if not card:
             raise HTTPException(404, "no card to book")
         result = book_card(_publish_date(), card.get("accumulators") or {}, force=force)
@@ -289,7 +660,7 @@ async def get_bookings(date: str | None = None):
     # from either endpoint alone.
     attach: dict = {}
     try:
-        card = build_daily_accumulators() or {}
+        card = build_daily_accumulators(allow_generation=False) or {}
         accs = card.get("accumulators") or {}
         attach = {
             "card_date": card.get("date"),
@@ -324,6 +695,8 @@ async def get_bookings(date: str | None = None):
 _SLIP_CACHE: dict = {}
 _SLIP_TTL = 1800
 _SLIP_LOCKS: dict = {}
+_V2_TARGET_CACHE: dict = {}
+_V2_TARGET_LOCKS: dict = {}
 _BUILDER_REVISION_LOCKS: dict = {}
 
 
@@ -337,7 +710,117 @@ class BuilderRevisionRequest(BaseModel):
     target: float | None = None
 
 
+
+class BuilderV2Filters(BaseModel):
+    horizon: str = "7_days"
+    markets: list[str] = Field(default_factory=list)
+    min_odds: float | None = None
+    max_odds: float | None = None
+    min_probability: float | None = Field(default=None, ge=0, le=1)
+    min_trust_grade: str = "B"
+    include_leagues: list[str] = Field(default_factory=list)
+    exclude_leagues: list[str] = Field(default_factory=list)
+    exclude_fixture_ids: list[str] = Field(default_factory=list)
+    exclude_team_ids: list[str] = Field(default_factory=list)
+    require_bookable: bool = True
+    # Anonymous-only until an authenticated Builder context exists server-side.
+    anonymous_id: str | None = Field(default=None, min_length=16, max_length=128)
+
+
+class BuilderV2Request(BuilderV2Filters):
+    mode: str
+    target_odds: float | None = None
+    game_count: int | None = None
+    max_games: int | None = None
+    fill_strategy: str = "strict_selected_markets"
+    refresh: bool = False
+    build_another: bool = False
+
+
+class BuilderV2ManualRequest(BuilderV2Filters):
+    selection_ids: list[str] = Field(default_factory=list)
+
+
+def _builder_v2_payload(model: BaseModel) -> dict:
+    """Return only fields that belong to Builder selection/optimization."""
+    payload = (
+        model.model_dump()
+        if hasattr(model, "model_dump")
+        else model.dict()
+    )
+    payload.pop("anonymous_id", None)
+    # User-history behavior is orchestrated by the API boundary and must not
+    # become a prediction/model/cache input.
+    payload.pop("build_another", None)
+    return payload
+
+
+def _builder_v2_persistence_payload(
+    model: BaseModel,
+    engine_payload: dict | None = None,
+) -> dict:
+    """Restore request identity only for audit/history persistence."""
+    payload = dict(engine_payload or _builder_v2_payload(model))
+    anonymous_id = getattr(model, "anonymous_id", None)
+    if anonymous_id:
+        payload["anonymous_id"] = anonymous_id
+    if bool(getattr(model, "build_another", False)):
+        payload["build_another"] = True
+    return payload
+
+def _record_v2_result(payload: dict, result: dict, started: float) -> None:
+    """Adapt V2 to the existing settlement archive; log only safe facts."""
+    import time
+    from leagues.builder_runs import record_run
+
+    persistence_started = time.perf_counter()
+    try:
+        record_run(
+            payload.get("target_odds") if payload.get("mode") == "target_odds" else None,
+            payload.get("horizon", "7_days"), bool(payload.get("refresh")),
+            result, cached=bool(result.get("cached")), request_id=result["request_id"],
+            mode=payload.get("mode", "target_odds"),
+            fill_strategy=payload.get("fill_strategy") if payload.get("mode") == "game_count" else None,
+            requested_markets=payload.get("markets") or [],
+            requested_game_count=(payload.get("game_count")
+                                  if payload.get("mode") == "game_count" else None),
+        )
+        if payload.get("anonymous_id"):
+            from leagues.ticket_history import record_generated_ticket
+            record_generated_ticket(payload, result)
+    except Exception as exc:
+        logger.error("builder_v2_persistence_failed request_id=%s error_type=%s",
+                     result["request_id"], type(exc).__name__)
+    booking = result.get("booking") or {}
+    diagnostics = result.get("selection_diagnostics_v2") or result.get("selection_diagnostics") or {}
+    logger.info("builder_v2_result %s", {
+        "request_id": result["request_id"], "mode": payload.get("mode"),
+        "horizon": payload.get("horizon"),
+        "board_snapshot_id": (result.get("board") or {}).get("board_snapshot_id"),
+        "candidate_count": diagnostics.get("approved_count"),
+        "delivered": len(result.get("games") or []), "shortfall": result.get("shortfall"),
+        "booking_status": booking.get("booking_status"),
+        "readback_status": booking.get("readback_validation"), "status": result.get("status"),
+        "requested_target": payload.get("target_odds"), "achieved_odds": result.get("odds"),
+        "best_reachable": result.get("best_reachable"),
+        "binding_constraints": diagnostics.get("primary_binding_constraint"),
+        "requested_selection_count": len(payload.get("selection_ids") or []),
+        "invalid_count": len(result.get("invalid_selections") or []),
+        "valid_count": result.get("valid_count", len(result.get("games") or [])),
+        "candidate_timing_ms": diagnostics.get("timing_ms"),
+        "booking_timing_ms": booking.get("timing_ms"),
+        "generation_timing_ms": result.get("timing_ms"),
+        "persistence_ms": round((time.perf_counter() - persistence_started) * 1000),
+        "duration_ms": round((time.perf_counter() - started) * 1000),
+    })
+
 def _start_builder_revision(target: float, horizon: str, result: dict) -> dict:
+    # Generation owns provenance; a later refresh cannot relabel this slip.
+    if result.get("board"):
+        if result.get("status") != "success" or not result.get("games"):
+            return result
+        from leagues.builder_revisions import create_initial_run
+        return create_initial_run(target, horizon, result)
     try:
         from leagues.engine import prepared_board_status
         state = prepared_board_status(days_ahead=7)
@@ -374,11 +857,34 @@ def _start_builder_revision(target: float, horizon: str, result: dict) -> dict:
 
 
 def _cached_slip_is_placeable(result: dict, now: datetime | None = None) -> bool:
-    """A cached code must still contain only matches a user can book."""
+    """A cached slip must still contain only matches a user can book."""
     from leagues.availability import all_games_actionable
 
     now = now or datetime.now(timezone.utc)
     return all_games_actionable(result.get("games") or [], now)
+
+
+def _cached_target_result_is_reusable(
+    result: dict, now: datetime | None = None
+) -> bool:
+    """V2 target cache may reuse only an exact active SportyBet booking."""
+    from leagues.booking import booking_lifecycle
+
+    now = now or datetime.now(timezone.utc)
+    games = result.get("games") or []
+
+    if not games or not _cached_slip_is_placeable(result, now):
+        return False
+
+    checked = booking_lifecycle(result.get("booking") or {}, games, now)
+
+    return bool(
+        checked
+        and checked.get("actionable")
+        and checked.get("booking_status") in {"FULL", "REBUILT_FULL"}
+        and str(checked.get("readback_validation") or "").upper() == "PASSED"
+        and checked.get("share_code")
+    )
 
 
 def _log_builder_board(builder_run_id: str, target: float, horizon: str,
@@ -420,32 +926,251 @@ def _log_builder_board(builder_run_id: str, target: float, horizon: str,
 @router.get("/slip-builder/targets")
 async def slip_builder_targets():
     """The targets offered, and what each is actually worth."""
-    from leagues.slip_builder import (HORIZONS, MAX_LEGS, MAX_TARGET,
-                                      MIN_TARGET, TARGETS)
+    from leagues.builder_v2 import V2_HORIZONS
+    from leagues.slip_builder import (
+        HORIZONS,
+        MAX_LEGS,
+        MAX_TARGET,
+        MIN_TARGET,
+        TARGETS,
+    )
+
     return {
         "status": "success",
         "targets": TARGETS,
         "min": MIN_TARGET,
         "max": MAX_TARGET,
         "max_legs": MAX_LEGS,
-        "horizons": sorted(HORIZONS),
-        "note": ("The return shown is the model's joint hit probability "
-                 "multiplied by the displayed odds. It is an estimate, not a guarantee."),
+        "horizons": sorted(V2_HORIZONS),
+        "legacy_horizons": sorted(HORIZONS),
+        "note": (
+            "The return shown is the model's joint hit probability "
+            "multiplied by the displayed odds. It is an estimate, not a guarantee."
+        ),
     }
 
+
+@router.post("/slip-builder/v2/candidates")
+async def slip_builder_v2_candidates(request: BuilderV2Filters):
+    """Browse the current approved V2 candidate board without rebuilding providers."""
+    import asyncio
+    import os
+    from leagues.builder_v2 import list_candidates
+
+    if os.getenv("BUILDER_ENGINE", "v2").strip().lower() != "v2":
+        return {"status": "unavailable", "reason": "builder_mode_disabled", "retryable": False}
+    return await asyncio.to_thread(
+        list_candidates,
+        _builder_v2_payload(request),
+    )
+
+
+@router.post("/slip-builder/v2/generate")
+async def slip_builder_v2_generate(request: BuilderV2Request):
+    """Build target/count/strongest V2 slips from the prepared trusted board."""
+    import asyncio
+    import json
+    import time as _t
+
+    from leagues.builder_v2 import generate_v2
+
+    request_id = str(uuid.uuid4())
+    payload = _builder_v2_payload(request)
+
+    if request.build_another:
+        payload["_build_another"] = True
+
+        if request.anonymous_id:
+            try:
+                from leagues.ticket_history import recent_exposure
+                payload["_recent_exposure"] = await asyncio.to_thread(
+                    recent_exposure,
+                    request.anonymous_id,
+                )
+            except Exception as exc:
+                # Diversification is optional context. A history failure must
+                # never break an otherwise valid Builder request.
+                logger.warning(
+                    "builder_recent_exposure_failed error_type=%s",
+                    type(exc).__name__,
+                )
+                payload["_recent_exposure"] = {
+                    "history_ticket_count": 0,
+                    "exact_selection_ids": [],
+                    "recent_fixture_ids": [],
+                    "team_counts": {},
+                    "league_counts": {},
+                    "market_counts": {},
+                }
+
+    import os
+    engine = os.getenv("BUILDER_ENGINE", "v2").strip().lower()
+    if engine == "legacy":
+        if request.mode != "target_odds" or request.horizon not in {"today", "7_days"} or any(
+            payload.get(key) for key in (
+                "markets", "include_leagues", "exclude_leagues",
+                "exclude_fixture_ids", "exclude_team_ids", "min_odds", "max_odds",
+                "min_probability",
+            )
+        ) or request.min_trust_grade != "B" or not request.require_bookable:
+            return {"status": "unavailable", "reason": "builder_mode_disabled", "retryable": False}
+        return await _legacy_slip_builder_generate(
+            request.target_odds or 0,
+            "week" if request.horizon == "7_days" else "today",
+            request.refresh,
+        )
+    if engine != "v2":
+        return {"status": "unavailable", "reason": "builder_engine_disabled", "retryable": False}
+    started = _t.perf_counter()
+
+    if request.mode == "target_odds":
+        from leagues.daily_feed import _publish_date
+        from leagues.engine import prepared_board_status
+
+        # Target Odds is cached because its optimizer is more expensive than
+        # the structural Builder modes. The prepared-board identity must be
+        # part of that cache key, though: after a board refresh we must never
+        # keep serving a combination selected from the previous fixture/price
+        # snapshot merely because the request payload and WAT date are equal.
+        cache_board = prepared_board_status(days_ahead=7)
+        cache_board_identity = (
+            cache_board.get("board_snapshot_id"),
+            cache_board.get("generated_at"),
+            int(cache_board.get("evaluated_fixture_count") or 0),
+        )
+
+        cache_key = (
+            json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+            _publish_date(),
+            cache_board_identity,
+        )
+        hit = (
+            None
+            if request.build_another
+            else _V2_TARGET_CACHE.get(cache_key)
+        )
+        if (
+            hit and not request.refresh
+            and (_t.time() - hit["ts"]) < _SLIP_TTL
+            and _cached_target_result_is_reusable(hit["result"])
+        ):
+            result = {**hit["result"], "cached": True}
+        else:
+            lock = _V2_TARGET_LOCKS.setdefault(
+                cache_key,
+                asyncio.Lock(),
+            )
+            async with lock:
+                hit = (
+            None
+            if request.build_another
+            else _V2_TARGET_CACHE.get(cache_key)
+        )
+                if (
+                    hit and not request.refresh
+                    and (_t.time() - hit["ts"]) < _SLIP_TTL
+                    and _cached_target_result_is_reusable(hit["result"])
+                ):
+                    result = {**hit["result"], "cached": True}
+                else:
+                    result = await asyncio.to_thread(
+                        generate_v2,
+                        payload,
+                    )
+                    if (
+                        not request.build_another
+                        and result.get("status") == "success"
+                        and _cached_target_result_is_reusable(result)
+                    ):
+                        _V2_TARGET_CACHE[cache_key] = {
+                            "result": result,
+                            "ts": _t.time(),
+                        }
+                    result = {**result, "cached": False}
+    else:
+        result = await asyncio.to_thread(
+            generate_v2,
+            payload,
+        )
+
+    if (
+        request.mode == "target_odds"
+        and result.get("status") == "success"
+        and result.get("games")
+    ):
+        result = await asyncio.to_thread(_start_builder_revision,
+            float(request.target_odds or result.get("odds") or 2),
+            request.horizon,
+            result,
+        )
+
+    result["request_id"] = request_id
+    await asyncio.to_thread(
+        _record_v2_result,
+        _builder_v2_persistence_payload(request, payload),
+        result,
+        started,
+    )
+    return result
+
+
+@router.post("/slip-builder/v2/manual")
+async def slip_builder_v2_manual(request: BuilderV2ManualRequest):
+    """Book only the exact approved selection IDs chosen by the user."""
+    import asyncio
+    import os
+    import time
+    from leagues.builder_v2 import manual_build
+
+    if os.getenv("BUILDER_ENGINE", "v2").strip().lower() != "v2":
+        return {"status": "unavailable", "reason": "builder_mode_disabled", "retryable": False}
+    started = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    payload = _builder_v2_payload(request)
+    result = await asyncio.to_thread(
+        manual_build,
+        payload,
+    )
+    result["request_id"] = request_id
+    persistence_payload = _builder_v2_persistence_payload(request, payload)
+    persistence_payload["mode"] = "manual"
+    await asyncio.to_thread(
+        _record_v2_result,
+        persistence_payload,
+        result,
+        started,
+    )
+    return result
 
 @router.post("/slip-builder/generate")
 async def slip_builder_generate(target: float, horizon: str = "week",
                                 refresh: bool = False):
+    """Deprecated query contract; selection and cache belong to V2."""
+    return await slip_builder_v2_generate(BuilderV2Request(
+        mode="target_odds", target_odds=target,
+        horizon="7_days" if horizon == "week" else horizon,
+        refresh=refresh,
+    ))
+
+
+async def _legacy_slip_builder_generate(target: float, horizon: str = "week",
+                                       refresh: bool = False):
     """Build a slip to a requested multiplier and book it."""
     import time as _t
     from database import log_pool_exception, log_pool_status
     from utils.runtime_metrics import log_runtime_memory
 
-    builder_run_id = str(uuid.uuid4())
+    # Audit/request identity is deliberately distinct from the persisted
+    # revision-chain ID returned by ``create_initial_run``.
+    request_id = str(uuid.uuid4())
 
     log_pool_status(
-        "builder_start", builder_run_id=builder_run_id,
+        "builder_start", request_id=request_id,
         target=round(float(target), 2),
         horizon=horizon,
         refresh=bool(refresh),
@@ -478,14 +1203,14 @@ async def slip_builder_generate(target: float, horizon: str = "week",
         response = _start_builder_revision(
             target, horizon, {**hit["result"], "cached": True}
         )
-        response["builder_run_id"] = builder_run_id
+        response["request_id"] = request_id
         try:
             from leagues.builder_runs import record_run
             record_run(target, horizon, refresh, response, cached=True,
-                       request_id=builder_run_id)
+                       request_id=request_id)
         except Exception as exc:
             logger.warning(f"Builder run audit failed: {exc}")
-        _log_builder_board(builder_run_id, target, horizon, response)
+        _log_builder_board(response.get("builder_run_id", request_id), target, horizon, response)
         log_pool_status(
             "builder_end", target=key[0], horizon=horizon,
             status=response.get("status"), cached=True,
@@ -498,6 +1223,17 @@ async def slip_builder_generate(target: float, horizon: str = "week",
 
     board = prepared_board_status(days_ahead=7)
     if not board.get("ready"):
+        from leagues.history_readiness import status as history_status
+        from leagues.engine import start_history_prewarm
+        history = history_status()
+        if not history["usable"]:
+            start_history_prewarm()
+            return {
+                "status": "unavailable", "reason": "history_not_ready",
+                "retryable": True, "history": history,
+                "requested_target": round(float(target), 2),
+                "horizon": horizon, "builder_run_id": builder_run_id,
+            }
         refresh_started = start_prepared_board_refresh(
             days_ahead=7, force=True
         )
@@ -509,7 +1245,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             "board": board,
             "requested_target": round(float(target), 2),
             "horizon": horizon,
-            "builder_run_id": builder_run_id,
+            "request_id": request_id,
         }
         log_pool_status(
             "builder_end", target=key[0], horizon=horizon,
@@ -519,7 +1255,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             "builder_end", target=key[0], horizon=horizon,
             status="board_refreshing", cached=False,
         )
-        _log_builder_board(builder_run_id, target, horizon, response)
+        _log_builder_board(request_id, target, horizon, response)
         return response
     if board.get("stale"):
         # Keep serving the last safe evaluated board while a single background
@@ -540,14 +1276,14 @@ async def slip_builder_generate(target: float, horizon: str = "week",
                 result = _start_builder_revision(
                     target, horizon, {**hit["result"], "cached": True}
                 )
-                result["builder_run_id"] = builder_run_id
+                result["request_id"] = request_id
                 try:
                     from leagues.builder_runs import record_run
                     record_run(target, horizon, refresh, result, cached=True,
-                               request_id=builder_run_id)
+                               request_id=request_id)
                 except Exception as exc:
                     logger.warning(f"Builder run audit failed: {exc}")
-                _log_builder_board(builder_run_id, target, horizon, result)
+                _log_builder_board(result.get("builder_run_id", request_id), target, horizon, result)
                 log_pool_status(
                     "builder_end", target=key[0], horizon=horizon,
                     status=result.get("status"), cached=True,
@@ -582,7 +1318,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
             from leagues.builder_runs import record_run
             record_run(target, horizon, refresh,
                        {"status": "error", "reason": type(e).__name__},
-                       request_id=builder_run_id)
+                       request_id=request_id)
         except Exception as exc:
             logger.warning(f"Builder run audit failed: {exc}")
         raise HTTPException(500, str(e))
@@ -590,14 +1326,14 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     response = _start_builder_revision(
         target, horizon, {**result, "cached": False}
     )
-    response["builder_run_id"] = builder_run_id
+    response["request_id"] = request_id
     try:
         from leagues.builder_runs import record_run
         record_run(target, horizon, refresh, response,
-                   request_id=builder_run_id)
+                   request_id=request_id)
     except Exception as exc:
         logger.warning(f"Builder run audit failed: {exc}")
-    _log_builder_board(builder_run_id, target, horizon, response)
+    _log_builder_board(response.get("builder_run_id", request_id), target, horizon, response)
     log_pool_status(
         "builder_end", target=key[0], horizon=horizon,
         status=response.get("status"), cached=False,
@@ -609,19 +1345,46 @@ async def slip_builder_generate(target: float, horizon: str = "week",
     return response
 
 
+def _public_prepared_board(horizon: int) -> tuple[list[dict], list[dict], dict]:
+    """A public read never starts provider/model work on its request thread."""
+    from leagues.engine import (prepared_board, start_history_prewarm,
+                                start_prepared_board_refresh)
+
+    picks, fixtures, board = prepared_board(horizon)
+    if board.get("ready") and fixtures:
+        if board.get("stale"):
+            board["refresh_started"] = start_prepared_board_refresh(
+                days_ahead=horizon, force=True)
+        return picks, fixtures, board
+
+    from leagues.history_readiness import status as history_status
+    history = history_status()
+    if not history["usable"]:
+        started = start_history_prewarm()
+        reason = "history_not_ready"
+    else:
+        started = start_prepared_board_refresh(days_ahead=horizon, force=True)
+        reason = "board_refreshing"
+    raise HTTPException(503, {
+        "reason": reason, "retryable": True, "refresh_started": started,
+        "board": board, "history": history,
+    })
+
+
 @router.get("/recommendations")
 def get_fixture_recommendations(date: str | None = None,
                                       days_ahead: int = 3):
     """One ranked football opinion per analysed fixture on a WAT date."""
     try:
-        from leagues.engine import prepared_board_status, run_pipeline
         from leagues.recommendation_board import build_recommendation_board
 
         horizon = max(1, min(7, days_ahead))
-        picks, fixtures = run_pipeline(days_ahead=horizon)
+        picks, fixtures, board = _public_prepared_board(horizon)
         result = build_recommendation_board(picks, fixtures, date=date)
-        result["board"] = prepared_board_status(horizon)
+        result["board"] = board
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Fixture recommendation board failed: %s", e,
                      exc_info=True)
@@ -633,13 +1396,16 @@ def get_fixture_recommendations(date: str | None = None,
 async def recommendation_diagnostics(date: str | None = None):
     """Internal board and Daily portfolio explanation without raw model data."""
     try:
-        from leagues.daily_feed import build_daily_accumulators
-        from leagues.engine import run_pipeline
+        from leagues.daily_feed import build_daily_accumulators, _publish_date
         from leagues.recommendation_board import build_recommendation_board
 
-        picks, fixtures = run_pipeline(days_ahead=4)
+        picks, fixtures, prepared = _public_prepared_board(4)
         board = build_recommendation_board(picks, fixtures, date=date)
-        daily = build_daily_accumulators()
+        daily = build_daily_accumulators(preview={
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "target_wat_date": date or _publish_date(),
+            "picks": picks, "fixtures": fixtures,
+        })
         accumulators = (daily or {}).get("accumulators") or {}
         tiers = {}
         for name in ("banker", "2_odds", "5_odds", "10_odds", "rollover"):
@@ -657,9 +1423,12 @@ async def recommendation_diagnostics(date: str | None = None):
             "date": board["date"],
             "board_summary": board["summary"],
             "market_distribution": board["market_distribution"],
+            "board": prepared,
             "daily_tiers": tiers,
             "portfolio": accumulators.get("_portfolio") or {},
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Recommendation diagnostics failed: %s", e,
                      exc_info=True)
@@ -860,14 +1629,36 @@ async def get_builder_performance(days: int = 90):
 
 
 @router.post("/backfill-legs", dependencies=[Depends(require_api_key)])
-async def trigger_leg_backfill(days: int = 120):
-    """Recover per-leg outcomes on chain days settled before we recorded them."""
+async def trigger_leg_backfill(days: int = 30, dry_run: bool = True,
+                               start_date: str | None = None,
+                               end_date: str | None = None):
+    """Review a bounded historical window; only an explicit apply writes legs."""
     try:
         from leagues.results_checker import backfill_leg_status
-        return {"status": "success", **backfill_leg_status(limit_days=days)}
+        return {"status": "success", **backfill_leg_status(
+            limit_days=days, dry_run=dry_run,
+            start_date=start_date, end_date=end_date)}
     except Exception as e:
         logger.error(f"Leg backfill failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
+
+
+@router.post("/reconcile-published-slips", dependencies=[Depends(require_api_key)])
+async def reconcile_historical_published_slips(
+        start_date: str = "2026-09-15", end_date: str = "2026-09-24",
+        dry_run: bool = True):
+    """Read-only historical settlement comparison for staging/admin review."""
+    if not dry_run:
+        raise HTTPException(400, "published-slip reconciliation is read-only; dry_run must be true")
+    try:
+        from leagues.results_checker import reconcile_published_slips
+        return {"status": "success", **reconcile_published_slips(
+            start_date=start_date, end_date=end_date, dry_run=True)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("Published-slip reconciliation failed: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
 
 
 @router.get("/calibration")
@@ -1076,36 +1867,23 @@ async def rebuild_rollover():
 
 @router.post("/repair-card", dependencies=[Depends(require_api_key)])
 async def repair_card():
-    """Fill tiers today's locked card left empty, without touching the rest.
+    """Safely recover genuinely empty tiers from the prepared board.
 
-    A tier can be published empty for two quite different reasons — the day
-    genuinely could not reach the target, or the value gate rejected the only
-    slip available. When a gate turns out to have been mis-set, the tier stays
-    blank until the next 08:00 WAT publish even though a perfectly good slip
-    exists for fixtures that have not kicked off.
-
-    This rebuilds the card and copies across only the tiers that are currently
-    empty. Anything already published is left untouched, so the guarantee that
-    matters — a slip you booked this morning is still the slip on the site —
-    holds exactly as before.
+    This endpoint intentionally does not force a prediction rebuild or use the
+    legacy payload-only fill helper.  Recovery is transactional: card, slip,
+    booking and provenance either all commit together or none do.
     """
     try:
         from leagues import daily_feed
-        from leagues.picks_db import fill_empty_card_tiers
-
-        fresh = daily_feed.build_daily_accumulators(force=True)
-        if not fresh:
-            raise HTTPException(404, "Could not rebuild the card")
-
-        publish_date = daily_feed._publish_date()
-        filled = fill_empty_card_tiers(publish_date, fresh.get("accumulators", {}))
-
-        # Rebuilding with force=True leaves the *unlocked* card in the response
-        # cache, which would serve freshly-reselected picks past the lock until
-        # the TTL expired. Drop it so the next read comes off the repaired card.
-        daily_feed._accum_cache.update({"result": None, "ts": 0.0})
-
-        return {"status": "success", "publish_date": publish_date, "filled": filled}
+        result = daily_feed.recover_today_empty_tiers()
+        if result.get("status") == "COMPLETE":
+            # Only discard the response cache after a transactional recovery
+            # succeeded; a failed booking must leave the locked card untouched.
+            if any(value.get("status") == "RECOVERED"
+                   for value in result.get("tiers", {}).values()):
+                daily_feed._accum_cache.update({"result": None, "ts": 0.0})
+            return {"status": "success", "publish_date": daily_feed._publish_date(), **result}
+        return {"status": "unavailable", **result}
     except HTTPException:
         raise
     except Exception as e:
@@ -1199,9 +1977,8 @@ async def odds_shop_status():
 async def get_fixtures_list(days_ahead: int = 3):
     """Upcoming fixtures with prices and the leagues currently in play."""
     try:
-        from leagues.engine import run_pipeline
-
-        _, fixtures = run_pipeline(days_ahead=days_ahead)
+        horizon = max(1, min(days_ahead, 7))
+        _, fixtures, board = _public_prepared_board(horizon)
         leagues: dict[str, dict] = {}
         for f in fixtures:
             entry = leagues.setdefault(
@@ -1212,7 +1989,10 @@ async def get_fixtures_list(days_ahead: int = 3):
             "status": "success",
             "total": len(fixtures),
             "leagues": sorted(leagues.values(), key=lambda x: -x["count"]),
+            "board": board,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Fixtures fetch failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
@@ -1229,11 +2009,15 @@ async def competition_coverage(days_ahead: int = 7, refresh: bool = False):
         )
         from leagues.engine import run_pipeline
         from leagues.espn_source import fetch_health
-        from leagues.elo_engine import get_ratings
+        from leagues.elo_engine import cached_ratings, get_ratings
 
-        _, fixtures = run_pipeline(days_ahead=max(1, min(days_ahead, 14)), force=refresh)
-        base_rates = get_base_rates()
-        ratings = get_ratings()
+        horizon = max(1, min(days_ahead, 14))
+        if refresh:
+            _, fixtures = run_pipeline(days_ahead=horizon, force=True)
+        else:
+            _, fixtures, _ = _public_prepared_board(horizon)
+        base_rates = get_base_rates(allow_refresh=refresh)
+        ratings = get_ratings(force=True) if refresh else cached_ratings()
         provider_health = fetch_health()
         by_slug: dict[str, list[dict]] = {}
         for fixture in fixtures:
@@ -1263,6 +2047,9 @@ async def competition_coverage(days_ahead: int = 7, refresh: bool = False):
                 ),
                 "historical_sample": int((base_rates.get(slug) or {}).get("matches") or 0),
                 "base_rate_source": rate.get("base_rate_source", "global_default"),
+                "history_fallback": (
+                    (base_rates.get("_history_fallback") or {}).get(slug)
+                ),
                 "rating_coverage": len(ratings.get(rating_pool) or {}),
                 "last_successful_fetch": health.get("last_successful_fetch"),
                 "error": health.get("error"),
@@ -1277,6 +2064,8 @@ async def competition_coverage(days_ahead: int = 7, refresh: bool = False):
                 "last_successful_fetch": None, "error": reason,
             })
         return {"status": "success", "competitions": rows}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"competition coverage failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))

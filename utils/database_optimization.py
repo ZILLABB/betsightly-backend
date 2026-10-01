@@ -11,7 +11,7 @@ import json
 from typing import List, Dict, Any, Optional, Callable
 from functools import wraps
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import and_, or_, desc, asc, event, Engine, text
+from sqlalchemy import and_, or_, desc, asc, event, Engine, inspect, text
 from datetime import datetime, timedelta
 
 # Set up logging
@@ -360,54 +360,265 @@ def get_cached_or_query(
 
 
 def create_database_indexes():
+    """Create only indexes supported by the live schema.
+
+    Older BetSightly deployments do not all contain the same legacy tables or
+    columns.  Startup should not issue knowingly invalid DDL and then log
+    UndefinedColumn/UndefinedTable warnings.  Missing legacy schema is skipped
+    explicitly; this function never invents tables or columns.
     """
-    Create database indexes for better query performance.
-    This should be run during application startup or migration.
-    """
+
     from database import engine
-    
-    indexes = [
-        # Predictions table indexes
-        "CREATE INDEX IF NOT EXISTS idx_predictions_fixture_id ON predictions (fixture_id);",
-        "CREATE INDEX IF NOT EXISTS idx_predictions_category ON predictions (category);",
-        "CREATE INDEX IF NOT EXISTS idx_predictions_created_at ON predictions (created_at);",
-        
-        # Fixtures table indexes
-        "CREATE INDEX IF NOT EXISTS idx_fixtures_date ON fixtures (date);",
-        "CREATE INDEX IF NOT EXISTS idx_fixtures_league_id ON fixtures (league_id);",
-        "CREATE INDEX IF NOT EXISTS idx_fixtures_status ON fixtures (status);",
-        
-        # Betting codes table indexes
-        "CREATE INDEX IF NOT EXISTS idx_betting_codes_punter_id ON betting_codes (punter_id);",
-        "CREATE INDEX IF NOT EXISTS idx_betting_codes_bookmaker_id ON betting_codes (bookmaker_id);",
-        "CREATE INDEX IF NOT EXISTS idx_betting_codes_featured ON betting_codes (featured);",
-        "CREATE INDEX IF NOT EXISTS idx_betting_codes_created_at ON betting_codes (created_at);",
-        
-        # Prediction combinations table indexes
-        "CREATE INDEX IF NOT EXISTS idx_prediction_combinations_category ON prediction_combinations (category);",
-        "CREATE INDEX IF NOT EXISTS idx_prediction_combinations_confidence ON prediction_combinations (combined_confidence);",
-        "CREATE INDEX IF NOT EXISTS idx_prediction_combinations_created_at ON prediction_combinations (created_at);",
-        
-        # Composite indexes for common query patterns
-        "CREATE INDEX IF NOT EXISTS idx_predictions_fixture_category ON predictions (fixture_id, category);",
-        "CREATE INDEX IF NOT EXISTS idx_fixtures_date_league ON fixtures (date, league_id);",
-        "CREATE INDEX IF NOT EXISTS idx_betting_codes_punter_featured ON betting_codes (punter_id, featured);",
+
+    index_specs = [
+        (
+            "idx_predictions_fixture_id",
+            "predictions",
+            (
+                "fixture_id",
+            ),
+        ),
+        (
+            "idx_predictions_category",
+            "predictions",
+            (
+                "category",
+            ),
+        ),
+        (
+            "idx_predictions_created_at",
+            "predictions",
+            (
+                "created_at",
+            ),
+        ),
+        (
+            "idx_fixtures_date",
+            "fixtures",
+            (
+                "date",
+            ),
+        ),
+        (
+            "idx_fixtures_league_id",
+            "fixtures",
+            (
+                "league_id",
+            ),
+        ),
+        (
+            "idx_fixtures_status",
+            "fixtures",
+            (
+                "status",
+            ),
+        ),
+        (
+            "idx_betting_codes_punter_id",
+            "betting_codes",
+            (
+                "punter_id",
+            ),
+        ),
+        (
+            "idx_betting_codes_bookmaker_id",
+            "betting_codes",
+            (
+                "bookmaker_id",
+            ),
+        ),
+        (
+            "idx_betting_codes_featured",
+            "betting_codes",
+            (
+                "featured",
+            ),
+        ),
+        (
+            "idx_betting_codes_created_at",
+            "betting_codes",
+            (
+                "created_at",
+            ),
+        ),
+        (
+            "idx_prediction_combinations_category",
+            "prediction_combinations",
+            (
+                "category",
+            ),
+        ),
+        (
+            "idx_prediction_combinations_confidence",
+            "prediction_combinations",
+            (
+                "combined_confidence",
+            ),
+        ),
+        (
+            "idx_prediction_combinations_created_at",
+            "prediction_combinations",
+            (
+                "created_at",
+            ),
+        ),
+        (
+            "idx_predictions_fixture_category",
+            "predictions",
+            (
+                "fixture_id",
+                "category",
+            ),
+        ),
+        (
+            "idx_fixtures_date_league",
+            "fixtures",
+            (
+                "date",
+                "league_id",
+            ),
+        ),
+        (
+            "idx_betting_codes_punter_featured",
+            "betting_codes",
+            (
+                "punter_id",
+                "featured",
+            ),
+        ),
     ]
-    
+
     try:
-        for index_sql in indexes:
+        inspector = inspect(
+            engine
+        )
+
+        tables = set(
+            inspector.get_table_names()
+        )
+
+        columns_by_table = {}
+
+        created = 0
+        skipped = 0
+
+        for (
+            index_name,
+            table_name,
+            columns,
+        ) in index_specs:
+
+            if (
+                table_name
+                not in tables
+            ):
+                skipped += 1
+
+                logger.info(
+                    "Skipping unavailable index %s: table %s does not exist",
+                    index_name,
+                    table_name,
+                )
+
+                continue
+
+            if (
+                table_name
+                not in columns_by_table
+            ):
+                columns_by_table[
+                    table_name
+                ] = {
+                    column[
+                        "name"
+                    ]
+                    for column
+                    in inspector.get_columns(
+                        table_name
+                    )
+                }
+
+            available_columns = (
+                columns_by_table[
+                    table_name
+                ]
+            )
+
+            missing_columns = [
+                column
+                for column
+                in columns
+                if column
+                not in available_columns
+            ]
+
+            if missing_columns:
+                skipped += 1
+
+                logger.info(
+                    "Skipping unavailable index %s: %s missing columns %s",
+                    index_name,
+                    table_name,
+                    ",".join(
+                        missing_columns
+                    ),
+                )
+
+                continue
+
+            column_sql = (
+                ", ".join(
+                    columns
+                )
+            )
+
+            index_sql = (
+                f"CREATE INDEX IF NOT EXISTS "
+                f"{index_name} "
+                f"ON {table_name} "
+                f"({column_sql});"
+            )
+
             try:
-                with engine.connect() as conn:
-                    conn.execute(text(index_sql))
-                    conn.commit()
-                    logger.info(f"Created index: {index_sql}")
-            except Exception as e:
-                logger.warning(f"Skipped index: {str(e).split(chr(10))[0]}")
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            index_sql
+                        )
+                    )
 
-        logger.info("Database indexes created successfully")
+                created += 1
 
-    except Exception as e:
-        logger.error(f"Error creating database indexes: {str(e)}")
+                logger.info(
+                    "Created index: %s",
+                    index_name,
+                )
+
+            except Exception as exc:
+                logger.warning(
+                    "Index creation failed for %s: %s",
+                    index_name,
+                    str(
+                        exc
+                    ).split(
+                        chr(
+                            10
+                        )
+                    )[0],
+                )
+
+        logger.info(
+            "Database index reconciliation complete: "
+            "created_or_existing=%s skipped_unavailable=%s",
+            created,
+            skipped,
+        )
+
+    except Exception as exc:
+        logger.error(
+            "Error reconciling database indexes: %s",
+            exc,
+        )
 
 
 def optimize_query_performance():
