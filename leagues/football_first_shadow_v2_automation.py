@@ -79,6 +79,24 @@ _STATE = {
     "last_v2_settled":
         None,
 
+    "last_history_refresh_status":
+        None,
+
+    "last_history_refresh_at":
+        None,
+
+    "last_base_rates_built_at":
+        None,
+
+    "last_team_history_built_at":
+        None,
+
+    "last_base_rate_competition_count":
+        None,
+
+    "last_team_history_match_count":
+        None,
+
     "runs":
         0,
 
@@ -202,6 +220,85 @@ def _update_state(
         )
 
 
+def _refresh_staging_history() -> dict:
+    """Refresh only the evidence artifacts needed by the staging worker.
+
+    Staging intentionally keeps ENABLE_BACKGROUND_JOBS=false, so the normal
+    daily-generation loop does not call start_history_prewarm(). The V2
+    evidence worker must therefore refresh these two caches itself before it
+    forces a new prospective board.
+
+    This does not publish a card, send notifications, settle public slips,
+    enable production workers, change prediction thresholds, or promote V2.
+    """
+
+    if _environment() != "staging":
+        return {
+            "status": "NOT_APPLICABLE",
+            "usable": False,
+            "staging_only": True,
+        }
+
+    from leagues.base_rates import get_base_rates
+    from leagues.team_history import load as load_team_history
+    from leagues.history_readiness import status as history_status
+
+    base_rates = get_base_rates(
+        force=False,
+        allow_refresh=True,
+    )
+
+    team_history = load_team_history(
+        force=False,
+        allow_refresh=True,
+    )
+
+    readiness = history_status()
+
+    competition_count = sum(
+        1
+        for key, value in (base_rates or {}).items()
+        if (
+            not str(key).startswith("_")
+            and isinstance(value, dict)
+            and int(value.get("matches") or 0) > 0
+        )
+    )
+
+    history_match_count = len(
+        (team_history or {}).get("matches") or []
+    )
+
+    usable = bool(
+        readiness.get("usable")
+    )
+
+    return {
+        "status": (
+            "READY"
+            if usable
+            else "NOT_READY"
+        ),
+        "usable": usable,
+        "staging_only": True,
+        "base_rates_built_at": (
+            (base_rates or {}).get("_built_at")
+        ),
+        "team_history_built_at": (
+            (team_history or {}).get("built_at")
+        ),
+        "base_rate_competition_count": (
+            competition_count
+        ),
+        "team_history_match_count": (
+            history_match_count
+        ),
+        "readiness_state": readiness.get(
+            "state"
+        ),
+    }
+
+
 def status() -> dict:
 
     with _STATE_LOCK:
@@ -293,6 +390,72 @@ def run_once() -> dict:
         ] += 1
 
     try:
+        history_refresh = (
+            _refresh_staging_history()
+        )
+
+        refresh_finished_at = (
+            _now_iso()
+        )
+
+        _update_state(
+            last_history_refresh_status=(
+                history_refresh.get("status")
+            ),
+            last_history_refresh_at=(
+                refresh_finished_at
+            ),
+            last_base_rates_built_at=(
+                history_refresh.get(
+                    "base_rates_built_at"
+                )
+            ),
+            last_team_history_built_at=(
+                history_refresh.get(
+                    "team_history_built_at"
+                )
+            ),
+            last_base_rate_competition_count=(
+                history_refresh.get(
+                    "base_rate_competition_count"
+                )
+            ),
+            last_team_history_match_count=(
+                history_refresh.get(
+                    "team_history_match_count"
+                )
+            ),
+        )
+
+        logger.info(
+            "V2 staging history refresh: "
+            "status=%s base_rates_built_at=%s "
+            "team_history_built_at=%s "
+            "base_rate_competitions=%s "
+            "team_history_matches=%s",
+            history_refresh.get("status"),
+            history_refresh.get(
+                "base_rates_built_at"
+            ),
+            history_refresh.get(
+                "team_history_built_at"
+            ),
+            history_refresh.get(
+                "base_rate_competition_count"
+            ),
+            history_refresh.get(
+                "team_history_match_count"
+            ),
+        )
+
+        if not history_refresh.get(
+            "usable"
+        ):
+            raise RuntimeError(
+                "staging history refresh did not "
+                "produce usable artifacts"
+            )
+
         from leagues.engine import (
             run_pipeline,
         )
@@ -396,6 +559,9 @@ def run_once() -> dict:
 
             "v2_observations":
                 observations,
+
+            "history":
+                history_refresh,
 
             "staging_only":
                 True,
