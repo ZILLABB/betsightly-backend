@@ -446,14 +446,29 @@ def _exact_validated_booking(slip: dict, booking: dict | None) -> float | None:
         return None
 
 
-def performance_summary(limit_days: int = 90,
-                        policy_version: str | None = None) -> dict:
+def performance_summary(
+    limit_days: int = 90,
+    policy_version: str | None = None,
+    as_of: date_type | str | None = None,
+) -> dict:
     """Aggregate win rate per category, plus profit on level 1-unit stakes."""
-    history = get_history(limit_days=limit_days)
+    history = (
+        get_history(limit_days=limit_days)
+        if as_of is None
+        else get_history(
+            limit_days=limit_days,
+            as_of=as_of,
+        )
+    )
     if policy_version is not None:
         history = [row for row in history
                    if row.get("policy_version") == policy_version]
-    bookings = _booking_records(history_cutoff(limit_days))
+    bookings = _booking_records(
+        history_cutoff(
+            limit_days,
+            as_of,
+        )
+    )
     by_cat: dict[str, dict] = {}
     for slip in history:
         if slip["status"] not in ("won", "lost"):
@@ -551,6 +566,149 @@ def performance_summary(limit_days: int = 90,
             if c["staked"] else 0.0,
         }
     return by_cat
+
+
+PRODUCT_ACCOUNTING_VERSION = "published-product-v1"
+
+
+def product_performance_summary(
+    limit_days: int = 90,
+    policy_version: str | None = None,
+    as_of: date_type | str | None = None,
+) -> dict:
+    """Count every published daily product once.
+
+    Over 1.5 remains an independent-picks product for model accuracy, but its
+    archived daily result contributes exactly one outcome to the public
+    product/slip headline.
+    """
+    history = (
+        get_history(limit_days=limit_days)
+        if as_of is None
+        else get_history(
+            limit_days=limit_days,
+            as_of=as_of,
+        )
+    )
+
+    if policy_version is not None:
+        history = [
+            row
+            for row in history
+            if row.get("policy_version") == policy_version
+        ]
+
+    by_category: dict[str, dict] = {}
+
+    won = 0
+    lost = 0
+    void = 0
+    pending = 0
+    oldest_pending_date = None
+
+    for row in history:
+        category = str(
+            row.get("category") or "unknown"
+        )
+
+        status = str(
+            row.get("status") or "pending"
+        ).lower()
+
+        record = by_category.setdefault(
+            category,
+            {
+                "unit": "published_product",
+                "won": 0,
+                "lost": 0,
+                "void": 0,
+                "pending": 0,
+                "settled": 0,
+            },
+        )
+
+        if status == "won":
+            won += 1
+            record["won"] += 1
+            record["settled"] += 1
+            continue
+
+        if status == "lost":
+            lost += 1
+            record["lost"] += 1
+            record["settled"] += 1
+            continue
+
+        if status == "void":
+            void += 1
+            record["void"] += 1
+            continue
+
+        pending += 1
+        record["pending"] += 1
+
+        row_date = row.get("date")
+
+        if (
+            row_date
+            and (
+                oldest_pending_date is None
+                or row_date < oldest_pending_date
+            )
+        ):
+            oldest_pending_date = row_date
+
+    for record in by_category.values():
+        settled = record["settled"]
+
+        record["win_rate"] = (
+            round(
+                record["won"] / settled,
+                4,
+            )
+            if settled
+            else None
+        )
+
+    settled = won + lost
+
+    return {
+        "accounting_version":
+            PRODUCT_ACCOUNTING_VERSION,
+
+        "unit":
+            "published_product",
+
+        "won":
+            won,
+
+        "lost":
+            lost,
+
+        "void":
+            void,
+
+        "pending":
+            pending,
+
+        "settled":
+            settled,
+
+        "win_rate": (
+            round(
+                won / settled,
+                4,
+            )
+            if settled
+            else None
+        ),
+
+        "oldest_pending_date":
+            oldest_pending_date,
+
+        "by_category":
+            by_category,
+    }
 
 
 # Confidence buckets used for calibration. Edges chosen so each band is wide
