@@ -213,91 +213,280 @@ def _dedupe_by_fixture(legs: list[dict]) -> list[dict]:
 
 
 def _recent_results(days: int = 7) -> dict:
-    """Yesterday's settled slips plus the running record."""
+    """Completed-day product record plus individual-pick accuracy."""
     try:
-        from leagues.picks_db import get_history, performance_summary
+        from leagues.picks_db import (
+            get_history,
+            performance_summary,
+            product_performance_summary,
+        )
 
-        history = get_history(limit_days=days)
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+        # Public reporting follows WAT, and excludes today's unfinished card.
+        wat_now = (
+            datetime.now(timezone.utc)
+            + timedelta(hours=1)
+        )
+
+        yesterday = (
+            wat_now
+            - timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+
+        history = get_history(
+            limit_days=days,
+            as_of=yesterday,
+        )
 
         settled_yesterday = []
+
         for slip in history:
-            if slip.get("date") != yesterday or slip.get("status") not in ("won", "lost"):
+            if slip.get("date") != yesterday:
                 continue
-            legs = slip.get("picks", [])
-            singles = slip.get("presentation") == "singles"
-            leg_won = sum(1 for p in legs if p.get("status") == "won")
-            leg_lost = sum(1 for p in legs if p.get("status") == "lost")
+
+            if slip.get("status") not in (
+                "won",
+                "lost",
+            ):
+                continue
+
+            legs = slip.get("picks") or []
+
+            singles = (
+                slip.get("presentation")
+                == "singles"
+            )
+
+            leg_won = sum(
+                1 for pick in legs
+                if pick.get("status") == "won"
+            )
+
+            leg_lost = sum(
+                1 for pick in legs
+                if pick.get("status") == "lost"
+            )
+
             settled_yesterday.append({
-                "category": slip.get("category"),
-                "label": TIER_LABELS.get(slip.get("category"), slip.get("category")),
-                "status": slip.get("status"),
-                # A singles tier is not one bet. Reporting "Over 1.5 lost" with
-                # a 7.04x combined price, on a day it went 7 from 10, describes
-                # a slip nobody placed.
-                "presentation": "singles" if singles else "accumulator",
-                "leg_won": leg_won,
-                "leg_lost": leg_lost,
-                "total_odds": (0.0 if singles
-                               else round(float(slip.get("total_odds") or 0.0), 2)),
+                "category":
+                    slip.get("category"),
+
+                "label":
+                    TIER_LABELS.get(
+                        slip.get("category"),
+                        slip.get("category"),
+                    ),
+
+                "status":
+                    slip.get("status"),
+
+                "presentation":
+                    (
+                        "singles"
+                        if singles
+                        else "accumulator"
+                    ),
+
+                "leg_won":
+                    leg_won,
+
+                "leg_lost":
+                    leg_lost,
+
+                "total_odds":
+                    (
+                        0.0
+                        if singles
+                        else round(
+                            float(
+                                slip.get("total_odds")
+                                or 0.0
+                            ),
+                            2,
+                        )
+                    ),
+
                 "legs": [
                     {
-                        "home_team": p.get("home_team"),
-                        "away_team": p.get("away_team"),
-                        "prediction": p.get("prediction"),
-                        "status": p.get("status"),
+                        "home_team":
+                            pick.get("home_team"),
+
+                        "away_team":
+                            pick.get("away_team"),
+
+                        "prediction":
+                            pick.get("prediction"),
+
+                        "status":
+                            pick.get("status"),
                     }
-                    for p in slip.get("picks", [])
+                    for pick in legs
                 ],
             })
 
-        summary = performance_summary(limit_days=days)
+        # Pick-level performance remains separate.
+        summary = performance_summary(
+            limit_days=days,
+            as_of=yesterday,
+        )
+
+        # One published category/day = one public product outcome.
+        product_record = (
+            product_performance_summary(
+                limit_days=days,
+                as_of=yesterday,
+            )
+        )
+
         try:
-            from leagues.rollover_db import history as rollover_history
+            from leagues.rollover_db import (
+                history as rollover_history,
+            )
+
             rollover_settled = [
-                row for row in rollover_history(limit_days=days)
-                if row.get("date") == yesterday
-                and row.get("status") in ("won", "lost", "void")
+                row
+                for row
+                in rollover_history(
+                    limit_days=days
+                )
+                if (
+                    row.get("date") == yesterday
+                    and row.get("status")
+                    in (
+                        "won",
+                        "lost",
+                        "void",
+                    )
+                )
             ]
+
         except Exception:
             rollover_settled = []
 
-        # Slips and singles are counted in different units and must not be
-        # added together. Doing so is why Telegram announced 70 wins while the
-        # site showed a different figure for the same window — the same
-        # conflation that made the results page report 94 individual Over 1.5
-        # picks as 94 slips.
-        def _tally(unit: str) -> dict:
-            rows = [c for c in summary.values()
-                    if (c.get("unit") or "slip") == unit]
-            w = sum(c.get("won", 0) for c in rows)
-            l = sum(c.get("lost", 0) for c in rows)
-            n = w + l
-            return {"won": w, "lost": l, "settled": n,
-                    "win_rate": round(w / n, 4) if n else None}
+        pick_rows = [
+            item
+            for item
+            in summary.values()
+            if item.get("unit") == "pick"
+        ]
 
-        slips = _tally("slip")
-        picks = _tally("pick")
+        pick_won = sum(
+            item.get("won", 0)
+            for item in pick_rows
+        )
+
+        pick_lost = sum(
+            item.get("lost", 0)
+            for item in pick_rows
+        )
+
+        pick_settled = (
+            pick_won + pick_lost
+        )
 
         return {
-            "date": yesterday,
-            "slips_settled": settled_yesterday,
-            "rollover_settled": rollover_settled,
-            # Headline figures are the slips — one bet, one outcome. Singles
-            # are reported alongside rather than folded in.
-            "won": slips["won"],
-            "lost": slips["lost"],
-            "settled": slips["settled"],
-            "win_rate": slips["win_rate"],
-            "singles": picks,
-            "window_days": days,
-            "by_category": summary,
+            "date":
+                yesterday,
+
+            "window_end":
+                yesterday,
+
+            "window_days":
+                days,
+
+            "accounting_version":
+                product_record[
+                    "accounting_version"
+                ],
+
+            "won":
+                product_record["won"],
+
+            "lost":
+                product_record["lost"],
+
+            "settled":
+                product_record["settled"],
+
+            "win_rate":
+                product_record["win_rate"],
+
+            "pending_products":
+                product_record["pending"],
+
+            "void_products":
+                product_record["void"],
+
+            "oldest_pending_date":
+                product_record[
+                    "oldest_pending_date"
+                ],
+
+            "is_final":
+                (
+                    product_record["pending"]
+                    == 0
+                ),
+
+            "product_record":
+                product_record,
+
+            "singles": {
+                "won":
+                    pick_won,
+
+                "lost":
+                    pick_lost,
+
+                "settled":
+                    pick_settled,
+
+                "win_rate":
+                    (
+                        round(
+                            pick_won / pick_settled,
+                            4,
+                        )
+                        if pick_settled
+                        else None
+                    ),
+            },
+
+            "slips_settled":
+                settled_yesterday,
+
+            "rollover_settled":
+                rollover_settled,
+
+            "by_category":
+                summary,
         }
+
     except Exception as e:
-        logger.warning(f"growth: results unavailable ({e})")
-        return {"date": None, "slips": [], "won": 0, "lost": 0,
-                "settled": 0, "win_rate": None, "window_days": days,
-                "by_category": {}}
+        logger.warning(
+            f"growth: results unavailable ({e})"
+        )
+
+        return {
+            "date": None,
+            "window_end": None,
+            "window_days": days,
+            "won": 0,
+            "lost": 0,
+            "settled": 0,
+            "win_rate": None,
+            "pending_products": 0,
+            "void_products": 0,
+            "is_final": False,
+            "singles": {
+                "won": 0,
+                "lost": 0,
+                "settled": 0,
+                "win_rate": None,
+            },
+            "slips_settled": [],
+            "rollover_settled": [],
+            "by_category": {},
+        }
 
 
 def build() -> Optional[dict]:

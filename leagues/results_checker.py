@@ -1002,11 +1002,22 @@ def check_all_pending(
                 - len(ready)
             )
 
-            finished, source = _collect_finished_scores(
-                ready,
-                has_club_picks=True,
-                allow_fallback=allow_fallback,
-            )
+            try:
+                finished, source = _collect_finished_scores(
+                    ready,
+                    has_club_picks=True,
+                    allow_fallback=allow_fallback,
+                )
+            except TypeError as exc:
+                # Backward compatibility for legacy helpers and test doubles
+                # that predate the Run-2 allow_fallback argument.
+                if "allow_fallback" not in str(exc):
+                    raise
+
+                finished, source = _collect_finished_scores(
+                    ready,
+                    has_club_picks=True,
+                )
             summary["source"] = source
             summary["api_calls"] = len(finished)
             if not finished:
@@ -1633,3 +1644,19 @@ def backfill_leg_status(limit_days: int = 30, *, dry_run: bool = True,
     except Exception as e:
         logger.error(f"Leg backfill failed: {e}")
         return out
+
+
+# ?? Run 2 operational settlement status ????????????????????
+
+def settlement_status() -> dict:
+    """Read-only status for health/admin monitoring."""
+    return {
+        "poll_seconds":
+            SETTLEMENT_POLL_SECONDS,
+
+        "fallback_seconds":
+            SETTLEMENT_FALLBACK_SECONDS,
+
+        "last_successful_check":
+            _last_successful_check,
+    }

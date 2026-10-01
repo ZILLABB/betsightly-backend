@@ -21,18 +21,99 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def runtime_process_status() -> Dict[str, Any]:
+    """Read-only process ownership summary."""
+    environment = (
+        os.getenv(
+            "ENVIRONMENT",
+            "development",
+        )
+        .strip()
+        .lower()
+    )
+
+    default_background = (
+        "true"
+        if environment == "production"
+        else "false"
+    )
+
+    background_jobs = (
+        os.getenv(
+            "ENABLE_BACKGROUND_JOBS",
+            default_background,
+        )
+        .strip()
+        .lower()
+        in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    )
+
+    role = (
+        os.getenv(
+            "BETSIGHTLY_PROCESS_ROLE",
+            "",
+        )
+        .strip()
+        .lower()
+    )
+
+    if not role:
+        role = (
+            "all"
+            if background_jobs
+            else "web"
+        )
+
+    try:
+        from leagues.results_checker import (
+            settlement_status,
+        )
+
+        settlement = (
+            settlement_status()
+        )
+
+    except Exception as exc:
+        settlement = {
+            "error":
+                type(exc).__name__,
+        }
+
+    return {
+        "environment":
+            environment,
+
+        "role":
+            role,
+
+        "background_jobs":
+            background_jobs,
+
+        "settlement":
+            settlement,
+    }
+
+
 @router.get("/")
 def health_check():
-    """
-    Basic health check endpoint.
-    
-    Returns:
-        Basic health status
-    """
+    """Basic health check endpoint."""
     return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "service": "BetSightly Backend API"
+        "status":
+            "healthy",
+
+        "timestamp":
+            datetime.now().isoformat(),
+
+        "service":
+            "BetSightly Backend API",
+
+        "runtime":
+            runtime_process_status(),
     }
 
 
@@ -49,6 +130,10 @@ def detailed_health_check(db: Session = Depends(get_db)):
         "timestamp": datetime.now().isoformat(),
         "service": "BetSightly Backend API",
         "version": "1.0.0",
+
+        "runtime":
+            runtime_process_status(),
+
         "checks": {}
     }
     

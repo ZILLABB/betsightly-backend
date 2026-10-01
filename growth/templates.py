@@ -540,86 +540,343 @@ def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
 
 # ── Template F — Results ───────────────────────────────────
 
-def results(data: dict, platform: str, ref: str | None = None) -> dict | None:
+def results(
+    data: dict,
+    platform: str,
+    ref: str | None = None,
+) -> dict | None:
     res = data.get("results") or {}
+
     if not res.get("settled"):
         return None
 
-    url = build_url("results", channel=platform, campaign="results",
-                    content="daily_results", ref=ref)
-    won, lost = res["won"], res["lost"]
+    url = build_url(
+        "results",
+        channel=platform,
+        campaign="results",
+        content="daily_results",
+        ref=ref,
+    )
+
+    won = int(res.get("won") or 0)
+    lost = int(res.get("lost") or 0)
+
     rate = res.get("win_rate")
-    rate_s = f"{rate:.0%}" if rate is not None else "n/a"
+
+    rate_s = (
+        f"{rate:.0%}"
+        if rate is not None
+        else "n/a"
+    )
+
+    pending = int(
+        res.get("pending_products")
+        or 0
+    )
+
+    provisional = pending > 0
+
+    pending_text = (
+        f"{pending} published "
+        f"{'product is' if pending == 1 else 'products are'} "
+        "still awaiting a verified final score."
+    )
+
+    label = (
+        "Results so far"
+        if provisional
+        else "Results"
+    )
 
     if platform == "telegram":
-        lines = ["\U0001f4ca *Betsightly Results*",
-                 f"_Last {res['window_days']} days_", "",
-                 f"✅ Won: *{won}*", f"❌ Lost: *{lost}*",
-                 f"\U0001f4c8 Strike rate: *{rate_s}*", ""]
-        for slip in res.get("slips_settled", [])[:5]:
-            if slip.get("presentation") == "singles":
-                # Report what actually happened: a count, not a verdict.
-                lines.append(
-                    f"📍 {slip['label']}: "
-                    f"{slip.get('leg_won', 0)} from "
-                    f"{slip.get('leg_won', 0) + slip.get('leg_lost', 0)}"
+        lines = [
+            "?? *Betsightly Results*",
+            (
+                f"_Last {res['window_days']} "
+                "completed days_"
+            ),
+            "",
+        ]
+
+        if provisional:
+            lines += [
+                "? *Results so far*",
+                pending_text,
+                "",
+            ]
+
+        lines += [
+            f"? Won: *{won}*",
+            f"? Lost: *{lost}*",
+            (
+                "?? Published-product "
+                f"strike rate: *{rate_s}*"
+            ),
+            "",
+        ]
+
+        for slip in res.get(
+            "slips_settled",
+            [],
+        )[:5]:
+
+            if (
+                slip.get("presentation")
+                == "singles"
+            ):
+                leg_won = int(
+                    slip.get("leg_won")
+                    or 0
                 )
+
+                leg_lost = int(
+                    slip.get("leg_lost")
+                    or 0
+                )
+
+                total = (
+                    leg_won + leg_lost
+                )
+
+                mark = (
+                    "?"
+                    if slip.get("status")
+                    == "won"
+                    else "?"
+                )
+
+                lines.append(
+                    f"{mark} "
+                    f"{slip['label']} "
+                    f"({leg_won}/{total} picks)"
+                )
+
             else:
-                mark = "✅" if slip["status"] == "won" else "❌"
-                lines.append(f"{mark} {slip['label']} ({slip['total_odds']:.2f}x)")
-        for day in res.get("rollover_settled", []):
-            mark = {"won": "✅", "lost": "❌", "void": "➖"}.get(
-                day.get("status"), "⏳")
-            lines.append(
-                f"{mark} Rollover Day {day.get('day_number')} "
-                f"({float(day.get('combined_odds') or 0):.2f}x)"
+                mark = (
+                    "?"
+                    if slip.get("status")
+                    == "won"
+                    else "?"
+                )
+
+                lines.append(
+                    f"{mark} "
+                    f"{slip['label']} "
+                    f"("
+                    f"{float(slip.get('total_odds') or 0):.2f}x"
+                    f")"
+                )
+
+        for day in res.get(
+            "rollover_settled",
+            [],
+        ):
+            mark = {
+                "won": "?",
+                "lost": "?",
+                "void": "?",
+            }.get(
+                day.get("status"),
+                "?",
             )
-        singles = res.get("singles") or {}
+
+            lines.append(
+                f"{mark} "
+                "Rollover Day "
+                f"{day.get('day_number')} "
+                f"("
+                f"{float(day.get('combined_odds') or 0):.2f}x"
+                f")"
+            )
+
+        singles = (
+            res.get("singles")
+            or {}
+        )
+
         if singles.get("settled"):
-            lines.append("")
-            lines.append(
-                f"Individual picks: {singles['won']} from {singles['settled']}"
-                + (f" ({singles['win_rate']:.0%})" if singles.get("win_rate") else "")
+            line = (
+                "?? Individual picks: "
+                f"{singles['won']} "
+                f"from {singles['settled']}"
             )
-        lines += ["", "_We publish losses as well as wins — a strike rate "
-                      "you cannot check is not a strike rate._", "",
-                  f"[Full results]({url})"]
-        return {"text": "\n".join(lines), "parse_mode": "Markdown", "url": url}
+
+            if singles.get("win_rate") is not None:
+                line += (
+                    f" "
+                    f"({singles['win_rate']:.0%})"
+                )
+
+            lines += [
+                "",
+                line,
+            ]
+
+        lines += [
+            "",
+            (
+                "_Published products and "
+                "individual picks are "
+                "tracked separately._"
+            ),
+            (
+                "_We publish losses as well "
+                "as wins ? a record you cannot "
+                "check is not a record._"
+            ),
+            "",
+            f"[Full results]({url})",
+        ]
+
+        return {
+            "text":
+                "\n".join(lines),
+
+            "parse_mode":
+                "Markdown",
+
+            "url":
+                url,
+        }
 
     if platform == "x":
-        return {"text": (
-            f"\U0001f4ca Results — last {res['window_days']} days\n\n"
-            f"Won {won} · Lost {lost}\nStrike rate {rate_s}\n\n"
-            f"Every settled slip is on the site, wins and losses.\n\n{url}"
-        ), "url": url}
+        text = (
+            f"?? {label} ? "
+            f"last {res['window_days']} "
+            "completed days\n\n"
+            f"{won}W ? {lost}L\n"
+            "Published-product "
+            f"strike rate {rate_s}\n"
+        )
 
-    if platform == "instagram":
-        return {"caption": (
-            f"\U0001f4ca RESULTS — LAST {res['window_days']} DAYS\n\n"
-            f"✅ Won: {won}\n❌ Lost: {lost}\n\U0001f4c8 Strike rate: {rate_s}\n\n"
-            f"We post the losses too. Link in bio.\n\n#footballpredictions #results"
-        ), "url": url, "card": {"kind": "results", "results": res}}
+        if provisional:
+            text += (
+                f"\n{pending_text}\n"
+            )
 
-    if platform == "facebook":
-        return {"text": (
-            f"\U0001f4ca Betsightly Results — last {res['window_days']} days\n\n"
-            f"Won: {won}\nLost: {lost}\nStrike rate: {rate_s}\n\n"
-            f"Every settled slip is published, wins and losses alike: {url}"
-        ), "url": url}
+        text += (
+            "\nIndividual-pick accuracy "
+            "is tracked separately.\n\n"
+            f"{url}"
+        )
 
-    if platform in ("tiktok", "youtube"):
         return {
-            "hook": f"Our last {res['window_days']} days, wins and losses.",
-            "script": [f"We won {won} and lost {lost}.",
-                       f"That is a {rate_s} strike rate.",
-                       "We publish the losing slips too, because a record you cannot check is not a record."],
-            "cta": "Every settled slip is on the site.",
-            "title": f"Results: {won}W-{lost}L over {res['window_days']} days",
-            "description": f"Strike rate {rate_s}. {url}",
+            "text": text,
             "url": url,
         }
 
-    return {"heading": "Results", "results": res, "url": url}
+    if platform == "instagram":
+        caption = (
+            f"?? {label.upper()} ? "
+            f"LAST {res['window_days']} "
+            "COMPLETED DAYS\n\n"
+            f"? Won: {won}\n"
+            f"? Lost: {lost}\n"
+            "?? Published-product "
+            f"strike rate: {rate_s}\n"
+        )
+
+        if provisional:
+            caption += (
+                f"\n{pending_text}\n"
+            )
+
+        caption += (
+            "\nIndividual picks are "
+            "tracked separately.\n\n"
+            "#footballpredictions #results"
+        )
+
+        return {
+            "caption": caption,
+            "url": url,
+            "card": {
+                "kind": "results",
+                "results": res,
+            },
+        }
+
+    if platform == "facebook":
+        text = (
+            f"?? Betsightly {label} ? "
+            f"last {res['window_days']} "
+            "completed days\n\n"
+            f"Won: {won}\n"
+            f"Lost: {lost}\n"
+            "Published-product "
+            f"strike rate: {rate_s}\n"
+        )
+
+        if provisional:
+            text += (
+                f"\n{pending_text}\n"
+            )
+
+        text += (
+            "\nIndividual-pick accuracy "
+            "is tracked separately.\n"
+            f"{url}"
+        )
+
+        return {
+            "text": text,
+            "url": url,
+        }
+
+    if platform in (
+        "tiktok",
+        "youtube",
+    ):
+        script = [
+            (
+                "Our published products "
+                f"went {won} wins and "
+                f"{lost} losses."
+            ),
+            (
+                "That is a "
+                f"{rate_s} published-product "
+                "strike rate."
+            ),
+            (
+                "Individual-pick accuracy "
+                "is a separate metric."
+            ),
+        ]
+
+        if provisional:
+            script.insert(
+                0,
+                pending_text,
+            )
+
+        return {
+            "hook":
+                f"{label} for BetSightly.",
+
+            "script":
+                script,
+
+            "cta":
+                "Every settled result "
+                "is on the site.",
+
+            "title":
+                f"{label}: {won}W-{lost}L",
+
+            "description":
+                f"Strike rate "
+                f"{rate_s}. {url}",
+
+            "url":
+                url,
+        }
+
+    return {
+        "heading": label,
+        "results": res,
+        "url": url,
+    }
 
 
 # Registry — content.py drives everything through this.

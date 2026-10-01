@@ -1551,7 +1551,11 @@ def get_results(days: int = 30, category: str | None = None):
     performance summary (win rate, profit and ROI at level 1-unit stakes).
     """
     try:
-        from leagues.picks_db import get_history, performance_summary
+        from leagues.picks_db import (
+            get_history,
+            performance_summary,
+            product_performance_summary,
+        )
         from leagues.rollover_db import history as rollover_history
         history = get_history(limit_days=days, category=category)
 
@@ -1559,7 +1563,15 @@ def get_results(days: int = 30, category: str | None = None):
         for slip in history:
             by_date.setdefault(slip["date"], {})[slip["category"]] = slip
 
-        summary = performance_summary(limit_days=days)
+        summary = performance_summary(
+            limit_days=days
+        )
+
+        product_record = (
+            product_performance_summary(
+                limit_days=days
+            )
+        )
 
         # Totals split by unit. Over 1.5 is a list of singles and is counted in
         # individual picks; every other tier is one slip. Adding them into a
@@ -1605,13 +1617,38 @@ def get_results(days: int = 30, category: str | None = None):
         }
         totals["slips"]["bookable_record"] = bookable
         totals["combined_profit"] = round(
-            totals["slips"]["profit"] + totals["picks"]["profit"], 2)
+            totals["slips"]["profit"]
+            + totals["picks"]["profit"],
+            2,
+        )
+
+        totals["products"] = {
+            key:
+                product_record.get(key)
+            for key in (
+                "accounting_version",
+                "unit",
+                "won",
+                "lost",
+                "void",
+                "pending",
+                "settled",
+                "win_rate",
+                "oldest_pending_date",
+            )
+        }
 
         return {
             "status": "success",
             "days": days,
-            "summary": summary,
-            "totals": totals,
+            "summary":
+                summary,
+
+            "product_record":
+                product_record,
+
+            "totals":
+                totals,
             "history": history,
             "rollover_history": rollover_history(limit_days=days),
             "by_date": by_date,
@@ -1619,6 +1656,182 @@ def get_results(days: int = 30, category: str | None = None):
     except Exception as e:
         logger.error(f"Results fetch failed: {e}", exc_info=True)
         raise HTTPException(500, str(e))
+
+
+@router.get("/runtime-status")
+async def get_runtime_status():
+    """Read-only runtime state; never triggers prediction generation."""
+    import os
+
+    environment = (
+        os.getenv(
+            "ENVIRONMENT",
+            "development",
+        )
+        .strip()
+        .lower()
+    )
+
+    default_background = (
+        "true"
+        if environment == "production"
+        else "false"
+    )
+
+    background_jobs = (
+        os.getenv(
+            "ENABLE_BACKGROUND_JOBS",
+            default_background,
+        )
+        .strip()
+        .lower()
+        in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    )
+
+    role = (
+        os.getenv(
+            "BETSIGHTLY_PROCESS_ROLE",
+            "",
+        )
+        .strip()
+        .lower()
+    )
+
+    if not role:
+        role = (
+            "all"
+            if background_jobs
+            else "web"
+        )
+
+    try:
+        from leagues.results_checker import (
+            settlement_status,
+        )
+
+        settlement = (
+            settlement_status()
+        )
+
+    except Exception as exc:
+        settlement = {
+            "error":
+                type(exc).__name__,
+        }
+
+    try:
+        from leagues.engine import (
+            prepared_board_status,
+        )
+
+        board = prepared_board_status(
+            days_ahead=7
+        )
+
+        prepared = {
+            "ready":
+                bool(board.get("ready")),
+
+            "degraded":
+                bool(
+                    board.get("degraded")
+                ),
+
+            "complete":
+                bool(
+                    board.get("complete")
+                ),
+
+            "age_seconds":
+                board.get("age_seconds"),
+
+            "source":
+                board.get("source"),
+
+            "provider":
+                board.get("provider"),
+        }
+
+    except Exception as exc:
+        prepared = {
+            "ready": False,
+            "error":
+                type(exc).__name__,
+        }
+
+    try:
+        from leagues.scheduler import (
+            last_runs,
+        )
+
+        recent_runs = last_runs(
+            limit=3
+        )
+
+    except Exception as exc:
+        recent_runs = [
+            {
+                "error":
+                    type(exc).__name__,
+            }
+        ]
+
+    return {
+        "status":
+            "success",
+
+        "process": {
+            "environment":
+                environment,
+
+            "role":
+                role,
+
+            "background_jobs":
+                background_jobs,
+
+            "owns_scheduler":
+                (
+                    background_jobs
+                    and role in (
+                        "scheduler",
+                        "all",
+                    )
+                ),
+
+            "owns_settlement":
+                (
+                    background_jobs
+                    and role in (
+                        "scheduler",
+                        "all",
+                    )
+                ),
+
+            "owns_telegram_polling":
+                (
+                    background_jobs
+                    and role in (
+                        "telegram",
+                        "all",
+                    )
+                ),
+        },
+
+        "settlement":
+            settlement,
+
+        "prepared_board":
+            prepared,
+
+        "recent_daily_runs":
+            recent_runs,
+    }
 
 
 @router.get("/performance")

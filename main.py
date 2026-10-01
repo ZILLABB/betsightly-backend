@@ -655,7 +655,26 @@ def health_check():
             "service": "BetSightly API",
             "version": "1.0.0",
             "timestamp": datetime.now().isoformat(),
-            "environment": os.getenv("ENVIRONMENT", "production")
+            "environment":
+                os.getenv(
+                    "ENVIRONMENT",
+                    "production",
+                ),
+
+            "process_role":
+                PROCESS_ROLE,
+
+            "background_jobs":
+                BACKGROUND_JOBS_ENABLED,
+
+            "scheduler_jobs":
+                SCHEDULER_JOBS_ENABLED,
+
+            "settlement_jobs":
+                SETTLEMENT_JOBS_ENABLED,
+
+            "telegram_polling":
+                TELEGRAM_POLLING_ENABLED,
         }
     except Exception as e:
         # Fallback response if anything fails
