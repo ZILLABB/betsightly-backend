@@ -147,6 +147,26 @@ def test_v2_automation_run_once_collects_fresh_board(
         football_first_shadow_v2_observations
         as v2obs,
     )
+    from leagues import builder_v2
+
+    monkeypatch.setattr(
+        builder_v2,
+        "list_candidates",
+        lambda options: {
+            "status": "success",
+            "candidate_count": 506,
+            "selection_diagnostics": {
+                "staging_supplemental_counts": {
+                    "qualified_pool": 14,
+                    "prepared_bookable": 14,
+                    "after_trust_and_policy": 14,
+                    "approved": 14,
+                },
+                "staging_supplemental_bookability_rejections": {},
+            },
+            "board": {"board_snapshot_id": "snapshot-test"},
+        },
+    )
 
     monkeypatch.setattr(
         v2obs,
@@ -220,6 +240,11 @@ def test_v2_automation_run_once_collects_fresh_board(
         == 42
     )
 
+    assert result["builder"]["candidate_count"] == 506
+    assert result["builder"]["supplemental_qualified"] == 14
+    assert result["builder"]["supplemental_bookable"] == 14
+    assert result["builder"]["supplemental_approved"] == 14
+
     state = (
         automation.status()
     )
@@ -244,6 +269,11 @@ def test_v2_automation_run_once_collects_fresh_board(
         ]
         == 7
     )
+
+    assert state["last_builder_candidate_count"] == 506
+    assert state["last_supplemental_qualified"] == 14
+    assert state["last_supplemental_bookable"] == 14
+    assert state["last_supplemental_approved"] == 14
 
     assert (
         state[

@@ -2027,6 +2027,9 @@ async def competition_coverage(days_ahead: int = 7, refresh: bool = False):
                 ),
                 "historical_sample": int((base_rates.get(slug) or {}).get("matches") or 0),
                 "base_rate_source": rate.get("base_rate_source", "global_default"),
+                "history_fallback": (
+                    (base_rates.get("_history_fallback") or {}).get(slug)
+                ),
                 "rating_coverage": len(ratings.get(rating_pool) or {}),
                 "last_successful_fetch": health.get("last_successful_fetch"),
                 "error": health.get("error"),

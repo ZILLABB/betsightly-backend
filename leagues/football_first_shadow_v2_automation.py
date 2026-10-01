@@ -97,6 +97,18 @@ _STATE = {
     "last_team_history_match_count":
         None,
 
+    "last_builder_candidate_count":
+        None,
+
+    "last_supplemental_qualified":
+        None,
+
+    "last_supplemental_bookable":
+        None,
+
+    "last_supplemental_approved":
+        None,
+
     "runs":
         0,
 
@@ -299,6 +311,30 @@ def _refresh_staging_history() -> dict:
     }
 
 
+def _builder_candidate_snapshot() -> dict:
+    """Read the prepared Builder pool after a successful staging refresh."""
+    try:
+        from leagues.builder_v2 import list_candidates
+        result = list_candidates({"horizon": "7_days", "require_bookable": True})
+        diagnostics = result.get("selection_diagnostics") or {}
+        supplemental = diagnostics.get("staging_supplemental_counts") or {}
+        return {
+            "status": result.get("status"),
+            "candidate_count": int(result.get("candidate_count") or 0),
+            "supplemental_qualified": int(supplemental.get("qualified_pool") or 0),
+            "supplemental_bookable": int(supplemental.get("prepared_bookable") or 0),
+            "supplemental_after_trust_policy": int(supplemental.get("after_trust_and_policy") or 0),
+            "supplemental_approved": int(supplemental.get("approved") or 0),
+            "supplemental_bookability_rejections": dict(
+                diagnostics.get("staging_supplemental_bookability_rejections") or {}
+            ),
+            "board_snapshot_id": (result.get("board") or {}).get("board_snapshot_id"),
+        }
+    except Exception as exc:
+        logger.warning("V2 staging Builder measurement failed: %s", exc, exc_info=True)
+        return {"status": "ERROR", "error_type": type(exc).__name__}
+
+
 def status() -> dict:
 
     with _STATE_LOCK:
@@ -482,6 +518,10 @@ def run_once() -> dict:
             or {}
         )
 
+        builder_snapshot = (
+            _builder_candidate_snapshot()
+        )
+
         finished_at = (
             _now_iso()
         )
@@ -515,6 +555,10 @@ def run_once() -> dict:
                 )
                 or 0
             ),
+            last_builder_candidate_count=(builder_snapshot.get("candidate_count")),
+            last_supplemental_qualified=(builder_snapshot.get("supplemental_qualified")),
+            last_supplemental_bookable=(builder_snapshot.get("supplemental_bookable")),
+            last_supplemental_approved=(builder_snapshot.get("supplemental_approved")),
             successes=(
                 _STATE[
                     "successes"
@@ -525,22 +569,18 @@ def run_once() -> dict:
 
         logger.info(
             "V2 staging evidence automation completed: "
-            "fixtures=%s picks=%s total=%s pending=%s settled=%s",
-            len(
-                fixtures
-            ),
-            len(
-                picks
-            ),
-            observations.get(
-                "total"
-            ),
-            observations.get(
-                "pending"
-            ),
-            observations.get(
-                "settled"
-            ),
+            "fixtures=%s picks=%s total=%s pending=%s settled=%s "
+            "builder_candidates=%s supplemental_qualified=%s "
+            "supplemental_bookable=%s supplemental_approved=%s",
+            len(fixtures),
+            len(picks),
+            observations.get("total"),
+            observations.get("pending"),
+            observations.get("settled"),
+            builder_snapshot.get("candidate_count"),
+            builder_snapshot.get("supplemental_qualified"),
+            builder_snapshot.get("supplemental_bookable"),
+            builder_snapshot.get("supplemental_approved"),
         )
 
         return {
@@ -562,6 +602,9 @@ def run_once() -> dict:
 
             "history":
                 history_refresh,
+
+            "builder":
+                builder_snapshot,
 
             "staging_only":
                 True,

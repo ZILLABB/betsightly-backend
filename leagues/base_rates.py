@@ -84,10 +84,42 @@ def _as_rates(sample: dict) -> dict:
 
 def _fetch_finished_range(slug: str, start: str, end: str, *,
                           as_of: datetime | None = None) -> list[tuple[int, int]]:
-    """Finished (home, away) scores from supported monthly ESPN queries."""
+    """Finished scores with ESPN primary and verified league-prior fallback.
+
+    The OpenFootball fallback is competition-level only. It is never fed
+    into current team form and is disabled for as-of replay.
+    """
+    from leagues.espn_history_fetch import HistoryMonthUnavailable
     from leagues.history_months import finished_matches
-    return [(row["hs"], row["as"]) for row in finished_matches(
-        slug, start, end, as_of=as_of)]
+
+    try:
+        rows = finished_matches(slug, start, end, as_of=as_of)
+    except HistoryMonthUnavailable as exc:
+        if as_of is not None or not exc.permanent:
+            raise
+        from leagues.openfootball_runtime_priors import finished_scores
+        fallback = finished_scores(slug)
+        if fallback:
+            logger.info(
+                "base-rate history fallback: slug=%s source=OpenFootball matches=%s",
+                slug, len(fallback),
+            )
+            return fallback
+        raise
+
+    scores = [(row["hs"], row["as"]) for row in rows]
+    if scores or as_of is not None:
+        return scores
+
+    from leagues.openfootball_runtime_priors import finished_scores
+    fallback = finished_scores(slug)
+    if fallback:
+        logger.info(
+            "base-rate empty ESPN fallback: slug=%s source=OpenFootball matches=%s",
+            slug, len(fallback),
+        )
+        return fallback
+    return scores
 
 
 def compute_base_rates(slugs: dict[str, str], *,
@@ -165,6 +197,11 @@ def compute_base_rates(slugs: dict[str, str], *,
     rates["_built_at"] = now.isoformat()
     rates["_failed_leagues"] = sorted(failed_leagues)
     rates["_unavailable_leagues"] = sorted(unavailable_leagues)
+    try:
+        from leagues.openfootball_runtime_priors import status as fallback_status
+        rates["_history_fallback"] = fallback_status()
+    except Exception:
+        rates["_history_fallback"] = {}
     return rates
 
 
