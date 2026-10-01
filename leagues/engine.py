@@ -32,6 +32,15 @@ _PREWARM_LOCK = threading.Lock()
 _PREWARMING = False
 _PERSISTENCE_LOCK = threading.Lock()
 _PERSISTENCE_HYDRATED = False
+_MAX_CACHED_HORIZONS = 3
+
+
+def interactive_refresh_allowed() -> bool:
+    """Only explicitly opted-in development/staging may prepare from a web process."""
+    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+    return environment not in {"production", "prod"} and os.getenv(
+        "ALLOW_INTERACTIVE_BOARD_REFRESH", "false"
+    ).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _parse_kickoff(value: str) -> datetime | None:
@@ -250,10 +259,21 @@ def _store_cache_entry(days_ahead: int, picks: list[dict],
             {},
         )[days_ahead] = entry
 
+    # A forced refresh may retain both latest and last healthy snapshots, but
+    # older horizon keys are never needed indefinitely. The scheduled seven-day
+    # board can serve shorter horizons without another full prediction run.
+    for bucket_name in ("entries", "healthy_entries"):
+        bucket = _CACHE.get(bucket_name, {})
+        while len(bucket) > _MAX_CACHED_HORIZONS:
+            alternatives = [key for key in bucket if key != 7]
+            oldest = min(alternatives or bucket,
+                         key=lambda key: bucket[key].get("ts", 0))
+            del bucket[oldest]
+
     try:
         from leagues import prepared_board_store
 
-        if prepared_board_store.enabled():
+        if days_ahead == 7 and prepared_board_store.enabled():
             prepared_board_store.persist_entry(
                 days_ahead,
                 entry,
@@ -416,8 +436,10 @@ def prepared_board(days_ahead: int = 7) -> tuple[list[dict], list[dict], dict]:
 
 def start_prepared_board_refresh(days_ahead: int = 7,
                                  force: bool = True) -> bool:
-    """Singleflight background preparation for an interactive Builder board."""
+    """Opt-in web refresh for development only; production uses the scheduler."""
     global _PREWARMING
+    if not interactive_refresh_allowed():
+        return False
     with _PREWARM_LOCK:
         if _PREWARMING:
             return False
@@ -443,13 +465,15 @@ _HISTORY_PREWARM_LOCK = threading.Lock()
 _HISTORY_PREWARMING = False
 
 
-def start_history_prewarm() -> bool:
+def start_history_prewarm(*, request_triggered: bool = False) -> bool:
     """Refresh historical inputs off the publication and request paths.
 
     Each artifact has a filesystem process claim. This is not a distributed
     lease across separate Render instances; staging must verify topology.
     """
     global _HISTORY_PREWARMING
+    if request_triggered and not interactive_refresh_allowed():
+        return False
     with _HISTORY_PREWARM_LOCK:
         if _HISTORY_PREWARMING:
             return False
@@ -521,6 +545,8 @@ def run_pipeline(days_ahead: int = 3, force: bool = False) -> tuple[list[dict], 
 
 def _build_pipeline(days_ahead: int, force: bool, now: float,
                     now_dt: datetime) -> tuple[list[dict], list[dict]]:
+    from utils.runtime_metrics import log_runtime_memory
+    refresh_source = threading.current_thread().name
     from leagues.history_readiness import HistoryNotReady, status
     if not status()["usable"] and os.getenv(
             "ENVIRONMENT", "").lower() in {"production", "staging"}:
@@ -536,7 +562,10 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     from leagues import ml_models
     from leagues.team_history import HistoryIndex
 
+    log_runtime_memory("board_before_espn_fetch", refresh_source=refresh_source)
     fixtures = get_fixtures(days_ahead=days_ahead, force=force)
+    log_runtime_memory("board_after_espn_fetch", refresh_source=refresh_source,
+                       fixture_count=len(fixtures))
 
     # Real, bookable prices and the margin behind each one. Never fatal: a
     # book that is unreachable leaves the fixtures exactly as ESPN supplied
@@ -545,6 +574,8 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     sportybet_coverage = {}
     sportybet_board = None
 
+    log_runtime_memory("board_before_sportybet_fetch", refresh_source=refresh_source,
+                       fixture_count=len(fixtures))
     try:
         from leagues import sportybet
 
@@ -576,6 +607,8 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
             "model_inputs_changed": False,
             "error_type": type(e).__name__,
         }
+    log_runtime_memory("board_after_sportybet_fetch", refresh_source=refresh_source,
+                       fixture_count=len(fixtures), matched_count=sb_matched)
 
     # Requests and the 08:00 publication path only consume completed history.
     # Cold ESPN refresh runs independently in start_history_prewarm().
@@ -590,6 +623,8 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     # snapshot so a mid-run refit cannot make two picks incomparable.
     fit = fit_calibration()
 
+    log_runtime_memory("board_before_enrichment", refresh_source=refresh_source,
+                       fixture_count=len(fixtures))
     # Second opinion from the trained ensemble, in shadow only: it is recorded
     # on each pick and evaluated against results, and does not move a published
     # number. Built once per run because the history index is a 15s fetch.
@@ -622,7 +657,6 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
             "SportyBet supplemental shadow audit unavailable: %s",
             e,
         )
-
         sportybet_shadow_supplemental = {
             "status": "unavailable",
             "shadow_only": True,
@@ -630,6 +664,8 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
             "prediction_pool_changed": False,
             "error_type": type(e).__name__,
         }
+    log_runtime_memory("board_after_enrichment", refresh_source=refresh_source,
+                       fixture_count=len(fixtures))
 
     all_picks: list[dict] = []
     priced = unpriced = with_elo = 0
@@ -655,6 +691,8 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         "publishing_changed": False,
     }
 
+    log_runtime_memory("board_before_prediction", refresh_source=refresh_source,
+                       fixture_count=len(fixtures))
     for fx in fixtures:
         base = rates_for(fx["league_slug"], cached_rates)
         fx["competition_historical_sample"] = int(base.get("matches") or 0)
@@ -748,6 +786,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         fx["_model"] = model
         all_picks.extend(build_picks(
             fx, model, min_confidence=MIN_CANDIDATE_CONFIDENCE, fit=fit))
+    log_runtime_memory("board_after_candidate_generation",
+                       refresh_source=refresh_source, fixture_count=len(fixtures),
+                       prediction_count=len(fixtures), candidate_count=len(all_picks))
 
     # SportyBet-only supplemental fixtures are modelled in isolation.
     # They never enter all_picks or fixtures and therefore cannot silently
@@ -886,6 +927,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     except Exception as exc:
         logger.error("decision board archive unavailable: %s", exc,
                      exc_info=True)
+    log_runtime_memory("board_before_persistence", refresh_source=refresh_source,
+                       fixture_count=len(fixtures), candidate_count=len(all_picks),
+                       board_snapshot_id=decision_snapshot_id)
     _store_cache_entry(
         days_ahead, all_picks, fixtures, now, now_dt, provider,
         decision_snapshot_id=decision_snapshot_id,
@@ -893,6 +937,9 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
             sportybet_staging_builder_picks
         ),
     )
+    log_runtime_memory("board_after_persistence", refresh_source=refresh_source,
+                       fixture_count=len(fixtures), candidate_count=len(all_picks),
+                       board_snapshot_id=decision_snapshot_id)
 
     # Settlement is isolated from this freshly generated prediction board.
     try:
@@ -910,6 +957,10 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
             exc,
         )
 
+    del sportybet_board, history, ratings, cached_rates
+    log_runtime_memory("board_after_cleanup", refresh_source=refresh_source,
+                       fixture_count=len(fixtures), candidate_count=len(all_picks),
+                       board_snapshot_id=decision_snapshot_id)
     return all_picks, fixtures
 
 

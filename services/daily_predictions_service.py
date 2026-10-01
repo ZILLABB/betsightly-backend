@@ -12,8 +12,6 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Float, Boolean, 
 from sqlalchemy.ext.declarative import declarative_base
 
 from database import Base, SessionLocal, engine, log_pool_exception, log_pool_status
-from services.fixture_service import FixtureService
-from services.accumulator_builder import AccumulatorBuilder
 # OddsService no longer needed — odds come embedded in fixture data
 
 # Set up logging
@@ -83,6 +81,8 @@ class DailyPredictionsService:
         # calls. Import its old ML implementation lazily so merely mounting the
         # legacy read/manual routes cannot load gigabytes of artifacts.
         from api.endpoints.ml_predictions import RealMLPredictionService
+        from services.fixture_service import FixtureService
+        from services.accumulator_builder import AccumulatorBuilder
 
         self.fixture_service = FixtureService()
         self.ml_service = RealMLPredictionService()

@@ -16,6 +16,7 @@ Provides:
 """
 
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -698,6 +699,21 @@ _SLIP_LOCKS: dict = {}
 _V2_TARGET_CACHE: dict = {}
 _V2_TARGET_LOCKS: dict = {}
 _BUILDER_REVISION_LOCKS: dict = {}
+_MAX_BUILDER_CACHE_ENTRIES = 32
+
+
+def _prune_builder_results(cache: dict, locks: dict, now: float) -> None:
+    """Bound full response retention without removing an in-flight lock."""
+    expired = [key for key, item in cache.items()
+               if now - float(item.get("ts") or 0) >= _SLIP_TTL]
+    for key in expired:
+        cache.pop(key, None)
+    while len(cache) > _MAX_BUILDER_CACHE_ENTRIES:
+        oldest = min(cache, key=lambda key: cache[key].get("ts", 0))
+        cache.pop(oldest, None)
+    for key, lock in list(locks.items()):
+        if key not in cache and not lock.locked():
+            locks.pop(key, None)
 
 
 class BuilderRevisionRequest(BaseModel):
@@ -1091,6 +1107,9 @@ async def slip_builder_v2_generate(request: BuilderV2Request):
                             "result": result,
                             "ts": _t.time(),
                         }
+                        _prune_builder_results(
+                            _V2_TARGET_CACHE, _V2_TARGET_LOCKS, _t.time(),
+                        )
                     result = {**result, "cached": False}
     else:
         result = await asyncio.to_thread(
@@ -1227,7 +1246,7 @@ async def _legacy_slip_builder_generate(target: float, horizon: str = "week",
         from leagues.engine import start_history_prewarm
         history = history_status()
         if not history["usable"]:
-            start_history_prewarm()
+            start_history_prewarm(request_triggered=True)
             return {
                 "status": "unavailable", "reason": "history_not_ready",
                 "retryable": True, "history": history,
@@ -1301,6 +1320,7 @@ async def _legacy_slip_builder_generate(target: float, horizon: str = "week",
             )
             if result.get("status") == "success":
                 _SLIP_CACHE[key] = {"result": result, "ts": _t.time()}
+                _prune_builder_results(_SLIP_CACHE, _SLIP_LOCKS, _t.time())
     except Exception as e:
         logger.error(f"Slip build failed: {e}", exc_info=True)
         log_pool_exception(
@@ -1350,20 +1370,21 @@ def _public_prepared_board(horizon: int) -> tuple[list[dict], list[dict], dict]:
     from leagues.engine import (prepared_board, start_history_prewarm,
                                 start_prepared_board_refresh)
 
+    # A single scheduled seven-day snapshot covers all public horizons.
     picks, fixtures, board = prepared_board(horizon)
     if board.get("ready") and fixtures:
         if board.get("stale"):
             board["refresh_started"] = start_prepared_board_refresh(
-                days_ahead=horizon, force=True)
+                days_ahead=7, force=True)
         return picks, fixtures, board
 
     from leagues.history_readiness import status as history_status
     history = history_status()
     if not history["usable"]:
-        started = start_history_prewarm()
+        started = start_history_prewarm(request_triggered=True)
         reason = "history_not_ready"
     else:
-        started = start_prepared_board_refresh(days_ahead=horizon, force=True)
+        started = start_prepared_board_refresh(days_ahead=7, force=True)
         reason = "board_refreshing"
     raise HTTPException(503, {
         "reason": reason, "retryable": True, "refresh_started": started,
@@ -2002,6 +2023,13 @@ async def get_fixtures_list(days_ahead: int = 3):
 async def competition_coverage(days_ahead: int = 7, refresh: bool = False):
     """Internal health report for every configured or explicitly rejected feed."""
     try:
+        if refresh and os.getenv("ENVIRONMENT", "").strip().lower() in {
+            "production", "prod",
+        }:
+            raise HTTPException(409, {
+                "reason": "board_refresh_requires_worker",
+                "retryable": False,
+            })
         from collections import Counter
         from leagues.base_rates import get_base_rates, rates_for
         from leagues.competition_registry import (

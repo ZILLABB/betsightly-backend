@@ -69,7 +69,7 @@ def test_stale_degraded_board_served_and_refreshes_once(monkeypatch):
     assert first["board"]["stale"] is True
     assert first["board"]["degraded"] is True
     assert first["board"]["refresh_started"] is True
-    assert calls == [{"days_ahead": 3, "force": True}]
+    assert calls == [{"days_ahead": 7, "force": True}]
 
 
 def test_fresh_degraded_board_does_not_refresh_loop(monkeypatch):
@@ -103,6 +103,8 @@ def test_cold_public_read_is_retryable_without_pipeline(monkeypatch):
 
 
 def test_concurrent_cold_public_reads_start_one_pipeline(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("ALLOW_INTERACTIVE_BOARD_REFRESH", "true")
     monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
     monkeypatch.setattr(engine, "_PERSISTENCE_HYDRATED", True)
     monkeypatch.setattr(engine, "_PREWARMING", False)

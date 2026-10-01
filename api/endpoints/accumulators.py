@@ -38,12 +38,12 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
         ).first()
         
         if not summary or summary.generation_status != "completed":
-            # Fallback to World Cup predictions when no league data
-            logger.info("No daily predictions — trying WC fallback...")
+            # Compatibility GET reads the official card; it must not generate
+            # a new board inside a public request worker.
+            logger.info("No legacy daily predictions — reading published card")
             try:
                 from leagues.daily_feed import build_daily_accumulators
-                wc_result = build_daily_accumulators()
-                logger.info(f"WC fallback result: {bool(wc_result)}")
+                wc_result = build_daily_accumulators(allow_generation=False)
                 if wc_result:
                     return wc_result
             except Exception as wc_err:
@@ -62,10 +62,10 @@ def get_todays_accumulators(db: Session = Depends(get_db)):
         ).all()
         
         if not predictions:
-            # Fallback to World Cup predictions
+            # Read-only compatibility fallback to the locked published card.
             try:
                 from leagues.daily_feed import build_daily_accumulators
-                wc_result = build_daily_accumulators()
+                wc_result = build_daily_accumulators(allow_generation=False)
                 if wc_result:
                     return wc_result
             except Exception as wc_err:

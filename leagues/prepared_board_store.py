@@ -199,6 +199,8 @@ def load_entries() -> list[dict]:
             ).where(
                 prepared_board_cache.c.schema_version
                 == SCHEMA_VERSION
+            ).where(
+                prepared_board_cache.c.horizon_days == 7
             ).order_by(
                 prepared_board_cache.c.saved_at.desc()
             )

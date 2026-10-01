@@ -54,7 +54,9 @@ def test_no_history_fails_before_provider_and_prewarm_orders_board(tmp_path, mon
     else:
         raise AssertionError("public board built without history")
 
-    # Exercise the background worker deterministically, with no provider I/O.
+    # Exercise the explicitly opted-in staging prewarm, with no provider I/O.
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("ALLOW_INTERACTIVE_BOARD_REFRESH", "true")
     order = []
     monkeypatch.setattr(base_rates, "get_base_rates", lambda: order.append("base"))
     monkeypatch.setattr(team_history, "load", lambda: order.append("team"))
