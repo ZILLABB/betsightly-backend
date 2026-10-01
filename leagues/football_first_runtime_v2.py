@@ -1,4 +1,4 @@
-﻿"""Combined Phase 8B.3-8B.6 runtime-context experiment.
+"""Combined Phase 8B.3-8B.6 runtime-context experiment.
 
 Additive only. Nothing here is wired into the deployed predictor.
 """
@@ -84,6 +84,18 @@ CONTEXT_COLUMNS = [
     *BASE_COLUMNS,
     *VENUE_COLUMNS,
     *REST_COLUMNS,
+]
+
+# Phase 8B.6 selected candidate.
+# Rest was evaluated but excluded because the 32-feature
+# Elo + base-rate + venue candidate performed better overall.
+V2_CANDIDATE_VERSION = "football-first-runtime-v2-candidate-32-v1"
+
+V2_CANDIDATE_FEATURE_COLUMNS = [
+    *RUNTIME_FEATURE_COLUMNS,
+    *RUNTIME_ELO_FEATURE_COLUMNS,
+    *BASE_COLUMNS,
+    *VENUE_COLUMNS,
 ]
 
 
@@ -1065,12 +1077,10 @@ def evaluate_runtime_v2(
             *BASE_COLUMNS,
         ],
 
-        "runtime_core_plus_elo_base_venue": [
-            *RUNTIME_FEATURE_COLUMNS,
-            *RUNTIME_ELO_FEATURE_COLUMNS,
-            *BASE_COLUMNS,
-            *VENUE_COLUMNS,
-        ],
+        "runtime_core_plus_elo_base_venue":
+            list(
+                V2_CANDIDATE_FEATURE_COLUMNS
+            ),
 
         "runtime_v2_full": [
             *RUNTIME_FEATURE_COLUMNS,

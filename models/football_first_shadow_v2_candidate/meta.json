@@ -1,0 +1,254 @@
+{
+  "artifact": {
+    "bytes": 2373,
+    "path": "models/football_first_shadow_v2_candidate/match_result.joblib",
+    "sha256": "f15d61c4161d751ab825cd3290606910f0f6bfbc9027139ebb9622ce3ad1b858"
+  },
+  "automatic_promotion": false,
+  "candidate_only": true,
+  "class_mapping": {
+    "0": "away_win",
+    "1": "draw",
+    "2": "home_win"
+  },
+  "combined_results": {
+    "conflicting_duplicates": 0,
+    "duplicate_rows": 0,
+    "input_normalized_rows": 76306,
+    "league_count": 36,
+    "max_date": "2026-06-01",
+    "min_date": "2012-01-24",
+    "same_score_duplicates_removed": 0,
+    "source_counts": {
+      "football_history": 9607,
+      "legacy_training_baseline": 66699
+    },
+    "unique_rows": 76306
+  },
+  "eligible_league_ids": [
+    39,
+    40,
+    61,
+    62,
+    71,
+    78,
+    88,
+    94,
+    103,
+    113,
+    119,
+    128,
+    135,
+    136,
+    140,
+    141,
+    144,
+    169,
+    179,
+    197,
+    203,
+    218,
+    253,
+    262
+  ],
+  "engine_integration": false,
+  "feature_columns": [
+    "home_win_rate_5",
+    "home_win_rate_10",
+    "home_draw_rate_5",
+    "home_goals_scored_5",
+    "home_goals_conceded_5",
+    "away_win_rate_5",
+    "away_win_rate_10",
+    "away_draw_rate_5",
+    "away_goals_scored_5",
+    "away_goals_conceded_5",
+    "h2h_home_win_rate",
+    "h2h_avg_goals",
+    "h2h_btts_rate",
+    "h2h_meetings",
+    "national_team_match",
+    "runtime_elo_available",
+    "runtime_elo_home_expectation",
+    "runtime_elo_diff_scaled",
+    "runtime_elo_evidence_scaled",
+    "runtime_base_sample_scaled",
+    "runtime_base_home_win",
+    "runtime_base_draw",
+    "runtime_base_away_win",
+    "runtime_base_over_1_5",
+    "runtime_base_over_2_5",
+    "runtime_base_btts",
+    "runtime_base_home_goals",
+    "runtime_base_away_goals",
+    "runtime_home_venue_win_5",
+    "runtime_home_venue_goals_5",
+    "runtime_away_venue_win_5",
+    "runtime_away_venue_goals_5"
+  ],
+  "feature_count": 32,
+  "feature_version": "football-first-runtime-v2-candidate-32-v1",
+  "league_policy": {
+    "counts_as_prospective_evidence": false,
+    "path": "audit/football_first_runtime_v2_league_policy.json",
+    "sha256": "ab4c61b96602bc16eb8a843be2eb57c2a1462f0d0a2f877813b7d42c91c1ced4"
+  },
+  "live_adjustment_allowed": false,
+  "model_version": "football-first-match-result-runtime-v2-candidate-32-20260601",
+  "production_promotion_credit": false,
+  "promotion_state": "FROZEN_OFFLINE_V2_CANDIDATE",
+  "prospective_observation_started_at": null,
+  "publishable": false,
+  "raw_feature_build": {
+    "feature_count": 28,
+    "input_matches": 76306,
+    "national_team_samples": 49,
+    "source_counts": {
+      "football_history": 7448,
+      "legacy_training_baseline": 64300
+    },
+    "trainable_samples": 71748,
+    "warmup_skipped": 4558
+  },
+  "remaining_blockers": [
+    "candidate_not_wired_to_runtime_shadow",
+    "v2_prospective_evidence_not_started",
+    "historical_base_rate_prior_universe_incomplete",
+    "historical_tournament_neutral_context_not_available",
+    "korea_saudi_historical_coverage_missing"
+  ],
+  "rest_exclusion_reason": "The 32-feature Elo + base-rate + venue candidate outperformed the 38-feature rest variant on Match Result, Over 1.5 and Over 2.5 in Phase 8B.6.",
+  "rest_features_excluded": [
+    "runtime_home_rest_available",
+    "runtime_home_rest_days_scaled",
+    "runtime_home_short_rest",
+    "runtime_away_rest_available",
+    "runtime_away_rest_days_scaled",
+    "runtime_away_short_rest"
+  ],
+  "runtime": {
+    "joblib": "1.6.0",
+    "python": "3.12.10",
+    "scikit_learn": "1.8.0"
+  },
+  "runtime_context_build": {
+    "automatic_promotion": false,
+    "away_rest_available": 70833,
+    "away_venue_available": 69757,
+    "base_availability_rate": 0.990007,
+    "base_available": 71031,
+    "base_rate_formula_matches_live_rates_for": true,
+    "base_rate_lookback_days": 45,
+    "base_rate_prior_blocker": "historical corpus does not contain every competition in the live ESPN registry",
+    "base_rate_prior_universe_complete": false,
+    "feature_version": "football-first-runtime-v2-context-v1",
+    "home_rest_available": 70875,
+    "home_venue_available": 69779,
+    "rest_contract": "shared_calendar_day_v2",
+    "rest_contract_matches_old_runtime_rest_context": false,
+    "same_day_results_visible": false,
+    "samples": 71748,
+    "team_history_lookback_days": 120,
+    "venue_formula_matches_history_index": true
+  },
+  "runtime_elo_build": {
+    "availability_rate": 0.812218,
+    "available": 58275,
+    "elo_core_version": "betsightly-runtime-elo-core-v1",
+    "feature_version": "football-first-runtime-elo-v2",
+    "history_window_days": 240,
+    "identity_allowlist_league_ids": [
+      39,
+      40,
+      61,
+      62,
+      71,
+      78,
+      79,
+      88,
+      94,
+      98,
+      103,
+      113,
+      119,
+      128,
+      135,
+      136,
+      140,
+      141,
+      144,
+      169,
+      179,
+      197,
+      203,
+      218,
+      253,
+      262
+    ],
+    "insufficient_evidence": 849,
+    "provider_identity_parity": false,
+    "provider_identity_parity_within_allowlist": true,
+    "provider_identity_scope": "phase8b2_verified_allowlist_v3",
+    "same_day_results_visible": false,
+    "samples": 71748,
+    "unsupported_context": 12624,
+    "window_rebuilds": 19021
+  },
+  "schema": 1,
+  "selected_family": "logistic",
+  "shadow_only": true,
+  "source_files": {
+    "football_history": {
+      "path": "data/football_history/openfootball_matches.csv",
+      "sha256": "36831c08c34d0ebd53dd8de70979e5d54a810b3575f0c75b5b11f200e2c1d40f"
+    },
+    "legacy": {
+      "path": "data/api-football/matches.csv",
+      "sha256": "4b66f1e69b8c78eaf2f31daceb6b2ad3279590fedf3095d746114714b8e9b98b"
+    },
+    "supplemental": {
+      "path": "data/football_history/espn_missing_target_matches.csv",
+      "sha256": "e394b41183b31d1264216ef92dc62f177929e2b4b83edcd07ab995882adb0e07"
+    }
+  },
+  "target": "match_result",
+  "trained_at": "2026-10-01T06:57:06.800046+00:00",
+  "trained_samples": 71748,
+  "training_cutoff": "2026-06-01",
+  "walk_forward_family_selection": {
+    "folds": [
+      {
+        "fold": 1,
+        "log_loss_skill_vs_prior": 0.044893,
+        "selected_family": "logistic",
+        "test_end": "2023-10-16",
+        "test_start": "2022-12-08"
+      },
+      {
+        "fold": 2,
+        "log_loss_skill_vs_prior": 0.045598,
+        "selected_family": "hist_gradient_boosting",
+        "test_end": "2024-08-25",
+        "test_start": "2023-10-17"
+      },
+      {
+        "fold": 3,
+        "log_loss_skill_vs_prior": 0.042923,
+        "selected_family": "hist_gradient_boosting",
+        "test_end": "2025-07-17",
+        "test_start": "2024-08-26"
+      },
+      {
+        "fold": 4,
+        "log_loss_skill_vs_prior": 0.04017,
+        "selected_family": "logistic",
+        "test_end": "2026-06-01",
+        "test_start": "2025-07-18"
+      }
+    ],
+    "selection_counts": {
+      "hist_gradient_boosting": 2,
+      "logistic": 2
+    }
+  }
+}
