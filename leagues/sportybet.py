@@ -2259,6 +2259,42 @@ def shadow_supplemental_readiness(
         )
     ]
 
+    by_league = {}
+    identity_not_ready = []
+
+    for item in results:
+        slug = str(item.get("league_slug") or "UNMAPPED")
+        league_bucket = by_league.setdefault(
+            slug,
+            {
+                "competition": item.get("competition"),
+                "evaluated": 0,
+                "ready": 0,
+                "readiness_counts": {},
+            },
+        )
+        league_bucket["evaluated"] += 1
+        state = str(item.get("readiness") or "UNKNOWN")
+        league_bucket["readiness_counts"][state] = (
+            int(league_bucket["readiness_counts"].get(state) or 0) + 1
+        )
+        if state == "READY_FOR_SHADOW_MODEL":
+            league_bucket["ready"] += 1
+        elif state == "TEAM_IDENTITY_NOT_READY":
+            identity_not_ready.append({
+                "event_id": item.get("event_id"),
+                "home_team": item.get("home_team"),
+                "away_team": item.get("away_team"),
+                "league_slug": item.get("league_slug"),
+                "competition": item.get("competition"),
+                "home_history_status": (
+                    item.get("home_history") or {}
+                ).get("status"),
+                "away_history_status": (
+                    item.get("away_history") or {}
+                ).get("status"),
+            })
+
     return {
         "status": "success",
         "shadow_only": True,
@@ -2281,6 +2317,13 @@ def shadow_supplemental_readiness(
         "readiness_counts": dict(
             states
         ),
+        "readiness_by_league": {
+            slug: by_league[slug]
+            for slug in sorted(by_league)
+        },
+        "identity_not_ready_samples": identity_not_ready[
+            :max(0, int(sample_limit))
+        ],
         "minimum_competition_history_matches": (
             MIN_SAMPLE
         ),

@@ -30,6 +30,26 @@ router = APIRouter(tags=["Leagues"])
 
 
 @router.get(
+    "/slip-builder/v2/staging-evidence-status",
+    dependencies=[Depends(require_api_key)],
+)
+async def staging_v2_evidence_status():
+    """Read-only staging V2 worker state and supplemental blocker counts."""
+    from leagues.football_first_shadow_v2_automation import status
+    return status()
+
+
+@router.post(
+    "/slip-builder/v2/staging-evidence-refresh",
+    dependencies=[Depends(require_api_key)],
+)
+async def staging_v2_evidence_refresh(force_history: bool = False):
+    """Trigger one non-blocking staging-only V2 evidence cycle."""
+    from leagues.football_first_shadow_v2_automation import trigger_once
+    return trigger_once(force_history=bool(force_history))
+
+
+@router.get(
     "/slip-builder/v2/shadow-board-status",
     dependencies=[Depends(require_api_key)],
 )

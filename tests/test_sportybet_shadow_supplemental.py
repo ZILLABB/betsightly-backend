@@ -230,3 +230,39 @@ def test_normalized_team_alias_can_resolve_existing_history_without_fuzzy_guessi
         sample["home_history"]["team"]
         == "Manchester United"
     )
+
+
+
+def test_readiness_report_groups_blockers_without_changing_matching():
+    now = datetime(2026, 9, 30, 12, tzinfo=timezone.utc)
+    ready_entry = _entry(
+        event_id="ready",
+        kickoff=now + timedelta(hours=4),
+    )
+    missing_entry = _entry(
+        event_id="missing",
+        home="Unknown Town",
+        away="Chelsea",
+        kickoff=now + timedelta(hours=5),
+    )
+    board = _board(ready_entry)
+    missing_key = (
+        f"{sportybet._norm(missing_entry['home_team'])}|"
+        f"{sportybet._norm(missing_entry['away_team'])}"
+    )
+    board[missing_key] = [missing_entry]
+
+    report = sportybet.shadow_supplemental_readiness(
+        [],
+        board,
+        cached_rates={"eng.1": {"matches": 30}},
+        history=_history(),
+        now=now,
+        days_ahead=3,
+    )
+
+    assert report["readiness_counts"]["READY_FOR_SHADOW_MODEL"] == 1
+    assert report["readiness_counts"]["TEAM_IDENTITY_NOT_READY"] == 1
+    assert report["readiness_by_league"]["eng.1"]["evaluated"] == 2
+    assert len(report["identity_not_ready_samples"]) == 1
+    assert report["identity_not_ready_samples"][0]["home_team"] == "Unknown Town"

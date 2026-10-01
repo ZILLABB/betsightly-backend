@@ -109,6 +109,18 @@ _STATE = {
     "last_supplemental_approved":
         None,
 
+    "last_supplemental_readiness_counts":
+        {},
+
+    "last_supplemental_ready_for_shadow":
+        None,
+
+    "last_supplemental_evaluated":
+        None,
+
+    "last_force_history":
+        False,
+
     "runs":
         0,
 
@@ -232,7 +244,7 @@ def _update_state(
         )
 
 
-def _refresh_staging_history() -> dict:
+def _refresh_staging_history(*, force: bool = False) -> dict:
     """Refresh only the evidence artifacts needed by the staging worker.
 
     Staging intentionally keeps ENABLE_BACKGROUND_JOBS=false, so the normal
@@ -256,12 +268,12 @@ def _refresh_staging_history() -> dict:
     from leagues.history_readiness import status as history_status
 
     base_rates = get_base_rates(
-        force=False,
+        force=bool(force),
         allow_refresh=True,
     )
 
     team_history = load_team_history(
-        force=False,
+        force=bool(force),
         allow_refresh=True,
     )
 
@@ -308,7 +320,69 @@ def _refresh_staging_history() -> dict:
         "readiness_state": readiness.get(
             "state"
         ),
+        "forced": bool(force),
+        "history_fallback": dict(
+            (base_rates or {}).get("_history_fallback")
+            or {}
+        ),
     }
+
+
+def _supplemental_readiness_snapshot(fixtures: list[dict]) -> dict:
+    """Read-only explanation of SportyBet-only supplemental blockers."""
+    try:
+        from leagues.base_rates import get_base_rates
+        from leagues.sportybet import fetch_board, shadow_supplemental_readiness
+        from leagues.team_history import HistoryIndex, load as load_team_history
+
+        rates = get_base_rates(force=False, allow_refresh=False)
+        history = HistoryIndex(
+            load_team_history(force=False, allow_refresh=False)
+        )
+        report = shadow_supplemental_readiness(
+            fixtures,
+            fetch_board(),
+            cached_rates=rates,
+            history=history,
+            days_ahead=7,
+            sample_limit=25,
+        )
+        return {
+            "status": report.get("status"),
+            "evaluated_fixture_count": int(
+                report.get("evaluated_fixture_count") or 0
+            ),
+            "ready_for_shadow_model_count": int(
+                report.get("ready_for_shadow_model_count") or 0
+            ),
+            "readiness_counts": dict(
+                report.get("readiness_counts") or {}
+            ),
+            "readiness_by_league": dict(
+                report.get("readiness_by_league") or {}
+            ),
+            "identity_not_ready_samples": list(
+                report.get("identity_not_ready_samples") or []
+            ),
+            "minimum_competition_history_matches": (
+                report.get("minimum_competition_history_matches")
+            ),
+            "minimum_team_history_matches": (
+                report.get("minimum_team_history_matches")
+            ),
+            "shadow_only": True,
+        }
+    except Exception as exc:
+        logger.warning(
+            "V2 staging supplemental readiness measurement failed: %s",
+            exc,
+            exc_info=True,
+        )
+        return {
+            "status": "ERROR",
+            "error_type": type(exc).__name__,
+            "shadow_only": True,
+        }
 
 
 def _builder_candidate_snapshot() -> dict:
@@ -379,8 +453,12 @@ def status() -> dict:
     return state
 
 
-def run_once() -> dict:
-    """Run one fresh staging evidence collection cycle synchronously."""
+def run_once(*, force_history: bool = False) -> dict:
+    """Run one staging evidence collection cycle synchronously.
+
+    ``force_history`` only bypasses history freshness inside this staging-only
+    worker. Production remains impossible because ``enabled()`` refuses it.
+    """
 
     if not enabled():
         return {
@@ -427,7 +505,9 @@ def run_once() -> dict:
 
     try:
         history_refresh = (
-            _refresh_staging_history()
+            _refresh_staging_history(
+                force=bool(force_history)
+            )
         )
 
         refresh_finished_at = (
@@ -461,6 +541,7 @@ def run_once() -> dict:
                     "team_history_match_count"
                 )
             ),
+            last_force_history=bool(force_history),
         )
 
         logger.info(
@@ -518,6 +599,12 @@ def run_once() -> dict:
             or {}
         )
 
+        supplemental_readiness = (
+            _supplemental_readiness_snapshot(
+                fixtures
+            )
+        )
+
         builder_snapshot = (
             _builder_candidate_snapshot()
         )
@@ -559,6 +646,15 @@ def run_once() -> dict:
             last_supplemental_qualified=(builder_snapshot.get("supplemental_qualified")),
             last_supplemental_bookable=(builder_snapshot.get("supplemental_bookable")),
             last_supplemental_approved=(builder_snapshot.get("supplemental_approved")),
+            last_supplemental_readiness_counts=dict(
+                supplemental_readiness.get("readiness_counts") or {}
+            ),
+            last_supplemental_ready_for_shadow=(
+                supplemental_readiness.get("ready_for_shadow_model_count")
+            ),
+            last_supplemental_evaluated=(
+                supplemental_readiness.get("evaluated_fixture_count")
+            ),
             successes=(
                 _STATE[
                     "successes"
@@ -571,7 +667,8 @@ def run_once() -> dict:
             "V2 staging evidence automation completed: "
             "fixtures=%s picks=%s total=%s pending=%s settled=%s "
             "builder_candidates=%s supplemental_qualified=%s "
-            "supplemental_bookable=%s supplemental_approved=%s",
+            "supplemental_bookable=%s supplemental_approved=%s "
+            "readiness=%s",
             len(fixtures),
             len(picks),
             observations.get("total"),
@@ -581,6 +678,7 @@ def run_once() -> dict:
             builder_snapshot.get("supplemental_qualified"),
             builder_snapshot.get("supplemental_bookable"),
             builder_snapshot.get("supplemental_approved"),
+            supplemental_readiness.get("readiness_counts"),
         )
 
         return {
@@ -605,6 +703,9 @@ def run_once() -> dict:
 
             "builder":
                 builder_snapshot,
+
+            "supplemental_readiness":
+                supplemental_readiness,
 
             "staging_only":
                 True,
@@ -662,6 +763,41 @@ def run_once() -> dict:
         _RUN_LOCK.release()
 
 
+def trigger_once(*, force_history: bool = False) -> dict:
+    """Start one staging evidence cycle without blocking the HTTP request."""
+    if not enabled():
+        return {
+            "status": "DISABLED",
+            "reason": "staging_only_or_flag_disabled",
+            "staging_only": True,
+            "automatic_promotion": False,
+        }
+
+    with _STATE_LOCK:
+        if _STATE.get("running"):
+            return {
+                "status": "SKIPPED",
+                "reason": "already_running",
+                "staging_only": True,
+                "automatic_promotion": False,
+            }
+
+    thread = threading.Thread(
+        target=run_once,
+        kwargs={"force_history": bool(force_history)},
+        daemon=True,
+        name="football-first-v2-staging-manual-refresh",
+    )
+    thread.start()
+
+    return {
+        "status": "STARTED",
+        "force_history": bool(force_history),
+        "staging_only": True,
+        "automatic_promotion": False,
+    }
+
+
 def _worker() -> None:
 
     delay = (
@@ -673,9 +809,16 @@ def _worker() -> None:
             delay
         )
 
+    first_run = True
+
     while enabled():
 
-        run_once()
+        # A staging deploy is our deterministic validation point for history
+        # fallbacks. Force history once after startup, then return to the normal
+        # freshness policy for six-hour cycles. Production can never reach
+        # this worker because enabled() is staging-only.
+        run_once(force_history=first_run)
+        first_run = False
 
         if not enabled():
             break
