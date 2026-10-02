@@ -36,9 +36,25 @@ _MAX_CACHED_HORIZONS = 3
 
 
 def interactive_refresh_allowed() -> bool:
-    """Only explicitly opted-in development/staging may prepare from a web process."""
-    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
-    return environment not in {"production", "prod"} and os.getenv(
+    """Allow request-triggered board refresh only where explicitly safe."""
+    environment = os.getenv(
+        "ENVIRONMENT", "development"
+    ).strip().lower()
+
+    role = os.getenv(
+        "BETSIGHTLY_PROCESS_ROLE", ""
+    ).strip().lower()
+
+    if (
+        environment in {"production", "prod", "staging"}
+        and role == "web"
+    ):
+        return False
+
+    if environment in {"production", "prod"}:
+        return False
+
+    return os.getenv(
         "ALLOW_INTERACTIVE_BOARD_REFRESH", "false"
     ).strip().lower() in {"1", "true", "yes", "on"}
 

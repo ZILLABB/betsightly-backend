@@ -378,3 +378,103 @@ def test_coverage_read_does_not_refresh_history_or_elo(monkeypatch):
     monkeypatch.setattr(elo_engine, "cached_ratings", lambda: {})
     result = asyncio.run(api.competition_coverage(days_ahead=3))
     assert result["status"] == "success"
+
+
+def test_live_scores_read_never_generates_missing_card(monkeypatch):
+    from leagues import daily_feed, live_scores
+
+    calls = []
+
+    monkeypatch.setattr(
+        daily_feed,
+        "build_daily_accumulators",
+        lambda **kwargs: calls.append(kwargs) or None,
+    )
+
+    result = live_scores.scores_for_card()
+
+    assert result == {
+        "scores": {},
+        "leagues": [],
+        "dates": [],
+    }
+
+    assert calls == [
+        {"allow_generation": False}
+    ]
+
+
+def test_staging_web_role_force_card_is_read_only(monkeypatch):
+    from leagues import daily_feed
+
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv(
+        "BETSIGHTLY_PROCESS_ROLE",
+        "web",
+    )
+
+    monkeypatch.setattr(
+        daily_feed,
+        "_accum_cache",
+        {"result": None, "ts": 0},
+    )
+
+    monkeypatch.setattr(
+        daily_feed,
+        "_load_locked",
+        lambda day: None,
+    )
+
+    _no_pipeline(monkeypatch)
+
+    assert (
+        daily_feed.build_daily_accumulators(
+            force=True
+        )
+        is None
+    )
+
+
+def test_staging_web_cannot_enable_interactive_refresh(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv(
+        "BETSIGHTLY_PROCESS_ROLE",
+        "web",
+    )
+    monkeypatch.setenv(
+        "ALLOW_INTERACTIVE_BOARD_REFRESH",
+        "true",
+    )
+
+    assert engine.interactive_refresh_allowed() is False
+
+    monkeypatch.setenv(
+        "BETSIGHTLY_PROCESS_ROLE",
+        "scheduler",
+    )
+
+    assert engine.interactive_refresh_allowed() is True
+
+
+def test_staging_web_cannot_force_competition_refresh(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv(
+        "BETSIGHTLY_PROCESS_ROLE",
+        "web",
+    )
+
+    _no_pipeline(monkeypatch)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            api.competition_coverage(
+                days_ahead=4,
+                refresh=True,
+            )
+        )
+
+    assert error.value.status_code == 409
+    assert (
+        error.value.detail["reason"]
+        == "board_refresh_requires_worker"
+    )

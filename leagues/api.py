@@ -2236,13 +2236,26 @@ async def get_fixtures_list(days_ahead: int = 3):
 async def competition_coverage(days_ahead: int = 7, refresh: bool = False):
     """Internal health report for every configured or explicitly rejected feed."""
     try:
-        if refresh and os.getenv("ENVIRONMENT", "").strip().lower() in {
-            "production", "prod",
-        }:
-            raise HTTPException(409, {
-                "reason": "board_refresh_requires_worker",
-                "retryable": False,
-            })
+        if refresh:
+            environment = os.getenv(
+                "ENVIRONMENT", ""
+            ).strip().lower()
+
+            role = os.getenv(
+                "BETSIGHTLY_PROCESS_ROLE", ""
+            ).strip().lower()
+
+            if (
+                environment in {"production", "prod"}
+                or (
+                    environment == "staging"
+                    and role == "web"
+                )
+            ):
+                raise HTTPException(409, {
+                    "reason": "board_refresh_requires_worker",
+                    "retryable": False,
+                })
         from collections import Counter
         from leagues.base_rates import get_base_rates, rates_for
         from leagues.competition_registry import (

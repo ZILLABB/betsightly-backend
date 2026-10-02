@@ -137,7 +137,9 @@ def scores_for_card() -> dict:
     try:
         from leagues.daily_feed import build_daily_accumulators
 
-        card = build_daily_accumulators()
+        card = build_daily_accumulators(
+            allow_generation=False
+        )
         if not card:
             return {"scores": {}, "leagues": [], "dates": []}
 

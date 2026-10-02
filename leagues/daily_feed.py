@@ -14,6 +14,7 @@ chance every leg wins — so a 10x slip is presented as the long shot it is.
 
 import json
 import logging
+import os
 from math import prod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -45,6 +46,22 @@ _MARGIN_TIE_BAND = 0.02
 # still ahead of the user rather than half-gone.
 WAT_OFFSET = timedelta(hours=1)
 PUBLISH_HOUR_WAT = 8
+
+
+def _web_role_read_only() -> bool:
+    """Deployed web processes may read cards but never generate them."""
+    environment = os.getenv(
+        "ENVIRONMENT", "development"
+    ).strip().lower()
+
+    role = os.getenv(
+        "BETSIGHTLY_PROCESS_ROLE", ""
+    ).strip().lower()
+
+    return (
+        environment in {"production", "prod", "staging"}
+        and role == "web"
+    )
 
 def _trusted_rollover_picks(picks: list) -> list:
     """Markets with enough settled evidence for the site's safest challenge."""
@@ -124,6 +141,12 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
                              allow_generation: bool = True) -> dict:
     """Category picks + rollover chain for the next actionable match day."""
     import time as _time
+
+    # Defence in depth: even if a caller forgets allow_generation=False,
+    # deployed web processes can never cold-start the prediction pipeline.
+    if preview is None and _web_role_read_only():
+        allow_generation = False
+
     now_ts = _time.time()
     if (preview is None and not force and _accum_cache["result"]
             and _accum_cache["result"].get("publication_date") == _publish_date()
