@@ -1660,8 +1660,14 @@ def get_results(days: int = 30, category: str | None = None):
 
 @router.get("/runtime-status")
 async def get_runtime_status():
-    """Read-only runtime state; never triggers prediction generation."""
+    """Read-only runtime state; never triggers generation."""
+
     import os
+
+    from utils.process_roles import (
+        resolve_process_role,
+        role_ownership,
+    )
 
     environment = (
         os.getenv(
@@ -1693,21 +1699,18 @@ async def get_runtime_status():
         }
     )
 
-    role = (
+    role = resolve_process_role(
+        background_jobs,
         os.getenv(
             "BETSIGHTLY_PROCESS_ROLE",
             "",
-        )
-        .strip()
-        .lower()
+        ),
     )
 
-    if not role:
-        role = (
-            "all"
-            if background_jobs
-            else "web"
-        )
+    ownership = role_ownership(
+        role,
+        background_jobs,
+    )
 
     try:
         from leagues.results_checker import (
@@ -1729,37 +1732,53 @@ async def get_runtime_status():
             prepared_board_status,
         )
 
-        board = prepared_board_status(
-            days_ahead=7
+        board = (
+            prepared_board_status(
+                days_ahead=7
+            )
         )
 
         prepared = {
             "ready":
-                bool(board.get("ready")),
+                bool(
+                    board.get("ready")
+                ),
 
             "degraded":
                 bool(
-                    board.get("degraded")
+                    board.get(
+                        "degraded"
+                    )
                 ),
 
             "complete":
                 bool(
-                    board.get("complete")
+                    board.get(
+                        "complete"
+                    )
                 ),
 
             "age_seconds":
-                board.get("age_seconds"),
+                board.get(
+                    "age_seconds"
+                ),
 
             "source":
-                board.get("source"),
+                board.get(
+                    "source"
+                ),
 
             "provider":
-                board.get("provider"),
+                board.get(
+                    "provider"
+                ),
         }
 
     except Exception as exc:
         prepared = {
-            "ready": False,
+            "ready":
+                False,
+
             "error":
                 type(exc).__name__,
         }
@@ -1774,19 +1793,19 @@ async def get_runtime_status():
         )
 
     except Exception as exc:
-        recent_runs = [
-            {
-                "error":
-                    type(exc).__name__,
-            }
-        ]
+        recent_runs = [{
+            "error":
+                type(exc).__name__,
+        }]
 
     try:
         from services.api_football_gateway import (
             quota_status,
         )
 
-        api_football = quota_status()
+        api_football = (
+            quota_status()
+        )
 
     except Exception as exc:
         api_football = {
@@ -1800,12 +1819,36 @@ async def get_runtime_status():
                 type(exc).__name__,
         }
 
+    try:
+        from leagues.runtime_heartbeat import (
+            status as heartbeat_status,
+        )
+
+        background_process = (
+            heartbeat_status(
+                role="worker",
+                stale_after_seconds=120,
+            )
+        )
+
+    except Exception as exc:
+        background_process = {
+            "active":
+                False,
+
+            "error":
+                type(exc).__name__,
+        }
+
     return {
         "status":
             "success",
 
         "api_football":
             api_football,
+
+        "background_process":
+            background_process,
 
         "process": {
             "environment":
@@ -1818,31 +1861,19 @@ async def get_runtime_status():
                 background_jobs,
 
             "owns_scheduler":
-                (
-                    background_jobs
-                    and role in (
-                        "scheduler",
-                        "all",
-                    )
-                ),
+                ownership[
+                    "scheduler"
+                ],
 
             "owns_settlement":
-                (
-                    background_jobs
-                    and role in (
-                        "scheduler",
-                        "all",
-                    )
-                ),
+                ownership[
+                    "settlement"
+                ],
 
             "owns_telegram_polling":
-                (
-                    background_jobs
-                    and role in (
-                        "telegram",
-                        "all",
-                    )
-                ),
+                ownership[
+                    "telegram"
+                ],
         },
 
         "settlement":

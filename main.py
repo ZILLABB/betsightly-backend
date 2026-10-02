@@ -64,60 +64,47 @@ LEGACY_PREDICTION_SETTLEMENT_ENABLED = os.getenv(
 
 # Explicit process ownership.
 #
-# Backward compatibility:
-# if no role is configured, the current production deployment continues
-# behaving as "all". Staging/Contabo can later separate the responsibilities.
-#
 # web       -> FastAPI only
-# scheduler -> generation + settlement + Growth
-# telegram  -> interactive Telegram polling
+# worker    -> scheduler + settlement + Telegram
+# scheduler -> compatibility scheduler/settlement role
+# telegram  -> compatibility Telegram-only role
 # all       -> legacy combined process
-_VALID_PROCESS_ROLES = {
-    "web",
-    "scheduler",
-    "telegram",
-    "all",
-}
+from utils.process_roles import (
+    resolve_process_role,
+    role_ownership,
+)
 
-PROCESS_ROLE = os.getenv(
-    "BETSIGHTLY_PROCESS_ROLE",
-    "",
-).strip().lower()
+PROCESS_ROLE = resolve_process_role(
+    BACKGROUND_JOBS_ENABLED,
+    os.getenv(
+        "BETSIGHTLY_PROCESS_ROLE",
+        "",
+    ),
+)
 
-if not PROCESS_ROLE:
-    PROCESS_ROLE = (
-        "all"
-        if BACKGROUND_JOBS_ENABLED
-        else "web"
-    )
-
-if PROCESS_ROLE not in _VALID_PROCESS_ROLES:
-    raise RuntimeError(
-        "Invalid BETSIGHTLY_PROCESS_ROLE: "
-        f"{PROCESS_ROLE}"
-    )
-
-
-def _role_owns(role: str) -> bool:
-    return (
-        PROCESS_ROLE == "all"
-        or PROCESS_ROLE == role
-    )
-
+_PROCESS_OWNERSHIP = role_ownership(
+    PROCESS_ROLE,
+    BACKGROUND_JOBS_ENABLED,
+)
 
 SCHEDULER_JOBS_ENABLED = (
-    BACKGROUND_JOBS_ENABLED
-    and _role_owns("scheduler")
+    _PROCESS_OWNERSHIP[
+        "scheduler"
+    ]
 )
 
 SETTLEMENT_JOBS_ENABLED = (
-    SCHEDULER_JOBS_ENABLED
+    _PROCESS_OWNERSHIP[
+        "settlement"
+    ]
 )
 
 TELEGRAM_POLLING_ENABLED = (
-    BACKGROUND_JOBS_ENABLED
-    and _role_owns("telegram")
+    _PROCESS_OWNERSHIP[
+        "telegram"
+    ]
 )
+
 
 # httpx logs full request URLs at INFO — the Telegram bot token is part of the
 # URL, so it would leak into production logs. Keep these loggers at WARNING.
@@ -340,49 +327,128 @@ if _legacy_prediction_settlement_should_start():
 
 
 def _start_telegram_bot_thread():
-    """
-    Spawn the Telegram bot polling loop in a supervised daemon thread.
+    """Start one cross-process Telegram polling owner."""
 
-    The bot crashes routinely during deploys (Telegram returns 409 Conflict
-    while old and new instances briefly poll simultaneously). Instead of
-    dying silently until the next deploy, restart with backoff — the old
-    instance exits within a minute and the retry then succeeds.
-    """
-    import threading
     import asyncio
+    import threading
     import time as _time
 
     MAX_RESTARTS = 10
 
     def _run():
         restarts = 0
-        while restarts <= MAX_RESTARTS:
-            try:
-                # The bot needs its own event loop inside this thread
-                asyncio.set_event_loop(asyncio.new_event_loop())
-                from telegram_bot import main as _bot_main
-                _bot_main()
-                logger.info("Telegram bot exited cleanly")
-                return
-            except Exception as e:
-                restarts += 1
-                backoff = min(30 * restarts, 300)  # 30s, 60s, ... capped at 5 min
-                is_conflict = "Conflict" in str(e) or "409" in str(e)
-                log = logger.warning if is_conflict else logger.error
-                log(
-                    f"Telegram bot {'conflict' if is_conflict else 'crashed'} "
-                    f"({restarts}/{MAX_RESTARTS}): {e} — restarting in {backoff}s"
-                )
-                _time.sleep(backoff)
-        logger.error("Telegram bot exceeded max restarts — giving up until next deploy")
 
-    if not os.getenv("TELEGRAM_BOT_TOKEN"):
-        logger.info("Telegram bot disabled (TELEGRAM_BOT_TOKEN not set)")
+        while restarts <= MAX_RESTARTS:
+            lease = None
+
+            try:
+                from services.process_leases import (
+                    acquire_process_lease,
+                )
+
+                lease = (
+                    acquire_process_lease(
+                        "betsightly:"
+                        "telegram:getUpdates"
+                    )
+                )
+
+                if lease is None:
+                    logger.info(
+                        "Telegram polling lease "
+                        "owned by another "
+                        "process; retrying"
+                    )
+
+                    _time.sleep(15)
+                    continue
+
+                asyncio.set_event_loop(
+                    asyncio.new_event_loop()
+                )
+
+                from telegram_bot import (
+                    main as _bot_main,
+                )
+
+                _bot_main()
+
+                logger.info(
+                    "Telegram bot exited cleanly"
+                )
+
+                return
+
+            except Exception as exc:
+                restarts += 1
+
+                backoff = min(
+                    30 * restarts,
+                    300,
+                )
+
+                is_conflict = (
+                    "Conflict" in str(exc)
+                    or "409" in str(exc)
+                )
+
+                log = (
+                    logger.warning
+                    if is_conflict
+                    else logger.error
+                )
+
+                log(
+                    "Telegram bot %s "
+                    "(%s/%s): %s ? "
+                    "restarting in %ss",
+                    (
+                        "conflict"
+                        if is_conflict
+                        else "crashed"
+                    ),
+                    restarts,
+                    MAX_RESTARTS,
+                    exc,
+                    backoff,
+                )
+
+                _time.sleep(
+                    backoff
+                )
+
+            finally:
+                if lease is not None:
+                    lease.release()
+
+        logger.error(
+            "Telegram bot exceeded "
+            "max restarts ? giving up "
+            "until next deploy"
+        )
+
+    if not os.getenv(
+        "TELEGRAM_BOT_TOKEN"
+    ):
+        logger.info(
+            "Telegram bot disabled "
+            "(TELEGRAM_BOT_TOKEN "
+            "not set)"
+        )
         return
 
-    t = threading.Thread(target=_run, daemon=True, name="telegram-bot")
-    t.start()
-    logger.info("Telegram bot started in supervised background thread")
+    thread = threading.Thread(
+        target=_run,
+        daemon=True,
+        name="telegram-bot",
+    )
+
+    thread.start()
+
+    logger.info(
+        "Telegram bot started in "
+        "supervised background thread"
+    )
 
 
 if TELEGRAM_POLLING_ENABLED:
