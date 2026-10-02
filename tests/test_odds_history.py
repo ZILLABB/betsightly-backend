@@ -1,10 +1,12 @@
 """Phase 9 odds evidence is immutable, exact and never a live-policy input."""
 from datetime import datetime, timedelta, timezone
+import asyncio
 import json
 
 import pytest
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException
 from sqlalchemy.orm import sessionmaker
 
 from leagues import odds_history as history
@@ -191,6 +193,56 @@ def test_extra_closing_fetch_is_disabled_and_never_available_to_web(monkeypatch)
     assert history.capture_closing_snapshot()["status"] == "wrong_process_role"
 
 
+@pytest.mark.parametrize("role,enabled,expected", [
+    ("web", True, "wrong_process_role"),
+    ("telegram", True, "wrong_process_role"),
+    ("worker", True, "owned_elsewhere"),
+    ("scheduler", True, "owned_elsewhere"),
+    ("all", True, "owned_elsewhere"),
+    ("all", False, "wrong_process_role"),
+    ("worker", False, "wrong_process_role"),
+    ("scheduler", False, "wrong_process_role"),
+])
+def test_closing_capture_respects_existing_process_ownership(
+        db, monkeypatch, role, enabled, expected):
+    from leagues import sportybet
+    from services import process_leases
+    monkeypatch.setenv("ODDS_HISTORY_CLOSE_FETCH_ENABLED", "true")
+    monkeypatch.setenv("BETSIGHTLY_PROCESS_ROLE", role)
+    monkeypatch.setenv("ENABLE_BACKGROUND_JOBS", str(enabled).lower())
+    monkeypatch.setattr(process_leases, "acquire_process_lease", lambda *a: None)
+    monkeypatch.setattr(sportybet, "fetch_board", lambda **kw: pytest.fail("network"))
+    assert history.capture_closing_snapshot()["status"] == expected
+
+
+def test_clv_report_default_and_explicit_bounded_ranges(monkeypatch):
+    from leagues import api
+    captured = []
+    monkeypatch.setattr(history, "selection_report", lambda **kw: captured.append(kw) or [])
+    monkeypatch.setattr(history, "aggregate_report", lambda rows: rows)
+    asyncio.run(api.clv_report(start=None, end=None))
+    assert captured[-1]["end"] - captured[-1]["start"] == timedelta(days=30)
+    asyncio.run(api.clv_report(start="2026-09-01T01:00:00+01:00",
+                               end="2026-09-03T00:00:00Z"))
+    assert captured[-1]["start"] == datetime(2026, 9, 1, tzinfo=UTC)
+    assert captured[-1]["end"] == datetime(2026, 9, 3, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("start,end", [
+    ("2026-09-01", "2026-10-03"),
+    ("2026-09-03", "2026-09-02"),
+    ("2026-09-03", "2026-09-03"),
+    ("not-a-date", "2026-09-03"),
+])
+def test_clv_report_rejects_unbounded_reverse_zero_and_malformed(
+        monkeypatch, start, end):
+    from leagues import api
+    monkeypatch.setattr(history, "selection_report", lambda **kw: pytest.fail("query"))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(api.clv_report(start=start, end=end))
+    assert exc.value.status_code == 400
+
+
 def test_clv_admin_routes_require_api_key():
     from leagues.api import router
     from utils.security import require_api_key
@@ -224,6 +276,17 @@ def test_observation_status_has_no_credentials(db):
     assert status["observation_count"] == 1
     assert status["provider_counts"] == {"sportybet": 1}
     assert "token" not in str(status).lower()
+
+
+def test_last_successful_capture_uses_persist_time_not_provider_time(db):
+    history.ingest_observations([
+        observation(at=ENTRY_AT - timedelta(days=30))
+    ])
+    status = history.status_report()
+    assert history._db_utc(status["latest_observation"]) == (
+        ENTRY_AT - timedelta(days=30))
+    assert history._db_utc(status["last_successful_capture"]) > (
+        ENTRY_AT - timedelta(days=30))
 
 
 def test_builder_archive_integrates_entry_capture_without_changing_result(db, monkeypatch):

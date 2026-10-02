@@ -18,7 +18,7 @@ Provides:
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -39,17 +39,22 @@ async def clv_status():
 
 @router.get("/clv/report", dependencies=[Depends(require_api_key)])
 async def clv_report(start: str | None = None, end: str | None = None):
-    """Read-only, sample-counted CLV from immutable recorded quotes."""
+    """Read-only CLV, restricted to a maximum 31-day UTC window."""
     from leagues.odds_history import aggregate_report, selection_report
     def parse(value):
-        if not value:
+        if value is None:
             return None
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError as exc:
+        except (ValueError, TypeError) as exc:
             raise HTTPException(400, "Use an ISO date or timestamp") from exc
-        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
-    return aggregate_report(selection_report(start=parse(start), end=parse(end)))
+        return (parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None
+                else parsed.astimezone(timezone.utc))
+    end_at = parse(end) or datetime.now(timezone.utc)
+    start_at = parse(start) or end_at - timedelta(days=30)
+    if start_at >= end_at or end_at - start_at > timedelta(days=31):
+        raise HTTPException(400, "CLV report range must be positive and at most 31 days")
+    return aggregate_report(selection_report(start=start_at, end=end_at))
 
 
 @router.get(

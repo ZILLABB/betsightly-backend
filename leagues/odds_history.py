@@ -281,8 +281,16 @@ def capture_closing_snapshot() -> dict:
     if os.getenv("ODDS_HISTORY_CLOSE_FETCH_ENABLED", "false").lower() not in {
             "1", "true", "yes"}:
         return {"status": "disabled", "provider_calls": 0}
-    role = os.getenv("BETSIGHTLY_PROCESS_ROLE", "web").lower()
-    if role not in {"worker", "scheduler"}:
+    from utils.process_roles import resolve_process_role, role_ownership
+    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+    background_default = "true" if environment == "production" else "false"
+    background_enabled = os.getenv(
+        "ENABLE_BACKGROUND_JOBS", background_default
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    role = resolve_process_role(
+        background_enabled, os.getenv("BETSIGHTLY_PROCESS_ROLE", "")
+    )
+    if not role_ownership(role, background_enabled)["scheduler"]:
         return {"status": "wrong_process_role", "provider_calls": 0}
     from sqlalchemy import inspect
     if not inspect(engine).has_table("odds_observations"):
@@ -478,17 +486,18 @@ def status_report() -> dict:
     with engine.connect() as conn:
         row = conn.execute(select(func.count(), func.min(observations.c.observed_at),
                                   func.max(observations.c.observed_at),
+                                  func.max(observations.c.created_at),
                                   func.count(func.distinct(observations.c.canonical_fixture_id)))).one()
         providers = dict(conn.execute(select(observations.c.provider,
                               func.count()).group_by(observations.c.provider)).all())
     result = aggregate_report(selection_report())
     return {"observation_count": row[0], "earliest_observation": row[1],
-            "latest_observation": row[2], "fixture_count": row[3],
+            "latest_observation": row[2], "fixture_count": row[4],
             "provider_counts": providers,
             "selections_awaiting_close": result["pending_count"],
             "selections_evaluated": result["evaluated_count"],
             "selections_unavailable": result["unavailable_count"],
-            "last_successful_capture": row[2]}
+            "last_successful_capture": row[3]}
 
 
 def backfill_archive_entries(start: datetime, end: datetime, *,
