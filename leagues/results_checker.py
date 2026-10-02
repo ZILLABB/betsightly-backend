@@ -48,6 +48,71 @@ SCORES_SPORTS_WC = ["soccer_fifa_world_cup"]
 
 _last_successful_check: Optional[str] = None
 
+_settlement_status_lock = threading.Lock()
+_results_checker_thread = None
+_last_loop_started_at: Optional[str] = None
+_last_loop_finished_at: Optional[str] = None
+_last_loop_error: Optional[str] = None
+_last_loop_iteration = 0
+_last_loop_summary: Dict[str, Any] = {}
+
+
+def _begin_settlement_cycle(iteration: int) -> None:
+    global _last_loop_started_at
+    global _last_loop_finished_at
+    global _last_loop_error
+    global _last_loop_iteration
+    global _last_loop_summary
+
+    with _settlement_status_lock:
+        _last_loop_started_at = (
+            datetime.now(timezone.utc).isoformat()
+        )
+        _last_loop_finished_at = None
+        _last_loop_error = None
+        _last_loop_iteration = iteration
+        _last_loop_summary = {}
+
+
+def _record_settlement_component(
+    component: str,
+    summary,
+) -> None:
+    with _settlement_status_lock:
+        if isinstance(summary, dict):
+            _last_loop_summary[component] = dict(summary)
+        else:
+            _last_loop_summary[component] = {
+                "value": summary,
+            }
+
+
+def _record_settlement_error(
+    component: str,
+    exc: Exception,
+) -> None:
+    global _last_loop_error
+
+    error_type = type(exc).__name__
+
+    with _settlement_status_lock:
+        _last_loop_error = (
+            f"{component}:{error_type}"
+        )
+
+        _last_loop_summary[component] = {
+            "error": error_type,
+        }
+
+
+def _finish_settlement_cycle() -> None:
+    global _last_loop_finished_at
+
+    with _settlement_status_lock:
+        _last_loop_finished_at = (
+            datetime.now(timezone.utc).isoformat()
+        )
+
 # Reporting age is diagnostic only. It is never grounds for a void without
 # explicit verified fixture status or market push semantics.
 MISSING_RESULT_GRACE = timedelta(hours=48)
@@ -1164,6 +1229,7 @@ def run_loop():
 
     while True:
         iteration += 1
+        _begin_settlement_cycle(iteration)
 
         allow_fallback = (
             iteration == 1
@@ -1175,6 +1241,11 @@ def run_loop():
                 allow_fallback=allow_fallback
             )
 
+            _record_settlement_component(
+                "rollover",
+                result,
+            )
+
             if result.get("api_calls"):
                 logger.info(
                     "Results check used %s "
@@ -1184,27 +1255,56 @@ def run_loop():
                 )
 
         except Exception as e:
+            _record_settlement_error(
+                "rollover",
+                e,
+            )
+
             logger.error(
                 "Results check loop iteration "
                 f"failed: {e}"
             )
 
         try:
-            settle_published_slips(
-                allow_fallback=allow_fallback
+            published_summary = (
+                settle_published_slips(
+                    allow_fallback=allow_fallback
+                )
+            )
+
+            _record_settlement_component(
+                "published_slips",
+                published_summary,
             )
 
         except Exception as e:
+            _record_settlement_error(
+                "published_slips",
+                e,
+            )
+
             logger.error(
                 f"Slip settlement failed: {e}"
             )
 
         try:
-            settle_builder_predictions(
-                allow_fallback=allow_fallback
+            builder_summary = (
+                settle_builder_predictions(
+                    allow_fallback=allow_fallback
+                )
+            )
+
+            _record_settlement_component(
+                "builder",
+                builder_summary,
             )
 
         except Exception as e:
+            _record_settlement_error(
+                "builder",
+                e,
+            )
+
             logger.error(
                 f"Builder settlement failed: {e}"
             )
@@ -1237,18 +1337,36 @@ def run_loop():
                     f"Rollover cleanup failed: {e}"
                 )
 
+        _finish_settlement_cycle()
+
         time.sleep(
             SETTLEMENT_POLL_SECONDS
         )
 
 
 def start_background_loop():
-    """Spawn the background results-checker thread."""
-    t = threading.Thread(
-        target=run_loop,
-        daemon=True,
-        name="results-checker",
-    )
+    """Spawn exactly one background results-checker thread."""
+    global _results_checker_thread
+
+    with _settlement_status_lock:
+        existing = _results_checker_thread
+
+        if (
+            existing is not None
+            and existing.is_alive()
+        ):
+            logger.info(
+                "Results checker already running"
+            )
+            return existing
+
+        t = threading.Thread(
+            target=run_loop,
+            daemon=True,
+            name="results-checker",
+        )
+
+        _results_checker_thread = t
 
     t.start()
 
@@ -1660,13 +1778,37 @@ def backfill_leg_status(limit_days: int = 30, *, dry_run: bool = True,
 
 def settlement_status() -> dict:
     """Read-only status for health/admin monitoring."""
-    return {
-        "poll_seconds":
-            SETTLEMENT_POLL_SECONDS,
+    with _settlement_status_lock:
+        thread = _results_checker_thread
 
-        "fallback_seconds":
-            SETTLEMENT_FALLBACK_SECONDS,
+        return {
+            "poll_seconds":
+                SETTLEMENT_POLL_SECONDS,
 
-        "last_successful_check":
-            _last_successful_check,
-    }
+            "fallback_seconds":
+                SETTLEMENT_FALLBACK_SECONDS,
+
+            "thread_alive":
+                bool(
+                    thread is not None
+                    and thread.is_alive()
+                ),
+
+            "iteration":
+                _last_loop_iteration,
+
+            "last_cycle_started_at":
+                _last_loop_started_at,
+
+            "last_cycle_finished_at":
+                _last_loop_finished_at,
+
+            "last_cycle_error":
+                _last_loop_error,
+
+            "last_cycle_summary":
+                dict(_last_loop_summary),
+
+            "last_successful_check":
+                _last_successful_check,
+        }

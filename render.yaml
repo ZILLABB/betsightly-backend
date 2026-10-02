@@ -4,13 +4,29 @@ services:
     runtime: docker
     repo: https://github.com/ZILLABB/betsightly-backend.git
     branch: devil
-    plan: starter
+    plan: 1c-2g
     healthCheckPath: /api/health/
     envVars:
       - key: ENVIRONMENT
         value: production
       - key: DEBUG
         value: "False"
+      - key: ENABLE_BACKGROUND_JOBS
+        value: "true"
+      - key: BETSIGHTLY_PROCESS_ROLE
+        value: "all"
+      - key: SETTLEMENT_POLL_SECONDS
+        value: "900"
+      - key: SETTLEMENT_FALLBACK_SECONDS
+        value: "3600"
+      - key: DAILY_RUN_STALE_MINUTES
+        value: "20"
+      - key: API_FOOTBALL_DAILY_BUDGET
+        value: "90"
+      - key: API_FOOTBALL_MINUTE_BUDGET
+        value: "8"
+      - key: API_FOOTBALL_PROVIDER_RESERVE
+        value: "10"
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
@@ -43,7 +59,7 @@ services:
       - key: ADMIN_PASSWORD_HASH
         sync: false
       - key: ALLOWED_ORIGINS
-        value: "https://betsightly.vercel.app,https://betsightly.com,http://localhost:3000,http://localhost:5173"
+        value: "https://betsightly.vercel.app,https://betsightly.com,https://www.betsightly.com,http://localhost:3000,http://localhost:5173"
 
 databases:
   - name: betsightly-db
