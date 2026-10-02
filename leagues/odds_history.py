@@ -11,11 +11,12 @@ import math
 import os
 import statistics
 from collections import defaultdict
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (Boolean, Column, DateTime, Float, Index,
                         Integer, MetaData, String, Table, Text, UniqueConstraint,
-                        func, or_, select)
+                        func, inspect, or_, select, text)
 from sqlalchemy.exc import IntegrityError
 
 from database import engine
@@ -75,6 +76,128 @@ entries = Table(
     Index("ix_odds_entry_fixture", "canonical_fixture_id"),
     Index("ix_odds_entry_selected", "selected_at"),
 )
+
+_PHASE9_TABLES = ("odds_observations", "odds_selection_entries")
+_PHASE9_INDEXES = {
+    table.name: {index.name for index in table.indexes}
+    for table in (observations, entries)
+}
+_PHASE9_UNIQUES = {
+    "odds_selection_entries": {"uq_odds_entry_source_leg"},
+}
+
+
+def _trigger_names(table: str) -> set[str]:
+    return ({f"trg_{table}_immutable"} if table else set())
+
+
+def odds_history_schema_status(bind=None) -> dict:
+    """Read-only Phase 9 schema inspection; never creates or migrates data."""
+    bind = bind or engine
+    inspector = inspect(bind)
+    existing_tables = set(inspector.get_table_names())
+    tables = {name: name in existing_tables for name in _PHASE9_TABLES}
+    indexes = {}
+    for table, required in _PHASE9_INDEXES.items():
+        present = ({item["name"] for item in inspector.get_indexes(table)}
+                   if tables[table] else set())
+        indexes[table] = {name: name in present for name in sorted(required)}
+    constraints = {}
+    for table, required in _PHASE9_UNIQUES.items():
+        present = ({item.get("name") for item in inspector.get_unique_constraints(table)}
+                   if tables[table] else set())
+        constraints[table] = {name: name in present for name in sorted(required)}
+    triggers = {table: {"update_delete_immutable": False} for table in _PHASE9_TABLES}
+    function_exists = bind.dialect.name != "postgresql"
+    if all(tables.values()):
+        connection_context = (nullcontext(bind) if hasattr(bind, "execute")
+                              else bind.connect())
+        with connection_context as conn:
+            if bind.dialect.name == "sqlite":
+                rows = conn.execute(text(
+                    "SELECT name FROM sqlite_master WHERE type='trigger'"
+                )).scalars().all()
+                names = set(rows)
+                for table in _PHASE9_TABLES:
+                    triggers[table]["update_delete_immutable"] = all(
+                        f"trg_{table}_{action}" in names
+                        for action in ("update", "delete")
+                    )
+            elif bind.dialect.name == "postgresql":
+                rows = conn.execute(text("""
+                    SELECT tgname FROM pg_trigger
+                    WHERE NOT tgisinternal
+                """)).scalars().all()
+                names = set(rows)
+                for table in _PHASE9_TABLES:
+                    triggers[table]["update_delete_immutable"] = (
+                        f"trg_{table}_immutable" in names
+                    )
+                function_exists = bool(conn.execute(text("""
+                    SELECT 1 FROM pg_proc WHERE proname =
+                    'odds_history_reject_mutation'
+                """)).first())
+    ready = (all(tables.values()) and
+             all(all(values.values()) for values in indexes.values()) and
+             all(all(values.values()) for values in constraints.values()) and
+             all(item["update_delete_immutable"] for item in triggers.values()) and
+             function_exists)
+    return {"tables": tables, "indexes": indexes, "constraints": constraints,
+            "immutability": {"function": function_exists, "triggers": triggers},
+            "ready": ready}
+
+
+def ensure_odds_history_schema(bind=None) -> dict:
+    """Idempotently create only Phase 9 tables, indexes, and protections.
+
+    This intentionally does not read or write Alembic bookkeeping or any
+    pre-existing application table.
+    """
+    bind = bind or engine
+    before = odds_history_schema_status(bind)
+    metadata.create_all(bind, checkfirst=True)
+    connection_context = (nullcontext(bind) if hasattr(bind, "execute")
+                          else bind.begin())
+    with connection_context as conn:
+        if bind.dialect.name == "postgresql":
+            conn.execute(text("""
+                CREATE OR REPLACE FUNCTION odds_history_reject_mutation()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'odds history is append-only'; END;
+                $$
+            """))
+            for table in _PHASE9_TABLES:
+                conn.execute(text(f"""
+                    DO $$ BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname =
+                        'trg_{table}_immutable') THEN
+                        CREATE TRIGGER trg_{table}_immutable
+                        BEFORE UPDATE OR DELETE ON {table}
+                        FOR EACH ROW EXECUTE FUNCTION odds_history_reject_mutation();
+                    END IF;
+                    END $$;
+                """))
+        elif bind.dialect.name == "sqlite":
+            for table in _PHASE9_TABLES:
+                for action in ("UPDATE", "DELETE"):
+                    conn.execute(text(
+                        f"CREATE TRIGGER IF NOT EXISTS trg_{table}_{action.lower()} "
+                        f"BEFORE {action} ON {table} BEGIN "
+                        "SELECT RAISE(ABORT, 'odds history is append-only'); END"
+                    ))
+    after = odds_history_schema_status(bind)
+    changes = []
+    for table, exists in after["tables"].items():
+        if exists and not before["tables"].get(table):
+            changes.append(f"created_table:{table}")
+    for table, values in after["indexes"].items():
+        for index, exists in values.items():
+            if exists and not before["indexes"].get(table, {}).get(index):
+                changes.append(f"created_index:{index}")
+    for table, values in after["immutability"]["triggers"].items():
+        if values["update_delete_immutable"] and not before["immutability"]["triggers"][table]["update_delete_immutable"]:
+            changes.append(f"created_immutability:{table}")
+    return {**after, "changes_applied": changes}
 
 
 def capture_enabled() -> bool:
@@ -483,6 +606,14 @@ def aggregate_report(rows: list[dict]) -> dict:
 
 
 def status_report() -> dict:
+    schema = odds_history_schema_status()
+    if not schema["ready"]:
+        return {"status": "migration_required", "ready": False,
+                "observation_count": 0, "earliest_observation": None,
+                "latest_observation": None, "fixture_count": 0,
+                "provider_counts": {}, "selections_awaiting_close": 0,
+                "selections_evaluated": 0, "selections_unavailable": 0,
+                "last_successful_capture": None, "schema": schema}
     with engine.connect() as conn:
         row = conn.execute(select(func.count(), func.min(observations.c.observed_at),
                                   func.max(observations.c.observed_at),

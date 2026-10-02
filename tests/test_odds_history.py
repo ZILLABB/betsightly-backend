@@ -2,6 +2,9 @@
 from datetime import datetime, timedelta, timezone
 import asyncio
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 from sqlalchemy import create_engine, inspect, select, text
@@ -19,7 +22,7 @@ ENTRY_AT = KICKOFF - timedelta(hours=5)
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'odds.db'}")
-    history.metadata.create_all(engine)
+    history.ensure_odds_history_schema(engine)
     monkeypatch.setattr(history, "engine", engine)
     return engine
 
@@ -55,6 +58,61 @@ def test_schema_and_append_only_idempotency(db):
     with db.connect() as conn:
         rows = conn.execute(select(history.observations)).mappings().all()
     assert len(rows) == 1 and rows[0]["decimal_odds"] == 2.0
+
+
+def test_phase9_schema_installer_is_idempotent_and_reports_indexes(tmp_path):
+    fresh = create_engine(f"sqlite:///{tmp_path / 'phase9-schema.db'}")
+    before = history.odds_history_schema_status(fresh)
+    assert before["ready"] is False
+    first = history.ensure_odds_history_schema(fresh)
+    second = history.ensure_odds_history_schema(fresh)
+    assert first["ready"] is True
+    assert second["ready"] is True and second["changes_applied"] == []
+    assert all(all(values.values()) for values in first["indexes"].values())
+    assert first["constraints"]["odds_selection_entries"]["uq_odds_entry_source_leg"]
+
+
+def test_legacy_runtime_schema_is_untouched_by_phase9_installer(tmp_path):
+    legacy = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    with legacy.begin() as conn:
+        for table in ("user_ticket_history", "user_ticket_selections", "prepared_board_cache"):
+            conn.execute(text(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, keep TEXT)"))
+            conn.execute(text(f"INSERT INTO {table} (id, keep) VALUES (1, 'original')"))
+    result = history.ensure_odds_history_schema(legacy)
+    assert result["ready"] is True
+    with legacy.connect() as conn:
+        assert conn.execute(text("SELECT keep FROM user_ticket_history")).scalar() == "original"
+        assert conn.execute(text("SELECT keep FROM user_ticket_selections")).scalar() == "original"
+        assert conn.execute(text("SELECT keep FROM prepared_board_cache")).scalar() == "original"
+        assert "alembic_version" not in inspect(legacy).get_table_names()
+
+
+def test_existing_phase9_rows_survive_schema_retry_and_both_tables_immutable(tmp_path):
+    target = create_engine(f"sqlite:///{tmp_path / 'retry.db'}")
+    history.ensure_odds_history_schema(target)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(history, "engine", target)
+    try:
+        history.ingest_observations([observation()])
+        history.record_selection_entries("builder", "one", [game()], selected_at=ENTRY_AT)
+        history.ensure_odds_history_schema(target)
+        with target.begin() as conn:
+            with pytest.raises(IntegrityError):
+                conn.execute(history.observations.update().values(decimal_odds=9.0))
+        with target.begin() as conn:
+            with pytest.raises(IntegrityError):
+                conn.execute(history.observations.delete())
+        with target.begin() as conn:
+            with pytest.raises(IntegrityError):
+                conn.execute(history.entries.update().values(entry_odds=9.0))
+        with target.begin() as conn:
+            with pytest.raises(IntegrityError):
+                conn.execute(history.entries.delete())
+        with target.connect() as conn:
+            assert conn.execute(select(history.observations)).first() is not None
+            assert conn.execute(select(history.entries)).first() is not None
+    finally:
+        monkeypatch.undo()
 
 
 def test_multiple_snapshots_and_exact_closing_selection(db):
@@ -218,6 +276,8 @@ def test_closing_capture_respects_existing_process_ownership(
 def test_clv_report_default_and_explicit_bounded_ranges(monkeypatch):
     from leagues import api
     captured = []
+    monkeypatch.setattr(history, "odds_history_schema_status",
+                        lambda: {"ready": True})
     monkeypatch.setattr(history, "selection_report", lambda **kw: captured.append(kw) or [])
     monkeypatch.setattr(history, "aggregate_report", lambda rows: rows)
     asyncio.run(api.clv_report(start=None, end=None))
@@ -226,6 +286,40 @@ def test_clv_report_default_and_explicit_bounded_ranges(monkeypatch):
                                end="2026-09-03T00:00:00Z"))
     assert captured[-1]["start"] == datetime(2026, 9, 1, tzinfo=UTC)
     assert captured[-1]["end"] == datetime(2026, 9, 3, tzinfo=UTC)
+
+
+def test_clv_status_and_report_are_safe_before_phase9_schema(tmp_path, monkeypatch):
+    from leagues import api
+    empty = create_engine(f"sqlite:///{tmp_path / 'unmigrated.db'}")
+    monkeypatch.setattr(history, "engine", empty)
+    payload = history.status_report()
+    assert payload["status"] == "migration_required"
+    assert payload["ready"] is False
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(api.clv_report())
+    assert exc.value.status_code == 503
+    assert inspect(empty).get_table_names() == []
+
+
+def test_phase9_cli_check_is_read_only_and_apply_requires_confirmation(tmp_path):
+    db_path = tmp_path / "cli.db"
+    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db_path.as_posix()}"}
+    command = [sys.executable, "-m", "scripts.apply_phase9_odds_history_schema"]
+    check = subprocess.run([*command, "--check"], capture_output=True,
+                           text=True, env=env, check=False)
+    assert check.returncode == 2
+    assert json.loads(check.stdout)["ready"] is False
+    assert inspect(create_engine(env["DATABASE_URL"])).get_table_names() == []
+    denied = subprocess.run([*command, "--apply"], capture_output=True,
+                            text=True, env=env, check=False)
+    assert denied.returncode != 0
+    applied = subprocess.run([*command, "--apply", "--confirm",
+                              "APPLY_PHASE9_ODDS_SCHEMA"], capture_output=True,
+                             text=True, env=env, check=False)
+    assert applied.returncode == 0 and json.loads(applied.stdout)["ready"] is True
+    checked = subprocess.run([*command, "--check"], capture_output=True,
+                             text=True, env=env, check=False)
+    assert checked.returncode == 0 and json.loads(checked.stdout)["changes_applied"] == []
 
 
 @pytest.mark.parametrize("start,end", [

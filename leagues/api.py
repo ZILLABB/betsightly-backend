@@ -40,7 +40,8 @@ async def clv_status():
 @router.get("/clv/report", dependencies=[Depends(require_api_key)])
 async def clv_report(start: str | None = None, end: str | None = None):
     """Read-only CLV, restricted to a maximum 31-day UTC window."""
-    from leagues.odds_history import aggregate_report, selection_report
+    from leagues.odds_history import (aggregate_report, odds_history_schema_status,
+                                      selection_report)
     def parse(value):
         if value is None:
             return None
@@ -54,6 +55,10 @@ async def clv_report(start: str | None = None, end: str | None = None):
     start_at = parse(start) or end_at - timedelta(days=30)
     if start_at >= end_at or end_at - start_at > timedelta(days=31):
         raise HTTPException(400, "CLV report range must be positive and at most 31 days")
+    if not odds_history_schema_status()["ready"]:
+        raise HTTPException(503, {
+            "reason": "migration_required", "retryable": False,
+        })
     return aggregate_report(selection_report(start=start_at, end=end_at))
 
 

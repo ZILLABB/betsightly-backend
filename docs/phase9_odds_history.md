@@ -42,13 +42,41 @@ cannot be used as SportyBet closing prices without a later verified mapping
 and bookability policy. An optional `capture_closing_snapshot()` helper uses
 the existing SportyBet client and a PostgreSQL advisory lease. It has no
 registered schedule and refuses to fetch unless
-`ODDS_HISTORY_CLOSE_FETCH_ENABLED=true` on a `worker`/`scheduler` role. It is
-disabled by default; frequency and network cost require separate operational
-approval. It never calls The Odds API.
+`ODDS_HISTORY_CLOSE_FETCH_ENABLED=true` on a process role that the existing
+runtime ownership policy grants scheduler work (`worker`, `scheduler`, or
+legacy `all`) with `ENABLE_BACKGROUND_JOBS=true`. It is disabled by default;
+frequency and network cost require separate operational approval. It never
+calls The Odds API.
 
-## Staging validation (not run on production here)
+## Deployment paths (not run on any environment here)
 
-1. Back up staging PostgreSQL, then run `python -m alembic upgrade head`.
+### Existing Render databases with legacy runtime-created schema
+
+Do **not** use `alembic upgrade head` as the Phase 9 deployment method. The
+existing Render databases have physical runtime tables ahead of their Alembic
+bookkeeping, so a historical migration replay is not a safe schema installer.
+The Phase 9-only script neither invokes Alembic nor reads or writes
+`alembic_version`; it creates/verifies only `odds_observations`,
+`odds_selection_entries`, their Phase 9 indexes, and their append-only
+protections.
+
+1. Deploy Phase 9 code with both capture flags false:
+   `ODDS_HISTORY_CAPTURE_ENABLED=false` and
+   `ODDS_HISTORY_CLOSE_FETCH_ENABLED=false`.
+2. Run `python -m scripts.apply_phase9_odds_history_schema --check` and keep
+   the JSON evidence.
+3. Run `python -m scripts.apply_phase9_odds_history_schema --apply --confirm APPLY_PHASE9_ODDS_SCHEMA`.
+4. Re-run `--check`; proceed only when `ready` is `true`.
+5. Only then enable `ODDS_HISTORY_CAPTURE_ENABLED=true` for the intended
+   owner. This does not enable extra closing fetches.
+
+### Fresh disposable databases
+
+Fresh databases may use `python -m alembic upgrade head`.
+
+### Staging validation after schema readiness
+
+1. Back up staging PostgreSQL, then use the applicable schema path above.
 2. Set `ODDS_HISTORY_CAPTURE_ENABLED=true` on the single background owner
    after migration. Enable it on web to record Builder entry prices; web does
    not use this flag to fetch odds. Keep existing Odds API quota settings unchanged.
