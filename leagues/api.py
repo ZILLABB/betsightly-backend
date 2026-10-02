@@ -1781,9 +1781,31 @@ async def get_runtime_status():
             }
         ]
 
+    try:
+        from services.api_football_gateway import (
+            quota_status,
+        )
+
+        api_football = quota_status()
+
+    except Exception as exc:
+        api_football = {
+            "blocked":
+                True,
+
+            "block_reason":
+                "status_error",
+
+            "error":
+                type(exc).__name__,
+        }
+
     return {
         "status":
             "success",
+
+        "api_football":
+            api_football,
 
         "process": {
             "environment":

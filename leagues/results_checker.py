@@ -181,11 +181,11 @@ def _collect_espn_scores(sport_keys: List[str], dates: List[str]) -> Dict[str, D
 # ── API-Football scores fetcher (SECONDARY) ─────────────────
 
 def _get_apifootball_key() -> str:
-    # Deployment templates and the example environment use the longer name.
-    # Keep the original name for installations that already configured it.
-    return (os.getenv("API_FOOTBALL_KEY") or
-            os.getenv("API_FOOTBALL_API_KEY") or
-            os.getenv("APIFOOTBALL_API_KEY") or "")
+    from services.api_football_gateway import (
+        api_football_key,
+    )
+
+    return api_football_key()
 
 
 def _fetch_apifootball_scores(league_id: int, date_from: str, date_to: str) -> List[dict]:
@@ -194,15 +194,25 @@ def _fetch_apifootball_scores(league_id: int, date_from: str, date_to: str) -> L
     if not api_key:
         return []
     try:
-        resp = requests.get(
-            "https://v3.football.api-sports.io/fixtures",
-            params={"league": league_id, "season": 2026, "from": date_from, "to": date_to, "status": "FT"},
-            headers={"x-apisports-key": api_key},
-            timeout=15,
+        from services.apifootball_service import (
+            APIFootballService,
         )
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
+
+        service = APIFootballService(
+            api_key=api_key,
+        )
+
+        data = service._get(
+            "fixtures",
+            {
+                "league": league_id,
+                "season": 2026,
+                "from": date_from,
+                "to": date_to,
+                "status": "FT",
+            },
+            use_cache=True,
+        )
         if data.get("errors"):
             return []
         return data.get("response", [])

@@ -83,7 +83,12 @@ class APIFootballService:
     """Service for fetching fixtures from API-Football (api-sports.io)."""
 
     def __init__(self, api_key: str = None, cache_ttl_hours: float = CACHE_TTL_HOURS):
-        self.api_key = api_key or API_KEY
+        from services.api_football_gateway import api_football_key
+
+        self.api_key = (
+            api_key
+            or api_football_key()
+        )
         self.base_url = BASE_URL
         self.headers = {"x-apisports-key": self.api_key}
         self.timeout = 30
@@ -221,8 +226,23 @@ class APIFootballService:
             if cached is not None:
                 return cached
 
-        url = f"{self.base_url}/{endpoint}"
-        resp = requests.get(url, headers=self.headers, params=params, timeout=self.timeout)
+        from services.api_football_gateway import api_football_get
+
+        resp = api_football_get(
+            endpoint,
+            params=params,
+            api_key=self.api_key,
+            timeout=self.timeout,
+        )
+
+        if resp is None:
+            return {
+                "response": [],
+                "errors": {
+                    "quota": "local_guard",
+                },
+            }
+
         resp.raise_for_status()
         data = resp.json()
         errors = data.get("errors", {})

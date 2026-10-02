@@ -84,6 +84,25 @@ def runtime_process_status() -> Dict[str, Any]:
                 type(exc).__name__,
         }
 
+    try:
+        from services.api_football_gateway import (
+            quota_status,
+        )
+
+        api_football = quota_status()
+
+    except Exception as exc:
+        api_football = {
+            "blocked":
+                True,
+
+            "block_reason":
+                "status_error",
+
+            "error":
+                type(exc).__name__,
+        }
+
     return {
         "environment":
             environment,
@@ -96,6 +115,9 @@ def runtime_process_status() -> Dict[str, Any]:
 
         "settlement":
             settlement,
+
+        "api_football":
+            api_football,
     }
 
 

@@ -181,18 +181,23 @@ class QuickPredictionService:
     
     def _get_fixtures_api_football(self, date: str) -> List[Dict]:
         """Get fixtures from API-Football."""
-        import requests
-        import os
+        from services.api_football_gateway import (
+            api_football_get,
+            api_football_key,
+        )
 
-        api_key = os.getenv("API_FOOTBALL_API_KEY", "")
-        headers = {
-            "x-rapidapi-key": api_key,
-            "x-rapidapi-host": "v3.football.api-sports.io"
-        }
-        url = "https://v3.football.api-sports.io/fixtures"
-        params = {"date": date}
-        
-        response = requests.get(url, headers=headers, params=params, timeout=30)
+        response = api_football_get(
+            "fixtures",
+            params={
+                "date": date,
+            },
+            api_key=api_football_key(),
+            timeout=30,
+        )
+
+        if response is None:
+            return []
+
         response.raise_for_status()
         
         data = response.json()

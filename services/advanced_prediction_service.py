@@ -111,7 +111,9 @@ class AdvancedPredictionService:
     def __init__(self):
         """Initialize the advanced prediction service (models are loaded lazily on first use)."""
         self.football_data_api_key = os.getenv("FOOTBALL_DATA_API_KEY")
-        self.api_football_key = os.getenv("API_FOOTBALL_API_KEY")
+        from services.api_football_gateway import api_football_key
+
+        self.api_football_key = api_football_key()
         self.base_url_football_data = "https://api.football-data.org/v4"
         self.base_url_api_football = "https://v3.football.api-sports.io"
 
@@ -507,11 +509,21 @@ class AdvancedPredictionService:
     def _get_fixtures_api_football(self, date_str: str) -> List[Dict]:
         """Get fixtures from API-Football (api-sports.io direct endpoint)."""
         try:
-            headers = {"x-apisports-key": self.api_football_key}
-            url = f"{self.base_url_api_football}/fixtures"
-            params = {"date": date_str}
+            from services.api_football_gateway import api_football_get
 
-            response = requests.get(url, headers=headers, params=params, timeout=15)
+            params = {
+                "date": date_str,
+            }
+
+            response = api_football_get(
+                "fixtures",
+                params=params,
+                api_key=self.api_football_key,
+                timeout=15,
+            )
+
+            if response is None:
+                return []
 
             if response.status_code != 200:
                 logger.warning(f"⚠️  API-Football failed: {response.status_code} — {response.text[:200]}")
