@@ -339,7 +339,15 @@ def shop_odds(league_slugs: list[str], force: bool = False) -> dict:
         if not _can_spend(2):
             logger.info(f"odds shop: credit ceiling reached, skipping {sport_key}")
             break
-        for event in _fetch_league(sport_key, api_key):
+        fetched_events = _fetch_league(sport_key, api_key)
+        try:
+            from leagues.odds_history import capture_enabled, capture_odds_api_events
+            if capture_enabled() and fetched_events:
+                capture_odds_api_events(fetched_events, sport_key)
+        except Exception as capture_error:
+            logger.warning("odds shop history capture unavailable: %s",
+                           type(capture_error).__name__)
+        for event in fetched_events:
             agg = _aggregate(event)
             if agg["outcomes"]:
                 data[f"{_norm(agg['home_team'])}|{_norm(agg['away_team'])}"] = agg

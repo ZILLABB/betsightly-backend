@@ -30,6 +30,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Leagues"])
 
 
+@router.get("/clv/status", dependencies=[Depends(require_api_key)])
+async def clv_status():
+    """Read-only warehouse health; no provider request is made."""
+    from leagues.odds_history import status_report
+    return status_report()
+
+
+@router.get("/clv/report", dependencies=[Depends(require_api_key)])
+async def clv_report(start: str | None = None, end: str | None = None):
+    """Read-only, sample-counted CLV from immutable recorded quotes."""
+    from leagues.odds_history import aggregate_report, selection_report
+    def parse(value):
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(400, "Use an ISO date or timestamp") from exc
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+    return aggregate_report(selection_report(start=parse(start), end=parse(end)))
+
+
 @router.get(
     "/slip-builder/v2/staging-evidence-status",
     dependencies=[Depends(require_api_key)],

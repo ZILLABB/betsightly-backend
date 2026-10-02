@@ -602,6 +602,18 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
             board=sportybet_board,
         )
 
+        # Capture only the board already fetched for this background run.
+        # Warehouse failures cannot alter predictions or publication.
+        try:
+            from leagues.odds_history import (
+                capture_enabled, capture_sportybet_fixture_prices,
+            )
+            if capture_enabled():
+                capture_sportybet_fixture_prices(fixtures, sportybet_board)
+        except Exception as capture_error:
+            logger.warning("odds history capture unavailable: %s",
+                           type(capture_error).__name__)
+
         sportybet_coverage = (
             sportybet.coverage_against_fixtures(
                 fixtures,

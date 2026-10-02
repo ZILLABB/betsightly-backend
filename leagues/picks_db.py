@@ -179,14 +179,30 @@ def archive_slip(date: str, category: str, games: list[dict],
                 return True
             else:
                 from leagues.booking import leg_fingerprint
-                db.add(PublishedSlip(
+                slip = PublishedSlip(
                     date=date, category=category, picks=payload,
                     total_odds=total_odds, hit_probability=hit_probability,
                     presentation=presentation,
                     policy_version=PUBLISHED_POLICY_VERSION,
                     selection_fingerprint=leg_fingerprint(games),
                     status="pending",
-                ))
+                )
+                db.add(slip)
+                db.flush()
+                try:
+                    from leagues.odds_history import capture_enabled, record_selection_entries
+                    if capture_enabled():
+                        with db.begin_nested():
+                            record_selection_entries(
+                                "published", str(slip.id), games,
+                                selected_at=datetime.now(timezone.utc),
+                                mode=category, horizon="today",
+                                policy_version=PUBLISHED_POLICY_VERSION,
+                                connection=db.connection(),
+                            )
+                except Exception as exc:
+                    logger.warning("published odds entry capture failed error_type=%s",
+                                   type(exc).__name__)
             db.commit()
             return True
         finally:

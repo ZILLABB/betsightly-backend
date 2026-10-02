@@ -234,6 +234,19 @@ def record_prediction(target: float | None, horizon: str, result: dict,
         )).first():
             return False
         conn.execute(builder_predictions.insert().values(**row))
+        try:
+            from leagues.odds_history import capture_enabled, record_selection_entries
+            if capture_enabled():
+                with conn.begin_nested():
+                    record_selection_entries(
+                        "builder", fingerprint, games, selected_at=row["created_at"],
+                        booking=booking, mode=mode, horizon=horizon,
+                        policy_version=PUBLISHED_SELECTION_POLICY_VERSION,
+                        connection=conn,
+                    )
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "builder odds entry capture failed error_type=%s", type(exc).__name__)
     return True
 
 
