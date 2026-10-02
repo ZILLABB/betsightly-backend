@@ -394,39 +394,295 @@ def performance(days: int = 90) -> dict:
                                     if row["horizon"] == horizon])
         for horizon in sorted({row["horizon"] for row in settled})
     }
+    by_mode = {
+        mode: _performance_rows([
+            row for row in settled
+            if str(row.get("mode") or "target_odds") == mode
+        ])
+        for mode in sorted({
+            str(row.get("mode") or "target_odds")
+            for row in settled
+        })
+    }
+
+    by_leg_count = {
+        str(count): _performance_rows([
+            row for row in settled
+            if int(row.get("leg_count") or 0) == count
+        ])
+        for count in sorted({
+            int(row.get("leg_count") or 0)
+            for row in settled
+            if int(row.get("leg_count") or 0) > 0
+        })
+    }
+
+    markets: dict[str, list[dict]] = defaultdict(list)
+    for row in settled:
+        try:
+            picks = json.loads(row.get("picks") or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            picks = []
+
+        for market in sorted({
+            str(pick.get("market") or "").strip()
+            for pick in picks
+            if str(pick.get("market") or "").strip()
+        }):
+            markets[market].append(row)
+
+    by_market_presence = {
+        market: _performance_rows(items)
+        for market, items in sorted(markets.items())
+    }
+
     return {
         "builds_generated": len(rows),
+        "pending_builds": sum(
+            row.get("final_status") == "pending"
+            for row in rows
+        ),
         "policy_version": PUBLISHED_SELECTION_POLICY_VERSION,
         **_performance_rows(rows),
         "by_target": by_target,
         "by_horizon": by_horizon,
+        "by_mode": by_mode,
+        "by_leg_count": by_leg_count,
+        # Build-level metric: a multi-market ticket can appear in more than
+        # one bucket. This deliberately does not pretend to be leg-level ROI.
+        "by_market_presence": by_market_presence,
     }
 
 
-def summary(start: str, end: str) -> dict:
-    ensure_table()
-    first = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    last = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    last = last.replace(hour=23, minute=59, second=59, microsecond=999999)
-    with engine.begin() as conn:
-        rows = conn.execute(select(builder_runs).where(
-            builder_runs.c.requested_at >= first,
-            builder_runs.c.requested_at <= last,
-        )).mappings().all()
-    targets, failures = defaultdict(Counter), Counter()
-    for row in rows:
-        key = (str(int(row["target_odds"]) if float(row["target_odds"]).is_integer()
-                   else row["target_odds"]) if row["target_odds"] is not None
-               else row["mode"])
-        targets[key]["requests"] += 1
-        targets[key]["tickets"] += int(bool(row["ticket_produced"]))
-        if row["failure_category"]:
-            failures[row["failure_category"]] += 1
-    produced = sum(bool(row["ticket_produced"]) for row in rows)
+def _safe_list(value) -> list[str]:
+    if not value:
+        return []
+
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    return sorted({
+        str(item).strip()
+        for item in parsed
+        if str(item).strip()
+    })
+
+
+def _request_metrics(rows) -> dict:
+    items = list(rows)
+    produced = sum(
+        bool(row["ticket_produced"])
+        for row in items
+    )
+
     return {
-        "requests": len(rows), "tickets_produced": produced,
-        "ticket_rate": round(produced / len(rows), 4) if rows else None,
-        "cache_hits": sum(bool(row["cached"]) for row in rows),
-        "by_target": [{"target": key, **dict(value)} for key, value in sorted(targets.items())],
-        "failures": [{"category": key, "count": value} for key, value in failures.most_common()],
+        "requests": len(items),
+        "tickets_produced": produced,
+        "ticket_rate": (
+            round(produced / len(items), 4)
+            if items
+            else None
+        ),
+        "cache_hits": sum(
+            bool(row["cached"])
+            for row in items
+        ),
+    }
+
+
+def _sort_group_key(value: str):
+    try:
+        return (0, float(value))
+    except (TypeError, ValueError):
+        return (1, str(value))
+
+
+def _group_requests(rows, label: str, value_fn) -> list[dict]:
+    buckets = defaultdict(list)
+
+    for row in rows:
+        value = value_fn(row)
+
+        if value is None or value == "":
+            continue
+
+        buckets[str(value)].append(row)
+
+    return [
+        {
+            label: key,
+            **_request_metrics(items),
+        }
+        for key, items in sorted(
+            buckets.items(),
+            key=lambda item: _sort_group_key(item[0]),
+        )
+    ]
+
+
+def _market_request_groups(rows, column: str) -> list[dict]:
+    buckets = defaultdict(list)
+
+    for row in rows:
+        for market in _safe_list(row[column]):
+            buckets[market].append(row)
+
+    return [
+        {
+            "market": market,
+            **_request_metrics(items),
+        }
+        for market, items in sorted(buckets.items())
+    ]
+
+
+def summary(start: str, end: str) -> dict:
+    """Operational V2 Builder request contract.
+
+    Request metrics answer what users asked the Builder to do. Settlement
+    performance remains separate in :func:`performance`, because one click and
+    one immutable generated selection set are intentionally different facts.
+    """
+    ensure_table()
+
+    first = datetime.strptime(
+        start,
+        "%Y-%m-%d",
+    ).replace(tzinfo=timezone.utc)
+
+    last = datetime.strptime(
+        end,
+        "%Y-%m-%d",
+    ).replace(tzinfo=timezone.utc)
+
+    last = last.replace(
+        hour=23,
+        minute=59,
+        second=59,
+        microsecond=999999,
+    )
+
+    with engine.begin() as conn:
+        rows = list(
+            conn.execute(
+                select(builder_runs).where(
+                    builder_runs.c.requested_at >= first,
+                    builder_runs.c.requested_at <= last,
+                )
+            ).mappings().all()
+        )
+
+    failures = Counter()
+
+    for row in rows:
+        if row["failure_category"]:
+            failures[
+                str(row["failure_category"])
+            ] += 1
+
+    overall = _request_metrics(rows)
+
+    by_target = _group_requests(
+        [
+            row for row in rows
+            if row["target_odds"] is not None
+        ],
+        "target",
+        lambda row: (
+            str(
+                int(row["target_odds"])
+                if float(row["target_odds"]).is_integer()
+                else row["target_odds"]
+            )
+        ),
+    )
+
+    by_mode = _group_requests(
+        rows,
+        "mode",
+        lambda row: str(
+            row["mode"]
+            or "target_odds"
+        ),
+    )
+
+    by_horizon = _group_requests(
+        rows,
+        "horizon",
+        lambda row: row["horizon"],
+    )
+
+    by_game_count = _group_requests(
+        [
+            row for row in rows
+            if row["requested_game_count"] is not None
+        ],
+        "game_count",
+        lambda row: int(
+            row["requested_game_count"]
+        ),
+    )
+
+    by_fill_strategy = _group_requests(
+        [
+            row for row in rows
+            if row["fill_strategy"]
+        ],
+        "fill_strategy",
+        lambda row: row["fill_strategy"],
+    )
+
+    by_booking_status = _group_requests(
+        [
+            row for row in rows
+            if row["booking_status"]
+        ],
+        "booking_status",
+        lambda row: row["booking_status"],
+    )
+
+    by_validation_status = _group_requests(
+        [
+            row for row in rows
+            if row["validation_status"]
+        ],
+        "validation_status",
+        lambda row: row["validation_status"],
+    )
+
+    return {
+        **overall,
+        "by_target": by_target,
+        "by_mode": by_mode,
+        "by_horizon": by_horizon,
+        "by_game_count": by_game_count,
+        "by_fill_strategy": by_fill_strategy,
+        "by_requested_market": _market_request_groups(
+            rows,
+            "requested_markets",
+        ),
+        "by_selected_market": _market_request_groups(
+            rows,
+            "selected_markets",
+        ),
+        "by_booking_status": by_booking_status,
+        "by_validation_status": by_validation_status,
+        "failures": [
+            {
+                "category": key,
+                "count": value,
+            }
+            for key, value in failures.most_common()
+        ],
+        "contract": {
+            "request_fact": "one_builder_request",
+            "performance_fact": "one_unique_generated_selection_set",
+            "market_performance_scope": "build_contains_market",
+            "share_codes_persisted": False,
+        },
     }

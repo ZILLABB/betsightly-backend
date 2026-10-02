@@ -209,3 +209,148 @@ def test_builder_performance_uses_unique_predictions_and_reports_calibration(mon
     assert report["actual_all_win_rate"] == .5
     assert report["brier_score"] is not None
     assert set(report["by_horizon"]) == {"today", "week"}
+
+
+def test_builder_summary_covers_v2_request_dimensions(monkeypatch):
+    _memory_engine(monkeypatch)
+
+    runs.record_run(
+        50,
+        "7_days",
+        False,
+        _success(
+            [
+                _game("m10", market="over_1_5"),
+                _game("m11", market="home_win"),
+            ],
+            target=50,
+            actual_odds=4.2,
+        ),
+        mode="target_odds",
+        fill_strategy="strict_selected_markets",
+        requested_markets=["over_1_5"],
+    )
+
+    runs.record_run(
+        None,
+        "today",
+        False,
+        _success(
+            [
+                _game("m12", market="over_1_5"),
+                _game("m13", market="over_1_5"),
+            ],
+            actual_odds=2.1,
+        ),
+        mode="game_count",
+        fill_strategy="selected_first_then_eligible",
+        requested_markets=["over_1_5", "over_2_5"],
+        requested_game_count=20,
+    )
+
+    report = runs.summary(
+        "2000-01-01",
+        "2100-01-01",
+    )
+
+    assert report["requests"] == 2
+    assert {
+        item["mode"]
+        for item in report["by_mode"]
+    } == {
+        "target_odds",
+        "game_count",
+    }
+
+    assert report["by_game_count"] == [
+        {
+            "game_count": "20",
+            "requests": 1,
+            "tickets_produced": 1,
+            "ticket_rate": 1.0,
+            "cache_hits": 0,
+        }
+    ]
+
+    requested = {
+        item["market"]: item
+        for item in report["by_requested_market"]
+    }
+
+    assert requested["over_1_5"]["requests"] == 2
+    assert requested["over_2_5"]["requests"] == 1
+
+    selected = {
+        item["market"]: item
+        for item in report["by_selected_market"]
+    }
+
+    assert selected["over_1_5"]["requests"] == 2
+    assert selected["home_win"]["requests"] == 1
+
+    assert report["contract"]["share_codes_persisted"] is False
+
+
+def test_builder_performance_reports_mode_leg_and_market_presence(monkeypatch):
+    _memory_engine(monkeypatch)
+
+    target_result = _success([
+        _game("p1", 1.5, "over_1_5"),
+        _game("p2", 1.4, "home_win"),
+    ])
+
+    count_result = _success([
+        _game("p3", 1.6, "over_1_5"),
+        _game("p4", 1.3, "over_1_5"),
+        _game("p5", 1.2, "away_or_draw"),
+    ])
+
+    runs.record_prediction(
+        2,
+        "today",
+        target_result,
+        mode="target_odds",
+    )
+
+    runs.record_prediction(
+        None,
+        "7_days",
+        count_result,
+        mode="game_count",
+    )
+
+    runs.settle_prediction(
+        leg_fingerprint(target_result["games"]),
+        ["won", "won"],
+    )
+
+    runs.settle_prediction(
+        leg_fingerprint(count_result["games"]),
+        ["won", "lost", "won"],
+    )
+
+    report = runs.performance(90)
+
+    assert set(report["by_mode"]) == {
+        "target_odds",
+        "game_count",
+    }
+
+    assert set(report["by_leg_count"]) == {
+        "2",
+        "3",
+    }
+
+    assert (
+        report["by_market_presence"]["over_1_5"]
+        ["unique_settled_builds"]
+        == 2
+    )
+
+    assert (
+        report["by_market_presence"]["home_win"]
+        ["unique_settled_builds"]
+        == 1
+    )
+
+    assert report["pending_builds"] == 0

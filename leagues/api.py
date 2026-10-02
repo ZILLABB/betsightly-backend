@@ -1884,6 +1884,35 @@ async def get_builder_performance(days: int = 90):
         raise HTTPException(500, str(exc))
 
 
+@router.get(
+    "/v2-closeout",
+    dependencies=[Depends(require_api_key)],
+)
+async def get_v2_closeout(days: int = 90):
+    """Read-only acceptance report for the original V2 scope."""
+    try:
+        from leagues.v2_closeout import report
+        return report(
+            days=max(
+                1,
+                min(
+                    365,
+                    int(days),
+                ),
+            )
+        )
+    except Exception as exc:
+        logger.error(
+            "V2 closeout report failed: %s",
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(
+            500,
+            str(exc),
+        )
+
+
 @router.post("/backfill-legs", dependencies=[Depends(require_api_key)])
 async def trigger_leg_backfill(days: int = 30, dry_run: bool = True,
                                start_date: str | None = None,
