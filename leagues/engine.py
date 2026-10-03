@@ -450,11 +450,20 @@ def prepared_board(days_ahead: int = 7) -> tuple[list[dict], list[dict], dict]:
     return picks, fixtures, _status_for_entry(entry, days_ahead, now)
 
 
-def start_prepared_board_refresh(days_ahead: int = 7,
-                                 force: bool = True) -> bool:
-    """Opt-in web refresh for development only; production uses the scheduler."""
+def start_prepared_board_refresh(
+    days_ahead: int = 7,
+    force: bool = True,
+    *,
+    request_triggered: bool = True,
+) -> bool:
+    """Start a prepared-board refresh only for an authorised caller.
+
+    A public request may ask whether a refresh has started, but it must never
+    create the expensive provider/model pipeline in production.  The runtime
+    scheduler and its history prewarm are the explicit non-request callers.
+    """
     global _PREWARMING
-    if not interactive_refresh_allowed():
+    if request_triggered and not interactive_refresh_allowed():
         return False
     with _PREWARM_LOCK:
         if _PREWARMING:
@@ -504,7 +513,13 @@ def start_history_prewarm(*, request_triggered: bool = False) -> bool:
             load()
             from leagues.history_readiness import status
             if status()["usable"] and not prepared_board_status(days_ahead=7).get("ready"):
-                start_prepared_board_refresh(days_ahead=7, force=False)
+                # This is the scheduler-owned continuation of an already
+                # backgrounded history prewarm, never an HTTP request.
+                start_prepared_board_refresh(
+                    days_ahead=7,
+                    force=False,
+                    request_triggered=False,
+                )
         except Exception as exc:
             logger.warning("history prewarm failed: %s", exc, exc_info=True)
         finally:

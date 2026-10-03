@@ -55,6 +55,66 @@ def test_scheduler_history_prewarm_remains_available_in_production(monkeypatch):
     assert engine.start_history_prewarm(request_triggered=True) is False
 
 
+def test_production_background_board_refresh_starts_pipeline(monkeypatch):
+    """The scheduler path is allowed even though a web request is not."""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setattr(engine, "_PREWARMING", False)
+    calls = []
+
+    def pipeline(*, days_ahead, force):
+        calls.append((days_ahead, force))
+        return [], []
+
+    class InlineThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(engine, "run_pipeline", pipeline)
+    monkeypatch.setattr(engine.threading, "Thread", InlineThread)
+
+    assert engine.start_prepared_board_refresh(
+        days_ahead=7,
+        force=False,
+        request_triggered=False,
+    ) is True
+    assert calls == [(7, False)]
+    assert engine._PREWARMING is False
+
+
+def test_scheduler_history_prewarm_orders_background_board_refresh(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setattr(engine, "_HISTORY_PREWARMING", False)
+    calls = []
+
+    class InlineThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(engine.threading, "Thread", InlineThread)
+    monkeypatch.setattr("leagues.base_rates.get_base_rates", lambda: calls.append("rates"))
+    monkeypatch.setattr("leagues.team_history.load", lambda: calls.append("history"))
+    monkeypatch.setattr("leagues.history_readiness.status", lambda: {"usable": True})
+    monkeypatch.setattr(engine, "prepared_board_status", lambda **_kwargs: {"ready": False})
+    monkeypatch.setattr(
+        engine,
+        "start_prepared_board_refresh",
+        lambda **kwargs: calls.append(kwargs) or True,
+    )
+
+    assert engine.start_history_prewarm(request_triggered=False) is True
+    assert calls == [
+        "rates",
+        "history",
+        {"days_ahead": 7, "force": False, "request_triggered": False},
+    ]
+
+
 def test_one_seven_day_board_filters_all_public_horizons(monkeypatch):
     monkeypatch.setattr(engine, "_PERSISTENCE_HYDRATED", True)
     monkeypatch.setattr(engine, "_CACHE", {"entries": {}, "healthy_entries": {}})
