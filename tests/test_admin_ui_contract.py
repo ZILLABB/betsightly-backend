@@ -35,3 +35,13 @@ def test_command_center_sidebar_remains_navigable():
     assert "dashboard-loading" in ADMIN_CSS
     assert "Refreshing dashboard" in ADMIN_JS
 
+
+def test_command_center_alert_severity_and_loading_copy():
+    assert "alert-severity-v2" in ADMIN_JS
+    assert "const good=" in ADMIN_JS
+    assert "All key systems look healthy" in ADMIN_JS
+    assert "alert-ok" in ADMIN_JS
+    assert "alert-warn" in ADMIN_JS
+    assert "&#10003;" in ADMIN_JS
+    assert "Refreshing dashboard..." in ADMIN_JS
+    assert "Refreshing dashboard?" not in ADMIN_JS
