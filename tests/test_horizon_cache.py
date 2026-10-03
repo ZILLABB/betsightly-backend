@@ -464,7 +464,9 @@ def test_cold_builder_click_returns_controlled_refresh_state(monkeypatch):
     started = []
     monkeypatch.setattr(
         engine, "start_prepared_board_refresh",
-        lambda days_ahead=7, force=True: started.append((days_ahead, force)) or True,
+        lambda days_ahead=7, force=True, request_triggered=True: (
+            started.append((days_ahead, force, request_triggered)) or True
+        ),
     )
     monkeypatch.setattr(
         slip_builder, "generate",
@@ -478,7 +480,7 @@ def test_cold_builder_click_returns_controlled_refresh_state(monkeypatch):
     assert result["status"] == "unavailable"
     assert result["reason"] == "board_refreshing"
     assert result["retryable"] is True
-    assert started == [(7, True)]
+    assert started == [(7, True, True)]
 
 
 def test_builder_refresh_reuses_ready_board(monkeypatch):
@@ -531,8 +533,8 @@ def test_builder_serves_stale_board_while_starting_background_refresh(monkeypatc
     started = []
     monkeypatch.setattr(
         engine, "start_prepared_board_refresh",
-        lambda days_ahead=7, force=True: (
-            started.append((days_ahead, force)) or True
+        lambda days_ahead=7, force=True, request_triggered=True: (
+            started.append((days_ahead, force, request_triggered)) or True
         ),
     )
     monkeypatch.setattr(
@@ -547,4 +549,4 @@ def test_builder_serves_stale_board_while_starting_background_refresh(monkeypatc
     result = asyncio.run(api.slip_builder_generate(100, horizon="week"))
 
     assert result["status"] == "success"
-    assert started == [(7, True)]
+    assert started == [(7, True, True)]

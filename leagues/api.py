@@ -1254,7 +1254,9 @@ async def _legacy_slip_builder_generate(target: float, horizon: str = "week",
                 "horizon": horizon, "request_id": request_id,
             }
         refresh_started = start_prepared_board_refresh(
-            days_ahead=7, force=True
+            days_ahead=7,
+            force=True,
+            request_triggered=True,
         )
         response = {
             "status": "unavailable",
@@ -1280,7 +1282,9 @@ async def _legacy_slip_builder_generate(target: float, horizon: str = "week",
         # Keep serving the last safe evaluated board while a single background
         # refresh replaces it. A provider refresh must not block this request.
         board["refresh_started"] = start_prepared_board_refresh(
-            days_ahead=7, force=True
+            days_ahead=7,
+            force=True,
+            request_triggered=True,
         )
 
     # Coalesce identical work. The model/board/booking functions are blocking,
@@ -1375,7 +1379,9 @@ def _public_prepared_board(horizon: int) -> tuple[list[dict], list[dict], dict]:
     if board.get("ready") and fixtures:
         if board.get("stale"):
             board["refresh_started"] = start_prepared_board_refresh(
-                days_ahead=7, force=True)
+                days_ahead=7,
+                force=True,
+                request_triggered=True)
         return picks, fixtures, board
 
     from leagues.history_readiness import status as history_status
@@ -1384,7 +1390,11 @@ def _public_prepared_board(horizon: int) -> tuple[list[dict], list[dict], dict]:
         started = start_history_prewarm(request_triggered=True)
         reason = "history_not_ready"
     else:
-        started = start_prepared_board_refresh(days_ahead=7, force=True)
+        started = start_prepared_board_refresh(
+            days_ahead=7,
+            force=True,
+            request_triggered=True,
+        )
         reason = "board_refreshing"
     raise HTTPException(503, {
         "reason": reason, "retryable": True, "refresh_started": started,
