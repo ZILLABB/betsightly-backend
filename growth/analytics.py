@@ -20,6 +20,7 @@ from growth.analytics_enrichment import (
     traffic_source,
 )
 from growth.models import GrowthEvent, ensure_tables
+from growth.funnel_contract import FUNNEL_SPECS, PREDICTION_PRODUCT_AREAS, assess_funnels
 
 logger = logging.getLogger(__name__)
 
@@ -233,8 +234,7 @@ def _booking_metrics(start: str, end: str) -> dict:
         return empty
 
 
-def _progression_funnel(events: list[GrowthEvent],
-                        stages: list[tuple[str, Callable[[GrowthEvent], bool]]]) -> list[dict]:
+def _progression_funnel(events: list[GrowthEvent], stages) -> list[dict]:
     by_visitor = defaultdict(list)
     for event in events:
         if event.visitor_hash:
@@ -242,7 +242,10 @@ def _progression_funnel(events: list[GrowthEvent],
     progressed = {visitor: None for visitor in by_visitor}
     output = []
     previous = None
-    for label, predicate in stages:
+    for stage in stages:
+        label = stage.label
+        predicate = lambda event, stage=stage: (
+            _canonical(event) == stage.event and _area(event) in stage.product_areas)
         next_progressed = {}
         for visitor, after in progressed.items():
             matches = [e for e in by_visitor[visitor]
@@ -352,40 +355,8 @@ def summary(days: int = 1, start: Optional[str] = None,
             })
         return sorted(rows, key=lambda row: row["visitors"], reverse=True)[:25]
 
-    prediction_sources = {"PREDICTIONS", "BANKER", "TWO_ODDS", "FIVE_ODDS",
-                          "TEN_ODDS", "OVER_1_5", "FALLBACK"}
-    funnels = {
-        "prediction": _progression_funnel(user_events, [
-            ("Visitors", lambda e: True),
-            ("Predictions viewed", lambda e: _canonical(e) == "prediction_viewed"),
-            ("Valid code displayed", lambda e: _canonical(e) == "booking_code_viewed"
-             and _area(e) in prediction_sources),
-            ("Code copied", lambda e: _canonical(e) == "booking_code_copied"
-             and _area(e) in prediction_sources),
-            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_opened"
-             and _area(e) in prediction_sources),
-        ]),
-        "builder": _progression_funnel(user_events, [
-            ("Builder opened", lambda e: _canonical(e) == "builder_opened"),
-            ("Target selected", lambda e: _canonical(e) == "builder_target_selected"),
-            ("Slip generated", lambda e: _canonical(e) == "builder_generated"),
-            ("Valid code displayed", lambda e: _canonical(e) == "booking_code_viewed"
-             and _area(e) == "BUILD_SLIP"),
-            ("Code copied", lambda e: _canonical(e) == "booking_code_copied"
-             and _area(e) == "BUILD_SLIP"),
-            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_opened"
-             and _area(e) == "BUILD_SLIP"),
-        ]),
-        "rollover": _progression_funnel(user_events, [
-            ("Rollover viewed", lambda e: _canonical(e) == "rollover_viewed"),
-            ("Valid code displayed", lambda e: _canonical(e) == "booking_code_viewed"
-             and _area(e) == "ROLLOVER"),
-            ("Code copied", lambda e: _canonical(e) == "booking_code_copied"
-             and _area(e) == "ROLLOVER"),
-            ("SportyBet opened", lambda e: _canonical(e) == "sportybet_opened"
-             and _area(e) == "ROLLOVER"),
-        ]),
-    }
+    funnels = {name: _progression_funnel(user_events, stages)
+               for name, stages in FUNNEL_SPECS.items()}
 
     daily = []
     for date in sorted({event.event_date for event in user_events}):
@@ -563,12 +534,15 @@ def summary(days: int = 1, start: Optional[str] = None,
         "sportybet": sources["backend_facts"],
         "operations": sources["backend_facts"],
     }
+    selected_funnels = provider_data.get("funnels") or funnels
+    analytics_integrity = assess_funnels(
+        selected_funnels, totals.get("schema_validation_errors", 0))
     payload = {
         "window_days": (datetime.strptime(end, "%Y-%m-%d") -
                         datetime.strptime(start, "%Y-%m-%d")).days + 1,
         "start": start, "end": end, "totals": totals,
-        "funnel": (provider_data.get("funnels") or funnels)["prediction"],
-        "funnels": provider_data.get("funnels") or funnels,
+        "funnel": selected_funnels["prediction"],
+        "funnels": selected_funnels,
         "retention": provider_data.get("retention") or retention,
         "prediction_day_return": provider_data.get("prediction_day_return") or {},
         "daily": provider_data.get("daily") or daily,
@@ -601,6 +575,7 @@ def summary(days: int = 1, start: Optional[str] = None,
                                            "2026-09-17T23:59:59Z"),
             "migration_complete": False,
         },
+        "analytics_integrity": analytics_integrity,
         "limitations": [
             "Historical events are not fabricated; missing enrichment remains unknown.",
             "Anonymous browser identity can be cleared and does not link devices.",

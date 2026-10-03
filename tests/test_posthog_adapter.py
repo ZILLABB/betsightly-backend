@@ -35,8 +35,8 @@ def test_posthog_adapter_queries_once_then_uses_cache(monkeypatch):
         if "arrayExists" in query:
             return FakeResponse([[8, 4, 8, 3, 7, 2, 5, 1, 2, 1]])
         if "FROM (SELECT distinct_id" in query:
-            width = (6 if "builder_target_selected" in query else
-                     4 if "rollover_viewed" in query else 5)
+            width = (6 if "builder_generate_requested" in query else
+                     4 if "rollover_viewed" in query else 4)
             return FakeResponse([[10 - i for i in range(width)]])
         if "properties.$is_first_day" in query:
             return FakeResponse([[10, 20, 30, 4]])

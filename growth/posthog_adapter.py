@@ -12,8 +12,24 @@ import requests
 from sqlalchemy import Column, DateTime, MetaData, String, Table, Text, select
 
 from database import engine
+from growth.funnel_contract import FUNNEL_SPECS, FunnelStage
 
 CACHE_SECONDS = int(os.getenv("POSTHOG_QUERY_CACHE_SECONDS", "300"))
+
+# The browser sends these lowercase product_area values directly to PostHog.
+# Local GrowthEvent storage normalizes them separately to canonical backend
+# product sources such as BUILD_SLIP and TWO_ODDS.
+POSTHOG_AREA_ALIASES: dict[str, frozenset[str]] = {
+    "BUILD_SLIP": frozenset({"builder", "build_slip"}),
+    "ROLLOVER": frozenset({"rollover"}),
+    "PREDICTIONS": frozenset({"predictions"}),
+    "BANKER": frozenset({"predictions", "banker"}),
+    "TWO_ODDS": frozenset({"predictions", "two_odds", "2_odds"}),
+    "FIVE_ODDS": frozenset({"predictions", "five_odds", "5_odds"}),
+    "TEN_ODDS": frozenset({"predictions", "ten_odds", "10_odds"}),
+    "OVER_1_5": frozenset({"predictions", "over_1_5", "over1.5"}),
+    "FALLBACK": frozenset({"fallback"}),
+}
 metadata = MetaData()
 provider_cache = Table(
     "analytics_provider_cache", metadata,
@@ -115,6 +131,8 @@ def _funnel(rows: list, labels: list[str]) -> list[dict]:
     out = []
     previous = None
     for label, count in zip(labels, counts):
+        if previous is not None and count > previous:
+            raise ValueError("provider funnel violates monotonic progression")
         rate = count / previous if previous else (1.0 if count else None)
         out.append({"label": label, "count": count,
                     "conversion": round(rate, 4) if rate is not None else None,
@@ -159,8 +177,10 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
         uniqIf(distinct_id, event = 'sportybet_opened'),
         countIf((event IN ('prediction_viewed','rollover_viewed','builder_opened')
                  AND empty(toString(properties.product_area))) OR
-                (event IN ('builder_target_selected','builder_generate_requested','builder_generated')
+                (event='builder_target_selected'
                  AND (empty(toString(properties.product_area)) OR properties.target_odds IS NULL)) OR
+                (event IN ('builder_generate_requested','builder_generated')
+                 AND empty(toString(properties.product_area))) OR
                 (event IN ('booking_code_viewed','booking_code_copied','sportybet_opened')
                  AND (empty(toString(properties.product_area)) OR empty(toString(properties.booking_status))
                       OR empty(toString(properties.booking_variant_id)))))
@@ -180,12 +200,31 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
                 "uniqIf(distinct_id,event='booking_code_copied'), uniqIf(distinct_id,event='sportybet_opened') "
                 f"FROM events WHERE {where} GROUP BY 1 "
                 "ORDER BY 2 DESC LIMIT 25")
-    def funnel_sql(events: list[str]) -> str:
+    def stage_predicate(stage: FunnelStage) -> str:
+        # FunnelStage uses canonical backend product areas. PostHog stores the
+        # browser's lowercase product_area values, so translate explicitly.
+        raw_areas = sorted({
+            alias
+            for canonical in stage.product_areas
+            for alias in POSTHOG_AREA_ALIASES.get(
+                canonical,
+                frozenset({canonical.lower()}),
+            )
+        })
+        areas = ", ".join(repr(area) for area in raw_areas)
+
+        return (
+            f"event={stage.event!r} AND "
+            f"lower(toString(properties.product_area)) IN ({areas})"
+        )
+
+    def funnel_sql(stages: tuple[FunnelStage, ...]) -> str:
         measures = ", ".join(
-            f"countIf(event='{event}') AS h{i}, minIf(toUnixTimestamp(timestamp), event='{event}') AS t{i}"
-            for i, event in enumerate(events))
+            f"countIf({stage_predicate(stage)}) AS h{i}, "
+            f"minIf(toUnixTimestamp(timestamp), {stage_predicate(stage)}) AS t{i}"
+            for i, stage in enumerate(stages))
         conditions, previous = [], None
-        for i in range(len(events)):
+        for i in range(len(stages)):
             current = f"h{i}>0"
             if previous:
                 current += f" AND t{i}>={previous}"
@@ -265,24 +304,10 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
             "by_path": _dimension(run(
                 dim_sql("properties.$pathname"), 10, "path")),
         }
-        funnel_specs = {
-            "prediction": (["$pageview", "prediction_viewed", "booking_code_viewed",
-                            "booking_code_copied", "sportybet_opened"],
-                           ["Visitors", "Predictions viewed", "Valid code displayed",
-                            "Code copied", "SportyBet opened"]),
-            "builder": (["builder_opened", "builder_target_selected",
-                         "builder_generate_requested", "booking_code_viewed",
-                         "booking_code_copied", "sportybet_opened"],
-                        ["Builder opened", "Target selected", "Generation requested",
-                         "Valid code displayed", "Code copied", "SportyBet opened"]),
-            "rollover": (["rollover_viewed", "booking_code_viewed",
-                          "booking_code_copied", "sportybet_opened"],
-                         ["Rollover viewed", "Valid code displayed",
-                          "Code copied", "SportyBet opened"]),
-        }
         data["funnels"] = {name: _funnel(
-            run(funnel_sql(events), len(labels), f"{name}_funnel"), labels)
-            for name, (events, labels) in funnel_specs.items()}
+            run(funnel_sql(stages), len(stages), f"{name}_funnel"),
+            [stage.label for stage in stages])
+            for name, stages in FUNNEL_SPECS.items()}
         rr = run(retention_sql, 10, "retention")
         values = rr[0] if rr else [0] * 10
         data["retention"] = {}

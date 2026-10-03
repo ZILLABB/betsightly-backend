@@ -61,11 +61,11 @@ def test_date_filter_and_new_vs_returning(analytics_db):
                            visitor_hash=visitor, is_new_visitor=True))
         db.add_all([
             GrowthEvent(event_date=today.isoformat(), event_type="prediction_viewed",
-                        visitor_hash=visitor, is_new_visitor=False),
+                        visitor_hash=visitor, product_source="PREDICTIONS", is_new_visitor=False),
             GrowthEvent(event_date=today.isoformat(), event_type="builder_opened",
-                        visitor_hash=visitor, is_new_visitor=False),
+                        visitor_hash=visitor, product_source="BUILD_SLIP", is_new_visitor=False),
             GrowthEvent(event_date=today.isoformat(), event_type="builder_generated",
-                        visitor_hash=visitor, is_new_visitor=False),
+                        visitor_hash=visitor, product_source="BUILD_SLIP", is_new_visitor=False),
         ])
         db.commit()
     finally:
@@ -197,12 +197,11 @@ def test_repeated_copy_actions_do_not_exceed_one_hundred_percent(analytics_db):
 
 def test_prediction_builder_and_rollover_funnels_are_independent(analytics_db):
     journeys = {
-        "prediction": [("pageview", "PREDICTIONS"),
-                       ("prediction_viewed", "PREDICTIONS"),
+        "prediction": [("prediction_viewed", "PREDICTIONS"),
                        ("booking_code_viewed", "TWO_ODDS"),
                        ("booking_code_copied", "TWO_ODDS")],
         "builder": [("builder_opened", "BUILD_SLIP"),
-                    ("builder_target_selected", "BUILD_SLIP"),
+                    ("builder_generate_requested", "BUILD_SLIP"),
                     ("builder_generated", "BUILD_SLIP"),
                     ("booking_code_viewed", "BUILD_SLIP")],
         "rollover": [("rollover_viewed", "ROLLOVER"),
@@ -215,8 +214,8 @@ def test_prediction_builder_and_rollover_funnels_are_independent(analytics_db):
                             session_id=f"{visitor}-session", event_id=f"{visitor}-{index}",
                             booking_id=f"{visitor}-code", product_area=area)
     result = A.summary(1)
-    assert [x["count"] for x in result["funnels"]["prediction"]] == [3, 1, 1, 1, 0]
-    assert [x["count"] for x in result["funnels"]["builder"]] == [1, 1, 1, 1, 0, 0]
+    assert [x["count"] for x in result["funnels"]["prediction"]] == [1, 1, 1, 0]
+    assert [x["count"] for x in result["funnels"]["builder"]] == [1, 1, 0, 0]
     assert [x["count"] for x in result["funnels"]["rollover"]] == [1, 1, 1, 0]
     assert all((row["conversion"] is None or row["conversion"] <= 1)
                for funnel in result["funnels"].values() for row in funnel)
