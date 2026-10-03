@@ -103,7 +103,7 @@ def test_results_dataset_uses_completed_day_window(
     )
 
 
-def test_telegram_keeps_product_and_pick_records_separate():
+def test_telegram_reports_official_slips_without_individual_pick_record():
     payload = render_results(
         {
             "results": {
@@ -147,25 +147,22 @@ def test_telegram_keeps_product_and_pick_records_separate():
 
     text = payload["text"]
 
-    assert "Won: *17*" in text
-    assert "Lost: *11*" in text
+    assert "✅ Won: *17*" in text
+    assert "❌ Lost: *11*" in text
 
     assert (
-        "Published-product "
-        "strike rate: *61%*"
+        "Slip strike rate: "
+        "*61%* (28 settled)"
         in text
     )
 
     assert (
-        "Over 1.5 (9/10 picks)"
+        "Over 1.5 — 9/10 selections"
         in text
     )
 
-    assert (
-        "Individual picks: "
-        "41 from 50 (82%)"
-        in text
-    )
+    assert "Individual picks:" not in text
+    assert "41 from 50" not in text
 
     assert "Results so far" in text
 
@@ -175,6 +172,29 @@ def test_telegram_keeps_product_and_pick_records_separate():
         "final score"
         in text
     )
+    assert "📊 *BetSightly Results*" in text
+    assert "_Every published slip counts — wins and losses._" in text
+
+
+def test_telegram_results_uses_plural_pending_product_wording():
+    payload = render_results(
+        {
+            "results": {
+                "window_days": 7,
+                "won": 1,
+                "lost": 1,
+                "settled": 2,
+                "win_rate": .5,
+                "pending_products": 2,
+                "slips_settled": [],
+                "rollover_settled": [],
+            }
+        },
+        "telegram",
+    )
+
+    assert "2 published products are still awaiting a verified final score." in payload["text"]
+    assert "⏳ Pending: *2*" in payload["text"]
 
 
 def test_runtime_status_reports_process_ownership(
