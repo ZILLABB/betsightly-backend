@@ -69,7 +69,11 @@ def test_stale_degraded_board_served_and_refreshes_once(monkeypatch):
     assert first["board"]["stale"] is True
     assert first["board"]["degraded"] is True
     assert first["board"]["refresh_started"] is True
-    assert calls == [{"days_ahead": 7, "force": True}]
+    assert calls == [{
+        "days_ahead": 7,
+        "force": True,
+        "request_triggered": True,
+    }]
 
 
 def test_fresh_degraded_board_does_not_refresh_loop(monkeypatch):

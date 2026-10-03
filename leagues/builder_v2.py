@@ -51,13 +51,19 @@ def _require_prepared_board() -> dict:
     if not state.get("ready"):
         raise BuilderV2BoardUnavailable(
             state,
-            start_prepared_board_refresh(days_ahead=7, force=True),
+            start_prepared_board_refresh(
+                days_ahead=7,
+                force=True,
+                request_triggered=True,
+            ),
         )
     if state.get("stale"):
         state = {
             **state,
             "refresh_started": start_prepared_board_refresh(
-                days_ahead=7, force=True
+                days_ahead=7,
+                force=True,
+                request_triggered=True,
             ),
         }
     return state
