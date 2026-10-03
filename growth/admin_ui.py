@@ -42,6 +42,992 @@ main{max-width:1520px;margin:0 auto;padding:28px 30px 64px}.page{display:none}.p
 @media(max-width:1180px){.kpis{grid-template-columns:repeat(3,1fr)}.three{grid-template-columns:1fr 1fr}.health-grid{grid-template-columns:1fr 1fr}.health-item:nth-child(3){border-left:0;border-top:1px solid var(--line)}.health-item:nth-child(4){border-top:1px solid var(--line)}}
 @media(max-width:800px){.shell{display:block}.sidebar{position:fixed;inset:0 auto 0 0;width:250px;transform:translateX(-105%);transition:.2s;box-shadow:var(--shadow)}.sidebar.open{transform:none}.mobile-toggle{display:inline-flex}.topbar{height:auto;min-height:66px;padding:12px 16px}.topbar .actions .desktop-action{display:none}main{padding:22px 16px 50px}.page-head{align-items:flex-start;flex-direction:column}.page-head>div{width:100%;min-width:0}.range{width:100%;overflow:auto}.kpis{grid-template-columns:1fr 1fr}.two,.three{grid-template-columns:1fr}.span-2{grid-column:auto}.health-grid{grid-template-columns:1fr}.health-item{border-left:0;border-top:1px solid var(--line)}.health-item:first-child{border-top:0}.retention{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:480px){.kpis{grid-template-columns:1fr 1fr}.kpi{min-height:112px;padding:14px}.kpi-value{font-size:23px}.funnel-row{grid-template-columns:1fr auto}.funnel-rate{grid-column:1/-1;text-align:left}.retention{grid-template-columns:1fr 1fr}.page-head h1{font-size:26px}}
+
+/* command-center-ui-v2 */
+
+:root{
+  --bg:#090d0b;
+  --shell:#0b100e;
+  --panel:#101713;
+  --panel-2:#131d18;
+  --panel-3:#18241e;
+
+  --line:rgba(236,247,241,.075);
+  --line-2:rgba(236,247,241,.12);
+
+  --text:#f5f8f6;
+  --text-2:#bdc9c3;
+  --muted:#7f8f87;
+
+  --brand:#38e48d;
+  --brand-2:#1fc876;
+  --brand-soft:rgba(56,228,141,.105);
+
+  --blue:#6faeff;
+  --amber:#f4bd68;
+  --red:#ff7478;
+  --purple:#ae92ff;
+
+  --radius:18px;
+  --shadow:
+    0 1px 1px rgba(0,0,0,.18),
+    0 18px 50px rgba(0,0,0,.20);
+}
+
+
+html{
+  background:var(--bg);
+}
+
+body{
+  background:
+    radial-gradient(circle at 78% -10%,rgba(56,228,141,.095),transparent 31rem),
+    radial-gradient(circle at 8% 15%,rgba(111,174,255,.035),transparent 24rem),
+    linear-gradient(180deg,#090d0b 0%,#080c0a 100%);
+  font-feature-settings:"ss01","cv02","cv03";
+  -webkit-font-smoothing:antialiased;
+}
+
+
+/* LOGIN */
+
+.login-card{
+  padding:38px;
+  border-radius:28px;
+  background:
+    linear-gradient(145deg,rgba(20,31,26,.985),rgba(12,20,16,.985));
+  border:1px solid rgba(255,255,255,.09);
+  box-shadow:
+    0 30px 100px rgba(0,0,0,.42),
+    inset 0 1px rgba(255,255,255,.035);
+}
+
+.login-card h1{
+  font-size:34px;
+  margin-top:36px;
+}
+
+.brand-mark{
+  width:40px;
+  height:40px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.18);
+  box-shadow:
+    0 12px 32px rgba(56,228,141,.17),
+    inset 0 1px rgba(255,255,255,.28);
+}
+
+
+/* APPLICATION SHELL */
+
+.shell{
+  grid-template-columns:270px minmax(0,1fr);
+}
+
+.sidebar{
+  padding:22px 15px;
+  background:
+    linear-gradient(180deg,rgba(12,18,15,.985),rgba(8,13,11,.985));
+  border-right:1px solid rgba(255,255,255,.065);
+  box-shadow:12px 0 40px rgba(0,0,0,.12);
+}
+
+.sidebar .brand{
+  padding:4px 10px 25px;
+}
+
+.nav-label{
+  padding:18px 12px 8px;
+  font-size:9px;
+  letter-spacing:.18em;
+}
+
+.nav{
+  gap:5px;
+}
+
+.nav button{
+  min-height:45px;
+  padding:7px 9px;
+  border:1px solid transparent;
+  border-radius:12px;
+  gap:10px;
+  font-size:13px;
+  transition:
+    background .16s ease,
+    border-color .16s ease,
+    color .16s ease,
+    transform .16s ease;
+}
+
+.nav button:hover{
+  background:rgba(255,255,255,.035);
+  border-color:rgba(255,255,255,.045);
+  transform:translateX(1px);
+}
+
+.nav button.active{
+  background:
+    linear-gradient(90deg,rgba(56,228,141,.13),rgba(56,228,141,.055));
+  border-color:rgba(56,228,141,.13);
+  box-shadow:none;
+}
+
+.nav-icon{
+  width:31px;
+  height:31px;
+  display:grid;
+  place-items:center;
+  flex:0 0 auto;
+  border:1px solid rgba(255,255,255,.055);
+  background:rgba(255,255,255,.025);
+  border-radius:9px;
+  color:#95a59d;
+  font-size:12px;
+}
+
+.nav button.active .nav-icon{
+  color:var(--brand);
+  border-color:rgba(56,228,141,.18);
+  background:rgba(56,228,141,.09);
+}
+
+.sidebar-foot{
+  padding-top:17px;
+}
+
+.live{
+  border:1px solid rgba(255,255,255,.055);
+  border-radius:11px;
+  background:rgba(255,255,255,.02);
+  padding:10px 11px;
+}
+
+
+/* TOP BAR */
+
+.topbar{
+  height:72px;
+  padding:0 34px;
+  border-bottom:1px solid rgba(255,255,255,.06);
+  background:rgba(9,13,11,.82);
+  backdrop-filter:blur(24px) saturate(130%);
+  box-shadow:0 10px 32px rgba(0,0,0,.10);
+}
+
+.topbar-heading{
+  display:flex;
+  align-items:center;
+  gap:9px;
+}
+
+.topbar-title strong{
+  font-size:14px;
+  font-weight:720;
+}
+
+.topbar-title>span{
+  display:block;
+  margin-top:2px;
+}
+
+.env-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 8px;
+  border:1px solid rgba(56,228,141,.16);
+  border-radius:999px;
+  background:rgba(56,228,141,.07);
+  color:#8cefb8;
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+
+.env-dot{
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  background:var(--brand);
+  box-shadow:0 0 0 4px rgba(56,228,141,.08);
+}
+
+
+/* CONTENT */
+
+main{
+  max-width:1480px;
+  padding:34px 36px 80px;
+}
+
+.page{
+  animation:admin-page-enter .18s ease both;
+}
+
+@keyframes admin-page-enter{
+  from{
+    opacity:0;
+    transform:translateY(3px);
+  }
+  to{
+    opacity:1;
+    transform:none;
+  }
+}
+
+.page-head{
+  margin-bottom:27px;
+  align-items:center;
+}
+
+.page-head h1{
+  font-size:34px;
+  letter-spacing:-.048em;
+}
+
+.page-head p{
+  max-width:690px;
+  color:#9eada6;
+}
+
+.eyebrow{
+  margin-bottom:9px;
+  font-size:10px;
+}
+
+.section{
+  margin-top:31px;
+}
+
+.section-head{
+  margin-bottom:14px;
+}
+
+.section-head h2{
+  font-size:16px;
+  font-weight:720;
+}
+
+.section-head p{
+  font-size:12px;
+}
+
+
+/* RANGE CONTROL */
+
+.range{
+  gap:3px;
+  padding:4px;
+  border-radius:14px;
+  background:rgba(255,255,255,.025);
+  border-color:rgba(255,255,255,.07);
+}
+
+.range button{
+  min-height:32px;
+  padding:6px 11px;
+  border-radius:9px;
+}
+
+.range button.active{
+  background:#1a2620;
+  color:#eff7f2;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.06),
+    0 3px 10px rgba(0,0,0,.18);
+}
+
+
+/* BUTTONS */
+
+.btn{
+  min-height:39px;
+  border-radius:10px;
+  border-color:rgba(255,255,255,.085);
+  background:#121a16;
+  font-size:12px;
+  transition:
+    background .15s ease,
+    border-color .15s ease,
+    transform .15s ease;
+}
+
+.btn:hover{
+  background:#18231d;
+  border-color:rgba(255,255,255,.14);
+  transform:translateY(-1px);
+}
+
+.btn-primary{
+  background:linear-gradient(135deg,#42e997,#23c977);
+  box-shadow:
+    0 8px 24px rgba(35,201,119,.15),
+    inset 0 1px rgba(255,255,255,.28);
+}
+
+.btn-primary:hover{
+  background:linear-gradient(135deg,#4eeca0,#26d07c);
+}
+
+
+/* GRID SYSTEM */
+
+.grid{
+  gap:13px;
+}
+
+.kpis{
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+}
+
+.two{
+  gap:16px;
+}
+
+.three{
+  gap:16px;
+}
+
+.overview-funnel-grid{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:16px;
+}
+
+.overview-insight-grid{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:16px;
+}
+
+.overview-insight-grid .span-2{
+  grid-column:1/-1;
+}
+
+
+/* CARDS */
+
+.card{
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,.07);
+  background:
+    linear-gradient(145deg,rgba(19,28,24,.93),rgba(13,21,17,.93));
+  box-shadow:
+    0 1px rgba(255,255,255,.018),
+    0 10px 30px rgba(0,0,0,.095);
+  transition:
+    border-color .16s ease,
+    background .16s ease,
+    box-shadow .16s ease;
+}
+
+.card:hover{
+  border-color:rgba(255,255,255,.105);
+  background:
+    linear-gradient(145deg,rgba(21,31,26,.96),rgba(14,22,18,.96));
+}
+
+.card-title{
+  margin-bottom:17px;
+}
+
+.card-title h3{
+  color:#d4ddd8;
+  font-size:13px;
+  font-weight:700;
+}
+
+
+/* KPI CARDS */
+
+.kpi{
+  min-height:132px;
+  padding:19px;
+}
+
+.kpi:before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  width:100%;
+  height:2px;
+  opacity:.5;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(56,228,141,.7),
+      rgba(56,228,141,0)
+    );
+}
+
+.kpi:after{
+  width:96px;
+  height:96px;
+  right:-46px;
+  top:-49px;
+  background:rgba(56,228,141,.055);
+}
+
+.kpi-label{
+  font-size:10px;
+  letter-spacing:.09em;
+}
+
+.kpi-value{
+  margin:15px 0 10px;
+  font-family:inherit;
+  font-size:29px;
+  font-weight:760;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:-.045em;
+}
+
+.kpi.hero{
+  border-color:rgba(56,228,141,.24);
+  background:
+    linear-gradient(145deg,rgba(56,228,141,.105),rgba(15,24,19,.98));
+}
+
+.kpi.hero .kpi-value{
+  color:#7eefb0;
+}
+
+.delta{
+  font-family:inherit;
+  font-size:10px;
+  font-weight:700;
+}
+
+
+/* HEALTH */
+
+.health-grid{
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:1px;
+  background:rgba(255,255,255,.065);
+}
+
+.health-item{
+  min-height:119px;
+  padding:18px;
+  border:0;
+  background:
+    linear-gradient(145deg,#111a16,#0d1511);
+}
+
+.health-label{
+  font-size:9px;
+  letter-spacing:.09em;
+}
+
+.health-value{
+  margin:9px 0 5px;
+  font-size:19px;
+}
+
+.status{
+  padding:5px 8px;
+  font-size:9px;
+  letter-spacing:.065em;
+}
+
+
+/* FUNNELS */
+
+.funnel{
+  gap:8px;
+}
+
+.funnel-row{
+  padding:12px 13px;
+  border:1px solid rgba(255,255,255,.045);
+  border-radius:11px;
+  background:rgba(255,255,255,.018);
+}
+
+.funnel-row.worst{
+  background:rgba(255,116,120,.055);
+  outline:none;
+  border-color:rgba(255,116,120,.15);
+}
+
+.funnel-name{
+  font-size:12px;
+}
+
+.funnel-count{
+  min-width:35px;
+  padding:4px 7px;
+  border:1px solid rgba(255,255,255,.055);
+  border-radius:8px;
+  background:rgba(255,255,255,.025);
+  text-align:center;
+}
+
+.funnel-rate{
+  font-family:inherit;
+  font-size:10px;
+}
+
+
+/* ALERTS */
+
+#alerts{
+  display:grid;
+  gap:8px;
+}
+
+.alert{
+  align-items:flex-start;
+  padding:12px;
+  border:1px solid rgba(255,255,255,.055);
+  border-radius:11px;
+  background:rgba(255,255,255,.018);
+}
+
+.alert:last-child{
+  border-bottom:1px solid rgba(255,255,255,.055);
+}
+
+.alert-icon{
+  width:30px;
+  height:30px;
+  border-radius:9px;
+}
+
+.alert-ok{
+  border-color:rgba(56,228,141,.11);
+  background:rgba(56,228,141,.035);
+}
+
+.alert-ok .alert-icon{
+  color:var(--brand);
+  background:rgba(56,228,141,.10);
+}
+
+.alert-warn .alert-icon{
+  color:var(--amber);
+  background:rgba(244,189,104,.10);
+}
+
+.alert strong{
+  font-size:12px;
+  line-height:1.35;
+}
+
+.alert p{
+  margin-top:4px;
+  line-height:1.45;
+}
+
+
+/* TREND */
+
+.trend{
+  height:205px;
+  gap:7px;
+  padding-top:20px;
+}
+
+.trend-bar{
+  background:
+    linear-gradient(
+      180deg,
+      rgba(56,228,141,.96),
+      rgba(56,228,141,.18)
+    );
+}
+
+.trend-col span{
+  font-family:inherit;
+  font-size:9px;
+}
+
+
+/* METRIC LISTS */
+
+.metric-list{
+  gap:13px;
+}
+
+.metric-row strong{
+  color:#cbd5d0;
+}
+
+.metric-row span{
+  font-family:inherit;
+  font-variant-numeric:tabular-nums;
+}
+
+.mini-track{
+  height:4px;
+  background:rgba(255,255,255,.045);
+}
+
+.mini-fill{
+  background:
+    linear-gradient(
+      90deg,
+      #28ca79,
+      #4be69a
+    );
+}
+
+
+/* RETENTION */
+
+.retention{
+  gap:10px;
+}
+
+.retention-cell{
+  min-height:95px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  padding:16px 12px;
+  border:1px solid rgba(255,255,255,.045);
+  background:rgba(255,255,255,.018);
+}
+
+.retention-cell strong{
+  font-family:inherit;
+  font-size:20px;
+}
+
+.retention-cell span{
+  margin-top:5px;
+  font-size:9px;
+}
+
+
+/* TABLES */
+
+.table-wrap{
+  border-radius:inherit;
+  scrollbar-width:thin;
+  scrollbar-color:#33483e transparent;
+}
+
+table{
+  min-width:680px;
+}
+
+th{
+  position:sticky;
+  top:0;
+  z-index:1;
+  padding:12px 15px;
+  background:#111a16;
+  color:#82938a;
+  font-size:9px;
+}
+
+td{
+  padding:13px 15px;
+  color:#c4d0ca;
+}
+
+td.num{
+  font-family:inherit;
+  font-variant-numeric:tabular-nums;
+}
+
+tbody tr{
+  transition:background .12s ease;
+}
+
+tbody tr:hover{
+  background:rgba(56,228,141,.026);
+}
+
+
+/* FIELDS */
+
+.field{
+  min-height:42px;
+  border-radius:10px;
+  border-color:rgba(255,255,255,.075);
+  background:#131d18;
+}
+
+.field:hover{
+  border-color:rgba(255,255,255,.12);
+}
+
+.field:focus{
+  border-color:rgba(56,228,141,.52);
+  box-shadow:0 0 0 3px rgba(56,228,141,.08);
+}
+
+
+/* NOTES */
+
+.note{
+  margin:14px 34px 0;
+  border-color:rgba(244,189,104,.16);
+  background:rgba(244,189,104,.045);
+}
+
+
+/* SCROLLBAR */
+
+*::-webkit-scrollbar{
+  width:9px;
+  height:9px;
+}
+
+*::-webkit-scrollbar-track{
+  background:transparent;
+}
+
+*::-webkit-scrollbar-thumb{
+  border:2px solid transparent;
+  border-radius:999px;
+  background:#30443a;
+  background-clip:padding-box;
+}
+
+
+/* RESPONSIVE */
+
+@media(max-width:1200px){
+
+  .shell{
+    grid-template-columns:242px minmax(0,1fr);
+  }
+
+  main{
+    padding-left:26px;
+    padding-right:26px;
+  }
+
+  .health-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+
+  .kpis{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+}
+
+@media(max-width:900px){
+
+  .overview-funnel-grid,
+  .overview-insight-grid{
+    grid-template-columns:1fr;
+  }
+
+  .overview-insight-grid .span-2{
+    grid-column:auto;
+  }
+
+  .kpis{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+
+@media(max-width:800px){
+
+  .sidebar{
+    width:274px;
+  }
+
+  .topbar{
+    padding-left:16px;
+    padding-right:16px;
+  }
+
+  main{
+    padding:25px 16px 58px;
+  }
+
+  .note{
+    margin:12px 16px 0;
+  }
+
+  .page-head{
+    align-items:flex-start;
+  }
+
+  .page-head h1{
+    font-size:30px;
+  }
+
+  .health-grid{
+    grid-template-columns:1fr;
+  }
+}
+
+@media(max-width:520px){
+
+  .kpis{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:9px;
+  }
+
+  .kpi{
+    min-height:115px;
+    padding:14px;
+  }
+
+  .kpi-value{
+    font-size:23px;
+  }
+
+  .page-head h1{
+    font-size:27px;
+  }
+
+  .section{
+    margin-top:26px;
+  }
+
+  .funnel-row{
+    grid-template-columns:1fr auto;
+  }
+
+  .retention{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+
+  .topbar-heading .env-pill{
+    display:none;
+  }
+}
+
+
+/* command-center-final-polish */
+
+/* Sidebar must never hide lower navigation/settings on short screens. */
+.sidebar{
+  height:100dvh;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+
+.sidebar-foot{
+  margin-top:22px;
+  padding-bottom:8px;
+  flex:0 0 auto;
+}
+
+.sidebar .nav{
+  flex:0 0 auto;
+}
+
+/* Quieter comparison copy. */
+.delta{
+  opacity:.82;
+}
+
+/* Make loading visible instead of leaving an apparently frozen dashboard. */
+.dashboard-loading #period{
+  color:var(--brand);
+}
+
+.dashboard-loading #period:before{
+  content:"";
+  display:inline-block;
+  width:7px;
+  height:7px;
+  margin-right:8px;
+  border-radius:50%;
+  background:var(--brand);
+  box-shadow:0 0 0 4px rgba(56,228,141,.09);
+  animation:admin-loading-pulse .8s ease-in-out infinite alternate;
+}
+
+@keyframes admin-loading-pulse{
+  from{opacity:.35;transform:scale(.85)}
+  to{opacity:1;transform:scale(1.05)}
+}
+
+/* Compact sidebar when laptop height is limited. */
+@media(min-width:801px) and (max-height:820px){
+  .sidebar{
+    padding-top:14px;
+    padding-bottom:12px;
+  }
+
+  .sidebar .brand{
+    padding-bottom:13px;
+  }
+
+  .nav-label{
+    padding-top:8px;
+    padding-bottom:4px;
+  }
+
+  .nav{
+    gap:2px;
+  }
+
+  .nav button{
+    min-height:38px;
+    padding-top:4px;
+    padding-bottom:4px;
+  }
+
+  .nav-icon{
+    width:27px;
+    height:27px;
+  }
+
+  .sidebar-foot{
+    margin-top:12px;
+    padding-top:10px;
+  }
+
+  .live{
+    padding:7px 9px;
+  }
+
+  .sidebar-foot .btn{
+    min-height:36px;
+  }
+}
+
+/* Very short laptop screens still remain completely navigable. */
+@media(min-width:801px) and (max-height:690px){
+  .nav button{
+    min-height:34px;
+    font-size:12px;
+  }
+
+  .nav-icon{
+    width:24px;
+    height:24px;
+  }
+
+  .nav-label{
+    font-size:8px;
+  }
+}
+
+/* Mobile should become a true single-column dashboard. */
+@media(max-width:560px){
+  .kpis{
+    grid-template-columns:1fr;
+  }
+
+  .retention{
+    grid-template-columns:1fr;
+  }
+
+  .kpi{
+    min-height:auto;
+  }
+
+  .health-item{
+    min-height:auto;
+  }
+}
+
 """
 
 ADMIN_JS = r"""
@@ -67,7 +1053,7 @@ function funnel(rows){if(!rows?.length)return empty();let worst=-1;rows.forEach(
 function renderOverview(){const s=DASH.summary,t=s.totals,b=s.booking,sb=s.sportybet||{},runs=s.operations?.runs||[],last=runs[0],country=s.by_country?.[0]?.key||'—',mobile=s.by_device?.find(x=>String(x.key).toLowerCase()==='mobile'),mobileShare=t.visitors?((mobile?.visitors||0)/t.visitors):null;$('audienceKpis').innerHTML=[kpi('Visitors',t.visitors,'visitors'),kpi('Returning users',t.returning_visitors,'returning_visitors',true),kpi('Sessions',t.sessions,'sessions'),kpi('Primary country',country,'country'),kpi('Mobile share',mobileShare,'mobile',false,'pct')].join('');$('engagementKpis').innerHTML=[kpi('Prediction users',t.prediction_viewers,'prediction_viewers'),kpi('Builder users',t.builder_users,'builder_users'),kpi('Rollover users',t.rollover_users,'rollover_users'),kpi('Valid-code viewers',t.valid_code_viewers,'valid_code_viewers'),kpi('Unique code copiers',t.unique_code_copiers,'unique_code_copiers',true),kpi('SportyBet openers',t.sportybet_openers,'sportybet_openers')].join('');$('systemKpis').innerHTML=[kpi('Automated bookings',b.attempts,'attempts'),kpi('Successful bookings',(b.full||0)+(b.rebuilt||0)+(b.partial||0),'full',true),kpi('Validation success',b.validation_success_rate,'validation_success_rate',false,'pct'),kpi('No-code rate',b.no_code_rate,'no_code_rate',false,'pct')].join('');
  const unique=sb.unique_indexed_fixtures??sb.fixtures??0,declared=sb.declared_total??null;const complete=sb.is_complete===true&&sb.error==null;const providerTotal=declared==null?'—':num(declared);$('health').innerHTML=`<div class="health-item"><div class="health-label">Today’s prediction run</div><div class="health-value"><span class="status ${last?.status==='success'?'ok':last?'warning':'neutral'}">${esc(last?.status||'No run')}</span></div><div class="muted">${esc(when(last?.finished_at))}</div></div><div class="health-item"><div class="health-label">SportyBet unique fixtures</div><div class="health-value">${num(unique)}</div><div class="muted">Provider total estimate: ${providerTotal}</div><span class="status ${complete?'ok':'bad'}">${complete?'Complete':'Incomplete'}</span></div><div class="health-item"><div class="health-label">System booking health</div><div class="health-value">${pct(b.success_rate)}</div><div class="muted">${num(b.attempts)} automated attempts</div></div><div class="health-item"><div class="health-label">Settlement / jobs</div><div class="health-value">${last?.failed?.length?'<span class="status bad">Attention</span>':'<span class="status ok">Healthy</span>'}</div><div class="muted">${last?.failed?.length?esc(last.failed.join(', ')):'No reported failures'}</div></div>`;
  const integrity=s.analytics_integrity||{},integrityBad=integrity.status==='error';$('health').insertAdjacentHTML('beforeend',`<div class="health-item"><div class="health-label">Analytics ingestion</div><div class="health-value"><span class="status ${s.analytics_provider?.status==='fresh'?'ok':'warning'}">${s.analytics_provider?.status==='fresh'?'Healthy':'Degraded'}</span></div><div class="muted">Provider freshness only.</div></div><div class="health-item"><div class="health-label">Analytics integrity</div><div class="health-value"><span class="status ${integrity.status==='healthy'?'ok':integrityBad?'bad':'warning'}">${esc(integrity.status||'Unknown')}</span></div><div class="muted">${num((integrity.issues||[]).length)} consistency issue(s).</div></div>`);$('predictionFunnel').innerHTML=funnel(s.funnels?.prediction);$('builderFunnel').innerHTML=funnel(s.funnels?.builder);$('rolloverFunnel').innerHTML=funnel(s.funnels?.rollover);$('trend').innerHTML=renderTrend(s.daily);$('topPages').innerHTML=bars(s.by_path);$('sourcesMini').innerHTML=bars(s.by_source);
- const alerts=[];if(s.analytics_provider?.status!=='fresh')alerts.push(['Analytics degraded','PostHog is unavailable or stale. Product and booking operations are unaffected.']);if(!complete)alerts.push(['Catalogue incomplete',`${num(unique)} unique of ${num(declared)} declared fixtures. Raw records: ${num(sb.raw_fetched_records)}.`]);if((b.no_code_rate||0)>.1)alerts.push(['No-code rate needs attention',`${pct(b.no_code_rate)} of automated bookings did not produce a usable code.`]);if((s.analytics_quality?.geo_coverage??1)<.7)alerts.push(['Analytics geo coverage degraded',`${pct(s.analytics_quality.geo_coverage)} of user events have trusted country metadata.`]);if(b.validation_failed)alerts.push(['Code validation failures',`${b.validation_failed} generated code(s) failed read-back validation.`]);if(last?.failed?.length)alerts.push(['Daily run incomplete',last.failed.join(', ')]);if(!alerts.length)alerts.push(['All key systems look healthy','No high-priority operational warnings in this period.']);$('alerts').innerHTML=alerts.map((a,i)=>`<div class="alert"><div class="alert-icon">${i?'!':'✓'}</div><div><strong>${esc(a[0])}</strong><p>${esc(a[1])}</p></div></div>`).join('')}
+ const alerts=[];if(integrity.status==='error')alerts.push(['Analytics integrity needs attention',`${num((integrity.issues||[]).length)} consistency issue(s) detected. Product and booking operations may still be healthy.`]);else if(integrity.status==='warning')alerts.push(['Analytics integrity warning',`${num((integrity.issues||[]).length)} analytics consistency warning(s) detected.`]);if(s.analytics_provider?.status!=='fresh')alerts.push(['Analytics degraded','PostHog is unavailable or stale. Product and booking operations are unaffected.']);if(!complete)alerts.push(['Catalogue incomplete',`${num(unique)} unique fixtures indexed. Provider total estimate: ${declared==null?'unknown':num(declared)}. Raw records: ${num(sb.raw_fetched_records)}.`]);if((b.no_code_rate||0)>.1)alerts.push(['No-code rate needs attention',`${pct(b.no_code_rate)} of automated bookings did not produce a usable code.`]);if((s.analytics_quality?.geo_coverage??1)<.7)alerts.push(['Analytics geo coverage degraded',`${pct(s.analytics_quality.geo_coverage)} of user events have trusted country metadata.`]);if(b.validation_failed)alerts.push(['Code validation failures',`${b.validation_failed} generated code(s) failed read-back validation.`]);if(last?.failed?.length)alerts.push(['Daily run incomplete',last.failed.join(', ')]);if(!alerts.length)alerts.push(['All key systems look healthy','No high-priority operational warnings in this period.']);$('alerts').innerHTML=alerts.map((a,i)=>`<div class="alert"><div class="alert-icon">${i?'!':'✓'}</div><div><strong>${esc(a[0])}</strong><p>${esc(a[1])}</p></div></div>`).join('')}
 const countryNames=typeof Intl.DisplayNames==='function'?new Intl.DisplayNames([navigator.language],{type:'region'}):null;const countryLabel=code=>code==='unknown'?'Unknown':(countryNames?.of(code)||code);
 function qualityCell(label,value){const cls=value==null?'neutral':value>=.9?'ok':value>=.7?'warning':'bad';return`<div class="retention-cell"><strong>${pct(value)}</strong><span>${esc(label)}</span><div class="status ${cls}">${value==null?'Awaiting data':value>=.9?'Healthy':value>=.7?'Watch':'Degraded'}</div></div>`}
 function audienceTable(rows,label=x=>x){return table(['Segment','Visitors','Returning','Sessions','Prediction viewers','Builders','Code copiers','Copy conversion'],(rows||[]).map(r=>`<tr><td><strong>${esc(label(r.key))}</strong></td><td class="num">${num(r.visitors)}</td><td class="num">${num(r.returning)}</td><td class="num">${num(r.sessions)}</td><td class="num">${num(r.prediction_viewers)}</td><td class="num">${num(r.builders)}</td><td class="num">${num(r.code_copiers)}</td><td class="num">${pct(r.copy_conversion)}</td></tr>`))}
@@ -77,7 +1063,49 @@ function renderSporty(){const s=DASH.summary,b=s.booking,sb=s.sportybet||{};$('s
 function renderProduct(){const s=DASH.summary,b=s.builder||{},bb=s.builder_backend||{};$('builderKpis').innerHTML=[kpi('Builder users',s.totals.builder_users,'builder_users'),kpi('Server requests',bb.requests,'slip_builds'),kpi('Tickets produced',bb.tickets_produced,'valid_code_viewers',true),kpi('Ticket rate',bb.ticket_rate,'code_copy_rate',false,'pct'),kpi('Average legs',b.average_legs,'average_legs'),kpi('Average actual odds',b.average_actual_odds,'actual_odds')].join('');$('targets').innerHTML=bars((bb.by_target||[]).map(r=>({key:r.target,visitors:r.requests})));$('features').innerHTML=audienceTable(s.by_product_source);const perf=Object.entries(s.prediction_performance||{});$('performance').innerHTML=table(['Tier','Settled','Won','Lost','Accuracy','ROI','Profit'],perf.map(([tier,r])=>`<tr><td><strong>${esc(tier)}</strong></td><td class="num">${num(r.settled)}</td><td class="num">${num(r.won)}</td><td class="num">${num(r.lost)}</td><td class="num">${pct(r.win_rate)}</td><td class="num">${pct(r.roi)}</td><td class="num">${r.profit??0}</td></tr>`))}
 function renderAnalyticsHealth(){const s=DASH.summary,h=s.analytics_health||{},p=h.provider||{},q=h.quality||{},c=s.metric_contracts||{},i=s.analytics_integrity||{};$('providerHealth').innerHTML=`<div class="health-grid"><div class="health-item"><div class="health-label">Human analytics</div><div class="health-value">${sourceLine(p)}</div><div class="muted">${esc(p.reason||'PostHog Query API responding')}</div></div><div class="health-item"><div class="health-label">Analytics integrity</div><div class="health-value"><span class="status ${i.status==='healthy'?'ok':i.status==='error'?'bad':'warning'}">${esc(i.status||'unknown')}</span></div><div class="muted">${esc((i.issues||[]).map(x=>x.code).join(', ')||'All funnel checks pass')}</div></div><div class="health-item"><div class="health-label">Backend facts</div><div class="health-value">${sourceLine(s.sources?.backend_facts)}</div></div><div class="health-item"><div class="health-label">Dual validation ends</div><div class="health-value">${esc(h.dual_write_until||'not set')}</div><div class="muted">Migration remains open until live events are verified.</div></div></div>`;$('quality').innerHTML=[qualityCell('Geo coverage',q.geo_coverage),qualityCell('Device detection',q.device_coverage),qualityCell('OS detection',q.os_coverage),qualityCell('Browser detection',q.browser_coverage),qualityCell('Referrer attribution',q.referrer_attribution),qualityCell('Stable visitor IDs',q.stable_visitor_coverage)].join('');$('rateContracts').innerHTML=table(['Metric','Numerator','Denominator','Rate','Sample'],Object.entries(c).map(([name,v])=>`<tr><td>${esc(name)}</td><td class="num">${num(v.numerator)}</td><td class="num">${num(v.denominator)}</td><td class="num">${pct(v.rate)}</td><td><span class="status ${v.sample_status==='normal'?'ok':'warning'}">${esc(v.sample_status)}</span></td></tr>`))}
 function dateISO(d){return d.toISOString().slice(0,10)}
-async function loadDashboard(){const active=document.querySelector('.range button.active');const days=active?.dataset.days||'1';let q='?days='+days;if(days==='yesterday'){const d=new Date();d.setUTCDate(d.getUTCDate()-1);q=`?start=${dateISO(d)}&end=${dateISO(d)}`}if(days==='custom'){if(!$('dateStart').value||!$('dateEnd').value)return;q=`?start=${$('dateStart').value}&end=${$('dateEnd').value}`}try{const [d,s]=await Promise.all([api('/analytics'+q),api('/status')]);DASH=d;SETTINGS=s.settings||{};$('period').textContent=`${d.summary.start} → ${d.summary.end}`;renderOverview();renderAudience();renderSporty();renderProduct();renderAnalyticsHealth()}catch(e){$('toast').textContent=e.message;$('toast').classList.remove('hidden')}}
+async function loadDashboard(){
+ const active=document.querySelector('.range button.active');
+ const days=active?.dataset.days||'1';
+ let q='?days='+days;
+
+ if(days==='yesterday'){
+  const d=new Date();
+  d.setUTCDate(d.getUTCDate()-1);
+  q=`?start=${dateISO(d)}&end=${dateISO(d)}`;
+ }
+
+ if(days==='custom'){
+  if(!$('dateStart').value||!$('dateEnd').value)return;
+  q=`?start=${$('dateStart').value}&end=${$('dateEnd').value}`;
+ }
+
+ document.body.classList.add('dashboard-loading');
+ $('period').textContent='Refreshing dashboard?';
+
+ try{
+  const [d,s]=await Promise.all([
+   api('/analytics'+q),
+   api('/status')
+  ]);
+
+  DASH=d;
+  SETTINGS=s.settings||{};
+
+  $('period').textContent=`${d.summary.start} ? ${d.summary.end}`;
+
+  renderOverview();
+  renderAudience();
+  renderSporty();
+  renderProduct();
+  renderAnalyticsHealth();
+ }catch(e){
+  $('period').textContent='Dashboard unavailable';
+  $('toast').textContent=e.message;
+  $('toast').classList.remove('hidden');
+ }finally{
+  document.body.classList.remove('dashboard-loading');
+ }
+}
 async function loadContent(){const p=$('fPlatform').value,st=$('fStatus').value;try{const d=await api('/content?limit=400'+(p?'&platform='+p:'')+(st?'&status='+st:''));$('contentTable').innerHTML=table(['Template','Platform','Status','Date','Actions'],d.content.map(c=>`<tr><td>${esc(c.template)}</td><td>${esc(c.platform)}</td><td><span class="tag ${esc(c.status)}">${esc(c.status)}</span></td><td>${esc(c.publish_date)}</td><td class="row wrap"><button class="btn" data-act="preview" data-id="${c.id}">View</button>${c.status==='DRAFT'?`<button class="btn" data-act="approve" data-id="${c.id}">Approve</button>`:''}${!['instagram','facebook','tiktok','youtube','x'].includes(c.platform)&&c.status!=='PUBLISHED'?`<button class="btn btn-primary" data-act="publish" data-id="${c.id}">Publish</button>`:''}</td></tr>`))}catch(e){$('contentTable').innerHTML=empty(e.message)}}
 async function preview(id){const d=await api('/content?limit=400'),c=d.content.find(x=>x.id===id);if(!c)return;const p=c.payload||{};$('previewBody').textContent=p.text||p.caption||JSON.stringify(p,null,2);$('preview').classList.remove('hidden')}
 async function act(id,what){try{await api(`/content/${id}/${what}`,{method:'POST'});loadContent()}catch(e){alert(e.message)}}
@@ -95,18 +1123,18 @@ async function boot(){$('today').textContent=new Date().toLocaleDateString(undef
 (async()=>{try{const c=await(await fetch(API+'/admin/config')).json();if(!c.configured)$('cfgNote').textContent='Admin login is not configured on this server.'}catch(e){}try{await api('/admin/me');show('app');boot()}catch(e){show('login')}})();
 """
 
-ADMIN_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#07100e"><title>BetSightly Command Center</title><link rel="stylesheet" href="/admin/app.css"></head><body>
+ADMIN_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#090d0b"><title>BetSightly Command Center</title><link rel="stylesheet" href="/admin/app.css"></head><body>
 <section id="login" class="login-shell"><div class="login-card"><div class="brand"><span class="brand-mark">B</span><span>BetSightly</span></div><h1>Command center</h1><p>Product growth, prediction performance and SportyBet operations in one place.</p><input id="pw" class="field" type="password" placeholder="Admin password" autocomplete="current-password"><p id="loginErr" class="error"></p><button class="btn btn-primary btn-wide" data-act="login">Enter dashboard</button><p id="cfgNote" class="muted"></p></div></section>
 <div id="app" class="shell hidden"><aside id="side" class="sidebar"><div class="brand"><span class="brand-mark">B</span><span>BetSightly</span></div><div class="nav-label">Command center</div><nav class="nav"><button class="active" data-page="overview"><span class="nav-icon">◫</span>Overview</button><button data-page="audience"><span class="nav-icon">◎</span>Users & retention</button><button data-page="product"><span class="nav-icon">◇</span>Product & predictions</button><button data-page="sporty"><span class="nav-icon">S</span>SportyBet</button></nav><div class="nav-label">Operations</div><nav class="nav"><button data-page="analytics-health"><span class="nav-icon">♥</span>Analytics health</button><button data-page="content"><span class="nav-icon">✦</span>Content</button><button data-page="publishing"><span class="nav-icon">↗</span>Publishing</button><button data-page="referrals"><span class="nav-icon">⌁</span>Referrals</button><button data-page="settings"><span class="nav-icon">⚙</span>Settings</button></nav><div class="sidebar-foot"><div class="live"><span class="dot"></span>Protected admin session</div><button class="btn btn-ghost btn-danger btn-wide" data-act="logout">Sign out</button></div></aside>
-<div class="workspace"><header class="topbar"><div class="row"><button class="btn mobile-toggle" data-act="menu">☰</button><div class="topbar-title"><strong>Operations dashboard</strong><span id="today"></span></div></div><div class="actions"><span id="period" class="muted"></span><button class="btn desktop-action" data-act="generate">Generate content</button><button class="btn btn-primary desktop-action" data-act="generate-publish">Generate + publish</button></div></header><div id="toast" class="note hidden"></div>
+<div class="workspace"><header class="topbar"><div class="row"><button class="btn mobile-toggle" data-act="menu">☰</button><div class="topbar-title"><div class="topbar-heading"><strong>Operations dashboard</strong><span class="env-pill"><span class="env-dot"></span>Live</span></div><span id="today"></span></div></div><div class="actions"><span id="period" class="muted"></span><button class="btn desktop-action" data-act="generate">Generate content</button><button class="btn btn-primary desktop-action" data-act="generate-publish">Generate + publish</button></div></header><div id="toast" class="note hidden"></div>
 <main>
 <section id="page-overview" class="page active"><div class="page-head"><div><p class="eyebrow">Business overview</p><h1>Today at BetSightly</h1><p>Usage, conversion and operational health—without vanity metrics.</p></div><div><div class="range"><button class="active" data-days="1">Today</button><button data-days="yesterday">Yesterday</button><button data-days="7">7 days</button><button data-days="30">30 days</button><button data-days="90">90 days</button><button data-days="custom">Custom</button></div><div id="customDates" class="row hidden"><input id="dateStart" class="field" type="date"><input id="dateEnd" class="field" type="date"><button class="btn" data-act="apply-range">Apply</button></div></div></div>
 <div class="section"><div class="section-head"><h2>Today’s health</h2><p>Can customers use the product right now?</p></div><div id="health" class="card card-flush health-grid"></div></div>
 <div class="section"><div class="section-head"><h2>Audience</h2><p>Actual user activity only</p></div><div id="audienceKpis" class="grid kpis"></div></div>
 <div class="section"><div class="section-head"><h2>Product engagement</h2><p>Unique people and valid-code conversion</p></div><div id="engagementKpis" class="grid kpis"></div></div>
 <div class="section"><div class="section-head"><h2>Operational health</h2><p>Automated backend generation—not user attempts</p></div><div id="systemKpis" class="grid kpis"></div></div>
-<div class="grid three section"><article class="card"><div class="card-title"><h3>Prediction funnel</h3><span class="muted">Unique user progression</span></div><div id="predictionFunnel" class="funnel"></div></article><article class="card"><div class="card-title"><h3>Builder funnel</h3></div><div id="builderFunnel" class="funnel"></div></article><article class="card"><div class="card-title"><h3>Rollover funnel</h3></div><div id="rolloverFunnel" class="funnel"></div></article><article class="card"><div class="card-title"><h3>Actionable alerts</h3></div><div id="alerts"></div></article></div>
-<div class="grid three section"><article class="card span-2"><div class="card-title"><h3>Visitor trend</h3><div class="legend"><span>● Visitors</span></div></div><div id="trend"></div></article><article class="card"><div class="card-title"><h3>Top product areas</h3></div><div id="topPages"></div></article><article class="card"><div class="card-title"><h3>Traffic sources</h3></div><div id="sourcesMini"></div></article></div></section>
+<div class="grid overview-funnel-grid section"><article class="card"><div class="card-title"><h3>Prediction funnel</h3><span class="muted">Unique user progression</span></div><div id="predictionFunnel" class="funnel"></div></article><article class="card"><div class="card-title"><h3>Builder funnel</h3></div><div id="builderFunnel" class="funnel"></div></article><article class="card"><div class="card-title"><h3>Rollover funnel</h3></div><div id="rolloverFunnel" class="funnel"></div></article><article class="card"><div class="card-title"><h3>Actionable alerts</h3></div><div id="alerts"></div></article></div>
+<div class="grid overview-insight-grid section"><article class="card span-2"><div class="card-title"><h3>Visitor trend</h3><div class="legend"><span>● Visitors</span></div></div><div id="trend"></div></article><article class="card"><div class="card-title"><h3>Top product areas</h3></div><div id="topPages"></div></article><article class="card"><div class="card-title"><h3>Traffic sources</h3></div><div id="sourcesMini"></div></article></div></section>
 <section id="page-audience" class="page"><div class="page-head"><div><p class="eyebrow">Audience intelligence</p><h1>Users & retention</h1><p>Do people return for tomorrow’s predictions?</p></div></div><div id="activeUsers" class="grid kpis"></div><div class="section"><div class="section-head"><h2>Retention cohorts</h2><p>Privacy-safe browser identifier; anonymous and approximate.</p></div><div class="card"><div id="retention" class="retention"></div></div></div><div class="section"><div class="section-head"><h2>Countries</h2><p>Provider-enriched geography; no GPS.</p></div><div id="countries" class="card card-flush"></div></div><div class="section"><div class="section-head"><h2>Traffic-source quality</h2><p>UTM and first-session referrer attribution</p></div><div id="traffic" class="card card-flush"></div></div><div class="section"><div class="section-head"><h2>Mobile quality</h2><p>Conversion and return behaviour by device</p></div><div id="devices" class="card card-flush"></div></div><div class="grid two section"><article class="card card-flush"><div class="card-title"><h3>Operating systems</h3></div><div id="os"></div></article><article class="card card-flush"><div class="card-title"><h3>Browsers</h3></div><div id="browsers"></div></article></div></section>
 <section id="page-analytics-health" class="page"><div class="page-head"><div><p class="eyebrow">Data operations</p><h1>Analytics health</h1><p>Provider freshness, enrichment coverage, rate denominators and migration status.</p></div></div><div id="providerHealth" class="card card-flush"></div><div class="section"><div class="section-head"><h2>Data quality</h2><p>Unknown values remain visible; historical data is never fabricated.</p></div><div class="card"><div id="quality" class="retention"></div></div></div><div class="section"><div class="section-head"><h2>Rate contracts</h2><p>Raw numerators and denominators; small samples are labelled.</p></div><div id="rateContracts" class="card card-flush"></div></div></section>
 <section id="page-product" class="page"><div class="page-head"><div><p class="eyebrow">Product intelligence</p><h1>Builder & predictions</h1><p>Usage and betting performance remain separate, so availability never masquerades as accuracy.</p></div></div><div id="builderKpis" class="grid kpis"></div><div class="grid two section"><article class="card"><div class="card-title"><h3>Builder target odds</h3></div><div id="targets"></div></article><article class="card card-flush"><div class="card-title"><h3>Feature usage</h3></div><div id="features"></div></article></div><div class="section"><div class="section-head"><h2>Prediction performance</h2><p>Settled record and level-stake ROI</p></div><div id="performance" class="card card-flush"></div></div></section>
