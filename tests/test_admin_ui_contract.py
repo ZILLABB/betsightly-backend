@@ -45,3 +45,14 @@ def test_command_center_alert_severity_and_loading_copy():
     assert "&#10003;" in ADMIN_JS
     assert "Refreshing dashboard..." in ADMIN_JS
     assert "Refreshing dashboard?" not in ADMIN_JS
+
+
+
+def test_command_center_runtime_context_is_truthful():
+    assert "isToday" in ADMIN_JS
+    assert "runIsToday" in ADMIN_JS
+    assert "Prediction run stale" in ADMIN_JS
+    assert r"\u2192" in ADMIN_JS
+    assert "s.environment" in ADMIN_JS
+    assert "'Staging'" in ADMIN_JS
+    assert "'Stale'" in ADMIN_JS
