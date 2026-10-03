@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import time
 from datetime import datetime, timezone
@@ -15,6 +16,10 @@ from database import engine
 from growth.funnel_contract import FUNNEL_SPECS, FunnelStage
 
 CACHE_SECONDS = int(os.getenv("POSTHOG_QUERY_CACHE_SECONDS", "300"))
+POSTHOG_QUERY_WORKERS = max(
+    1,
+    min(8, int(os.getenv("POSTHOG_QUERY_WORKERS", "6"))),
+)
 
 # The browser sends these lowercase product_area values directly to PostHog.
 # Local GrowthEvent storage normalizes them separately to canonical backend
@@ -270,65 +275,187 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
             return _validated_rows(
                 _query(project, key, host, hogql, transport), width, name)
 
-        total_rows = run(totals_sql, 12, "totals")
+        query_specs: dict[str, tuple[str, int]] = {
+            "totals": (totals_sql, 12),
+            "daily": (daily_sql, 6),
+            "country": (dim_sql("properties.$geoip_country_code"), 10),
+            "device": (dim_sql("properties.$device_type"), 10),
+            "browser": (dim_sql("properties.$browser"), 10),
+            "os": (dim_sql("properties.$os"), 10),
+            "region": (
+                dim_sql("properties.$geoip_subdivision_1_name"),
+                10,
+            ),
+            "source": (
+                dim_sql(
+                    "coalesce(properties.$utm_source, "
+                    "properties.$referring_domain)"
+                ),
+                10,
+            ),
+            "campaign": (dim_sql("properties.$utm_campaign"), 10),
+            "path": (dim_sql("properties.$pathname"), 10),
+            "retention": (retention_sql, 10),
+            "prediction_day_return": (prediction_return_sql, 2),
+            "active_users": (active_sql, 4),
+        }
+
+        for funnel_name, stages in FUNNEL_SPECS.items():
+            query_specs[f"{funnel_name}_funnel"] = (
+                funnel_sql(stages),
+                len(stages),
+            )
+
+        # Tests inject a fake transport. Keep that path deterministic and
+        # sequential; real PostHog reads are independent and safe to run
+        # concurrently.
+        if transport is not None:
+            rows_by_name = {
+                name: run(sql, width, name)
+                for name, (sql, width) in query_specs.items()
+            }
+        else:
+            rows_by_name = {}
+            worker_count = min(
+                POSTHOG_QUERY_WORKERS,
+                len(query_specs),
+            )
+
+            with ThreadPoolExecutor(max_workers=worker_count) as pool:
+                futures = {
+                    pool.submit(run, sql, width, name): name
+                    for name, (sql, width) in query_specs.items()
+                }
+
+                for future in as_completed(futures):
+                    name = futures[future]
+                    rows_by_name[name] = future.result()
+
+        total_rows = rows_by_name["totals"]
         row = total_rows[0] if total_rows else [0] * 12
-        totals = dict(zip(("events", "visitors", "sessions", "pageviews",
-                           "prediction_viewers", "rollover_users", "builder_users", "slip_generators",
-                           "valid_code_viewers", "unique_code_copiers", "sportybet_openers",
-                           "schema_validation_errors"),
-                          [int(value or 0) for value in row]))
+
+        totals = dict(zip(
+            (
+                "events",
+                "visitors",
+                "sessions",
+                "pageviews",
+                "prediction_viewers",
+                "rollover_users",
+                "builder_users",
+                "slip_generators",
+                "valid_code_viewers",
+                "unique_code_copiers",
+                "sportybet_openers",
+                "schema_validation_errors",
+            ),
+            [int(value or 0) for value in row],
+        ))
+
         totals["total_copy_actions"] = totals["unique_code_copiers"]
         totals["sportybet_opened"] = totals["sportybet_openers"]
-        daily_rows = run(daily_sql, 6, "daily")
+
+        daily_rows = rows_by_name["daily"]
+
         data = {
             "totals": totals,
-            "daily": [{"date": str(r[0]), "visitors": int(r[1] or 0),
-                       "sessions": int(r[2] or 0), "events": int(r[3] or 0),
-                       "builds": int(r[4] or 0), "copy_actions": int(r[5] or 0)}
-                      for r in daily_rows],
-            "by_country": _dimension(run(
-                dim_sql("properties.$geoip_country_code"), 10, "country")),
-            "by_device": _dimension(run(
-                dim_sql("properties.$device_type"), 10, "device")),
-            "by_browser": _dimension(run(
-                dim_sql("properties.$browser"), 10, "browser")),
-            "by_os": _dimension(run(
-                dim_sql("properties.$os"), 10, "os")),
-            "by_region": _dimension(run(
-                dim_sql("properties.$geoip_subdivision_1_name"), 10, "region")),
-            "by_source": _dimension(run(
-                dim_sql("coalesce(properties.$utm_source, properties.$referring_domain)"),
-                10, "source")),
-            "by_campaign": _dimension(run(
-                dim_sql("properties.$utm_campaign"), 10, "campaign")),
-            "by_path": _dimension(run(
-                dim_sql("properties.$pathname"), 10, "path")),
+            "daily": [
+                {
+                    "date": str(r[0]),
+                    "visitors": int(r[1] or 0),
+                    "sessions": int(r[2] or 0),
+                    "events": int(r[3] or 0),
+                    "builds": int(r[4] or 0),
+                    "copy_actions": int(r[5] or 0),
+                }
+                for r in daily_rows
+            ],
+            "by_country": _dimension(rows_by_name["country"]),
+            "by_device": _dimension(rows_by_name["device"]),
+            "by_browser": _dimension(rows_by_name["browser"]),
+            "by_os": _dimension(rows_by_name["os"]),
+            "by_region": _dimension(rows_by_name["region"]),
+            "by_source": _dimension(rows_by_name["source"]),
+            "by_campaign": _dimension(rows_by_name["campaign"]),
+            "by_path": _dimension(rows_by_name["path"]),
         }
-        data["funnels"] = {name: _funnel(
-            run(funnel_sql(stages), len(stages), f"{name}_funnel"),
-            [stage.label for stage in stages])
-            for name, stages in FUNNEL_SPECS.items()}
-        rr = run(retention_sql, 10, "retention")
+
+        data["funnels"] = {
+            name: _funnel(
+                rows_by_name[f"{name}_funnel"],
+                [stage.label for stage in stages],
+            )
+            for name, stages in FUNNEL_SPECS.items()
+        }
+
+        rr = rows_by_name["retention"]
         values = rr[0] if rr else [0] * 10
+
         data["retention"] = {}
+
         for index, day in enumerate((1, 3, 7, 14, 30)):
-            eligible, returned = int(values[index * 2] or 0), int(values[index * 2 + 1] or 0)
+            eligible = int(values[index * 2] or 0)
+            returned = int(values[index * 2 + 1] or 0)
+
             data["retention"][f"d{day}"] = {
-                "eligible": eligible, "returned": returned,
-                "rate": round(returned / eligible, 4) if eligible else None}
-        pr = run(prediction_return_sql, 2, "prediction_day_return")
-        eligible, returned = ([int(value or 0) for value in pr[0]] if pr else [0, 0])
+                "eligible": eligible,
+                "returned": returned,
+                "rate": (
+                    round(returned / eligible, 4)
+                    if eligible
+                    else None
+                ),
+            }
+
+        pr = rows_by_name["prediction_day_return"]
+
+        eligible, returned = (
+            [int(value or 0) for value in pr[0]]
+            if pr
+            else [0, 0]
+        )
+
         data["prediction_day_return"] = {
-            "eligible": eligible, "returned": min(returned, eligible),
-            "rate": round(min(returned, eligible) / eligible, 4) if eligible else None}
-        ar = run(active_sql, 4, "active_users")
-        av = [int(value or 0) for value in (ar[0] if ar else [0, 0, 0, 0])]
-        data["active_users"] = {"dau": av[0], "wau": av[1], "mau": av[2]}
+            "eligible": eligible,
+            "returned": min(returned, eligible),
+            "rate": (
+                round(min(returned, eligible) / eligible, 4)
+                if eligible
+                else None
+            ),
+        }
+
+        ar = rows_by_name["active_users"]
+
+        av = [
+            int(value or 0)
+            for value in (
+                ar[0]
+                if ar
+                else [0, 0, 0, 0]
+            )
+        ]
+
+        data["active_users"] = {
+            "dau": av[0],
+            "wau": av[1],
+            "mau": av[2],
+        }
+
         data["totals"]["new_visitors"] = av[3]
-        data["totals"]["returning_visitors"] = max(0, data["totals"]["visitors"] - av[3])
+        data["totals"]["returning_visitors"] = max(
+            0,
+            data["totals"]["visitors"] - av[3],
+        )
+
         as_of = datetime.now(timezone.utc)
         _write_cache(cache_key, data, as_of)
-        result = {"data": data, "meta": _meta("fresh", as_of)}
+
+        result = {
+            "data": data,
+            "meta": _meta("fresh", as_of),
+        }
+
         _memory[cache_key] = (now_mono, result)
         return result
     except Exception as exc:
