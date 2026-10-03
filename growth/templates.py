@@ -590,7 +590,7 @@ def results(
 
     if platform == "telegram":
         lines = [
-            "?? *Betsightly Results*",
+            "📊 *BetSightly Results*",
             (
                 f"_Last {res['window_days']} "
                 "completed days_"
@@ -600,19 +600,22 @@ def results(
 
         if provisional:
             lines += [
-                "? *Results so far*",
+                "⏳ *Results so far*",
                 pending_text,
                 "",
             ]
 
         lines += [
-            f"? Won: *{won}*",
-            f"? Lost: *{lost}*",
+            "*Official slip record*",
+            f"✅ Won: *{won}*",
+            f"❌ Lost: *{lost}*",
             (
-                "?? Published-product "
-                f"strike rate: *{rate_s}*"
+                "📈 Slip strike rate: "
+                f"*{rate_s}* ({res.get('settled') or 0} settled)"
             ),
+            f"⏳ Pending: *{pending}*" if provisional else "",
             "",
+            "*Recent settled slips*",
         ]
 
         for slip in res.get(
@@ -639,24 +642,24 @@ def results(
                 )
 
                 mark = (
-                    "?"
+                    "✅"
                     if slip.get("status")
                     == "won"
-                    else "?"
+                    else "❌"
                 )
 
                 lines.append(
                     f"{mark} "
                     f"{slip['label']} "
-                    f"({leg_won}/{total} picks)"
+                    f"— {leg_won}/{total} selections"
                 )
 
             else:
                 mark = (
-                    "?"
+                    "✅"
                     if slip.get("status")
                     == "won"
-                    else "?"
+                    else "❌"
                 )
 
                 lines.append(
@@ -672,12 +675,12 @@ def results(
             [],
         ):
             mark = {
-                "won": "?",
-                "lost": "?",
-                "void": "?",
+                "won": "✅",
+                "lost": "❌",
+                "void": "↩️",
             }.get(
                 day.get("status"),
-                "?",
+                "⏳",
             )
 
             lines.append(
@@ -689,40 +692,10 @@ def results(
                 f")"
             )
 
-        singles = (
-            res.get("singles")
-            or {}
-        )
-
-        if singles.get("settled"):
-            line = (
-                "?? Individual picks: "
-                f"{singles['won']} "
-                f"from {singles['settled']}"
-            )
-
-            if singles.get("win_rate") is not None:
-                line += (
-                    f" "
-                    f"({singles['win_rate']:.0%})"
-                )
-
-            lines += [
-                "",
-                line,
-            ]
-
         lines += [
             "",
             (
-                "_Published products and "
-                "individual picks are "
-                "tracked separately._"
-            ),
-            (
-                "_We publish losses as well "
-                "as wins ? a record you cannot "
-                "check is not a record._"
+                "_Every published slip counts — wins and losses._"
             ),
             "",
             f"[Full results]({url})",
