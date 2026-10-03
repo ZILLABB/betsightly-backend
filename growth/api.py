@@ -16,6 +16,7 @@ Nothing here does prediction work. Generation and publishing delegate to
 """
 
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Query, Request, Response
@@ -331,7 +332,11 @@ async def growth_analytics(admin: str = Depends(require_admin),
 @router.get("/status")
 async def growth_status(admin: str = Depends(require_admin)):
     from growth.engine import status
-    return {"status": "success", **status()}
+    return {
+        "status": "success",
+        **status(),
+        "environment": os.getenv("ENVIRONMENT", "production"),
+    }
 
 
 @router.get("/settings")
