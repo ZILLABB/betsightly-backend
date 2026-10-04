@@ -1049,6 +1049,104 @@ def _attach_live_bookings(accumulators: dict, board: dict) -> dict:
     return accumulators
 
 
+def _validate_bookable_now_portfolio(accumulators: dict, rollover: dict) -> dict:
+    """Fail closed if the live action card would repeat an official fixture.
+
+    ``bookable-now`` is deliberately separate from the immutable morning card,
+    but it is still presented as one diversified set of accumulator products.
+    Selection-time exclusion should make this a no-op.  This final check is a
+    defense against a future selector or booking change exposing a later tier
+    that reuses a fixture already claimed by Rollover, Banker, 2 Odds, or 5
+    Odds.  Over 1.5 remains independent singles by product design.
+    """
+    selection_counts: dict[str, int] = {}
+    fixture_counts: dict[str, int] = {}
+    withheld: list[dict] = []
+
+    def claim(games: list[dict]) -> None:
+        for game in games:
+            identity = _selection_identity(game)
+            fixture_id = str(game.get("match_id") or "")
+            if identity:
+                selection_counts[identity] = selection_counts.get(identity, 0) + 1
+            if fixture_id:
+                fixture_counts[fixture_id] = fixture_counts.get(fixture_id, 0) + 1
+
+    # The original rollover chain is not rebuilt or rebooked here, but its
+    # fixture exposure is reserved before dynamic tiers are considered.
+    claim((rollover or {}).get("games") or [])
+
+    for product in ("banker", "2_odds", "5_odds", "10_odds"):
+        data = accumulators.get(product) or {}
+        if not data.get("selected"):
+            continue
+        games = data.get("games") or []
+        identities = [_selection_identity(game) for game in games]
+        fixture_ids = [str(game.get("match_id") or "") for game in games]
+        duplicate_selections = sorted({
+            identity for identity in identities
+            if identity and selection_counts.get(identity, 0) >= MAX_OFFICIAL_SELECTION_EXPOSURE
+        })
+        duplicate_fixtures = sorted({
+            fixture_id for fixture_id in fixture_ids
+            if fixture_id and fixture_counts.get(fixture_id, 0) >= MAX_OFFICIAL_FIXTURE_EXPOSURE
+        })
+        # A duplicate inside a dynamically-built tier is just as unsafe as a
+        # duplicate across tiers.  Do not turn that tier into a different bet.
+        duplicate_selections.extend(sorted({
+            identity for identity in identities if identity and identities.count(identity) > 1
+        }))
+        duplicate_fixtures.extend(sorted({
+            fixture_id for fixture_id in fixture_ids if fixture_id and fixture_ids.count(fixture_id) > 1
+        }))
+        duplicate_selections = sorted(set(duplicate_selections))
+        duplicate_fixtures = sorted(set(duplicate_fixtures))
+        if duplicate_selections or duplicate_fixtures:
+            withheld.append({
+                "product": product,
+                "duplicate_selection_ids": duplicate_selections,
+                "duplicate_fixture_ids": duplicate_fixtures,
+            })
+            # Do not expose a fresh code that represents a card we refuse to
+            # display.  The immutable published code/card is never touched.
+            data.pop("booking", None)
+            data.update(
+                selected=False, games=[], total_odds=0, hit_probability=0,
+                reason="Withheld because it repeats a fixture in the live portfolio.",
+            )
+            continue
+        claim(games)
+
+    duplicate_selection_count = sum(
+        count - MAX_OFFICIAL_SELECTION_EXPOSURE
+        for count in selection_counts.values()
+        if count > MAX_OFFICIAL_SELECTION_EXPOSURE
+    )
+    duplicate_fixture_count = sum(
+        count - MAX_OFFICIAL_FIXTURE_EXPOSURE
+        for count in fixture_counts.values()
+        if count > MAX_OFFICIAL_FIXTURE_EXPOSURE
+    )
+    return {
+        "portfolio_version": OFFICIAL_PORTFOLIO_VERSION,
+        "policy": "available_now_official_exposure_v1",
+        "rollover_claimed_fixture_ids": sorted(
+            str(game.get("match_id")) for game in (rollover or {}).get("games") or []
+            if game.get("match_id")
+        ),
+        "withheld_products": withheld,
+        "portfolio_validation": {
+            "exact_selection_overlap_count": duplicate_selection_count,
+            "fixture_overlap_count": duplicate_fixture_count,
+            "max_selection_exposure": max(selection_counts.values(), default=0),
+            "max_fixture_exposure": max(fixture_counts.values(), default=0),
+            "fixture_count": len(fixture_counts),
+            "selection_count": len(selection_counts),
+            "valid": not duplicate_selection_count and not duplicate_fixture_count,
+        },
+    }
+
+
 def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
     """A slip built only from fixtures that have not kicked off yet.
 
@@ -1183,6 +1281,24 @@ def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
                     "No exact SportyBet-ready slip could be verified."),
         )
 
+    portfolio = _validate_bookable_now_portfolio(accumulators, rollover)
+    # A malformed rollover must not be used as the basis for a dynamic card.
+    # Normal selector output has one fixture per product, so this is a final
+    # fail-closed guard rather than a product-path change.
+    if not portfolio["portfolio_validation"]["valid"]:
+        for category in accumulators.values():
+            if isinstance(category, dict) and category.get("selected"):
+                category.pop("booking", None)
+                category.update(
+                    selected=False, games=[], total_odds=0, hit_probability=0,
+                    reason="Live portfolio validation could not be completed safely.",
+                )
+
+    active_tiers = sum(
+        1 for category in accumulators.values()
+        if isinstance(category, dict) and category.get("selected")
+    )
+
     return {
         "status": "success",
         "available": active_tiers > 0,
@@ -1192,6 +1308,7 @@ def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
         "generated_at": now.isoformat(),
         "kickoffs_remaining": len({p["match_id"] for p in live}),
         "accumulators": accumulators,
+        "_portfolio": portfolio,
     }
 
 

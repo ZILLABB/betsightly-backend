@@ -378,3 +378,75 @@ def test_daily_preview_uses_same_selector_without_publication_writes(monkeypatch
     finally:
         daily_feed._accum_cache.clear()
         daily_feed._accum_cache.update(old_cache)
+
+
+def _available_now_game(match_id: str, market: str = "over_1_5") -> dict:
+    return {
+        "match_id": match_id,
+        "market": market,
+        "market_key": market,
+        "prediction": market,
+        "home_team": f"Home {match_id}",
+        "away_team": f"Away {match_id}",
+    }
+
+
+def test_available_now_final_portfolio_reserves_rollover_and_all_official_tiers():
+    rollover = {"games": [_available_now_game("A", "under_3_5")]}
+    accumulators = {
+        "banker": {"selected": True, "games": [_available_now_game("B")]},
+        "2_odds": {"selected": True, "games": [
+            _available_now_game("C"), _available_now_game("D"),
+        ]},
+        "5_odds": {"selected": True, "games": [
+            _available_now_game("E"), _available_now_game("F"), _available_now_game("G"),
+        ]},
+        "10_odds": {"selected": True, "games": [
+            _available_now_game("H"), _available_now_game("I"), _available_now_game("J"),
+        ]},
+        # Independent singles must not participate in this accumulator cap.
+        "over_1_5": {"selected": True, "games": [_available_now_game("B")]},
+    }
+
+    portfolio = daily_feed._validate_bookable_now_portfolio(accumulators, rollover)
+
+    assert portfolio["portfolio_validation"] == {
+        "exact_selection_overlap_count": 0,
+        "fixture_overlap_count": 0,
+        "max_selection_exposure": 1,
+        "max_fixture_exposure": 1,
+        "fixture_count": 10,
+        "selection_count": 10,
+        "valid": True,
+    }
+    assert not portfolio["withheld_products"]
+    assert all(accumulators[name]["selected"] for name in (
+        "banker", "2_odds", "5_odds", "10_odds",
+    ))
+
+
+def test_available_now_final_portfolio_fails_closed_for_duplicate_fixture():
+    rollover = {"games": [_available_now_game("A", "under_3_5")]}
+    accumulators = {
+        "banker": {"selected": True, "games": [_available_now_game("B")]},
+        # It is a different market, proving fixture exposure rather than only
+        # exact-selection exposure protects the action surface.
+        "2_odds": {"selected": True, "games": [_available_now_game("B", "home_win")]},
+        "5_odds": {"selected": True, "games": [_available_now_game("C")]},
+        "10_odds": {"selected": True, "games": [_available_now_game("D")]},
+    }
+
+    portfolio = daily_feed._validate_bookable_now_portfolio(accumulators, rollover)
+
+    assert accumulators["banker"]["selected"] is True
+    assert accumulators["2_odds"]["selected"] is False
+    assert accumulators["2_odds"]["games"] == []
+    assert portfolio["withheld_products"] == [{
+        "product": "2_odds",
+        "duplicate_selection_ids": [],
+        "duplicate_fixture_ids": ["B"],
+    }]
+    # The API exposes only the retained portfolio, so consumers can rely on
+    # zero final overlap rather than interpreting an attempted duplicate.
+    assert portfolio["portfolio_validation"]["valid"] is True
+    assert portfolio["portfolio_validation"]["fixture_overlap_count"] == 0
