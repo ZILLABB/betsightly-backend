@@ -388,28 +388,47 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
             adjusted = ([], 0.0, 0.0)
             decision = "WITHHELD_FOR_SELECTION_EXPOSURE"
 
-        # Fixture reuse is preferred against, but unlike exact selection reuse
-        # it can be retained only when the existing quality gates find no
-        # fixture/team-independent selection at all.  We never use the old
-        # uncertainty comparison to silently preserve a conflicting pick.
+        # Exact fixture exposure is also a hard customer-risk rule. A
+        # different market on the same match is still the same match-level
+        # failure exposure. Team overlap across different fixtures remains a
+        # softer diversification preference.
         if adjusted[0]:
-            final_fixture_conflicts = [
+            exact_fixture_conflicts = [
                 pick for pick in adjusted[0]
                 if str(pick["match_id"]) in fixture_uses
-                or bool(_pick_teams(pick) & team_uses)
             ]
-            if final_fixture_conflicts:
+            if exact_fixture_conflicts:
                 fixture_safe_pool = [
                     pick for pick in exact_safe_pool
                     if str(pick["match_id"]) not in fixture_uses
-                    and not (_pick_teams(pick) & team_uses)
                 ]
                 fixture_safe = selector(fixture_safe_pool)
                 if fixture_safe[0]:
                     adjusted = fixture_safe
                     decision = "DIVERSIFIED"
                 else:
-                    decision = "QUALITY_CAPPED_FOR_DIVERSIFICATION"
+                    adjusted = ([], 0.0, 0.0)
+                    decision = "WITHHELD_FOR_FIXTURE_EXPOSURE"
+
+            # Different fixtures involving an already-used team are still
+            # preferably diversified, but this is not the hard fixture cap.
+            if adjusted[0]:
+                team_conflicts = [
+                    pick for pick in adjusted[0]
+                    if bool(_pick_teams(pick) & team_uses)
+                ]
+                if team_conflicts:
+                    team_safe_pool = [
+                        pick for pick in exact_safe_pool
+                        if str(pick["match_id"]) not in fixture_uses
+                        and not (_pick_teams(pick) & team_uses)
+                    ]
+                    team_safe = selector(team_safe_pool)
+                    if team_safe[0]:
+                        adjusted = team_safe
+                        decision = "DIVERSIFIED"
+                    else:
+                        decision = "QUALITY_CAPPED_FOR_TEAM_DIVERSIFICATION"
 
         quality_cost = max(0.0, independent[2] - adjusted[2]) if adjusted[0] else independent[2]
         _record_use(adjusted)
@@ -456,22 +475,58 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         "5_odds": five,
         "10_odds": ten,
     }
-    seen_official: set[str] = set()
-    duplicate_official: list[str] = []
+    selection_exposure_counts: dict[str, int] = {}
+    fixture_exposure_counts: dict[str, int] = {}
+
     for product in OFFICIAL_PORTFOLIO_PRODUCTS:
-        for identity in _selection_ids(final_official[product]):
-            if identity in seen_official:
-                duplicate_official.append(identity)
-            seen_official.add(identity)
-    if duplicate_official:
+        for pick in final_official[product][0]:
+            identity = _selection_identity(pick)
+            selection_exposure_counts[identity] = (
+                selection_exposure_counts.get(identity, 0) + 1
+            )
+
+            fixture_id = str(pick.get("match_id") or "")
+            if fixture_id:
+                fixture_exposure_counts[fixture_id] = (
+                    fixture_exposure_counts.get(fixture_id, 0) + 1
+                )
+
+    duplicate_official = sorted(
+        identity
+        for identity, count in selection_exposure_counts.items()
+        if count > MAX_OFFICIAL_SELECTION_EXPOSURE
+    )
+    duplicate_fixtures = sorted(
+        fixture_id
+        for fixture_id, count in fixture_exposure_counts.items()
+        if count > MAX_OFFICIAL_FIXTURE_EXPOSURE
+    )
+
+    if duplicate_official or duplicate_fixtures:
+        problems = []
+        if duplicate_official:
+            problems.append(
+                "duplicate exact selection " + ", ".join(duplicate_official)
+            )
+        if duplicate_fixtures:
+            problems.append(
+                "duplicate fixture " + ", ".join(duplicate_fixtures)
+            )
         raise RuntimeError(
-            "official portfolio integrity violation: duplicate exact selection "
-            + ", ".join(sorted(set(duplicate_official)))
+            "official portfolio integrity violation: " + "; ".join(problems)
         )
+
     portfolio_diagnostics["portfolio_validation"] = {
         "exact_selection_overlap_count": 0,
-        "fixture_count": len(fixture_uses),
-        "selection_count": len(seen_official),
+        "fixture_overlap_count": 0,
+        "max_selection_exposure": max(
+            selection_exposure_counts.values(), default=0
+        ),
+        "max_fixture_exposure": max(
+            fixture_exposure_counts.values(), default=0
+        ),
+        "fixture_count": len(fixture_exposure_counts),
+        "selection_count": len(selection_exposure_counts),
         "valid": True,
     }
 

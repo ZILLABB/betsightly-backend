@@ -142,6 +142,87 @@ def test_october_three_shared_losses_cannot_be_republished_in_5_and_10(monkeypat
     )
 
 
+
+def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
+    """Same match cannot decide Rollover and another official slip."""
+    target_date = (
+        datetime.now(timezone.utc) + timedelta(days=1)
+    ).date().isoformat()
+    kickoff = f"{target_date}T18:00:00Z"
+
+    picks = [_pick(index, kickoff) for index in range(6)]
+    shared = picks[0]
+    fixtures = [pick["_fixture"] for pick in picks]
+
+    # Rollover owns the same fixture, but deliberately under a different
+    # market/prediction so exact-selection de-duplication alone cannot catch it.
+    rollover_game = {
+        "match_id": shared["match_id"],
+        "home_team": shared["_fixture"]["home"]["name"],
+        "away_team": shared["_fixture"]["away"]["name"],
+        "market": "under_4_5",
+        "market_key": "under_4_5",
+        "prediction": "Under 4.5 Goals",
+        "odds": 1.20,
+        "confidence": .80,
+    }
+
+    monkeypatch.setattr(
+        daily_feed,
+        "_build_rollover",
+        lambda *_, **kw: {
+            "selected": True,
+            "games": [rollover_game],
+            "chain": [],
+            "chain_length": 1,
+            "total_odds": 1.20,
+            "today_hit_probability": .80,
+        },
+    )
+
+    # Force Banker to want the canonical pick from that exact same fixture.
+    # If the fixture is absent, there is intentionally no fallback banker.
+    import leagues.selection as selection
+
+    def fixture_only_banker(pool, *args, **kwargs):
+        hit = next(
+            (
+                pick for pick in pool
+                if pick["match_id"] == shared["match_id"]
+            ),
+            None,
+        )
+        if not hit:
+            return [], 0.0, 0.0
+        return [hit], float(hit["odds"]), float(hit["confidence"])
+
+    monkeypatch.setattr(
+        selection,
+        "select_banker",
+        fixture_only_banker,
+    )
+
+    result = daily_feed.build_daily_accumulators(
+        preview={
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "target_wat_date": target_date,
+            "picks": picks,
+            "fixtures": fixtures,
+        }
+    )
+
+    portfolio = result["accumulators"]["_portfolio"]
+    banker = portfolio["products"]["banker"]
+
+    assert banker["independent_selection_ids"]
+    assert banker["final_selection_ids"] == []
+    assert banker["decision"] == "WITHHELD_FOR_FIXTURE_EXPOSURE"
+
+    validation = portfolio["portfolio_validation"]
+    assert validation["fixture_overlap_count"] == 0
+    assert validation["max_fixture_exposure"] <= 1
+
+
 def test_daily_preview_uses_same_selector_without_publication_writes(monkeypatch):
     target_date = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
     kickoff = f"{target_date}T18:00:00Z"
