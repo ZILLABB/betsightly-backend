@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Callable
@@ -43,6 +44,15 @@ provider_cache = Table(
     Column("as_of", DateTime(timezone=True), nullable=False),
 )
 _memory: dict[str, tuple[float, dict]] = {}
+
+_refresh_lock = threading.Lock()
+_refreshing: set[str] = set()
+_last_refresh_attempt: dict[str, float] = {}
+
+REFRESH_RETRY_SECONDS = max(
+    15,
+    int(os.getenv("POSTHOG_REFRESH_RETRY_SECONDS", "60")),
+)
 
 
 def _config() -> tuple[str | None, str | None, str]:
@@ -146,8 +156,129 @@ def _funnel(rows: list, labels: list[str]) -> list[dict]:
     return out
 
 
+def _start_background_refresh(
+    start: str,
+    end: str,
+    cache_key: str,
+) -> bool:
+    """Refresh one provider window without blocking the admin request.
+
+    Only PostHog analytics are refreshed here. This does not publish,
+    generate predictions, book SportyBet slips, settle records, or send
+    notifications.
+    """
+    now = time.monotonic()
+
+    with _refresh_lock:
+        if cache_key in _refreshing:
+            return False
+
+        previous = _last_refresh_attempt.get(cache_key)
+
+        if (
+            previous is not None
+            and now - previous < REFRESH_RETRY_SECONDS
+        ):
+            return False
+
+        _refreshing.add(cache_key)
+        _last_refresh_attempt[cache_key] = now
+
+    def _work() -> None:
+        try:
+            _summary_sync(start, end)
+        finally:
+            with _refresh_lock:
+                _refreshing.discard(cache_key)
+
+    threading.Thread(
+        target=_work,
+        daemon=True,
+        name="posthog-admin-refresh",
+    ).start()
+
+    return True
+
+
 def summary(start: str, end: str, transport: Callable | None = None) -> dict:
-    """Return PostHog human analytics, with 5-minute cache and stale-if-error."""
+    """Return immediately from cache and refresh stale PostHog data off-request.
+
+    Tests and explicit injected transports remain synchronous so provider
+    validation stays deterministic.
+    """
+    if transport is not None:
+        return _summary_sync(start, end, transport)
+
+    datetime.strptime(start, "%Y-%m-%d")
+    datetime.strptime(end, "%Y-%m-%d")
+
+    project, key, _host = _config()
+    cache_key = f"posthog:{start}:{end}"
+    now_mono = time.monotonic()
+
+    cached = _memory.get(cache_key)
+
+    if (
+        cached
+        and now_mono - cached[0] < CACHE_SECONDS
+    ):
+        return cached[1]
+
+    persisted, persisted_at = _read_cache(cache_key)
+
+    if persisted_at:
+        aware = (
+            persisted_at
+            if persisted_at.tzinfo
+            else persisted_at.replace(tzinfo=timezone.utc)
+        )
+
+        if (
+            datetime.now(timezone.utc) - aware
+        ).total_seconds() < CACHE_SECONDS:
+            result = {
+                "data": persisted,
+                "meta": _meta("fresh", aware),
+            }
+            _memory[cache_key] = (now_mono, result)
+            return result
+
+    if not project or not key:
+        return {
+            "data": persisted or {},
+            "meta": _meta(
+                "stale" if persisted else "unavailable",
+                persisted_at,
+                "not_configured",
+            ),
+        }
+
+    started = _start_background_refresh(
+        start,
+        end,
+        cache_key,
+    )
+
+    return {
+        "data": persisted or {},
+        "meta": _meta(
+            "stale" if persisted else "unavailable",
+            persisted_at,
+            (
+                "refreshing"
+                if started
+                else "refresh_in_progress_or_backoff"
+            ),
+        ),
+    }
+
+
+def _summary_sync(
+    start: str,
+    end: str,
+    transport: Callable | None = None,
+) -> dict:
+    """Synchronously fetch PostHog; used by the background refresher/tests."""
     datetime.strptime(start, "%Y-%m-%d")
     datetime.strptime(end, "%Y-%m-%d")
     project, key, host = _config()

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
@@ -98,3 +98,91 @@ def test_posthog_adapter_rejects_malformed_provider_rows(monkeypatch):
     assert result["data"] == {}
     assert result["meta"]["status"] == "unavailable"
     assert result["meta"]["reason"] == "query_failed:ValueError"
+
+
+
+def test_stale_provider_cache_returns_immediately_and_schedules_refresh(monkeypatch):
+    db = create_engine(
+        "sqlite://",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    monkeypatch.setattr(adapter, "engine", db)
+    monkeypatch.setenv("POSTHOG_PROJECT_ID", "42")
+    monkeypatch.setenv("POSTHOG_PERSONAL_API_KEY", "secret")
+    monkeypatch.setattr(adapter, "CACHE_SECONDS", 300)
+
+    adapter._memory.clear()
+    adapter._refreshing.clear()
+    adapter._last_refresh_attempt.clear()
+
+    cache_key = "posthog:2026-09-01:2026-09-02"
+
+    adapter._write_cache(
+        cache_key,
+        {"totals": {"visitors": 9}},
+        datetime.now(timezone.utc) - timedelta(minutes=10),
+    )
+
+    scheduled = []
+
+    monkeypatch.setattr(
+        adapter,
+        "_start_background_refresh",
+        lambda start, end, key: (
+            scheduled.append((start, end, key)) or True
+        ),
+    )
+
+    result = adapter.summary(
+        "2026-09-01",
+        "2026-09-02",
+    )
+
+    assert result["data"]["totals"]["visitors"] == 9
+    assert result["meta"]["status"] == "stale"
+    assert result["meta"]["reason"] == "refreshing"
+    assert scheduled == [
+        (
+            "2026-09-01",
+            "2026-09-02",
+            cache_key,
+        )
+    ]
+
+
+def test_cold_provider_window_schedules_refresh_instead_of_blocking(monkeypatch):
+    db = create_engine(
+        "sqlite://",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    monkeypatch.setattr(adapter, "engine", db)
+    monkeypatch.setenv("POSTHOG_PROJECT_ID", "42")
+    monkeypatch.setenv("POSTHOG_PERSONAL_API_KEY", "secret")
+
+    adapter._memory.clear()
+    adapter._refreshing.clear()
+    adapter._last_refresh_attempt.clear()
+
+    scheduled = []
+
+    monkeypatch.setattr(
+        adapter,
+        "_start_background_refresh",
+        lambda start, end, key: (
+            scheduled.append(key) or True
+        ),
+    )
+
+    result = adapter.summary(
+        "2026-09-10",
+        "2026-09-10",
+    )
+
+    assert result["data"] == {}
+    assert result["meta"]["status"] == "unavailable"
+    assert result["meta"]["reason"] == "refreshing"
+    assert scheduled == [
+        "posthog:2026-09-10:2026-09-10"
+    ]

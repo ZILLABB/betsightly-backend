@@ -582,7 +582,16 @@ def summary(days: int = 1, start: Optional[str] = None,
             "Code copied and SportyBet opened do not prove a bet was placed.",
         ],
     }
-    _cache.update({"key": key, "at": time.time(), "value": payload})
+    provider_is_fresh = (
+        (posthog.get("meta") or {}).get("status") == "fresh"
+    )
+
+    _cache.update({
+        "key": key,
+        "at": time.time() if provider_is_fresh else 0.0,
+        "value": payload,
+    })
+
     return payload
 
 
