@@ -39,10 +39,10 @@ def _pick(index: int, kickoff: str) -> dict:
     }
 
 
-def test_daily_products_are_built_independently_before_diversification(monkeypatch):
+def test_official_products_have_no_exact_selection_overlap_when_board_is_sufficient(monkeypatch):
     target_date = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
     kickoff = f"{target_date}T18:00:00Z"
-    picks = [_pick(index, kickoff) for index in range(12)]
+    picks = [_pick(index, kickoff) for index in range(48)]
     fixtures = [pick["_fixture"] for pick in picks]
 
     monkeypatch.setattr("leagues.engine.run_pipeline", lambda **_: (picks, fixtures))
@@ -65,13 +65,288 @@ def test_daily_products_are_built_independently_before_diversification(monkeypat
     assert diagnostics["2_odds"]["independent_odds"] > 0
     assert diagnostics["5_odds"]["independent_odds"] > 0
     assert diagnostics["10_odds"]["independent_odds"] > 0
+    assert all(entry["decision"] != "CONTROLLED_OVERLAP_QUALITY_PRESERVED"
+               for entry in diagnostics.values())
+    assert accumulators["_portfolio"]["portfolio_version"] == "official_exposure_v1"
+    assert accumulators["_portfolio"]["portfolio_validation"]["valid"] is True
+    final_ids = [
+        selection_id
+        for product in diagnostics.values()
+        for selection_id in product["final_selection_ids"]
+    ]
+    assert len(final_ids) == len(set(final_ids))
+
+
+def test_rollover_selection_is_excluded_from_later_official_products(monkeypatch):
+    target_date = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
+    kickoff = f"{target_date}T18:00:00Z"
+    picks = [_pick(index, kickoff) for index in range(48)]
+    fixtures = [pick["_fixture"] for pick in picks]
+    rollover_game = dict(picks[0])
+    rollover_game.update({
+        "home_team": "Home 0", "away_team": "Away 0",
+        "market_key": picks[0]["market"],
+    })
+
+    monkeypatch.setattr("leagues.engine.run_pipeline", lambda **_: (picks, fixtures))
+    monkeypatch.setattr(daily_feed, "_publish_date", lambda: target_date)
+    monkeypatch.setattr(daily_feed, "_load_locked", lambda _: None)
+    monkeypatch.setattr(daily_feed, "_build_rollover", lambda *_, **kw: {
+        "selected": True, "games": [rollover_game], "chain": [], "chain_length": 1,
+        "total_odds": 1.3, "today_hit_probability": .72,
+    })
+    monkeypatch.setattr(daily_feed, "_archive", lambda *_: None)
+    monkeypatch.setattr("leagues.picks_db.save_card", lambda *_: False)
+    daily_feed._accum_cache.update({"result": None, "ts": 0})
+
+    result = daily_feed.build_daily_accumulators(force=True)
+    products = result["accumulators"]["_portfolio"]["products"]
+    rollover_identity = products["rollover"]["final_selection_ids"][0]
     assert all(
-        entry["decision"] in {
-            "INDEPENDENT_BEST", "DIVERSIFIED_WITHIN_UNCERTAINTY",
-            "CONTROLLED_OVERLAP_QUALITY_PRESERVED",
-        }
-        for entry in diagnostics.values()
+        rollover_identity not in entry["final_selection_ids"]
+        for name, entry in products.items() if name != "rollover"
     )
+
+
+def test_october_three_shared_losses_cannot_be_republished_in_5_and_10(monkeypatch):
+    """Recreate the 2026-10-03 correlated 5x/10x decision shape."""
+    target_date = (
+        datetime.now(timezone.utc) + timedelta(days=1)
+    ).date().isoformat()
+    kickoff = f"{target_date}T18:00:00Z"
+
+    picks = [_pick(index, kickoff) for index in range(12)]
+    incident = [
+        (
+            "estonia-luxembourg",
+            "Estonia",
+            "Luxembourg",
+            "over_1_5",
+            "Over 1.5 Goals",
+        ),
+        (
+            "ivory-coast-cameroon",
+            "Ivory Coast",
+            "Cameroon",
+            "dnb_home",
+            "Ivory Coast Draw No Bet",
+        ),
+        (
+            "newells-lanus",
+            "Newell's Old Boys",
+            "Lan?s",
+            "over_1_5",
+            "Over 1.5 Goals",
+        ),
+    ]
+
+    for pick, (
+        match_id, home, away, market, prediction
+    ) in zip(picks[:3], incident):
+        pick.update({
+            "match_id": match_id,
+            "market": market,
+            "prediction": prediction,
+        })
+        pick["_fixture"].update({
+            "match_id": match_id,
+            "home": {"name": home},
+            "away": {"name": away},
+        })
+
+    incident_ids = {
+        daily_feed._selection_identity(pick)
+        for pick in picks[:3]
+    }
+    alternative_ids = {
+        pick["match_id"] for pick in picks[3:6]
+    }
+
+    monkeypatch.setattr(
+        daily_feed,
+        "_build_rollover",
+        lambda *_, **kw: {
+            "selected": False,
+            "games": [],
+            "chain": [],
+            "chain_length": 0,
+        },
+    )
+
+    # Keep earlier official products out of this regression so we can prove
+    # specifically that independent 5x and 10x both want the incident legs.
+    monkeypatch.setattr(
+        "leagues.selection.select_banker",
+        lambda *_, **kw: ([], 0.0, 0.0),
+    )
+
+    def fake_select_tier(
+        pool,
+        target,
+        max_picks,
+        min_confidence,
+        min_ev,
+        prefer="joint",
+        band_low=0.80,
+        canonicalize=True,
+    ):
+        by_match = {
+            str(pick["match_id"]): pick for pick in pool
+        }
+
+        if target == 2.0:
+            return (([], 0.0, 0.0), "No 2x needed in this regression.")
+
+        incident_available = [
+            pick for pick in picks[:3]
+            if pick["match_id"] in by_match
+        ]
+
+        # This is the pre-fix incident shape: independently, BOTH 5x and 10x
+        # want the same three football opinions.
+        if len(incident_available) == 3 and target in {5.0, 10.0}:
+            return (
+                (
+                    [by_match[pick["match_id"]]
+                     for pick in incident_available],
+                    5.10 if target == 5.0 else 10.20,
+                    0.34 if target == 5.0 else 0.24,
+                ),
+                None,
+            )
+
+        # After 5x claims those fixtures, 10x must use a different qualifying
+        # set rather than silently republishing the same losses.
+        alternatives = [
+            by_match[pick["match_id"]]
+            for pick in picks[3:6]
+            if pick["match_id"] in by_match
+        ]
+        if target == 10.0 and len(alternatives) == 3:
+            return ((alternatives, 9.40, 0.22), None)
+
+        return (([], 0.0, 0.0), "No qualifying independent alternative.")
+
+    monkeypatch.setattr(daily_feed, "_select_tier", fake_select_tier)
+
+    result = daily_feed.build_daily_accumulators(
+        preview={
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "target_wat_date": target_date,
+            "picks": picks,
+            "fixtures": [pick["_fixture"] for pick in picks],
+        }
+    )
+
+    products = result["accumulators"]["_portfolio"]["products"]
+
+    independent_five = set(
+        products["5_odds"]["independent_selection_ids"]
+    )
+    independent_ten = set(
+        products["10_odds"]["independent_selection_ids"]
+    )
+    final_five = set(products["5_odds"]["final_selection_ids"])
+    final_ten = set(products["10_odds"]["final_selection_ids"])
+
+    # Prove the test actually recreated the incident rather than merely
+    # checking two unrelated final sets.
+    assert incident_ids <= independent_five
+    assert incident_ids <= independent_ten
+
+    # 5x may keep the independent set, but 10x must no longer share it.
+    assert incident_ids <= final_five
+    assert not (incident_ids & final_ten)
+    assert not (final_five & final_ten)
+
+    assert {
+        selection_id.split("|", 1)[0]
+        for selection_id in final_ten
+    } == alternative_ids
+
+    assert products["10_odds"]["decision"] == "DIVERSIFIED"
+
+
+
+
+def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
+    """Same match cannot decide Rollover and another official slip."""
+    target_date = (
+        datetime.now(timezone.utc) + timedelta(days=1)
+    ).date().isoformat()
+    kickoff = f"{target_date}T18:00:00Z"
+
+    picks = [_pick(index, kickoff) for index in range(6)]
+    shared = picks[0]
+    fixtures = [pick["_fixture"] for pick in picks]
+
+    # Rollover owns the same fixture, but deliberately under a different
+    # market/prediction so exact-selection de-duplication alone cannot catch it.
+    rollover_game = {
+        "match_id": shared["match_id"],
+        "home_team": shared["_fixture"]["home"]["name"],
+        "away_team": shared["_fixture"]["away"]["name"],
+        "market": "under_4_5",
+        "market_key": "under_4_5",
+        "prediction": "Under 4.5 Goals",
+        "odds": 1.20,
+        "confidence": .80,
+    }
+
+    monkeypatch.setattr(
+        daily_feed,
+        "_build_rollover",
+        lambda *_, **kw: {
+            "selected": True,
+            "games": [rollover_game],
+            "chain": [],
+            "chain_length": 1,
+            "total_odds": 1.20,
+            "today_hit_probability": .80,
+        },
+    )
+
+    # Force Banker to want the canonical pick from that exact same fixture.
+    # If the fixture is absent, there is intentionally no fallback banker.
+    import leagues.selection as selection
+
+    def fixture_only_banker(pool, *args, **kwargs):
+        hit = next(
+            (
+                pick for pick in pool
+                if pick["match_id"] == shared["match_id"]
+            ),
+            None,
+        )
+        if not hit:
+            return [], 0.0, 0.0
+        return [hit], float(hit["odds"]), float(hit["confidence"])
+
+    monkeypatch.setattr(
+        selection,
+        "select_banker",
+        fixture_only_banker,
+    )
+
+    result = daily_feed.build_daily_accumulators(
+        preview={
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "target_wat_date": target_date,
+            "picks": picks,
+            "fixtures": fixtures,
+        }
+    )
+
+    portfolio = result["accumulators"]["_portfolio"]
+    banker = portfolio["products"]["banker"]
+
+    assert banker["independent_selection_ids"]
+    assert banker["final_selection_ids"] == []
+    assert banker["decision"] == "WITHHELD_FOR_FIXTURE_EXPOSURE"
+
+    validation = portfolio["portfolio_validation"]
+    assert validation["fixture_overlap_count"] == 0
+    assert validation["max_fixture_exposure"] <= 1
 
 
 def test_daily_preview_uses_same_selector_without_publication_writes(monkeypatch):
