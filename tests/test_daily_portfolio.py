@@ -39,10 +39,10 @@ def _pick(index: int, kickoff: str) -> dict:
     }
 
 
-def test_daily_products_are_built_independently_before_diversification(monkeypatch):
+def test_official_products_have_no_exact_selection_overlap_when_board_is_sufficient(monkeypatch):
     target_date = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
     kickoff = f"{target_date}T18:00:00Z"
-    picks = [_pick(index, kickoff) for index in range(12)]
+    picks = [_pick(index, kickoff) for index in range(48)]
     fixtures = [pick["_fixture"] for pick in picks]
 
     monkeypatch.setattr("leagues.engine.run_pipeline", lambda **_: (picks, fixtures))
@@ -65,12 +65,80 @@ def test_daily_products_are_built_independently_before_diversification(monkeypat
     assert diagnostics["2_odds"]["independent_odds"] > 0
     assert diagnostics["5_odds"]["independent_odds"] > 0
     assert diagnostics["10_odds"]["independent_odds"] > 0
+    assert all(entry["decision"] != "CONTROLLED_OVERLAP_QUALITY_PRESERVED"
+               for entry in diagnostics.values())
+    assert accumulators["_portfolio"]["portfolio_version"] == "official_exposure_v1"
+    assert accumulators["_portfolio"]["portfolio_validation"]["valid"] is True
+    final_ids = [
+        selection_id
+        for product in diagnostics.values()
+        for selection_id in product["final_selection_ids"]
+    ]
+    assert len(final_ids) == len(set(final_ids))
+
+
+def test_rollover_selection_is_excluded_from_later_official_products(monkeypatch):
+    target_date = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
+    kickoff = f"{target_date}T18:00:00Z"
+    picks = [_pick(index, kickoff) for index in range(48)]
+    fixtures = [pick["_fixture"] for pick in picks]
+    rollover_game = dict(picks[0])
+    rollover_game.update({
+        "home_team": "Home 0", "away_team": "Away 0",
+        "market_key": picks[0]["market"],
+    })
+
+    monkeypatch.setattr("leagues.engine.run_pipeline", lambda **_: (picks, fixtures))
+    monkeypatch.setattr(daily_feed, "_publish_date", lambda: target_date)
+    monkeypatch.setattr(daily_feed, "_load_locked", lambda _: None)
+    monkeypatch.setattr(daily_feed, "_build_rollover", lambda *_, **kw: {
+        "selected": True, "games": [rollover_game], "chain": [], "chain_length": 1,
+        "total_odds": 1.3, "today_hit_probability": .72,
+    })
+    monkeypatch.setattr(daily_feed, "_archive", lambda *_: None)
+    monkeypatch.setattr("leagues.picks_db.save_card", lambda *_: False)
+    daily_feed._accum_cache.update({"result": None, "ts": 0})
+
+    result = daily_feed.build_daily_accumulators(force=True)
+    products = result["accumulators"]["_portfolio"]["products"]
+    rollover_identity = products["rollover"]["final_selection_ids"][0]
     assert all(
-        entry["decision"] in {
-            "INDEPENDENT_BEST", "DIVERSIFIED_WITHIN_UNCERTAINTY",
-            "CONTROLLED_OVERLAP_QUALITY_PRESERVED",
-        }
-        for entry in diagnostics.values()
+        rollover_identity not in entry["final_selection_ids"]
+        for name, entry in products.items() if name != "rollover"
+    )
+
+
+def test_october_three_shared_losses_cannot_be_republished_in_5_and_10(monkeypatch):
+    """Regression for the 2026-10-03 5x/10x correlated-loss incident."""
+    target_date = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
+    kickoff = f"{target_date}T18:00:00Z"
+    picks = [_pick(index, kickoff) for index in range(56)]
+    incident = [
+        ("estonia-luxembourg", "Estonia", "Luxembourg", "over_1_5", "Over 1.5 Goals"),
+        ("ivory-coast-cameroon", "Ivory Coast", "Cameroon", "dnb_home", "Ivory Coast Draw No Bet"),
+        ("newells-lanus", "Newell's Old Boys", "Lanús", "over_1_5", "Over 1.5 Goals"),
+    ]
+    for pick, (match_id, home, away, market, prediction) in zip(picks, incident):
+        pick.update({"match_id": match_id, "market": market, "prediction": prediction})
+        pick["_fixture"].update({"match_id": match_id, "home": {"name": home}, "away": {"name": away}})
+    fixtures = [pick["_fixture"] for pick in picks]
+
+    monkeypatch.setattr("leagues.engine.run_pipeline", lambda **_: (picks, fixtures))
+    monkeypatch.setattr(daily_feed, "_publish_date", lambda: target_date)
+    monkeypatch.setattr(daily_feed, "_load_locked", lambda _: None)
+    monkeypatch.setattr(daily_feed, "_build_rollover", lambda *_, **kw: {
+        "selected": False, "games": [], "chain": [], "chain_length": 0,
+    })
+    monkeypatch.setattr(daily_feed, "_archive", lambda *_: None)
+    monkeypatch.setattr("leagues.picks_db.save_card", lambda *_: False)
+    daily_feed._accum_cache.update({"result": None, "ts": 0})
+
+    products = daily_feed.build_daily_accumulators(force=True)["accumulators"]["_portfolio"]["products"]
+    assert not (set(products["5_odds"]["final_selection_ids"])
+                & set(products["10_odds"]["final_selection_ids"]))
+    assert all(
+        decision["decision"] != "CONTROLLED_OVERLAP_QUALITY_PRESERVED"
+        for decision in products.values()
     )
 
 

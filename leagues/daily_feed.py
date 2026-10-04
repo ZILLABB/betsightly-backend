@@ -35,6 +35,16 @@ _ACCUM_CACHE_TTL = 900  # 15 min — the card itself is locked, this just trims 
 # somebody actually wins now and then.
 TARGET_DAYS = 3
 
+# Daily products are a single customer-facing portfolio, not five independent
+# opportunities to repeat the same football opinion.  A selection identity is
+# deliberately narrower than a fixture: different, independently defensible
+# markets can still be considered as a last resort, but one exact selection is
+# never published twice across the official accumulator products.
+OFFICIAL_PORTFOLIO_VERSION = "official_exposure_v1"
+MAX_OFFICIAL_SELECTION_EXPOSURE = 1
+MAX_OFFICIAL_FIXTURE_EXPOSURE = 1
+OFFICIAL_PORTFOLIO_PRODUCTS = ("rollover", "banker", "2_odds", "5_odds", "10_odds")
+
 # How close two confidences have to be before the bookmaker's margin is
 # allowed to decide between them. Two points: wide enough that near-identical
 # picks are actually compared on price, narrow enough that a cheap market can
@@ -74,6 +84,17 @@ def _pick_teams(pick: dict) -> set[str]:
         str((fixture.get(side) or {}).get("name") or "").strip().casefold()
         for side in ("home", "away")
     } - {""}
+
+
+def _selection_identity(pick: dict) -> str:
+    """Stable identity for the exact football opinion published to a user."""
+    market = pick.get("market_key") or pick.get("market") or ""
+    prediction = pick.get("prediction") or ""
+    return "|".join((str(pick.get("match_id") or ""), str(market), str(prediction)))
+
+
+def _selection_ids(selection) -> list[str]:
+    return [_selection_identity(pick) for pick in selection[0]]
 
 
 def _wat_now(now: datetime | None = None) -> datetime:
@@ -297,65 +318,111 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         str(game.get("match_id")) for game in rollover.get("games", [])
         if game.get("match_id")
     }
+    selection_uses = {
+        _selection_identity(game) for game in rollover.get("games", [])
+        if game.get("match_id")
+    }
     team_uses = {
         str(game.get(field) or "").strip().casefold()
         for game in rollover.get("games", [])
         for field in ("home_team", "away_team")
     } - {""}
     portfolio_diagnostics = {
-        "policy": "INDEPENDENT_THEN_UNCERTAINTY_AWARE_DIVERSIFICATION",
+        "portfolio_version": OFFICIAL_PORTFOLIO_VERSION,
+        "policy": "OFFICIAL_SELECTION_EXPOSURE_FIRST",
+        "max_official_selection_exposure": MAX_OFFICIAL_SELECTION_EXPOSURE,
+        "max_official_fixture_exposure": MAX_OFFICIAL_FIXTURE_EXPOSURE,
         "rollover_isolated_first": True,
+        "official_product_order": list(OFFICIAL_PORTFOLIO_PRODUCTS),
         "products": {},
     }
-
-    def _lower_joint(selection) -> float:
-        floor = 1.0
-        for pick in selection[0]:
-            lower = (pick.get("lower_reliability_bound")
-                     or (pick.get("trust") or {}).get(
-                         "lower_reliability_bound")
-                     or selection_probability(pick))
-            floor *= min(selection_probability(pick), float(lower))
-        return round(floor, 6)
+    rollover_selection = (rollover.get("games", []), rollover.get("total_odds", 0),
+                          rollover.get("today_hit_probability", 0) or 0)
+    portfolio_diagnostics["products"]["rollover"] = {
+        "independent_odds": rollover_selection[1],
+        "final_odds": rollover_selection[1],
+        "independent_joint_probability": rollover_selection[2],
+        "final_joint_probability": rollover_selection[2],
+        "independent_selection_ids": _selection_ids(rollover_selection),
+        "final_selection_ids": _selection_ids(rollover_selection),
+        "exact_selection_overlap_count": 0,
+        "fixture_overlap_count": 0,
+        "excluded_due_to_selection_exposure": [],
+        "decision": "INDEPENDENT_BEST",
+        "quality_cost": 0.0,
+    }
 
     def _record_use(selection):
         for pick in selection[0]:
             fixture_uses.add(str(pick["match_id"]))
+            selection_uses.add(_selection_identity(pick))
             team_uses.update(_pick_teams(pick))
 
     def _portfolio_product(name, independent, source, selector):
-        conflicts = [
+        independent_ids = _selection_ids(independent)
+        exact_conflicts = [
+            pick for pick in independent[0]
+            if _selection_identity(pick) in selection_uses
+        ]
+        fixture_conflicts = [
             pick for pick in independent[0]
             if str(pick["match_id"]) in fixture_uses
             or bool(_pick_teams(pick) & team_uses)
         ]
-        adjusted = independent
+        excluded_exact = [
+            pick for pick in source if _selection_identity(pick) in selection_uses
+        ]
+        # Exact selection exposure is an absolute customer-risk rule.  It is
+        # applied before any tier search, so target odds can never make an
+        # earlier published opinion reappear in a later official accumulator.
+        exact_safe_pool = [
+            pick for pick in source if _selection_identity(pick) not in selection_uses
+        ]
+        adjusted = selector(exact_safe_pool)
         decision = "INDEPENDENT_BEST"
-        quality_cost = 0.0
-        if conflicts:
-            diversified_pool = [
-                pick for pick in source
-                if str(pick["match_id"]) not in fixture_uses
-                and not (_pick_teams(pick) & team_uses)
+        if exact_conflicts:
+            decision = "DIVERSIFIED"
+        if not adjusted[0] and independent[0]:
+            # No eligible alternative after absolute selection de-duplication:
+            # withhold this product rather than re-publish the same opinion.
+            adjusted = ([], 0.0, 0.0)
+            decision = "WITHHELD_FOR_SELECTION_EXPOSURE"
+
+        # Fixture reuse is preferred against, but unlike exact selection reuse
+        # it can be retained only when the existing quality gates find no
+        # fixture/team-independent selection at all.  We never use the old
+        # uncertainty comparison to silently preserve a conflicting pick.
+        if adjusted[0]:
+            final_fixture_conflicts = [
+                pick for pick in adjusted[0]
+                if str(pick["match_id"]) in fixture_uses
+                or bool(_pick_teams(pick) & team_uses)
             ]
-            alternative = selector(diversified_pool)
-            uncertainty_floor = _lower_joint(independent)
-            if alternative[0] and alternative[2] >= uncertainty_floor:
-                adjusted = alternative
-                decision = "DIVERSIFIED_WITHIN_UNCERTAINTY"
-                quality_cost = max(0.0, independent[2] - alternative[2])
-            else:
-                # Keeping an exceptional overlap is more honest than deleting
-                # the product or quietly replacing it with a materially worse
-                # football opinion.
-                decision = "CONTROLLED_OVERLAP_QUALITY_PRESERVED"
+            if final_fixture_conflicts:
+                fixture_safe_pool = [
+                    pick for pick in exact_safe_pool
+                    if str(pick["match_id"]) not in fixture_uses
+                    and not (_pick_teams(pick) & team_uses)
+                ]
+                fixture_safe = selector(fixture_safe_pool)
+                if fixture_safe[0]:
+                    adjusted = fixture_safe
+                    decision = "DIVERSIFIED"
+                else:
+                    decision = "QUALITY_CAPPED_FOR_DIVERSIFICATION"
+
+        quality_cost = max(0.0, independent[2] - adjusted[2]) if adjusted[0] else independent[2]
         _record_use(adjusted)
         portfolio_diagnostics["products"][name] = {
             "independent_odds": independent[1],
             "final_odds": adjusted[1],
             "independent_joint_probability": independent[2],
             "final_joint_probability": adjusted[2],
-            "overlap_conflicts": len(conflicts),
+            "independent_selection_ids": independent_ids,
+            "final_selection_ids": _selection_ids(adjusted),
+            "exact_selection_overlap_count": len(exact_conflicts),
+            "fixture_overlap_count": len(fixture_conflicts),
+            "excluded_due_to_selection_exposure": [_selection_identity(pick) for pick in excluded_exact],
             "decision": decision,
             "quality_cost": round(quality_cost, 6),
         }
@@ -377,6 +444,36 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         "10_odds", independent_ten, day_picks,
         lambda pool: _select_tier(
             pool, 10.0, 10, FLOOR, 0.63, canonicalize=False)[0])
+
+    # A defensive invariant for future selector changes.  The individual
+    # searches above are allowed to quality-cap or withhold, but publication
+    # cannot silently reintroduce the same exact selection in two official
+    # accumulator products.
+    final_official = {
+        "rollover": rollover_selection,
+        "banker": banker,
+        "2_odds": two,
+        "5_odds": five,
+        "10_odds": ten,
+    }
+    seen_official: set[str] = set()
+    duplicate_official: list[str] = []
+    for product in OFFICIAL_PORTFOLIO_PRODUCTS:
+        for identity in _selection_ids(final_official[product]):
+            if identity in seen_official:
+                duplicate_official.append(identity)
+            seen_official.add(identity)
+    if duplicate_official:
+        raise RuntimeError(
+            "official portfolio integrity violation: duplicate exact selection "
+            + ", ".join(sorted(set(duplicate_official)))
+        )
+    portfolio_diagnostics["portfolio_validation"] = {
+        "exact_selection_overlap_count": 0,
+        "fixture_count": len(fixture_uses),
+        "selection_count": len(seen_official),
+        "valid": True,
+    }
 
     # Over 1.5 — a list of singles, one per fixture, safest first.
     #
@@ -552,6 +649,19 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         },
     }
 
+    # A different market on the same fixture is not an exact duplicate, but it
+    # is still a portfolio compromise.  Keep the selected, fully qualified
+    # football opinion rather than weaken safety gates, while being truthful
+    # that fixture independence could not be achieved on this board.
+    for product in ("banker", "2_odds", "5_odds", "10_odds"):
+        if (portfolio_diagnostics["products"][product]["decision"]
+                == "QUALITY_CAPPED_FOR_DIVERSIFICATION"):
+            result["accumulators"][product]["result_status"] = "QUALITY_CAPPED"
+            result["accumulators"][product]["reason"] = (
+                "Best available without repeating an exact official selection; "
+                "a fixture-independent alternative did not meet quality rules."
+            )
+
     # Exact booking belongs before first-write lock.  If a chosen leg has
     # disappeared from SportyBet, the existing bounded qualified snapshot may
     # supply a fully validated quality-equivalent replacement; only that FULL
@@ -576,7 +686,8 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
                                 if p.get("_board_snapshot_id")), None)
             record_daily(
                 snapshot_id, publish_date,
-                {"banker": independent_banker, "2_odds": independent_two,
+                {"rollover": rollover_selection,
+                 "banker": independent_banker, "2_odds": independent_two,
                  "5_odds": independent_five, "10_odds": independent_ten},
                 result["accumulators"], portfolio_diagnostics,
             )
