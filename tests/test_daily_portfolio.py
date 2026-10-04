@@ -109,37 +109,163 @@ def test_rollover_selection_is_excluded_from_later_official_products(monkeypatch
 
 
 def test_october_three_shared_losses_cannot_be_republished_in_5_and_10(monkeypatch):
-    """Regression for the 2026-10-03 5x/10x correlated-loss incident."""
-    target_date = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
+    """Recreate the 2026-10-03 correlated 5x/10x decision shape."""
+    target_date = (
+        datetime.now(timezone.utc) + timedelta(days=1)
+    ).date().isoformat()
     kickoff = f"{target_date}T18:00:00Z"
-    picks = [_pick(index, kickoff) for index in range(56)]
+
+    picks = [_pick(index, kickoff) for index in range(12)]
     incident = [
-        ("estonia-luxembourg", "Estonia", "Luxembourg", "over_1_5", "Over 1.5 Goals"),
-        ("ivory-coast-cameroon", "Ivory Coast", "Cameroon", "dnb_home", "Ivory Coast Draw No Bet"),
-        ("newells-lanus", "Newell's Old Boys", "Lanús", "over_1_5", "Over 1.5 Goals"),
+        (
+            "estonia-luxembourg",
+            "Estonia",
+            "Luxembourg",
+            "over_1_5",
+            "Over 1.5 Goals",
+        ),
+        (
+            "ivory-coast-cameroon",
+            "Ivory Coast",
+            "Cameroon",
+            "dnb_home",
+            "Ivory Coast Draw No Bet",
+        ),
+        (
+            "newells-lanus",
+            "Newell's Old Boys",
+            "Lan?s",
+            "over_1_5",
+            "Over 1.5 Goals",
+        ),
     ]
-    for pick, (match_id, home, away, market, prediction) in zip(picks, incident):
-        pick.update({"match_id": match_id, "market": market, "prediction": prediction})
-        pick["_fixture"].update({"match_id": match_id, "home": {"name": home}, "away": {"name": away}})
-    fixtures = [pick["_fixture"] for pick in picks]
 
-    monkeypatch.setattr("leagues.engine.run_pipeline", lambda **_: (picks, fixtures))
-    monkeypatch.setattr(daily_feed, "_publish_date", lambda: target_date)
-    monkeypatch.setattr(daily_feed, "_load_locked", lambda _: None)
-    monkeypatch.setattr(daily_feed, "_build_rollover", lambda *_, **kw: {
-        "selected": False, "games": [], "chain": [], "chain_length": 0,
-    })
-    monkeypatch.setattr(daily_feed, "_archive", lambda *_: None)
-    monkeypatch.setattr("leagues.picks_db.save_card", lambda *_: False)
-    daily_feed._accum_cache.update({"result": None, "ts": 0})
+    for pick, (
+        match_id, home, away, market, prediction
+    ) in zip(picks[:3], incident):
+        pick.update({
+            "match_id": match_id,
+            "market": market,
+            "prediction": prediction,
+        })
+        pick["_fixture"].update({
+            "match_id": match_id,
+            "home": {"name": home},
+            "away": {"name": away},
+        })
 
-    products = daily_feed.build_daily_accumulators(force=True)["accumulators"]["_portfolio"]["products"]
-    assert not (set(products["5_odds"]["final_selection_ids"])
-                & set(products["10_odds"]["final_selection_ids"]))
-    assert all(
-        decision["decision"] != "CONTROLLED_OVERLAP_QUALITY_PRESERVED"
-        for decision in products.values()
+    incident_ids = {
+        daily_feed._selection_identity(pick)
+        for pick in picks[:3]
+    }
+    alternative_ids = {
+        pick["match_id"] for pick in picks[3:6]
+    }
+
+    monkeypatch.setattr(
+        daily_feed,
+        "_build_rollover",
+        lambda *_, **kw: {
+            "selected": False,
+            "games": [],
+            "chain": [],
+            "chain_length": 0,
+        },
     )
+
+    # Keep earlier official products out of this regression so we can prove
+    # specifically that independent 5x and 10x both want the incident legs.
+    monkeypatch.setattr(
+        "leagues.selection.select_banker",
+        lambda *_, **kw: ([], 0.0, 0.0),
+    )
+
+    def fake_select_tier(
+        pool,
+        target,
+        max_picks,
+        min_confidence,
+        min_ev,
+        prefer="joint",
+        band_low=0.80,
+        canonicalize=True,
+    ):
+        by_match = {
+            str(pick["match_id"]): pick for pick in pool
+        }
+
+        if target == 2.0:
+            return (([], 0.0, 0.0), "No 2x needed in this regression.")
+
+        incident_available = [
+            pick for pick in picks[:3]
+            if pick["match_id"] in by_match
+        ]
+
+        # This is the pre-fix incident shape: independently, BOTH 5x and 10x
+        # want the same three football opinions.
+        if len(incident_available) == 3 and target in {5.0, 10.0}:
+            return (
+                (
+                    [by_match[pick["match_id"]]
+                     for pick in incident_available],
+                    5.10 if target == 5.0 else 10.20,
+                    0.34 if target == 5.0 else 0.24,
+                ),
+                None,
+            )
+
+        # After 5x claims those fixtures, 10x must use a different qualifying
+        # set rather than silently republishing the same losses.
+        alternatives = [
+            by_match[pick["match_id"]]
+            for pick in picks[3:6]
+            if pick["match_id"] in by_match
+        ]
+        if target == 10.0 and len(alternatives) == 3:
+            return ((alternatives, 9.40, 0.22), None)
+
+        return (([], 0.0, 0.0), "No qualifying independent alternative.")
+
+    monkeypatch.setattr(daily_feed, "_select_tier", fake_select_tier)
+
+    result = daily_feed.build_daily_accumulators(
+        preview={
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "target_wat_date": target_date,
+            "picks": picks,
+            "fixtures": [pick["_fixture"] for pick in picks],
+        }
+    )
+
+    products = result["accumulators"]["_portfolio"]["products"]
+
+    independent_five = set(
+        products["5_odds"]["independent_selection_ids"]
+    )
+    independent_ten = set(
+        products["10_odds"]["independent_selection_ids"]
+    )
+    final_five = set(products["5_odds"]["final_selection_ids"])
+    final_ten = set(products["10_odds"]["final_selection_ids"])
+
+    # Prove the test actually recreated the incident rather than merely
+    # checking two unrelated final sets.
+    assert incident_ids <= independent_five
+    assert incident_ids <= independent_ten
+
+    # 5x may keep the independent set, but 10x must no longer share it.
+    assert incident_ids <= final_five
+    assert not (incident_ids & final_ten)
+    assert not (final_five & final_ten)
+
+    assert {
+        selection_id.split("|", 1)[0]
+        for selection_id in final_ten
+    } == alternative_ids
+
+    assert products["10_odds"]["decision"] == "DIVERSIFIED"
+
 
 
 

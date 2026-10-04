@@ -97,6 +97,104 @@ def _selection_ids(selection) -> list[str]:
     return [_selection_identity(pick) for pick in selection[0]]
 
 
+def _sync_portfolio_diagnostics_from_card(
+    accumulators: dict, diagnostics: dict
+) -> None:
+    """Make diagnostics describe the actual card that will be locked.
+
+    Pre-publication SportyBet rebuilding may replace an unavailable leg with
+    another already-qualified candidate.  The replacement is allowed to become
+    official before first lock, so the audit record must follow that final set
+    rather than continuing to describe the earlier model-only version.
+    """
+    products = diagnostics.get("products") or {}
+
+    for name in ("banker", "2_odds", "5_odds", "10_odds"):
+        data = accumulators.get(name) or {}
+        entry = products.get(name)
+        if not isinstance(entry, dict):
+            continue
+
+        games = data.get("games") or []
+        entry["final_selection_ids"] = [
+            _selection_identity(game) for game in games
+        ]
+        entry["final_odds"] = round(
+            float(data.get("total_odds") or 0.0), 4
+        )
+        entry["final_joint_probability"] = round(
+            float(data.get("hit_probability") or 0.0), 6
+        )
+        entry["quality_cost"] = round(
+            max(
+                0.0,
+                float(entry.get("independent_joint_probability") or 0.0)
+                - float(entry.get("final_joint_probability") or 0.0),
+            ),
+            6,
+        )
+        entry["prepublication_rebuilt"] = bool(
+            data.get("prepublication_replacements")
+        )
+
+    selection_counts: dict[str, int] = {}
+    fixture_counts: dict[str, int] = {}
+
+    for name in OFFICIAL_PORTFOLIO_PRODUCTS:
+        entry = products.get(name) or {}
+        for identity in entry.get("final_selection_ids") or []:
+            selection_counts[identity] = (
+                selection_counts.get(identity, 0) + 1
+            )
+            fixture_id = str(identity).split("|", 1)[0]
+            if fixture_id:
+                fixture_counts[fixture_id] = (
+                    fixture_counts.get(fixture_id, 0) + 1
+                )
+
+    duplicate_selections = sorted(
+        identity
+        for identity, count in selection_counts.items()
+        if count > MAX_OFFICIAL_SELECTION_EXPOSURE
+    )
+    duplicate_fixtures = sorted(
+        fixture_id
+        for fixture_id, count in fixture_counts.items()
+        if count > MAX_OFFICIAL_FIXTURE_EXPOSURE
+    )
+
+    if duplicate_selections or duplicate_fixtures:
+        problems = []
+        if duplicate_selections:
+            problems.append(
+                "duplicate exact selection "
+                + ", ".join(duplicate_selections)
+            )
+        if duplicate_fixtures:
+            problems.append(
+                "duplicate fixture "
+                + ", ".join(duplicate_fixtures)
+            )
+        raise RuntimeError(
+            "official portfolio integrity violation after "
+            "prepublication booking: " + "; ".join(problems)
+        )
+
+    diagnostics["portfolio_validation"] = {
+        "exact_selection_overlap_count": 0,
+        "fixture_overlap_count": 0,
+        "max_selection_exposure": max(
+            selection_counts.values(), default=0
+        ),
+        "max_fixture_exposure": max(
+            fixture_counts.values(), default=0
+        ),
+        "fixture_count": len(fixture_counts),
+        "selection_count": len(selection_counts),
+        "valid": True,
+    }
+
+
 def _wat_now(now: datetime | None = None) -> datetime:
     # Return WAT wall-clock time for `now`, or for the current instant.
     return (now or datetime.now(timezone.utc)) + WAT_OFFSET
@@ -367,7 +465,11 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         fixture_conflicts = [
             pick for pick in independent[0]
             if str(pick["match_id"]) in fixture_uses
-            or bool(_pick_teams(pick) & team_uses)
+        ]
+        team_conflicts = [
+            pick for pick in independent[0]
+            if str(pick["match_id"]) not in fixture_uses
+            and bool(_pick_teams(pick) & team_uses)
         ]
         excluded_exact = [
             pick for pick in source if _selection_identity(pick) in selection_uses
@@ -441,7 +543,21 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
             "final_selection_ids": _selection_ids(adjusted),
             "exact_selection_overlap_count": len(exact_conflicts),
             "fixture_overlap_count": len(fixture_conflicts),
-            "excluded_due_to_selection_exposure": [_selection_identity(pick) for pick in excluded_exact],
+            "team_overlap_count": len(team_conflicts),
+            "excluded_due_to_selection_exposure": [
+                _selection_identity(pick) for pick in excluded_exact
+            ],
+            "excluded_due_to_fixture_exposure": sorted({
+                str(pick["match_id"])
+                for pick in source
+                if str(pick["match_id"]) in fixture_uses
+            }),
+            "excluded_due_to_team_exposure": sorted({
+                str(pick["match_id"])
+                for pick in source
+                if str(pick["match_id"]) not in fixture_uses
+                and bool(_pick_teams(pick) & team_uses)
+            }),
             "decision": decision,
             "quality_cost": round(quality_cost, 6),
         }
@@ -704,17 +820,40 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         },
     }
 
-    # A different market on the same fixture is not an exact duplicate, but it
-    # is still a portfolio compromise.  Keep the selected, fully qualified
-    # football opinion rather than weaken safety gates, while being truthful
-    # that fixture independence could not be achieved on this board.
+    # Explain portfolio exposure decisions directly on the public product.
+    # A withheld tier is not an unexplained selector failure: it was available
+    # independently but intentionally refused because the remaining safe board
+    # would repeat exposure already carried by another official product.
     for product in ("banker", "2_odds", "5_odds", "10_odds"):
-        if (portfolio_diagnostics["products"][product]["decision"]
-                == "QUALITY_CAPPED_FOR_DIVERSIFICATION"):
-            result["accumulators"][product]["result_status"] = "QUALITY_CAPPED"
+        decision = (
+            portfolio_diagnostics["products"][product]["decision"]
+        )
+
+        if decision == "WITHHELD_FOR_SELECTION_EXPOSURE":
+            result["accumulators"][product]["result_status"] = (
+                "EXPOSURE_CAPPED"
+            )
             result["accumulators"][product]["reason"] = (
-                "Best available without repeating an exact official selection; "
-                "a fixture-independent alternative did not meet quality rules."
+                "Withheld because every qualifying version repeated an exact "
+                "selection already used by another official BetSightly slip."
+            )
+
+        elif decision == "WITHHELD_FOR_FIXTURE_EXPOSURE":
+            result["accumulators"][product]["result_status"] = (
+                "EXPOSURE_CAPPED"
+            )
+            result["accumulators"][product]["reason"] = (
+                "Withheld because the remaining qualifying versions reused a "
+                "match already carried by another official BetSightly slip."
+            )
+
+        elif decision == "QUALITY_CAPPED_FOR_TEAM_DIVERSIFICATION":
+            result["accumulators"][product]["result_status"] = (
+                "QUALITY_CAPPED"
+            )
+            result["accumulators"][product]["reason"] = (
+                "Best qualifying version retained. No different-team "
+                "alternative met the existing prediction-quality rules."
             )
 
     # Exact booking belongs before first-write lock.  If a chosen leg has
@@ -731,6 +870,13 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         except Exception as exc:
             logger.warning("prepublication booking skipped: %s", exc,
                            exc_info=True)
+
+    # A validated pre-publication booking rebuild may have changed the
+    # official games. Refresh IDs/odds/probabilities and re-run the hard
+    # exposure invariant before the final decision archive and card lock.
+    _sync_portfolio_diagnostics_from_card(
+        result["accumulators"], portfolio_diagnostics
+    )
 
     # Preserve both the independent counterfactual and the actual version
     # that will be locked, including any validated pre-publication replacement.
