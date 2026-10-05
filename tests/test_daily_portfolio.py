@@ -19,11 +19,11 @@ def _pick(index: int, kickoff: str) -> dict:
         "match_id": fixture["match_id"], "market": market,
         "market_group": groups[index % len(groups)],
         "prediction": market, "confidence": confidence,
-        "raw_confidence": confidence, "odds": 1.35,
+        "raw_confidence": confidence, "odds": 1.45,
         "odds_are_real": True, "odds_provider": "SportyBet",
         "market_margin": .05, "bookable": True,
-        "market_implied_probability": .71, "ml_confidence": .71,
-        "expected_value": -.028, "edge": .01,
+        "market_implied_probability": .68, "ml_confidence": .71,
+        "expected_value": .044, "edge": .04,
         "safe_tier_eligible": True, "calibration_group": market,
         "calibration_sample": 100,
         "trust": {
@@ -278,6 +278,13 @@ def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
 
     picks = [_pick(index, kickoff) for index in range(6)]
     shared = picks[0]
+    shared["confidence"] = .80
+    shared["raw_confidence"] = .80
+    shared["ml_confidence"] = .80
+    shared["market_implied_probability"] = .68
+    shared["expected_value"] = .088
+    shared["trust"]["evidence_adjusted_probability"] = .80
+    shared["trust"]["lower_reliability_bound"] = .79
     fixtures = [pick["_fixture"] for pick in picks]
 
     # Rollover owns the same fixture, but deliberately under a different

@@ -196,7 +196,16 @@ def start_daily_job(force: bool = False, publish: bool = True) -> dict:
     starting the daemon so concurrent callers retain the same first-wins
     behaviour as the synchronous scheduler path.
     """
-    from leagues.daily_feed import _publish_date
+    from leagues.daily_feed import PUBLISH_HOUR_WAT, _publish_date, _wat_now
+
+    wat = _wat_now()
+    if not force and wat.hour < PUBLISH_HOUR_WAT:
+        return {
+            "run_date": wat.strftime("%Y-%m-%d"),
+            "status": "skipped",
+            "reason": f"publication window opens at {PUBLISH_HOUR_WAT:02d}:00 WAT",
+            "queued": False,
+        }
 
     run_date = _publish_date()
     claimed, why = _claim(run_date, force)
@@ -233,7 +242,16 @@ def run_daily_job(force: bool = False, publish: bool = True,
                   _claimed_run_date: str | None = None) -> dict:
     """The whole day, once. Safe to call repeatedly."""
     from database import log_pool_exception, log_pool_status
-    from leagues.daily_feed import _publish_date
+    from leagues.daily_feed import PUBLISH_HOUR_WAT, _publish_date, _wat_now
+
+    wat = _wat_now()
+    if _claimed_run_date is None and not force and wat.hour < PUBLISH_HOUR_WAT:
+        return {
+            "run_date": wat.strftime("%Y-%m-%d"),
+            "status": "skipped",
+            "reason": f"publication window opens at {PUBLISH_HOUR_WAT:02d}:00 WAT",
+            "steps": {}, "failed": [],
+        }
 
     run_date = _claimed_run_date or _publish_date()
     report: dict = {
