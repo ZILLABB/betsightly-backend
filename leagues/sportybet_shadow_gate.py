@@ -195,15 +195,15 @@ def production_bridge_candidates(
         else "production"
     )
 
-    if not feature_flag:
-        report["status"] = "production_feature_flag_off"
-        return [], report
-
+    # Feature OFF is a hard MERGE barrier, not a diagnostic barrier.
+    # Evaluate the exact same production facts so we can measure current
+    # eligibility safely without exposing a single supplemental pick.
     if not board_complete:
         report["status"] = "sportybet_board_incomplete"
         return [], report
 
     eligible = []
+    eligible_count = 0
     reasons = Counter()
 
     for pick in picks:
@@ -235,30 +235,49 @@ def production_bridge_candidates(
                 reasons[reason] += 1
             continue
 
-        clone = deepcopy(pick)
-        clone["_production_supplemental"] = True
-        clone["_production_supplemental_source"] = (
-            "sportybet_exact_history_ready_v1"
+        eligible_count += 1
+
+        if feature_flag:
+            clone = deepcopy(pick)
+            clone["_production_supplemental"] = True
+            clone["_production_supplemental_source"] = (
+                "sportybet_exact_history_ready_v1"
+            )
+            eligible.append(clone)
+
+    if not feature_flag:
+        status = (
+            "diagnostic_ready_feature_flag_off"
+            if eligible_count
+            else "diagnostic_no_eligible_candidates"
         )
-        eligible.append(clone)
+    elif eligible_count:
+        status = (
+            "ready_for_staging_preview"
+            if environment == "staging"
+            else "ready_for_production_merge"
+        )
+    else:
+        status = "no_eligible_candidates"
 
     report.update({
-        "status": (
-            (
-                "ready_for_staging_preview"
-                if environment == "staging"
-                else "ready_for_production_merge"
-            )
-            if eligible
-            else "no_eligible_candidates"
-        ),
-        "eligible_candidate_count": len(eligible),
-        "rejected_count": len(picks) - len(eligible),
+        "status": status,
+        "eligible_candidate_count": eligible_count,
+        "rejected_count": len(picks) - eligible_count,
         "rejection_reason_counts": dict(reasons),
-        "production_merge_allowed": bool(eligible),
+        "production_merge_allowed": bool(
+            feature_flag
+            and eligible_count
+        ),
+        "activation_blocked_by_feature_flag": bool(
+            not feature_flag
+        ),
     })
 
-    return eligible, report
+    # Absolute fail-closed guarantee:
+    # when the feature flag is OFF this function ALWAYS returns zero
+    # merge candidates even if diagnostics show eligible selections.
+    return eligible if feature_flag else [], report
 
 def _metric_delta(
     left: dict,

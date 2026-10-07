@@ -36,7 +36,10 @@ def test_production_bridge_requires_flag_complete_board_and_production():
         environment="production", feature_flag=False,
     )
     assert candidates == []
-    assert report["status"] == "production_feature_flag_off"
+    assert report["status"] == "diagnostic_ready_feature_flag_off"
+    assert report["eligible_candidate_count"] == 1
+    assert report["production_merge_allowed"] is False
+    assert report["activation_blocked_by_feature_flag"] is True
 
     candidates, report = production_bridge_candidates(
         [pick], board_complete=False,
@@ -177,3 +180,24 @@ def test_promoted_supplemental_fixture_settlement_does_not_require_espn_match_id
     assert score is not None
     assert score["home_score"] == 2
     assert score["away_score"] == 1
+
+
+def test_production_bridge_reports_rejections_while_flag_is_off():
+    candidates, report = production_bridge_candidates(
+        [_pick(safe=False)],
+        board_complete=True,
+        environment="production",
+        feature_flag=False,
+    )
+
+    assert candidates == []
+    assert report["status"] == "diagnostic_no_eligible_candidates"
+    assert report["eligible_candidate_count"] == 0
+    assert report["production_merge_allowed"] is False
+    assert report["activation_blocked_by_feature_flag"] is True
+    assert (
+        report["rejection_reason_counts"][
+            "SAFE_TIER_EVIDENCE_NOT_READY"
+        ]
+        == 1
+    )

@@ -16,6 +16,7 @@ officially, or inserted into the Builder pool.
 """
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -31,6 +32,9 @@ from leagues.elo_engine import (
 from leagues.fixture_ranker import canonical_fixture_recommendations
 from leagues.picks import MIN_CANDIDATE_CONFIDENCE, build_picks
 from leagues.predictor import predict
+
+
+logger = logging.getLogger(__name__)
 
 
 MAX_SHADOW_FIXTURES = 120
@@ -795,6 +799,17 @@ def evaluate_shadow_supplemental(
                 "is_complete"
             )
         ),
+    )
+
+    logger.info(
+        "sportybet_bridge "
+        "status=%s flag=%s candidates=%s eligible=%s rejected=%s reasons=%s",
+        production_bridge.get("status"),
+        production_bridge.get("feature_flag_enabled"),
+        production_bridge.get("candidate_count"),
+        production_bridge.get("eligible_candidate_count"),
+        production_bridge.get("rejected_count"),
+        production_bridge.get("rejection_reason_counts"),
     )
 
     fixture_results.sort(
