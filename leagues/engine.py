@@ -680,6 +680,7 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
                     history=history,
                     now=now_dt,
                     days_ahead=days_ahead,
+                    sample_limit=120,
                 )
             )
 

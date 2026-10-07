@@ -49,8 +49,9 @@ def test_production_bridge_requires_flag_complete_board_and_production():
         [pick], board_complete=True,
         environment="staging", feature_flag=True,
     )
-    assert candidates == []
-    assert report["status"] == "not_applicable_outside_production"
+    assert len(candidates) == 1
+    assert report["status"] == "ready_for_staging_preview"
+    assert report["bridge_mode"] == "staging_preview"
 
 
 def test_production_bridge_admits_only_history_ready_positive_value_pick():
@@ -125,3 +126,54 @@ def test_same_day_recovery_reserves_existing_portfolio_before_selection():
     assert "reserved_teams" in source
     assert "recovery_available" in source
     assert 'recovery.get("status") == "RECOVERED"' in source
+
+
+def test_engine_requests_full_bounded_supplemental_readiness_window():
+    source = inspect.getsource(engine._build_pipeline)
+    marker = "sportybet.shadow_supplemental_readiness("
+    start = source.index(marker)
+    call_window = source[start:start + 1000]
+    assert "sample_limit=120" in call_window
+
+
+def test_promoted_supplemental_fixture_settlement_does_not_require_espn_match_id():
+    from leagues.results_checker import (
+        _lookup_settlement_score,
+        _normalize_name,
+    )
+
+    promoted_pick = {
+        "match_id": "sportybet-shadow:sr:match:123",
+        "home_team": "Alpha FC",
+        "away_team": "Beta United",
+        "date": "2026-10-07T18:00:00+00:00",
+    }
+
+    score_key = "|".join(
+        (
+            _normalize_name(promoted_pick["home_team"]),
+            _normalize_name(promoted_pick["away_team"]),
+            promoted_pick["date"][:10],
+        )
+    )
+
+    scores = {
+        score_key: {
+            "home": "Alpha FC",
+            "away": "Beta United",
+            "home_score": 2,
+            "away_score": 1,
+            "completed": True,
+        }
+    }
+
+    score = _lookup_settlement_score(
+        scores,
+        promoted_pick["home_team"],
+        promoted_pick["away_team"],
+        promoted_pick["date"][:10],
+    )
+
+    assert score is not None
+    assert score["home_score"] == 2
+    assert score["away_score"] == 1

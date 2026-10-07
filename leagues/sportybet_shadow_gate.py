@@ -185,9 +185,15 @@ def production_bridge_candidates(
         "publishing_changed": False,
     }
 
-    if environment not in {"production", "prod"}:
-        report["status"] = "not_applicable_outside_production"
+    if environment not in {"production", "prod", "staging"}:
+        report["status"] = "not_applicable_outside_supported_environment"
         return [], report
+
+    report["bridge_mode"] = (
+        "staging_preview"
+        if environment == "staging"
+        else "production"
+    )
 
     if not feature_flag:
         report["status"] = "production_feature_flag_off"
@@ -238,7 +244,11 @@ def production_bridge_candidates(
 
     report.update({
         "status": (
-            "ready_for_production_merge"
+            (
+                "ready_for_staging_preview"
+                if environment == "staging"
+                else "ready_for_production_merge"
+            )
             if eligible
             else "no_eligible_candidates"
         ),
