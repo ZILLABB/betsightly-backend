@@ -403,6 +403,12 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     rollover = _build_rollover(
         rollover_source, today, preview=preview is not None
     )
+
+    # Publication must precede exposure accounting. A product that is
+    # withheld by the official contract must reserve zero fixtures or selections.
+    _rollover_preallocation_card = {"rollover": rollover}
+    enforce_card_policy(_rollover_preallocation_card)
+    rollover = _rollover_preallocation_card["rollover"]
     independent_banker = select_banker(
         banker_source, canonicalize=False
     )
@@ -1230,6 +1236,12 @@ def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
     over_live, _ = filter_official_candidates(live, "over_1_5")
 
     rollover = _build_rollover([], today)
+
+    # Available Now must obey the same rule: blocked Rollover exposure
+    # cannot starve otherwise valid live tiers.
+    _live_rollover_preallocation_card = {"rollover": rollover}
+    enforce_card_policy(_live_rollover_preallocation_card)
+    rollover = _live_rollover_preallocation_card["rollover"]
     fixture_uses = {
         game.get("match_id") for game in rollover.get("games", [])
         if game.get("match_id")
