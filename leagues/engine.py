@@ -821,13 +821,14 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
                        refresh_source=refresh_source, fixture_count=len(fixtures),
                        prediction_count=len(fixtures), candidate_count=len(all_picks))
 
-    # SportyBet-only supplemental fixtures are modelled in isolation.
-    # They never enter all_picks or fixtures and therefore cannot silently
-    # widen public Predictions, publication, official records, or settlement.
-    # A separate staging-only path may expose only 6H-approved exact picks to
-    # the interactive Builder when both supplemental feature flags are enabled.
+    # SportyBet-only fixtures are still modelled in isolation first.
+    # A separately gated production bridge may promote only exact, evidence-
+    # ready fixture/market pairs. Staging keeps its existing isolated path.
     sportybet_shadow_model = {}
     sportybet_staging_builder_picks = []
+    sportybet_production_picks = []
+    sportybet_production_merged = []
+    sportybet_builder_picks = []
 
     try:
         if (
@@ -857,6 +858,13 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
                 )
             )
 
+            sportybet_production_picks = (
+                sportybet_shadow_model.pop(
+                    "_production_candidates",
+                    [],
+                )
+            )
+
             merge_report = dict(
                 sportybet_shadow_model.get(
                     "staging_builder_merge"
@@ -880,6 +888,77 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
                 sportybet_shadow_model[
                     "staging_builder_merge"
                 ] = merge_report
+
+            production_report = dict(
+                sportybet_shadow_model.get(
+                    "production_bridge"
+                )
+                or {}
+            )
+
+            if sportybet_production_picks:
+                existing_selections = {
+                    (
+                        str(pick.get("match_id") or ""),
+                        str(pick.get("market") or ""),
+                    )
+                    for pick in all_picks
+                }
+
+                supplemental_fixtures = {}
+
+                for pick in sportybet_production_picks:
+                    key = (
+                        str(pick.get("match_id") or ""),
+                        str(pick.get("market") or ""),
+                    )
+
+                    if key in existing_selections:
+                        continue
+
+                    fixture = pick.get("_fixture") or {}
+                    fixture["_production_supplemental"] = True
+
+                    sportybet_production_merged.append(pick)
+                    existing_selections.add(key)
+
+                    match_id = str(pick.get("match_id") or "")
+                    if match_id:
+                        supplemental_fixtures[match_id] = fixture
+
+                if sportybet_production_merged:
+                    all_picks.extend(sportybet_production_merged)
+                    fixtures.extend(supplemental_fixtures.values())
+
+                    production_report.update({
+                        "merge_executed": True,
+                        "prediction_pool_changed": True,
+                        "builder_pool_changed": True,
+                        "publishing_changed": True,
+                        "merged_candidate_count": len(
+                            sportybet_production_merged
+                        ),
+                        "merged_fixture_count": len(
+                            supplemental_fixtures
+                        ),
+                    })
+
+                    sportybet_shadow_model[
+                        "production_bridge"
+                    ] = production_report
+
+                    # Builder consumes only exact approved fixture/market pairs.
+                    sportybet_builder_picks = list(
+                        sportybet_production_merged
+                    )
+
+            if (
+                not sportybet_builder_picks
+                and sportybet_staging_builder_picks
+            ):
+                sportybet_builder_picks = list(
+                    sportybet_staging_builder_picks
+                )
 
     except Exception as e:
         logger.warning(
@@ -939,6 +1018,42 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
     provider["sportybet_shadow_model"] = (
         sportybet_shadow_model
     )
+    provider["prediction_supply"] = {
+        "espn_fixture_count": int(
+            sportybet_coverage.get("espn_fixture_count") or 0
+        ),
+        "sportybet_fixture_count": int(
+            sportybet_coverage.get("sportybet_fixture_count") or 0
+        ),
+        "sportybet_only_fixture_count": int(
+            sportybet_coverage.get("sportybet_only_fixture_count") or 0
+        ),
+        "exact_registry_mapped_sportybet_only": int(
+            sportybet_coverage.get("exact_registry_mapped_sportybet_only") or 0
+        ),
+        "unmapped_registry_sportybet_only": int(
+            sportybet_coverage.get("unmapped_registry_sportybet_only") or 0
+        ),
+        "supplemental_ready_input_fixtures": int(
+            sportybet_shadow_model.get("ready_input_fixture_count") or 0
+        ),
+        "supplemental_modelled_fixtures": int(
+            sportybet_shadow_model.get("modelled_fixture_count") or 0
+        ),
+        "supplemental_production_eligible_candidates": int(
+            (sportybet_shadow_model.get("production_bridge") or {}).get(
+                "eligible_candidate_count"
+            ) or 0
+        ),
+        "supplemental_merged_candidates": len(
+            sportybet_production_merged
+        ),
+        "supplemental_builder_exact_candidates": len(
+            sportybet_builder_picks
+        ),
+        "final_fixture_count": len(fixtures),
+        "final_candidate_count": len(all_picks),
+    }
     provider["football_first_shadow"] = (
         football_first_shadow_summary
     )
@@ -965,7 +1080,7 @@ def _build_pipeline(days_ahead: int, force: bool, now: float,
         days_ahead, all_picks, fixtures, now, now_dt, provider,
         decision_snapshot_id=decision_snapshot_id,
         builder_supplemental_picks=(
-            sportybet_staging_builder_picks
+            sportybet_builder_picks
         ),
     )
     log_runtime_memory("board_after_persistence", refresh_source=refresh_source,

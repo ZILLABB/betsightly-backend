@@ -403,6 +403,12 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     rollover = _build_rollover(
         rollover_source, today, preview=preview is not None
     )
+
+    # A product rejected by Publication Contract v1 must not
+    # reserve fixture/selection exposure from later tiers.
+    _rollover_preallocation_card = {"rollover": rollover}
+    enforce_card_policy(_rollover_preallocation_card)
+    rollover = _rollover_preallocation_card["rollover"]
     independent_banker = select_banker(
         banker_source, canonicalize=False
     )
@@ -981,6 +987,45 @@ def recover_today_empty_tiers() -> dict:
     day = canonical_fixture_recommendations(day)
     official_day, _ = filter_official_candidates(day, "5_odds")
     banker_day, _ = filter_official_candidates(day, "banker")
+
+    reserved_fixture_ids = set()
+    reserved_selection_ids = set()
+    reserved_teams = set()
+
+    for product in OFFICIAL_PORTFOLIO_PRODUCTS:
+        current = card.get(product) or {}
+        if not (
+            isinstance(current, dict)
+            and current.get("selected")
+            and current.get("games")
+        ):
+            continue
+
+        for game in current.get("games") or []:
+            fixture_id = str(game.get("match_id") or "")
+            if fixture_id:
+                reserved_fixture_ids.add(fixture_id)
+
+            identity = _selection_identity(game)
+            if identity:
+                reserved_selection_ids.add(identity)
+
+            for field in ("home_team", "away_team"):
+                team = str(game.get(field) or "").strip().casefold()
+                if team:
+                    reserved_teams.add(team)
+
+    def recovery_available(source: list) -> list:
+        return [
+            pick
+            for pick in source
+            if (
+                str(pick.get("match_id") or "") not in reserved_fixture_ids
+                and _selection_identity(pick) not in reserved_selection_ids
+                and not (_pick_teams(pick) & reserved_teams)
+            )
+        ]
+
     rules = {
         "banker": (None, 1, 0.80),
         "2_odds": (2.0, 4, .92),
@@ -993,12 +1038,15 @@ def recover_today_empty_tiers() -> dict:
         if isinstance(card.get(tier), dict) and card[tier].get("selected") and card[tier].get("games"):
             continue
         if tier == "banker":
-            selected, odds, probability = select_banker(banker_day, canonicalize=False)
+            selected, odds, probability = select_banker(
+                recovery_available(banker_day),
+                canonicalize=False,
+            )
             reason = "No safe banker is available on the prepared board."
         else:
             target, max_picks, band_low = rule
             selected, reason = _select_tier(
-                official_day,
+                recovery_available(official_day),
                 target,
                 max_picks,
                 MIN_PUBLISHABLE_CONFIDENCE,
@@ -1017,9 +1065,23 @@ def recover_today_empty_tiers() -> dict:
         board = board or sportybet.fetch_board()
         booking = create_booking(candidate["games"], board, booking_status="FULL",
                                  original_games=candidate["games"], predicted_odds=candidate["total_odds"])
-        out[tier] = recover_empty_tier(
+        recovery = recover_empty_tier(
             publish_date=publish_date, tier=tier, candidate=candidate, booking=booking,
             decision_snapshot_id=board_status.get("board_snapshot_id"))
+        out[tier] = recovery
+
+        if recovery.get("status") == "RECOVERED":
+            for pick in selected:
+                fixture_id = str(pick.get("match_id") or "")
+                if fixture_id:
+                    reserved_fixture_ids.add(fixture_id)
+
+                identity = _selection_identity(pick)
+                if identity:
+                    reserved_selection_ids.add(identity)
+
+                reserved_teams.update(_pick_teams(pick))
+
     return {"status": "COMPLETE", "tiers": out, "board": board_status}
 
 
@@ -1230,6 +1292,11 @@ def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
     over_live, _ = filter_official_candidates(live, "over_1_5")
 
     rollover = _build_rollover([], today)
+
+    # Available Now obeys the same exposure rule as morning publication.
+    _live_rollover_preallocation_card = {"rollover": rollover}
+    enforce_card_policy(_live_rollover_preallocation_card)
+    rollover = _live_rollover_preallocation_card["rollover"]
     fixture_uses = {
         game.get("match_id") for game in rollover.get("games", [])
         if game.get("match_id")

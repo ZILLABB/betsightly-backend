@@ -12,12 +12,24 @@ from __future__ import annotations
 
 import os
 from collections import Counter
+from copy import deepcopy
 from typing import Any
 
 
 FEATURE_FLAG = (
     "SPORTYBET_SUPPLEMENTAL_STAGING_ENABLED"
 )
+
+PRODUCTION_FEATURE_FLAG = (
+    "SPORTYBET_SUPPLEMENTAL_PRODUCTION_ENABLED"
+)
+
+# Production supplemental candidates are allowed only from competitions with
+# a real recent historical sample. This is deliberately stricter than the
+# base-rate fallback threshold: the bridge is an expansion path, not a reason
+# to publish global-prior football as if it were competition-specific.
+MIN_PRODUCTION_COMPETITION_HISTORY = 25
+MIN_PRODUCTION_RISK_ADJUSTED_RETURN = 1.0
 
 
 def _truthy(
@@ -129,6 +141,114 @@ def candidate_gate(
         "reason_codes": reasons,
     }
 
+
+
+def production_bridge_candidates(
+    picks: list[dict],
+    *,
+    board_complete: bool,
+    environment: str | None = None,
+    feature_flag: bool | None = None,
+) -> tuple[list[dict], dict]:
+    """Admit only fully-vetted SportyBet-only selections to production.
+
+    This bridge never creates probabilities. It accepts the already-modelled
+    supplemental selections only after the same trust, evidence, market-floor,
+    exact-bookability and real-price facts used elsewhere have passed.
+
+    SportyBet remains the execution/price source, not the probability anchor.
+    """
+    environment = str(
+        environment
+        if environment is not None
+        else os.getenv("ENVIRONMENT", "")
+    ).strip().casefold()
+
+    if feature_flag is None:
+        feature_flag = _truthy(
+            os.getenv(PRODUCTION_FEATURE_FLAG, "")
+        )
+
+    report = {
+        "status": "blocked",
+        "environment": environment,
+        "feature_flag": PRODUCTION_FEATURE_FLAG,
+        "feature_flag_enabled": bool(feature_flag),
+        "board_complete": bool(board_complete),
+        "candidate_count": len(picks),
+        "eligible_candidate_count": 0,
+        "rejected_count": 0,
+        "rejection_reason_counts": {},
+        "production_merge_allowed": False,
+        "prediction_pool_changed": False,
+        "builder_pool_changed": False,
+        "publishing_changed": False,
+    }
+
+    if environment not in {"production", "prod"}:
+        report["status"] = "not_applicable_outside_production"
+        return [], report
+
+    if not feature_flag:
+        report["status"] = "production_feature_flag_off"
+        return [], report
+
+    if not board_complete:
+        report["status"] = "sportybet_board_incomplete"
+        return [], report
+
+    eligible = []
+    reasons = Counter()
+
+    for pick in picks:
+        gate = candidate_gate(pick)
+        rejected = list(gate["reason_codes"])
+        fixture = pick.get("_fixture") or {}
+
+        if not fixture.get("_shadow_supplemental"):
+            rejected.append("NOT_SUPPLEMENTAL_FIXTURE")
+
+        if fixture.get("competition_type") != "LEAGUE":
+            rejected.append("NON_LEAGUE_CONTEXT")
+
+        historical_sample = int(
+            fixture.get("competition_historical_sample") or 0
+        )
+        if historical_sample < MIN_PRODUCTION_COMPETITION_HISTORY:
+            rejected.append("INSUFFICIENT_COMPETITION_HISTORY")
+
+        rar = _number(pick.get("risk_adjusted_return"))
+        if (
+            rar is None
+            or rar < MIN_PRODUCTION_RISK_ADJUSTED_RETURN
+        ):
+            rejected.append("NEGATIVE_MODEL_VALUE")
+
+        if rejected:
+            for reason in set(rejected):
+                reasons[reason] += 1
+            continue
+
+        clone = deepcopy(pick)
+        clone["_production_supplemental"] = True
+        clone["_production_supplemental_source"] = (
+            "sportybet_exact_history_ready_v1"
+        )
+        eligible.append(clone)
+
+    report.update({
+        "status": (
+            "ready_for_production_merge"
+            if eligible
+            else "no_eligible_candidates"
+        ),
+        "eligible_candidate_count": len(eligible),
+        "rejected_count": len(picks) - len(eligible),
+        "rejection_reason_counts": dict(reasons),
+        "production_merge_allowed": bool(eligible),
+    })
+
+    return eligible, report
 
 def _metric_delta(
     left: dict,

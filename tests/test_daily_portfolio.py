@@ -296,8 +296,16 @@ def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
         "market": "under_4_5",
         "market_key": "under_4_5",
         "prediction": "Under 4.5 Goals",
-        "odds": 1.20,
+        # This regression tests fixture exposure for a PUBLISHED Rollover.
+        "odds": 1.30,
         "confidence": .80,
+        "market_floor_eligible": True,
+        "safe_tier_eligible": True,
+        "market_trust_state": "TRUSTED",
+        "bookable": True,
+        "odds_are_real": True,
+        "league_slug": "portfolio",
+        "competition_type": "LEAGUE",
     }
 
     monkeypatch.setattr(
@@ -308,7 +316,7 @@ def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
             "games": [rollover_game],
             "chain": [],
             "chain_length": 1,
-            "total_odds": 1.20,
+            "total_odds": 1.30,
             "today_hit_probability": .80,
         },
     )

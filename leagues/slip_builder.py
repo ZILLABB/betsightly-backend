@@ -368,6 +368,12 @@ def _pool(horizon: str = DEFAULT_HORIZON, force: bool = False,
     picks = []
 
     for fixture in fixtures:
+        # Production supplemental fixtures remain in the prepared board for
+        # product visibility and auditability, but Builder consumes only the
+        # exact fixture/market pairs that passed the production bridge.
+        if fixture.get("_production_supplemental"):
+            continue
+
         model = fixture.get("_model")
         if not model:
             continue

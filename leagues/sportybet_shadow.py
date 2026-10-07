@@ -33,7 +33,7 @@ from leagues.picks import MIN_CANDIDATE_CONFIDENCE, build_picks
 from leagues.predictor import predict
 
 
-MAX_SHADOW_FIXTURES = 60
+MAX_SHADOW_FIXTURES = 120
 
 
 def _board_entries(board: dict | None):
@@ -781,6 +781,22 @@ def evaluate_shadow_supplemental(
         ),
     )
 
+    from leagues.sportybet_shadow_gate import (
+        production_bridge_candidates,
+    )
+
+    (
+        production_candidates,
+        production_bridge,
+    ) = production_bridge_candidates(
+        shadow_ranked,
+        board_complete=bool(
+            meta.get(
+                "is_complete"
+            )
+        ),
+    )
+
     fixture_results.sort(
         key=lambda item: (
             item.get("kickoff")
@@ -922,6 +938,12 @@ def evaluate_shadow_supplemental(
         ),
         "_staging_builder_candidates": (
             staging_builder_candidates
+        ),
+        "production_bridge": (
+            production_bridge
+        ),
+        "_production_candidates": (
+            production_candidates
         ),
         "ready_input_fixture_count": len(
             ready
