@@ -19,11 +19,11 @@ def _pick(index: int, kickoff: str) -> dict:
         "match_id": fixture["match_id"], "market": market,
         "market_group": groups[index % len(groups)],
         "prediction": market, "confidence": confidence,
-        "raw_confidence": confidence, "odds": 1.35,
+        "raw_confidence": confidence, "odds": 1.45,
         "odds_are_real": True, "odds_provider": "SportyBet",
         "market_margin": .05, "bookable": True,
-        "market_implied_probability": .71, "ml_confidence": .71,
-        "expected_value": -.028, "edge": .01,
+        "market_implied_probability": .68, "ml_confidence": .71,
+        "expected_value": .044, "edge": .04,
         "safe_tier_eligible": True, "calibration_group": market,
         "calibration_sample": 100,
         "trust": {
@@ -278,6 +278,13 @@ def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
 
     picks = [_pick(index, kickoff) for index in range(6)]
     shared = picks[0]
+    shared["confidence"] = .80
+    shared["raw_confidence"] = .80
+    shared["ml_confidence"] = .80
+    shared["market_implied_probability"] = .68
+    shared["expected_value"] = .088
+    shared["trust"]["evidence_adjusted_probability"] = .80
+    shared["trust"]["lower_reliability_bound"] = .79
     fixtures = [pick["_fixture"] for pick in picks]
 
     # Rollover owns the same fixture, but deliberately under a different
@@ -289,8 +296,16 @@ def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
         "market": "under_4_5",
         "market_key": "under_4_5",
         "prediction": "Under 4.5 Goals",
-        "odds": 1.20,
+        # This regression tests fixture exposure for a PUBLISHED Rollover.
+        "odds": 1.30,
         "confidence": .80,
+        "market_floor_eligible": True,
+        "safe_tier_eligible": True,
+        "market_trust_state": "TRUSTED",
+        "bookable": True,
+        "odds_are_real": True,
+        "league_slug": "portfolio",
+        "competition_type": "LEAGUE",
     }
 
     monkeypatch.setattr(
@@ -301,7 +316,7 @@ def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
             "games": [rollover_game],
             "chain": [],
             "chain_length": 1,
-            "total_odds": 1.20,
+            "total_odds": 1.30,
             "today_hit_probability": .80,
         },
     )
@@ -378,3 +393,75 @@ def test_daily_preview_uses_same_selector_without_publication_writes(monkeypatch
     finally:
         daily_feed._accum_cache.clear()
         daily_feed._accum_cache.update(old_cache)
+
+
+def _available_now_game(match_id: str, market: str = "over_1_5") -> dict:
+    return {
+        "match_id": match_id,
+        "market": market,
+        "market_key": market,
+        "prediction": market,
+        "home_team": f"Home {match_id}",
+        "away_team": f"Away {match_id}",
+    }
+
+
+def test_available_now_final_portfolio_reserves_rollover_and_all_official_tiers():
+    rollover = {"games": [_available_now_game("A", "under_3_5")]}
+    accumulators = {
+        "banker": {"selected": True, "games": [_available_now_game("B")]},
+        "2_odds": {"selected": True, "games": [
+            _available_now_game("C"), _available_now_game("D"),
+        ]},
+        "5_odds": {"selected": True, "games": [
+            _available_now_game("E"), _available_now_game("F"), _available_now_game("G"),
+        ]},
+        "10_odds": {"selected": True, "games": [
+            _available_now_game("H"), _available_now_game("I"), _available_now_game("J"),
+        ]},
+        # Independent singles must not participate in this accumulator cap.
+        "over_1_5": {"selected": True, "games": [_available_now_game("B")]},
+    }
+
+    portfolio = daily_feed._validate_bookable_now_portfolio(accumulators, rollover)
+
+    assert portfolio["portfolio_validation"] == {
+        "exact_selection_overlap_count": 0,
+        "fixture_overlap_count": 0,
+        "max_selection_exposure": 1,
+        "max_fixture_exposure": 1,
+        "fixture_count": 10,
+        "selection_count": 10,
+        "valid": True,
+    }
+    assert not portfolio["withheld_products"]
+    assert all(accumulators[name]["selected"] for name in (
+        "banker", "2_odds", "5_odds", "10_odds",
+    ))
+
+
+def test_available_now_final_portfolio_fails_closed_for_duplicate_fixture():
+    rollover = {"games": [_available_now_game("A", "under_3_5")]}
+    accumulators = {
+        "banker": {"selected": True, "games": [_available_now_game("B")]},
+        # It is a different market, proving fixture exposure rather than only
+        # exact-selection exposure protects the action surface.
+        "2_odds": {"selected": True, "games": [_available_now_game("B", "home_win")]},
+        "5_odds": {"selected": True, "games": [_available_now_game("C")]},
+        "10_odds": {"selected": True, "games": [_available_now_game("D")]},
+    }
+
+    portfolio = daily_feed._validate_bookable_now_portfolio(accumulators, rollover)
+
+    assert accumulators["banker"]["selected"] is True
+    assert accumulators["2_odds"]["selected"] is False
+    assert accumulators["2_odds"]["games"] == []
+    assert portfolio["withheld_products"] == [{
+        "product": "2_odds",
+        "duplicate_selection_ids": [],
+        "duplicate_fixture_ids": ["B"],
+    }]
+    # The API exposes only the retained portfolio, so consumers can rely on
+    # zero final overlap rather than interpreting an attempted duplicate.
+    assert portfolio["portfolio_validation"]["valid"] is True
+    assert portfolio["portfolio_validation"]["fixture_overlap_count"] == 0
