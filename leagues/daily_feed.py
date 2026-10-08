@@ -370,7 +370,13 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
 
     # Rank football opinions before any product asks them to buy a multiplier.
     from leagues.fixture_ranker import canonical_fixture_recommendations
-    day_picks = canonical_fixture_recommendations(day_picks)
+    # Let every *currently ACTIVE and trusted* market reach the existing
+    # fail-closed official policy before the portfolio chooses one per fixture.
+    # Rank-1/2 truncation used to discard policy-qualified Over 1.5 outcomes.
+    # No market activation, confidence, price or booking rule is relaxed.
+    day_picks = canonical_fixture_recommendations(
+        day_picks, include_all_eligible=True,
+    )
     if not day_picks:
         return None
 
@@ -384,7 +390,9 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     # Model analysis and official publication are deliberately separate.
     # The model may keep analysing a fixture, but a Premium product only sees
     # candidates that pass the single fail-closed publication contract.
-    rollover_ranked = canonical_fixture_recommendations(all_picks)
+    rollover_ranked = canonical_fixture_recommendations(
+        all_picks, include_all_eligible=True,
+    )
     rollover_source, rollover_rejections = filter_official_candidates(
         rollover_ranked, "rollover"
     )
@@ -984,7 +992,7 @@ def recover_today_empty_tiers() -> dict:
     day = [p for p in picks if kickoff_wat_date(p.get("_fixture", {}).get("commence_time")) == target_day
            and p.get("_fixture", {}).get("commence_time", "") >= bookable_from]
     from leagues.fixture_ranker import canonical_fixture_recommendations
-    day = canonical_fixture_recommendations(day)
+    day = canonical_fixture_recommendations(day, include_all_eligible=True)
     official_day, _ = filter_official_candidates(day, "5_odds")
     banker_day, _ = filter_official_candidates(day, "banker")
 
@@ -1286,7 +1294,7 @@ def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
 
     F = MIN_PUBLISHABLE_CONFIDENCE
     from leagues.fixture_ranker import canonical_fixture_recommendations
-    live = canonical_fixture_recommendations(live)
+    live = canonical_fixture_recommendations(live, include_all_eligible=True)
     official_live, _ = filter_official_candidates(live, "5_odds")
     banker_live, _ = filter_official_candidates(live, "banker")
     over_live, _ = filter_official_candidates(live, "over_1_5")
