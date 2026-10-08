@@ -14,6 +14,71 @@ from scripts.prepare_staging_board_once import preflight
 
 TIERS = ("rollover", "banker", "2_odds", "5_odds", "10_odds", "over_1_5")
 
+def diagnose_supply(picks: list[dict], target_date_wat: str, now: datetime) -> dict:
+    """Read-only counts of price, trust and publication gates for one WAT day.
+
+    Diagnostics use the same canonicalizer and official policy as the daily
+    selector; one failed leg may contribute multiple rejection reasons.
+    """
+    from collections import Counter
+    from leagues.engine import kickoff_wat_date
+    from leagues.fixture_ranker import canonical_fixture_recommendations
+    from leagues.publication_policy import filter_official_candidates, rejection_summary
+    from leagues.availability import BOOKING_BUFFER
+
+    cutoff = now + BOOKING_BUFFER
+    day = []
+    for pick in picks:
+        fixture = pick.get("_fixture") or {}
+        kickoff = fixture.get("commence_time")
+        if kickoff_wat_date(kickoff) != target_date_wat:
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(kickoff).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if parsed < cutoff:
+            continue
+        day.append(pick)
+
+    canonical = canonical_fixture_recommendations(
+        day, include_all_eligible=True,
+    )
+    products = {}
+    for product in ("banker", "2_odds", "5_odds", "10_odds", "over_1_5"):
+        # Daily 2x, 5x and 10x deliberately share the '5_odds' candidate
+        # contract; selection and final-slip validation are separate gates.
+        policy = "5_odds" if product in {"2_odds", "5_odds", "10_odds"} else product
+        allowed, rejected = filter_official_candidates(canonical, policy)
+        products[product] = {
+            "approved_legs": len(allowed),
+            "approved_unique_fixtures": len({
+                str(p.get("match_id")) for p in allowed
+            }),
+            "rejected_legs": len(rejected),
+            "rejection_reasons": rejection_summary(rejected),
+        }
+    return {
+        "forecast_legs_on_target_day": len(day),
+        "forecast_unique_fixtures_on_target_day": len({
+            str(p.get("match_id")) for p in day
+        }),
+        "canonical_active_market_legs": len(canonical),
+        "priced_bookable_forecasts": sum(
+            bool(p.get("bookable")) and bool(p.get("odds_are_real"))
+            for p in day
+        ),
+        "products": products,
+        "note": (
+            "Counts are per-leg before cross-tier allocation, slip EV, "
+            "SportyBet booking-code generation and live price readback. "
+            "Rejection reasons overlap."
+        ),
+    }
+
+
 
 def simulate(*, target_date_wat: str | None = None) -> dict:
     database = preflight()
@@ -111,6 +176,7 @@ def simulate(*, target_date_wat: str | None = None) -> dict:
         "board_age_seconds": board.get("age_seconds"),
         "evaluated_fixtures": len(fixtures),
         "model_candidate_picks": len(picks),
+        "target_day_supply_audit": diagnose_supply(picks, target_wat_date, now),
         "official_product_preview": products,
         "duplicate_fixture_count": 0,
         "publication_policy": card.get("publication_policy"),
