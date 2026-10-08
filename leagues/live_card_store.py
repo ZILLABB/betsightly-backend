@@ -111,16 +111,21 @@ def load(now: datetime | None = None) -> dict:
     from database import engine
     current = now or datetime.now(timezone.utc)
     date = _wat_date(current)
-    with engine.connect() as conn:
-        _ensure_result = conn.execute(text(
-            "SELECT revision, created_at, expires_at, payload "
-            "FROM live_bookable_editions WHERE wat_date=:d "
-            "ORDER BY revision DESC LIMIT 1"
-        ), {"d": date}).first()
-    if not _ensure_result:
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT revision, created_at, expires_at, payload "
+                "FROM live_bookable_editions WHERE wat_date=:d "
+                "ORDER BY revision DESC LIMIT 1"
+            ), {"d": date}).first()
+    except Exception as exc:
+        logger.warning("read-only live snapshot unavailable: %s", type(exc).__name__)
+        return {"status": "success", "available": False, "date": date,
+                "reason": "Rolling ticket storage not initialized."}
+    if not row:
         return {"status": "success", "available": False, "date": date,
                 "reason": "No prevalidated rolling ticket edition is ready yet."}
-    revision, created, expires, raw = _ensure_result
+    revision, created, expires, raw = row
     expiry = datetime.fromisoformat(expires)
     if expiry <= current:
         return {"status": "success", "available": False, "date": date,
