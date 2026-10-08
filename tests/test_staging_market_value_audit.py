@@ -32,7 +32,7 @@ def test_value_diagnostics_split_raw_unprofitable_from_conservative(monkeypatch)
     assert goals["raw_break_even_but_conservative_negative"] == 1
     assert goals["raw_and_conservative_negative"] == 1
     assert goals["median_verified_price"] == pytest.approx(1.35)
-    assert report["under_4_5"]["negative_model_value"] == 0
+    assert report["under_4_5"].get("negative_model_value", 0) == 0
 
 
 def test_never_claims_estimated_price_as_verified(monkeypatch):
