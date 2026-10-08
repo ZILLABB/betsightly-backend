@@ -259,12 +259,13 @@ def test_october_three_shared_losses_cannot_be_republished_in_5_and_10(monkeypat
     assert not (incident_ids & final_ten)
     assert not (final_five & final_ten)
 
-    assert {
-        selection_id.split("|", 1)[0]
-        for selection_id in final_ten
-    } == alternative_ids
-
-    assert products["10_odds"]["decision"] == "DIVERSIFIED"
+    # The fake independent optimizer quoted 9.40x after exposure removal
+    # while its three actual market prices multiply to substantially less.
+    # Under the honest 10.00x contract, that must be withheld rather than
+    # advertised as a full 10 Odds ticket.
+    assert not final_ten
+    assert result["accumulators"]["10_odds"]["selected"] is False
+    assert "10.00x" in result["accumulators"]["10_odds"]["reason"]
 
 
 
