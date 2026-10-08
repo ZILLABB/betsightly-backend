@@ -531,6 +531,20 @@ def get_next_available():
     try:
         from leagues.next_available import next_available_quality_board
         picks, _, board = _public_prepared_board(7)
+        # The interactive engine may return an aged fallback to keep Builder
+        # usable. Do NOT advertise its historical SportyBet prices as fresh
+        # future picks. The preview must fail closed until scheduler refreshes
+        # the prepared board (no provider work in an HTTP request).
+        if board.get("stale"):
+            raise HTTPException(
+                503,
+                {
+                    "reason": "prepared_board_stale",
+                    "retryable": True,
+                    "board_age_seconds": board.get("age_seconds"),
+                    "refresh_started": board.get("refresh_started", False),
+                },
+            )
         return {**next_available_quality_board(picks), "board": board}
     except HTTPException:
         raise
