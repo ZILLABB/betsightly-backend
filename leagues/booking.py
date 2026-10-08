@@ -1225,8 +1225,7 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
             if game.get("match_id")
         }
         for tier, data in (accumulators or {}).items()
-        if (not tier.startswith("_") and tier != "over_1_5"
-            and isinstance(data, dict))
+        if (not tier.startswith("_") and isinstance(data, dict))
     }
     claimed_replacements: set = set()
 
@@ -1283,12 +1282,11 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
                                 tier, str(reason)[:80])
         if reusable:
             report["skipped"].append(f"{tier}: {prior.get('share_code')}")
-            if tier != "over_1_5":
-                claimed_replacements.update(
-                    game.get("match_id")
-                    for game in (prior.get("final_booked_legs") or games)
-                    if game.get("match_id")
-                )
+            claimed_replacements.update(
+                game.get("match_id")
+                for game in (prior.get("final_booked_legs") or games)
+                if game.get("match_id")
+            )
             continue
 
         predicted_odds = data.get("total_odds")
@@ -1304,10 +1302,11 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
             # snapshot and with the exact same tier rule captured at publish.
             rule = data.get("booking_rule") or {}
             excluded = set(claimed_replacements)
-            if tier != "over_1_5":
-                for other_tier, fixture_ids in portfolio_originals.items():
-                    if other_tier != tier:
-                        excluded.update(fixture_ids)
+            # All official tickets, including Over 1.5, reserve their
+            # fixtures against replacement legs on every other product.
+            for other_tier, fixture_ids in portfolio_originals.items():
+                if other_tier != tier:
+                    excluded.update(fixture_ids)
             rebuilt = _select_replacements(
                 available_original, bookable_candidates,
                 len(unavailable_original), rule, len(games),
