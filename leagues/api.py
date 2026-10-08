@@ -535,6 +535,10 @@ def get_bookable_now():
     quietly reroll its losers.
     """
     try:
+        from leagues import live_card_store
+        if live_card_store.enabled():
+            # Read-only: no provider call or booking creation from public GET.
+            return live_card_store.load()
         from leagues.daily_feed import build_bookable_now
         picks, _, board = _public_prepared_board(2)
         result = build_bookable_now(all_picks=picks)
