@@ -1115,10 +1115,10 @@ def generate_v2(options: dict) -> dict:
     ):
         return {"status": "error", "mode": mode, "reason": "invalid fill_strategy"}
 
-    use_all_eligible = (
-        mode in {"target_odds", "strongest"}
-        or (mode == "game_count" and bool(requested_markets))
-    )
+    # All three modes should see the same independently eligible selection
+    # universe. Game Count without an explicit market list used to discard
+    # usable alternatives before the requested game-count search could run.
+    use_all_eligible = True
     broader_fill = bool(
         mode == "game_count"
         and requested_markets
