@@ -16,7 +16,7 @@ TIMES_WAT = (8, 12, 16, 20)
 TIERS = ("banker", "2_odds", "5_odds", "10_odds", "over_1_5")
 
 
-def simulate(target_day: str) -> dict:
+def simulate(target_day: str, *, refresh_if_stale: bool = False) -> dict:
     database = preflight()
     requested = date.fromisoformat(target_day)
     today = datetime.now(WAT).date()
@@ -27,10 +27,30 @@ def simulate(target_day: str) -> dict:
     from leagues.daily_feed import build_bookable_now
 
     picks, fixtures, board = prepared_board(days_ahead=7)
+    refreshed = False
     if not board.get("ready") or board.get("stale"):
-        raise RuntimeError("Staging prepared board is missing or stale")
+        if not refresh_if_stale:
+            age = board.get("age_seconds")
+            raise RuntimeError(
+                "Staging seven-day board missing or stale "
+                f"(ready={bool(board.get('ready'))}, age_seconds={age}). "
+                "Run python -m scripts.prepare_staging_board_once, "
+                "or explicitly retry with --refresh-if-stale."
+            )
+        # This is an opt-in, CLI-only provider/model refresh. prepare_once()
+        # repeats the database-identity and environment safety preflight;
+        # it never archives, publishes, settles, or creates bookmaker codes.
+        from scripts.prepare_staging_board_once import prepare_once
+        refresh_result = prepare_once()
+        refreshed = True
+        picks, fixtures, board = prepared_board(days_ahead=7)
+        if not board.get("ready") or board.get("stale"):
+            raise RuntimeError(
+                "Staging refresh completed but the new seven-day board is "
+                f"unusable: {refresh_result!r}; status={board!r}"
+            )
     if not picks or not fixtures:
-        raise RuntimeError("No staging board candidates available")
+        raise RuntimeError("Staging prepared board has no evaluated fixtures/picks")
 
     previews = []
     for hour_wat in TIMES_WAT:
@@ -97,6 +117,7 @@ def simulate(target_day: str) -> dict:
         "published_record_unchanged": True,
         "board_age_seconds": board.get("age_seconds"),
         "board_snapshot_id": board.get("board_snapshot_id"),
+        "board_refreshed": refreshed,
         "wat_times": list(TIMES_WAT),
         "snapshots": previews,
         "note": ("Staging simulations use captured prices, not fresh SportyBet "
@@ -107,5 +128,10 @@ def simulate(target_day: str) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date", required=True, help="YYYY-MM-DD in Nigeria")
+    parser.add_argument(
+        "--refresh-if-stale", action="store_true",
+        help="Explicitly prepare a fresh staging-only board if absent/stale",
+    )
     args = parser.parse_args()
-    print(json.dumps(simulate(args.date), sort_keys=True, default=str))
+    print(json.dumps(simulate(args.date, refresh_if_stale=args.refresh_if_stale),
+                     sort_keys=True, default=str))
