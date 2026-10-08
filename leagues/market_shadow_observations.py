@@ -73,6 +73,11 @@ def staging_write_gate(*, db_engine) -> str:
     from scripts.prepare_staging_board_once import preflight
 
     name = preflight()
+    # The engine being mutated must be the exact engine whose actual database
+    # identity the shared staging preflight has already checked.
+    from database import engine as verified_staging_engine
+    if db_engine is not verified_staging_engine:
+        raise RuntimeError("Refusing a database engine other than verified staging")
     if os.getenv("BETSIGHTLY_STAGING_MARKET_SHADOW_WRITE") != "CONFIRM_SHADOW_ONLY":
         raise RuntimeError("Shadow writes disabled: require CONFIRM_SHADOW_ONLY")
     if db_engine.dialect.name != "postgresql":
@@ -134,6 +139,16 @@ def make_observation(pick: dict, snapshot_id: str,
     }, "ready"
 
 
+def _db_utc(value) -> datetime | None:
+    """SQLAlchemy SQLite tests can return naive UTC timestamps; PostgreSQL
+    production pilot persists timezone-aware UTC values. Only use for our
+    own database columns, never for incoming match provider timestamps.
+    """
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return _utc(value)
+
+
 def ensure_table(db_engine) -> None:
     metadata.create_all(db_engine, tables=[observations], checkfirst=True)
 
@@ -162,21 +177,36 @@ def collect(picks: list[dict], snapshot_id: str, *,
     ensure_table(db_engine)
     inserted = 0
     existing = 0
-    for row in pending_rows:
-        try:
-            with db_engine.begin() as connection:
-                prior = connection.execute(
-                    select(observations.c.observation_key).where(
-                        observations.c.observation_key == row["observation_key"]
-                    )
-                ).first()
-                if prior:
-                    existing += 1
-                    continue
-                connection.execute(observations.insert().values(**row))
-                inserted += 1
-        except IntegrityError:
-            existing += 1
+    if db_engine.dialect.name == "postgresql":
+        # Bounded bulk insert avoids thousands of remote DB round trips.
+        # ON CONFLICT preserves the first immutable pre-kickoff forecast.
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        with db_engine.begin() as connection:
+            for start in range(0, len(pending_rows), 250):
+                batch = pending_rows[start:start + 250]
+                query = pg_insert(observations).values(batch).on_conflict_do_nothing(
+                    index_elements=[observations.c.observation_key]
+                )
+                inserted += connection.execute(query).rowcount
+        existing = len(pending_rows) - inserted
+    else:
+        # SQLite is for isolated unit tests only; staging gate above is
+        # required before any real script can enter this path.
+        for row in pending_rows:
+            try:
+                with db_engine.begin() as connection:
+                    prior = connection.execute(
+                        select(observations.c.observation_key).where(
+                            observations.c.observation_key == row["observation_key"]
+                        )
+                    ).first()
+                    if prior:
+                        existing += 1
+                        continue
+                    connection.execute(observations.insert().values(**row))
+                    inserted += 1
+            except IntegrityError:
+                existing += 1
     return {
         "status": "SHADOW_CAPTURE_ONLY",
         "inserted": inserted, "existing": existing,
@@ -211,7 +241,7 @@ def pending_fixtures(*, db_engine, now: datetime | None = None,
             "match_id": fixture_id,
             "home_team": row["home_team"],
             "away_team": row["away_team"],
-            "commence_time": _utc(row["kickoff"]).isoformat(),
+            "commence_time": _db_utc(row["kickoff"]).isoformat(),
             "league_slug": row["league_slug"],
         })
         if len(fixtures) >= limit:
@@ -223,7 +253,7 @@ def pending_fixtures(*, db_engine, now: datetime | None = None,
 def verified_result_for_row(row: dict, scores: dict) -> tuple[dict | None, str]:
     """Fail closed on unresolved/ambiguous final scores and unknown markets."""
     from leagues.results_checker import _lookup_settlement_score
-    kickoff = _utc(row["kickoff"])
+    kickoff = _db_utc(row["kickoff"])
     result = _lookup_settlement_score(
         scores, row["home_team"], row["away_team"],
         kickoff.date().isoformat(),
