@@ -723,7 +723,12 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
 
     over_picks, seen = [], set()
     for p in sorted(over_source, key=_over_rank):
-        if p["market"] != "over_1_5" or p["match_id"] in seen:
+        # Over 1.5 is presented separately, but it remains an official
+        # customer exposure. Do not reuse a fixture already allocated to
+        # Rollover, Banker, 2x, 5x or 10x (October 8 incident).
+        if (p["market"] != "over_1_5"
+                or p["match_id"] in seen
+                or str(p["match_id"]) in fixture_uses):
             continue
         if selection_probability(p) < OVER_MIN_CONFIDENCE:
             continue
