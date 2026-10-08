@@ -1409,7 +1409,7 @@ def build_bookable_now(all_picks: list[dict] | None = None, *, now: datetime | N
         _attach_live_bookings(accumulators, board)
 
     active_tiers = 0
-    for category in accumulators.values():
+    for tier, category in accumulators.items():
         booking = category.get("booking") or {}
         exact = (
             booking.get("status") == "active"
