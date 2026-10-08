@@ -93,6 +93,7 @@ def test_official_selection_attempts_twenty_legs_for_five_and_ten(monkeypatch):
 @pytest.mark.parametrize("mode,options", [
     ("target_odds", {"target_odds": 2.0}),
     ("strongest", {"max_games": 1}),
+    ("game_count", {"game_count": 2}),
 ])
 def test_builder_target_and_strongest_receive_all_approved_alternatives(
     monkeypatch, mode, options,
