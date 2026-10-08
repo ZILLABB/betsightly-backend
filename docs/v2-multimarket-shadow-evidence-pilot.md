@@ -66,6 +66,10 @@ $env:BETSIGHTLY_STAGING_MARKET_SHADOW_WRITE = "CONFIRM_SHADOW_ONLY"
 # View shadow-only market coverage
 .\.venv\Scripts\python.exe -m scripts.staging_multimarket_shadow report
 
+# Immediately audit negative model value on the SAME fresh board.
+# This is read-only and does not relax publication or trust thresholds.
+.\.venv\Scripts\python.exe -m scripts.audit_staging_market_value
+
 # Later, once fixtures have been completed for at least 3 hours:
 .\.venv\Scripts\python.exe -m scripts.staging_multimarket_shadow settle
 .\.venv\Scripts\python.exe -m scripts.staging_multimarket_shadow report
