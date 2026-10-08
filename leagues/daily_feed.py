@@ -51,6 +51,12 @@ OFFICIAL_PORTFOLIO_VERSION = "official_exposure_v1"
 MAX_OFFICIAL_SELECTION_EXPOSURE = 1
 MAX_OFFICIAL_FIXTURE_EXPOSURE = 1
 OFFICIAL_PORTFOLIO_PRODUCTS = ("rollover", "banker", "2_odds", "5_odds", "10_odds")
+# 10 Odds must actually reach 10x in at most 20 independent fixtures.
+# The bounded selector currently searches at most 18 ranked candidates, so
+# raising the permitted leg count does not expand an unbounded search.
+OFFICIAL_FIVE_MAX_LEGS = 20
+OFFICIAL_TEN_MAX_LEGS = 20
+OFFICIAL_TEN_BAND_LOW = 1.0
 
 # How close two confidences have to be before the bookmaker's margin is
 # allowed to decide between them. Two points: wide enough that near-identical
@@ -424,11 +430,11 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         official_source, 2.0, 4, FLOOR, MIN_SLIP_MODEL_RETURN,
         band_low=0.92, canonicalize=False)
     independent_five, five_why = _select_tier(
-        official_source, 5.0, 8, FLOOR, MIN_SLIP_MODEL_RETURN,
+        official_source, 5.0, OFFICIAL_FIVE_MAX_LEGS, FLOOR, MIN_SLIP_MODEL_RETURN,
         canonicalize=False)
     independent_ten, ten_why = _select_tier(
-        official_source, 10.0, 10, FLOOR, MIN_SLIP_MODEL_RETURN,
-        canonicalize=False)
+        official_source, 10.0, OFFICIAL_TEN_MAX_LEGS, FLOOR, MIN_SLIP_MODEL_RETURN,
+        band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False)
 
     fixture_uses = {
         str(game.get("match_id")) for game in rollover.get("games", [])
@@ -602,13 +608,13 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     five = _portfolio_product(
         "5_odds", independent_five, official_source,
         lambda pool: _select_tier(
-            pool, 5.0, 8, FLOOR, MIN_SLIP_MODEL_RETURN,
+            pool, 5.0, OFFICIAL_FIVE_MAX_LEGS, FLOOR, MIN_SLIP_MODEL_RETURN,
             canonicalize=False)[0])
     ten = _portfolio_product(
         "10_odds", independent_ten, official_source,
         lambda pool: _select_tier(
-            pool, 10.0, 10, FLOOR, MIN_SLIP_MODEL_RETURN,
-            canonicalize=False)[0])
+            pool, 10.0, OFFICIAL_TEN_MAX_LEGS, FLOOR, MIN_SLIP_MODEL_RETURN,
+            band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False)[0])
 
     # A defensive invariant for future selector changes.  The individual
     # searches above are allowed to quality-cap or withhold, but publication
@@ -817,16 +823,17 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
                 five, "Medium", five_why,
                 target=5.0,
                 booking_rule={"selector": "accumulator", "target": 5.0,
-                              "max_picks": 8,
+                              "max_picks": OFFICIAL_FIVE_MAX_LEGS,
                               "min_confidence": FLOOR,
                               "min_ev": MIN_SLIP_MODEL_RETURN, "band_low": 0.80}),
             "10_odds": mk_cat(
                 ten, "High", ten_why,
                 target=10.0,
                 booking_rule={"selector": "accumulator", "target": 10.0,
-                              "max_picks": 10,
+                              "max_picks": OFFICIAL_TEN_MAX_LEGS,
                               "min_confidence": FLOOR,
-                              "min_ev": MIN_SLIP_MODEL_RETURN, "band_low": 0.80}),
+                              "min_ev": MIN_SLIP_MODEL_RETURN,
+                              "band_low": OFFICIAL_TEN_BAND_LOW}),
             "over_1_5": mk_cat(
                 (over_picks, over_total, over_avg) if over_picks else ([], 0, 0),
                 "Very Safe",
