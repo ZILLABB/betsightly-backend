@@ -27,7 +27,7 @@ def row(index: int, *, offset_days: int | None = None) -> dict:
         "away_goals": str(goals_a),
     }
     for n, feature in enumerate(FEATURES):
-        result[feature] = str(round(0.2 + ((index+n) % 19) / 19, 4))
+        result[feature] = str(round(0.05 + 0.9 * ((index+n) % 19) / 19, 4))
     return result
 
 
