@@ -69,6 +69,18 @@ def test_official_products_have_no_exact_selection_overlap_when_board_is_suffici
                for entry in diagnostics.values())
     assert accumulators["_portfolio"]["portfolio_version"] == "official_exposure_v1"
     assert accumulators["_portfolio"]["portfolio_validation"]["valid"] is True
+    # Over 1.5 singles must never repeat a match from any accumulator.
+    assert daily_feed.all_daily_fixture_conflicts(accumulators) == []
+    over_ids = {
+        str(pick["match_id"])
+        for pick in accumulators["over_1_5"]["games"]
+    }
+    accumulator_ids = {
+        str(pick["match_id"])
+        for tier in daily_feed.OFFICIAL_PORTFOLIO_PRODUCTS
+        for pick in accumulators[tier]["games"]
+    }
+    assert over_ids.isdisjoint(accumulator_ids)
     final_ids = [
         selection_id
         for product in diagnostics.values()
