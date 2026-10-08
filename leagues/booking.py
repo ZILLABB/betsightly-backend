@@ -1474,8 +1474,6 @@ def attach_bookings(publish_date: str, accumulators: dict,
     a bookmaker, and two readers could hold different codes for one tier.
     """
     stored = bookings_for(publish_date)
-    if not stored:
-        return accumulators
     for tier, data in (accumulators or {}).items():
         if not isinstance(data, dict):
             continue
