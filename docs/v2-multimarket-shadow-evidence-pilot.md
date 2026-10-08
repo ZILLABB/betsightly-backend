@@ -21,10 +21,12 @@ SportyBet booking state, or trained production model artifacts.
   `BETSIGHTLY_STAGING_MARKET_SHADOW_WRITE=CONFIRM_SHADOW_ONLY`. The ledger
   must use the **same engine** verified by the staging preflight.
 - `report` is read-only and does not require the second write confirmation.
-- Capturing requires a **fresh**, already persisted 7-day prediction board;
-  the script never performs ESPN or SportyBet provider refresh. It refuses
-  missing snapshots, invalid probabilities and forecasts made fewer than 10
-  minutes before kickoff.
+- `capture` requires a **fresh**, already persisted 7-day prediction
+  board and never calls providers. If stale, `refresh-capture` explicitly
+  runs the existing one-shot provider/model preparation and immediately
+  captures its matching persisted snapshot in the same command. This avoids
+  expiry between separate manual commands. Both refuse missing snapshots,
+  invalid probabilities and forecasts made fewer than 10 minutes before kickoff.
 - First write wins for a model-version / fixture / market combination, even
   across later board refreshes. Captured probability, bookmaker real-price
   flags, observed timestamp and source snapshot cannot change during
@@ -54,8 +56,12 @@ $env:BETSIGHTLY_STAGING_BOARD_ONCE = "CONFIRM_STAGING_ONLY"
 $env:PREPARED_BOARD_PERSISTENCE_ENABLED = "true"
 $env:BETSIGHTLY_STAGING_MARKET_SHADOW_WRITE = "CONFIRM_SHADOW_ONLY"
 
-# Existing board must still be within its 1-hour freshness window
-.\.venv\Scripts\python.exe -m scripts.staging_multimarket_shadow capture
+# Preferred: single guarded staging refresh followed by immediate capture.
+# This is explicit provider/model work; it cannot publish or book slips.
+.\.venv\Scripts\python.exe -m scripts.staging_multimarket_shadow refresh-capture
+
+# Alternative when a board is already fresh (avoid unnecessary refresh):
+# .\.venv\Scripts\python.exe -m scripts.staging_multimarket_shadow capture
 
 # View shadow-only market coverage
 .\.venv\Scripts\python.exe -m scripts.staging_multimarket_shadow report
