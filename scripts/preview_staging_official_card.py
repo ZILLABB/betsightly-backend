@@ -6,15 +6,16 @@ Use only with the existing staging-only database preflight authorization.
 """
 from __future__ import annotations
 
+import argparse
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from scripts.prepare_staging_board_once import preflight
 
 TIERS = ("rollover", "banker", "2_odds", "5_odds", "10_odds", "over_1_5")
 
 
-def simulate() -> dict:
+def simulate(*, target_date_wat: str | None = None) -> dict:
     database = preflight()
 
     from leagues.engine import prepared_board
@@ -27,9 +28,17 @@ def simulate() -> dict:
         raise RuntimeError("Prepared board has no evaluated fixtures or picks")
 
     now = datetime.now(timezone.utc)
-    target_wat_date = (
-        (now + timedelta(hours=1)).date() + timedelta(days=1)
-    ).isoformat()
+    today_wat = (now + timedelta(hours=1)).date()
+    if target_date_wat is None:
+        target_wat_date = (today_wat + timedelta(days=1)).isoformat()
+    else:
+        try:
+            target = date.fromisoformat(target_date_wat)
+        except ValueError as exc:
+            raise ValueError("Target date must be YYYY-MM-DD") from exc
+        if target < today_wat or target > today_wat + timedelta(days=6):
+            raise ValueError("Target date must be within the current 7-day staging board")
+        target_wat_date = target.isoformat()
     # The preview pathway is intentionally not a publication path:
     # no existing-card load, no pre-publication booking, no archive, no lock.
     card = build_daily_accumulators(preview={
@@ -65,6 +74,18 @@ def simulate() -> dict:
             "odds": data.get("total_odds"),
             "presentation": data.get("presentation"),
             "reason": data.get("reason") if not selected else None,
+            "proposed_games": [
+                {
+                    "fixture_id": game.get("match_id"),
+                    "home": game.get("home_team"),
+                    "away": game.get("away_team"),
+                    "kickoff": game.get("kickoff") or game.get("date"),
+                    "market": game.get("market") or game.get("market_key"),
+                    "quoted_odds_at_capture": game.get("odds"),
+                    "model_confidence": game.get("confidence"),
+                }
+                for game in games
+            ],
         }
     # Portfolio exposure contract is hard-cap one fixture per official tier.
     if len(fixture_ids) != len(set(fixture_ids)):
@@ -78,6 +99,12 @@ def simulate() -> dict:
         "locked": False,
         "target_wat_date": target_wat_date,
         "fixture_target_date": card.get("fixture_target_date"),
+        "requested_date_matched": card.get("fixture_target_date") == target_wat_date,
+        "warning": (
+            "Staging only; NOT an official published slip or verified booking. "
+            "Bookmaker prices require live readback before betting. "
+            "A false requested_date_matched means the selector used another fixture date."
+        ),
         "board_snapshot_id": board.get("board_snapshot_id"),
         "board_complete": board.get("complete"),
         "board_degraded": board.get("degraded"),
@@ -92,4 +119,13 @@ def simulate() -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps(simulate(), sort_keys=True, default=str))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--date", dest="target_date_wat", metavar="YYYY-MM-DD",
+        help="Explicit match-day in Nigeria (prevents midnight rollover)",
+    )
+    args = parser.parse_args()
+    print(json.dumps(
+        simulate(target_date_wat=args.target_date_wat),
+        sort_keys=True, default=str,
+    ))
