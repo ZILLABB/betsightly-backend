@@ -9,9 +9,6 @@ def _pick(market, match_id, reasons):
 
 
 def test_counts_evidence_only_separately_from_other_rejections(monkeypatch):
-    import leagues.fixture_ranker as ranker
-    import leagues.publication_policy as policy
-
     candidates = [
         _pick("over_1_5", "a", []),
         _pick("home_or_draw", "b", ["INSUFFICIENT_SETTLED_EVIDENCE"]),
@@ -23,13 +20,13 @@ def test_counts_evidence_only_separately_from_other_rejections(monkeypatch):
     original = [dict(p) for p in candidates]
 
     monkeypatch.setattr(
-        ranker, "canonical_fixture_recommendations",
+        audit, "canonical_fixture_recommendations",
         lambda rows, *, include_all_eligible: [
             r for r in rows if r["market"] != "btts_yes"
         ],
     )
     monkeypatch.setattr(
-        policy, "evaluate_leg",
+        audit, "evaluate_leg",
         lambda pick, product: {
             "allowed": not pick["_test_reasons"],
             "reasons": list(pick["_test_reasons"]),
@@ -47,15 +44,12 @@ def test_counts_evidence_only_separately_from_other_rejections(monkeypatch):
 
 
 def test_over15_product_remains_single_market_only(monkeypatch):
-    import leagues.fixture_ranker as ranker
-    import leagues.publication_policy as policy
-
     monkeypatch.setattr(
-        ranker, "canonical_fixture_recommendations",
+        audit, "canonical_fixture_recommendations",
         lambda rows, *, include_all_eligible: rows,
     )
     monkeypatch.setattr(
-        policy, "evaluate_leg",
+        audit, "evaluate_leg",
         lambda pick, product: {"reasons": pick["_test_reasons"]},
     )
     result = audit.inspect_market_picks(
