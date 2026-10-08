@@ -1234,6 +1234,12 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
             continue
         if not isinstance(data, dict):
             continue
+        # A withheld publication is not eligible for SportyBet creation,
+        # even if its historical rollover chain still holds pending picks.
+        # Legacy/test cards without a selected flag retain old behavior.
+        if data.get("selected") is False:
+            report["skipped"].append(f"{tier}: publication withheld")
+            continue
         games = data.get("games") or []
         if tier == "rollover" and not games:
             pending = next((d for d in (data.get("days") or [])
@@ -1472,6 +1478,11 @@ def attach_bookings(publish_date: str, accumulators: dict,
         return accumulators
     for tier, data in (accumulators or {}).items():
         if not isinstance(data, dict):
+            continue
+        # Codes can outlive publication decisions. A historical booking row
+        # cannot reactivate a withheld, unselected or empty official card.
+        if data.get("selected") is False or not data.get("games"):
+            data.pop("booking", None)
             continue
         record = stored.get(tier)
         if not record:
