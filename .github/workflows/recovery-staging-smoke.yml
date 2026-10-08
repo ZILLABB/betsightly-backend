@@ -128,6 +128,16 @@ jobs:
                       assert not pick.get("booking") and not pick.get("share_code"), (
                           "Next Available preview must not advertise code."
                       )
+                  markets = {}
+                  for pick in candidates:
+                      market = str(pick.get("market_key") or pick.get("market") or "unknown")
+                      markets[market] = markets.get(market, 0) + 1
+                  print(
+                      "STAGING BEST QUALIFIED DAY "
+                      f"date={chosen['fixture_target_date']} "
+                      f"qualified_fixtures={chosen['qualified_unique_fixture_count']} "
+                      f"preview_market_distribution={json.dumps(markets, sort_keys=True)}"
+                  )
               print(
                   "PASS /api/leagues/next-available: "
                   f"{len(dates)} dates analysed, available={next_available.get('available')}; "
