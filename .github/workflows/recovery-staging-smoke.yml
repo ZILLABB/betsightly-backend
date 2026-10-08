@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 10
     env:
       STAGING_BASE: https://betsightly-backend-mdr1.onrender.com
-      EXPECT_STAGING_COMMIT: 4ef8e2303cdc0008dc564a78be2fd55b67338bf7
+      EXPECT_STAGING_COMMIT: 286eb4f25973089f09466855614ba527c11d6ae3
     steps:
       - name: Check public staging routes without writes or credentials
         shell: bash
@@ -84,32 +84,45 @@ jobs:
           )
           
           status, next_available = get("/api/leagues/next-available", retries=3)
-          assert status == 200, (
-              "Staging next-available endpoint unavailable: "
-              f"{status} (check stage prepared board and history readiness)"
-          )
-          assert next_available.get("status") == "success", "Bad next-available status"
-          assert next_available.get("preview_only") is True, "Preview must remain preview-only"
-          assert next_available.get("official_publication") is False
-          assert next_available.get("actionable") is False
-          assert next_available.get("bookable_code_verified") is False
-          dates = next_available.get("evaluated_dates", [])
-          assert isinstance(dates, list) and len(dates) >= 1
-          chosen = next_available.get("next_available")
-          if chosen:
-              assert chosen["fixture_target_date"] > next_available["publication_date_wat"]
-              candidates = chosen.get("candidates", [])
-              assert len(candidates) == len({str(p.get("match_id")) for p in candidates})
-              for pick in candidates:
-                  assert not pick.get("booking") and not pick.get("share_code"), (
-                      "Next Available preview must not advertise code."
-                  )
-          print(
-              "PASS /api/leagues/next-available: "
-              f"{len(dates)} dates analysed, available={next_available.get('available')}; "
-              "not actionable or official."
-          )
-          
+          board_unready = False
+          if status == 503:
+              detail = next_available.get("detail") or {}
+              reason = detail.get("reason")
+              assert reason in {
+                  "prepared_board_stale", "board_refreshing", "history_not_ready"
+              }, f"Unexpected 503 from Next Available: {reason}"
+              board_unready = True
+              print(
+                  "DEGRADED /api/leagues/next-available: fail-closed 503 "
+                  f"reason={reason}; no stale odds served."
+              )
+          else:
+              assert status == 200, (
+                  "Staging next-available endpoint unavailable: "
+                  f"{status} (check stage prepared board and history readiness)"
+              )
+              assert next_available.get("status") == "success"
+              assert next_available.get("preview_only") is True
+              assert next_available.get("official_publication") is False
+              assert next_available.get("actionable") is False
+              assert next_available.get("bookable_code_verified") is False
+              dates = next_available.get("evaluated_dates", [])
+              assert isinstance(dates, list) and len(dates) >= 1
+              chosen = next_available.get("next_available")
+              if chosen:
+                  assert chosen["fixture_target_date"] > next_available["publication_date_wat"]
+                  candidates = chosen.get("candidates", [])
+                  assert len(candidates) == len({str(p.get("match_id")) for p in candidates})
+                  for pick in candidates:
+                      assert not pick.get("booking") and not pick.get("share_code"), (
+                          "Next Available preview must not advertise code."
+                      )
+              print(
+                  "PASS /api/leagues/next-available: "
+                  f"{len(dates)} dates analysed, available={next_available.get('available')}; "
+                  "not actionable or official."
+              )
+
           status, daily = get("/api/leagues/daily-accumulators", retries=2)
           assert status in (200, 404), f"Daily official route returned {status}"
           if status == 200:
@@ -133,5 +146,9 @@ jobs:
           else:
               print("INFO /api/leagues/daily-accumulators: no staged official card (404)")
           
+          if board_unready:
+              raise AssertionError(
+                  "STAGING RELEASE BLOCKED: API works but no fresh model board is prepared"
+              )
           print("STAGING HTTP SMOKE PASSED (GET-only; no booking or publishing requested)")
           PY
