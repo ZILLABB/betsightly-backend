@@ -28,6 +28,11 @@ def preflight() -> str:
         )
     if _enabled(os.getenv("ENABLE_BACKGROUND_JOBS")):
         raise RuntimeError("Refusing board refresh with background jobs enabled")
+    if not _enabled(os.getenv("PREPARED_BOARD_PERSISTENCE_ENABLED")):
+        raise RuntimeError(
+            "Refusing board refresh: PREPARED_BOARD_PERSISTENCE_ENABLED "
+            "must be true, or the result is only cached in this job's memory"
+        )
 
     # Check the *connected database*, not a configurable label in a URL.
     # A wrong DATABASE_URL must never make this command refresh production.
