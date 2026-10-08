@@ -49,7 +49,7 @@ def test_stored_editions_refresh_without_unnecessary_revision(monkeypatch):
     assert revised["status"] == "new_revision" and revised["revision"] == 2
     assert live_card_store.load(now + timedelta(minutes=8))["live_revision"] == 2
 
-    expired = live_card_store.load(now + timedelta(minutes=21))
+    expired = live_card_store.load(now + timedelta(minutes=28))
     assert expired["available"] is False
     assert "expired" in expired["reason"]
 
@@ -74,7 +74,7 @@ def test_worker_refresh_is_off_without_explicit_flag(monkeypatch):
 def test_snapshot_expiry_precedes_kickoff_buffer():
     now = datetime(2026, 10, 9, 10, tzinfo=timezone.utc)
     card = _card(now, kickoff_hours=1)
-    assert live_card_store._expiry(card, now) == now + timedelta(minutes=13)
+    assert live_card_store._expiry(card, now) == now + timedelta(minutes=20)
     card["accumulators"]["2_odds"]["games"][0]["kickoff"] = (
         now + timedelta(minutes=25)).isoformat()
     assert live_card_store._expiry(card, now) == now + timedelta(minutes=5)
