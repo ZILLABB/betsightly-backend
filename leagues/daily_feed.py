@@ -58,6 +58,28 @@ OFFICIAL_FIVE_MAX_LEGS = 20
 OFFICIAL_TEN_MAX_LEGS = 20
 OFFICIAL_TEN_BAND_LOW = 1.0
 
+# Every customer-facing product uses exclusive fixtures, including Over 1.5
+# singles. A different market is not a different match-level exposure.
+ALL_DAILY_PRODUCT_NAMES = (*OFFICIAL_PORTFOLIO_PRODUCTS, "over_1_5")
+
+
+def all_daily_fixture_conflicts(accumulators: dict) -> list[dict]:
+    """Identify any fixture reused within or across the six daily products."""
+    claimed: dict[str, list[str]] = {}
+    for product in ALL_DAILY_PRODUCT_NAMES:
+        data = accumulators.get(product) or {}
+        if not isinstance(data, dict) or not data.get("selected"):
+            continue
+        for game in data.get("games") or []:
+            match_id = str(game.get("match_id") or "")
+            if match_id:
+                claimed.setdefault(match_id, []).append(product)
+    return [
+        {"match_id": match_id, "products": products}
+        for match_id, products in sorted(claimed.items())
+        if len(products) > 1
+    ]
+
 # How close two confidences have to be before the bookmaker's margin is
 # allowed to decide between them. Two points: wide enough that near-identical
 # picks are actually compared on price, narrow enough that a cheap market can
@@ -914,6 +936,12 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     # filtering should make this a no-op; this assertion prevents a future
     # selector change from bypassing the contract.
     result["publication_policy"] = enforce_card_policy(result["accumulators"])
+    fixture_conflicts = all_daily_fixture_conflicts(result["accumulators"])
+    if fixture_conflicts:
+        raise RuntimeError(
+            "six-product daily fixture exposure violation: "
+            + json.dumps(fixture_conflicts, sort_keys=True)
+        )
     _sync_portfolio_diagnostics_from_card(
         result["accumulators"], portfolio_diagnostics
     )
@@ -936,6 +964,12 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     # A validated pre-publication booking rebuild may have changed the
     # official games. Re-run both contracts before the final archive/lock.
     result["publication_policy"] = enforce_card_policy(result["accumulators"])
+    fixture_conflicts = all_daily_fixture_conflicts(result["accumulators"])
+    if fixture_conflicts:
+        raise RuntimeError(
+            "six-product daily fixture exposure violation: "
+            + json.dumps(fixture_conflicts, sort_keys=True)
+        )
     _sync_portfolio_diagnostics_from_card(
         result["accumulators"], portfolio_diagnostics
     )
@@ -1419,6 +1453,16 @@ def build_bookable_now(all_picks: list[dict] | None = None, *, now: datetime | N
     # A failed policy candidate must never burn a booking request or a code.
     enforce_card_policy(accumulators)
     portfolio = _validate_bookable_now_portfolio(accumulators, rollover)
+    # Fail closed if a future refactor permits a duplicate match in singles.
+    conflicts = all_daily_fixture_conflicts({**accumulators, "rollover": rollover})
+    if conflicts:
+        for category in accumulators.values():
+            if isinstance(category, dict) and category.get("selected"):
+                category.pop("booking", None)
+                category.update(
+                    selected=False, games=[], total_odds=0, hit_probability=0,
+                    reason="Withheld: duplicate match across daily products.",
+                )
     if not portfolio["portfolio_validation"]["valid"]:
         for category in accumulators.values():
             if isinstance(category, dict) and category.get("selected"):
