@@ -152,9 +152,49 @@ def test_staging_write_gate_requires_explicit_opt_in(monkeypatch):
     )
     monkeypatch.delenv("BETSIGHTLY_STAGING_MARKET_SHADOW_WRITE", raising=False)
     pg = type("Pg", (), {"dialect": type("D", (), {"name": "postgresql"})()})()
+    monkeypatch.setattr("database.engine", pg)
     with pytest.raises(RuntimeError, match="require CONFIRM_SHADOW_ONLY"):
         shadow.staging_write_gate(db_engine=pg)
     monkeypatch.setenv(
         "BETSIGHTLY_STAGING_MARKET_SHADOW_WRITE", "CONFIRM_SHADOW_ONLY"
     )
     assert shadow.staging_write_gate(db_engine=pg) == "betsightly_db_staging"
+
+
+def test_verified_shadow_settlement_is_idempotent(sqlite_db):
+    from leagues.results_checker import _normalize_name
+
+    pick = _forecast(market="dnb_home")
+    observed = datetime.now(timezone.utc)
+    capture = shadow.collect(
+        [pick], "first-pre-kickoff", db_engine=sqlite_db,
+        observed_at=observed,
+    )
+    assert capture["inserted"] == 1
+    kickoff = datetime.fromisoformat(pick["_fixture"]["commence_time"])
+    key = (
+        f"{_normalize_name('Home United')}|"
+        f"{_normalize_name('Away Town')}|{kickoff.date().isoformat()}"
+    )
+    fetched = []
+    def final_scores(fixtures):
+        fetched.append(fixtures)
+        return {key: {"home_score": 2, "away_score": 1}}, "espn"
+
+    later = kickoff + timedelta(hours=4)
+    result = shadow.settle(
+        db_engine=sqlite_db, now=later, score_fetcher=final_scores
+    )
+    assert result["checked"] == 1
+    assert result["settled"] == 1
+    assert result["unresolved"] == 0
+    assert len(fetched) == 1
+    report = shadow.evidence_report(db_engine=sqlite_db)
+    assert report["markets"]["dnb_home"]["settled"] == 1
+    assert report["markets"]["dnb_home"]["brier"] == pytest.approx(0.0441, abs=0.5)
+    assert report["market_promotion_allowed"] is False
+    again = shadow.settle(
+        db_engine=sqlite_db, now=later, score_fetcher=final_scores
+    )
+    assert again["checked"] == 0
+    assert len(fetched) == 1
