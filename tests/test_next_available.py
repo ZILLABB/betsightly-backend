@@ -116,3 +116,27 @@ def test_next_available_only_uses_future_wat_dates_and_past_kickoffs_are_skipped
     assert report["available"] is True
     assert report["next_available"]["fixture_target_date"] == "2026-10-10"
     assert all(g["match_id"] != "today" for g in report["next_available"]["candidates"])
+
+
+def test_next_available_rejects_stale_prepared_board(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+    from leagues import api as league_api
+
+    monkeypatch.setattr(
+        league_api, "_public_prepared_board",
+        lambda horizon: (
+            [{"match_id": "old"}],
+            [{"match_id": "old"}],
+            {"ready": True, "stale": True, "age_seconds": 5400},
+        ),
+    )
+    monkeypatch.setattr(
+        "leagues.next_available.next_available_quality_board",
+        lambda *_: pytest.fail("stale market candidates must not be served"),
+    )
+    with pytest.raises(HTTPException) as error:
+        league_api.get_next_available()
+    assert error.value.status_code == 503
+    assert error.value.detail["reason"] == "prepared_board_stale"
+    assert error.value.detail["retryable"] is True
