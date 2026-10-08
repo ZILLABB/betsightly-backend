@@ -154,6 +154,13 @@ class APIFootballService:
             cached_date = cached.get("fixture_date", "")
             today = datetime.now().strftime("%Y-%m-%d")
 
+            # A provider error with an HTTP 200 is NOT an empty valid slate.
+            # Previous versions persisted suspended/quota errors as a daily
+            # zero-fixture cache, hiding provider outages from the product.
+            if (cached.get("data") or {}).get("errors"):
+                path.unlink(missing_ok=True)
+                return None
+
             # If requesting today's fixtures and cache is from today -> valid
             if cached_date == target_date == today:
                 logger.info(f"Daily cache hit for {target_date} — saved an API call")
@@ -247,8 +254,11 @@ class APIFootballService:
         data = resp.json()
         errors = data.get("errors", {})
         if errors:
-            logger.error(f"API-Football errors: {errors}")
-            return {"response": []}
+            logger.error("API-Football provider reported an error: %s", errors)
+            # Preserve the error reason for every caller. Returning a plain
+            # empty response made a suspended provider indistinguishable from
+            # a legitimate day with zero fixtures.
+            return {"response": [], "errors": errors}
 
         if use_cache:
             self._write_cache(key, data)
@@ -282,8 +292,10 @@ class APIFootballService:
                 # Cache miss — make API call
                 data = self._get("fixtures", {"date": date}, use_cache=False)
                 raw_fixtures = data.get("response", [])
-                # Store in date-aware cache (not the generic one)
-                self._write_daily_cache(date, data)
+                # Never persist a failed quota/authorization/provider response
+                # as a legitimate empty fixture date.
+                if not data.get("errors"):
+                    self._write_daily_cache(date, data)
 
             fixtures = []
             for f in raw_fixtures:
