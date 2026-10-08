@@ -112,3 +112,50 @@ def test_final_card_guard_withholds_invalid_accumulator():
     assert accumulators["2_odds"]["selected"] is False
     assert accumulators["2_odds"]["result_status"] == "PUBLICATION_POLICY_BLOCKED"
     assert report["products"]["2_odds"]["allowed"] is False
+
+
+def test_final_publication_contract_blocks_cross_product_fixture_overlap():
+    """Even a code-time replacement cannot share an official match."""
+    banker = pick(confidence=.78, odds=1.45)
+    over = pick(confidence=.75, odds=1.45)
+    card = {
+        "banker": {
+            "selected": True, "games": [banker],
+            "presentation": "accumulator",
+        },
+        "over_1_5": {
+            "selected": True, "games": [over],
+            "presentation": "singles",
+            "booking": {"actionable": True, "share_code": "STALE"},
+        },
+    }
+
+    report = enforce_card_policy(card)
+    assert report["products"]["banker"]["allowed"] is True
+    assert report["products"]["over_1_5"]["allowed"] is False
+    assert report["products"]["over_1_5"]["duplicate_fixture_ids"] == ["m1"]
+    assert "DUPLICATE_FIXTURE_ACROSS_OFFICIAL_PRODUCTS" in (
+        report["products"]["over_1_5"]["reasons"]
+    )
+    assert card["over_1_5"]["selected"] is False
+    assert card["over_1_5"]["games"] == []
+    assert "booking" not in card["over_1_5"]
+
+
+def test_final_publication_contract_allows_unique_fixtures_across_products():
+    card = {
+        "banker": {
+            "selected": True, "games": [pick(confidence=.78, odds=1.45)],
+            "presentation": "accumulator",
+        },
+        "over_1_5": {
+            "selected": True, "games": [
+                {**pick(confidence=.75, odds=1.45), "match_id": "m2"}
+            ],
+            "presentation": "singles",
+        },
+    }
+    report = enforce_card_policy(card)
+    assert report["products"]["banker"]["allowed"] is True
+    assert report["products"]["over_1_5"]["allowed"] is True
+    assert card["over_1_5"]["selected"] is True
