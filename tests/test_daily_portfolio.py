@@ -465,3 +465,43 @@ def test_available_now_final_portfolio_fails_closed_for_duplicate_fixture():
     # zero final overlap rather than interpreting an attempted duplicate.
     assert portfolio["portfolio_validation"]["valid"] is True
     assert portfolio["portfolio_validation"]["fixture_overlap_count"] == 0
+
+
+def test_over_1_5_never_reuses_any_official_portfolio_fixture(monkeypatch):
+    """October 8 regression: Banker and Over 1.5 shared the same selection.
+
+    The single over market may appear on the model board, but it must not
+    become a second official product after another category has claimed it.
+    """
+    target_date = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
+    kickoff = f"{target_date}T18:00:00Z"
+    picks = [_pick(i, kickoff) for i in range(40)]
+    # Make fixture 0 an unambiguous safe Banker AND an Over 1.5 candidate.
+    top = picks[0]
+    top.update(confidence=.86, raw_confidence=.86, ml_confidence=.84)
+    top["trust"].update(
+        evidence_adjusted_probability=.86,
+        lower_reliability_bound=.85,
+        evidence_strength=.95,
+    )
+    monkeypatch.setattr(daily_feed, "_build_rollover", lambda *_, **kw: {
+        "selected": False, "games": [], "chain": [], "chain_length": 0,
+    })
+
+    result = daily_feed.build_daily_accumulators(preview={
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "target_wat_date": target_date,
+        "picks": picks,
+        "fixtures": [p["_fixture"] for p in picks],
+    })
+    accumulators = result["accumulators"]
+    banker_ids = {g["match_id"] for g in accumulators["banker"]["games"]}
+    assert top["match_id"] in banker_ids
+    all_ids = []
+    for tier in ("rollover", "banker", "2_odds", "5_odds", "10_odds", "over_1_5"):
+        all_ids.extend(g["match_id"] for g in accumulators[tier].get("games", []))
+
+    assert len(all_ids) == len(set(all_ids))
+    assert not banker_ids.intersection(
+        {g["match_id"] for g in accumulators["over_1_5"].get("games", [])}
+    )
