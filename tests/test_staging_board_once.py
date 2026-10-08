@@ -10,6 +10,7 @@ from scripts import prepare_staging_board_once as board_once
 def _authorize_staging(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "staging")
     monkeypatch.setenv("ENABLE_BACKGROUND_JOBS", "false")
+    monkeypatch.setenv("PREPARED_BOARD_PERSISTENCE_ENABLED", "true")
     monkeypatch.setenv("BETSIGHTLY_STAGING_BOARD_ONCE", "CONFIRM_STAGING_ONLY")
 
 
@@ -93,3 +94,10 @@ def test_board_only_fails_if_no_current_snapshot(monkeypatch):
     })
     with pytest.raises(RuntimeError, match="current usable snapshot"):
         board_once.prepare_once()
+
+
+def test_never_succeeds_without_shared_board_persistence(monkeypatch):
+    _authorize_staging(monkeypatch)
+    monkeypatch.setenv("PREPARED_BOARD_PERSISTENCE_ENABLED", "false")
+    with pytest.raises(RuntimeError, match="PREPARED_BOARD_PERSISTENCE_ENABLED"):
+        board_once.preflight()
