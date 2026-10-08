@@ -735,9 +735,15 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
                 margin,
                 not (p.get("_model") or {}).get("has_market"))
 
+    # Over 1.5 is displayed as independent singles, but its fixtures are
+    # still part of the customer's official daily portfolio. Never repeat a
+    # match already allocated to Rollover, Banker or an odds accumulator.
     over_picks, seen = [], set()
+    over_reserved = set(fixture_uses)
     for p in sorted(over_source, key=_over_rank):
-        if p["market"] != "over_1_5" or p["match_id"] in seen:
+        if (p["market"] != "over_1_5"
+                or str(p["match_id"]) in over_reserved
+                or p["match_id"] in seen):
             continue
         if selection_probability(p) < OVER_MIN_CONFIDENCE:
             continue
@@ -745,6 +751,17 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         seen.add(p["match_id"])
         if len(over_picks) >= OVER_MAX_PICKS:
             break
+
+    portfolio_diagnostics["over_1_5_allocation"] = {
+        "reserved_fixture_count": len(over_reserved),
+        "excluded_due_to_fixture_exposure": sorted({
+            str(p.get("match_id")) for p in over_source
+            if p.get("market") == "over_1_5"
+            and str(p.get("match_id")) in over_reserved
+        }),
+        "final_fixture_count": len(over_picks),
+        "policy": "NO_REPEAT_ACROSS_ALL_SIX_PRODUCTS",
+    }
 
     # For singles the meaningful headline is the typical chance of any one
     # landing, not the product of all of them.
@@ -1354,9 +1371,12 @@ def build_bookable_now(all_picks: list[dict] | None = None, *, now: datetime | N
         available(official_live), 10.0, OFFICIAL_TEN_MAX_LEGS, F, MIN_SLIP_MODEL_RETURN,
         band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False)
 
+    # Reserve the same fixtures for every customer-facing product, including
+    # the independent Over 1.5 singles list.
     over, seen = [], set()
     for p in sorted(over_live, key=lambda x: -selection_probability(x)):
         if (p["market"] != "over_1_5" or p["match_id"] in seen
+                or p["match_id"] in fixture_uses
                 or selection_probability(p) < 0.65):
             continue
         over.append(p)
