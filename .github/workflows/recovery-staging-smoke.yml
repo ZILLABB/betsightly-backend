@@ -108,6 +108,17 @@ jobs:
               assert next_available.get("bookable_code_verified") is False
               dates = next_available.get("evaluated_dates", [])
               assert isinstance(dates, list) and len(dates) >= 1
+              for row in dates:
+                  assert row["qualified_unique_fixture_count"] <= row["raw_fixture_count"]
+                  print(
+                      "STAGING DAILY QUALITY "
+                      f"date={row['fixture_date_wat']} "
+                      f"raw_fixtures={row['raw_fixture_count']} "
+                      f"qualified_unique={row['qualified_unique_fixture_count']} "
+                      f"qualified_selections={row['qualified_selection_count']} "
+                      f"ranked_selections={row['ranked_selection_count']} "
+                      f"rejections={json.dumps(row.get('rejection_reasons') or {}, sort_keys=True)}"
+                  )
               chosen = next_available.get("next_available")
               if chosen:
                   assert chosen["fixture_target_date"] > next_available["publication_date_wat"]
