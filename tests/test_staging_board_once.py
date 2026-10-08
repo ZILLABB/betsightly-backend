@@ -101,3 +101,19 @@ def test_never_succeeds_without_shared_board_persistence(monkeypatch):
     monkeypatch.setenv("PREPARED_BOARD_PERSISTENCE_ENABLED", "false")
     with pytest.raises(RuntimeError, match="PREPARED_BOARD_PERSISTENCE_ENABLED"):
         board_once.preflight()
+
+
+def test_one_shot_prevents_shadow_settlement_even_with_observation_table(monkeypatch):
+    _authorize_staging(monkeypatch)
+    from leagues import football_first_shadow_observations as observations
+
+    def unwanted_query(*_args, **_kwargs):
+        raise AssertionError("shadow settlement must not query the database")
+
+    monkeypatch.setattr(observations, "table_exists", unwanted_query)
+    result = observations.start_settlement_async()
+    assert result == {
+        "status": "SKIPPED",
+        "reason": "staging_board_only",
+        "shadow_only": True,
+    }
