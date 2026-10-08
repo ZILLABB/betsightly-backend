@@ -10,7 +10,7 @@ name: Backend CI
 
 on:
   push:
-    branches: [main, dev, devil]
+    branches: [main, dev, devil, "feature/v2-multimarket-challenger-*"]
   pull_request:
     branches: [main, dev, devil]
 

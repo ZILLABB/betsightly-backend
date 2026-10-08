@@ -227,6 +227,20 @@ def _save(filename: str, data):
 
 # ── Categories ─────────────────────────────────────────────
 
+def _staging_multi_market_preview(preview: dict | None) -> bool:
+    """Explore all ACTIVE market alternatives only in an authorized dry run.
+
+    This must not change production publication, available-now, or scheduled
+    staging publication until quality, booking and diversification are tested.
+    """
+    return (
+        preview is not None
+        and os.getenv("ENVIRONMENT", "").strip().lower() == "staging"
+        and os.getenv("BETSIGHTLY_STAGING_BOARD_ONCE") == "CONFIRM_STAGING_ONLY"
+        and os.getenv("BETSIGHTLY_PREVIEW_ALL_MARKETS") == "1"
+    )
+
+
 def _select_tier(picks: list, target: float, max_picks: int,
                  min_confidence: float, min_ev: float,
                  prefer: str = "joint", band_low: float = 0.80,
@@ -368,9 +382,15 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     if not day_picks:
         return None
 
-    # Rank football opinions before any product asks them to buy a multiplier.
+    # Production stays rank-1/close-rank-2. In an authorized staging preview
+    # alone, admit *all currently ACTIVE eligible markets* into the existing
+    # fail-closed publication policy before choosing one market per fixture.
+    # This avoids discarding a viable third-ranked market before it is checked.
     from leagues.fixture_ranker import canonical_fixture_recommendations
-    day_picks = canonical_fixture_recommendations(day_picks)
+    multi_market_preview = _staging_multi_market_preview(preview)
+    day_picks = canonical_fixture_recommendations(
+        day_picks, include_all_eligible=multi_market_preview,
+    )
     if not day_picks:
         return None
 
@@ -384,7 +404,9 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     # Model analysis and official publication are deliberately separate.
     # The model may keep analysing a fixture, but a Premium product only sees
     # candidates that pass the single fail-closed publication contract.
-    rollover_ranked = canonical_fixture_recommendations(all_picks)
+    rollover_ranked = canonical_fixture_recommendations(
+        all_picks, include_all_eligible=multi_market_preview,
+    )
     rollover_source, rollover_rejections = filter_official_candidates(
         rollover_ranked, "rollover"
     )
@@ -444,6 +466,7 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
 "official_product_order": list(OFFICIAL_PORTFOLIO_PRODUCTS),
 "publication_policy": {
     "version": PUBLICATION_POLICY_VERSION,
+    "staging_multi_market_preview": multi_market_preview,
     "minimum_model_return": MIN_SLIP_MODEL_RETURN,
     "rejections": {
         "official": rejection_summary(official_rejections),
