@@ -288,7 +288,11 @@ def settle(*, db_engine, now: datetime | None = None,
                 "settled": 0, "void": 0, "unresolved": 0}
     if score_fetcher is None:
         from leagues.results_checker import _collect_scores_for_picks
-        score_fetcher = _collect_scores_for_picks
+        # Pilot starts with completed ESPN scoreboards only; do not silently
+        # consume quota or request paid third-party score fallbacks.
+        score_fetcher = lambda fixtures: _collect_scores_for_picks(
+            fixtures, allow_fallback=False
+        )
     scores, source = score_fetcher(fixtures)
     source = str(source or "unknown")[:80]
     resolved = {"settled": 0, "void": 0, "unresolved": 0}
