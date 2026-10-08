@@ -128,3 +128,31 @@ def test_live_ten_odds_refuses_code_below_ten_after_readback(monkeypatch):
     assert "10.00x" in ten["reason"]
     assert "booking" not in ten  # Never expose invalid replacement code.
     assert result["available"] is False
+
+
+def test_available_now_over_1_5_does_not_repeat_banker_fixture(monkeypatch):
+    """Even independent singles cannot reuse an official accumulator match."""
+    _wire(monkeypatch)
+    from leagues import selection
+    now = datetime(2026, 10, 9, 10, tzinfo=timezone.utc)
+    picks = [
+        _pick("one", now + timedelta(hours=2), market="over_1_5"),
+        _pick("two", now + timedelta(hours=3), market="over_1_5"),
+    ]
+    monkeypatch.setattr(
+        selection, "select_banker",
+        lambda pool, **kwargs: ([pool[0]], 1.5, .8),
+    )
+    monkeypatch.setattr(
+        daily_feed, "_select_tier",
+        lambda *args, **kwargs: (([], 0, 0), None),
+    )
+    result = daily_feed.build_bookable_now(
+        all_picks=picks, now=now, preview_only=True,
+    )
+    assert result["preview_only"] is True
+    assert [p["match_id"] for p in
+            result["accumulators"]["banker"]["games"]] == ["one"]
+    assert [p["match_id"] for p in
+            result["accumulators"]["over_1_5"]["games"]] == ["two"]
+    assert daily_feed.all_daily_fixture_conflicts(result["accumulators"]) == []
