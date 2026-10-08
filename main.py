@@ -503,6 +503,17 @@ def _ensure_today_generated():
     except Exception as e:
         logger.error("Daily loop: live booking refresh failed: %s", e)
 
+    # Optional rolling tickets: scheduler owns all bookmaker I/O.
+    # The immutable morning card and official results remain unchanged.
+    try:
+        from leagues.live_card_store import refresh as refresh_live_card
+        refreshed = refresh_live_card()
+        if refreshed.get("stored"):
+            logger.info("Rolling edition %s revision=%s",
+                        refreshed.get("status"), refreshed.get("revision"))
+    except Exception as e:
+        logger.error("Rolling live-ticket refresh failed: %s", e)
+
     # Subscriber alerts used to fire from here, guarded by a dict held in
     # process memory. That dict is empty in a new process, so every deploy and
     # every restart announced the day again — one notification per push, and
