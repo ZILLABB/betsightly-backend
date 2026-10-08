@@ -126,4 +126,5 @@ def test_live_ten_odds_refuses_code_below_ten_after_readback(monkeypatch):
     assert ten["selected"] is False
     assert not ten["games"]
     assert "10.00x" in ten["reason"]
+    assert "booking" not in ten  # Never expose invalid replacement code.
     assert result["available"] is False
