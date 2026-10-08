@@ -84,7 +84,8 @@ def simulate(*, target_date_wat: str | None = None) -> dict:
     database = preflight()
 
     from leagues.engine import prepared_board
-    from leagues.daily_feed import build_daily_accumulators
+    from leagues.daily_feed import (build_daily_accumulators,
+                                    all_daily_fixture_conflicts)
 
     picks, fixtures, board = prepared_board(days_ahead=7)
     if not board.get("ready") or board.get("stale"):
@@ -152,9 +153,15 @@ def simulate(*, target_date_wat: str | None = None) -> dict:
                 for game in games
             ],
         }
-    # Portfolio exposure contract is hard-cap one fixture per official tier.
-    if len(fixture_ids) != len(set(fixture_ids)):
-        raise RuntimeError("Duplicate fixture found across official preview tiers")
+    # Unlike the old accumulator-only validator, the public preview treats
+    # Over 1.5 singles as part of the user's six-product fixture portfolio.
+    # Surface exact conflicting products instead of an unexplained exception.
+    conflicts = all_daily_fixture_conflicts(accumulators)
+    if conflicts:
+        raise RuntimeError(
+            "Duplicate fixture across daily products: "
+            + json.dumps(conflicts, sort_keys=True)
+        )
 
     summary = {
         "database": database,
@@ -178,7 +185,10 @@ def simulate(*, target_date_wat: str | None = None) -> dict:
         "model_candidate_picks": len(picks),
         "target_day_supply_audit": diagnose_supply(picks, target_wat_date, now),
         "official_product_preview": products,
-        "duplicate_fixture_count": 0,
+        "duplicate_fixture_count": len(conflicts),
+        "all_six_products_unique": not conflicts,
+        "over_1_5_allocation": (accumulators.get("_portfolio") or {}).get(
+            "over_1_5_allocation", {}),
         "publication_policy": card.get("publication_policy"),
     }
     return summary
