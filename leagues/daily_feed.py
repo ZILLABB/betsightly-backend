@@ -1261,7 +1261,7 @@ def _validate_bookable_now_portfolio(accumulators: dict, rollover: dict) -> dict
     }
 
 
-def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
+def build_bookable_now(all_picks: list[dict] | None = None, *, now: datetime | None = None) -> dict | None:
     """A slip built only from fixtures that have not kicked off yet.
 
     Answers the problem the lock creates. The morning card must not change —
@@ -1281,20 +1281,25 @@ def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
     from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
     from leagues.selection import select_banker
 
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     if all_picks is None:
         all_picks, _ = prepared_pipeline(days_ahead=2)
     if not all_picks:
         return None
 
     bookable_from = (now + BOOKING_BUFFER).isoformat().replace("+00:00", "Z")
+    # Rolling 30-hour horizon supplies future replacements as today\'s games
+    # start; remaining matches are never moved into the immutable 08:00 card.
+    window_end = now + timedelta(hours=30)
     # "Today" is an audience-facing calendar day. Around midnight WAT the
     # UTC date is still yesterday, which used to make the available-now card
     # search the wrong fixtures for the first hour of the Nigerian day.
     today = _wat_now(now).strftime("%Y-%m-%d")
+    from leagues.availability import parse_kickoff
     live = [p for p in all_picks
-            if p["_fixture"]["commence_time"] >= bookable_from
-            and kickoff_wat_date(p["_fixture"]["commence_time"]) == today
+            if (kickoff := parse_kickoff(p["_fixture"].get("commence_time")))
+            and now + BOOKING_BUFFER <= kickoff <= window_end
+            and kickoff_wat_date(p["_fixture"]["commence_time"]) >= today
             and p.get("bookable")]
     if not live:
         return None
@@ -1338,14 +1343,14 @@ def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
     for pick in two[0]:
         team_uses.update(_pick_teams(pick))
     five, _ = _select_tier(
-        available(official_live), 5.0, 8, F, MIN_SLIP_MODEL_RETURN,
+        available(official_live), 5.0, OFFICIAL_FIVE_MAX_LEGS, F, MIN_SLIP_MODEL_RETURN,
         canonicalize=False)
     fixture_uses.update(p["match_id"] for p in five[0])
     for pick in five[0]:
         team_uses.update(_pick_teams(pick))
     ten, _ = _select_tier(
-        available(official_live), 10.0, 10, F, MIN_SLIP_MODEL_RETURN,
-        canonicalize=False)
+        available(official_live), 10.0, OFFICIAL_TEN_MAX_LEGS, F, MIN_SLIP_MODEL_RETURN,
+        band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False)
 
     over, seen = [], set()
     for p in sorted(over_live, key=lambda x: -selection_probability(x)):
@@ -1388,9 +1393,20 @@ def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
     # single snapshot is shared by every tier so the selections and codes are
     # validated against the same view of SportyBet availability.
     from leagues import sportybet
-    board = sportybet.fetch_board()
-    _attach_live_bookings(accumulators, board)
+    # Validate the exact displayed candidate before any SportyBet create call.
+    # A failed policy candidate must never burn a booking request or a code.
     enforce_card_policy(accumulators)
+    portfolio = _validate_bookable_now_portfolio(accumulators, rollover)
+    if not portfolio["portfolio_validation"]["valid"]:
+        for category in accumulators.values():
+            if isinstance(category, dict) and category.get("selected"):
+                category.update(
+                    selected=False, games=[], total_odds=0, hit_probability=0,
+                    reason="Live portfolio validation failed.",
+                )
+    if any(d.get("selected") for d in accumulators.values()):
+        board = sportybet.fetch_board()
+        _attach_live_bookings(accumulators, board)
 
     active_tiers = 0
     for category in accumulators.values():
@@ -1401,6 +1417,16 @@ def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
             and booking.get("readback_validation") == "PASSED"
             and booking.get("share_code")
         )
+        # The provider readback may omit prices. A 10x ticket is actionable
+        # only when the validated provider-board price still reaches 10.00x.
+        if exact and tier == "10_odds":
+            try:
+                actual = float(booking.get("actual_sportybet_odds") or 0)
+            except (TypeError, ValueError):
+                actual = 0.0
+            if actual < 10.0:
+                exact = False
+                booking["reason"] = "Current SportyBet prices do not reach 10.00x."
         if exact:
             active_tiers += 1
             continue
@@ -1438,6 +1464,9 @@ def build_bookable_now(all_picks: list[dict] | None = None) -> dict | None:
                    "No future exact-bookable SportyBet slip could be verified."),
         "date": today,
         "generated_at": now.isoformat(),
+        "window_ends_at": window_end.isoformat(),
+        "rolling_window_hours": 30,
+        "published_record_unchanged": True,
         "kickoffs_remaining": len({p["match_id"] for p in live}),
         "accumulators": accumulators,
         "_portfolio": portfolio,
