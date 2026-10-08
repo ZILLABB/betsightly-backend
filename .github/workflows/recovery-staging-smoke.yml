@@ -86,8 +86,8 @@ jobs:
           status, next_available = get("/api/leagues/next-available", retries=3)
           board_unready = False
           if status == 503:
-              detail = next_available.get("detail") or {}
-              reason = detail.get("reason")
+              detail = next_available.get("message") or next_available.get("detail") or {}
+              reason = detail.get("reason") if isinstance(detail, dict) else None
               assert reason in {
                   "prepared_board_stale", "board_refreshing", "history_not_ready"
               }, f"Unexpected 503 from Next Available: {reason}"
