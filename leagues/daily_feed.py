@@ -1451,6 +1451,9 @@ def build_bookable_now(all_picks: list[dict] | None = None, *, now: datetime | N
         # Available-now is an action surface, not the official record. Never
         # show a rebuilt tier as usable unless its current code was read back
         # and exactly matches every displayed selection.
+        # Remove the failed code as well: a consumer must not accidentally
+        # expose an invalid share link from an unselected product.
+        category.pop("booking", None)
         category.update(
             selected=False, games=[], total_odds=0, hit_probability=0,
             reason=(booking.get("reason") or
