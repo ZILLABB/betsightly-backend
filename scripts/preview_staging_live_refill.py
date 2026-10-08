@@ -78,9 +78,21 @@ def simulate(target_day: str, *, refresh_if_stale: bool = False) -> dict:
             if len(ids) != len(set(ids)):
                 raise RuntimeError(f"Duplicate fixture within {tier}")
             ids_by_tier[tier] = ids
+            from leagues.availability import parse_kickoff
+            kickoff_dates = [
+                parse_kickoff(g.get("kickoff") or g.get("date"))
+                for g in games
+            ]
+            if any(kickoff is None for kickoff in kickoff_dates):
+                raise RuntimeError(f"Unparseable kickoff in {tier}")
+            dates_wat = [kickoff.astimezone(WAT).date().isoformat()
+                         for kickoff in kickoff_dates]
             summaries[tier] = {
                 "selected": bool(cat.get("selected")),
                 "legs": len(games),
+                "same_day_legs": sum(d == target_day for d in dates_wat),
+                "following_day_legs": sum(d > target_day for d in dates_wat),
+                "fixture_wat_dates": sorted(set(dates_wat)),
                 "model_odds": cat.get("total_odds"),
                 "reason": cat.get("reason"),
                 "fixtures": [{
@@ -89,6 +101,9 @@ def simulate(target_day: str, *, refresh_if_stale: bool = False) -> dict:
                     "away": g.get("away_team"),
                     "market": g.get("market") or g.get("market_key"),
                     "kickoff": g.get("kickoff") or g.get("date"),
+                    "kickoff_date_wat": parse_kickoff(
+                        g.get("kickoff") or g.get("date")
+                    ).astimezone(WAT).date().isoformat(),
                 } for g in games],
             }
         portfolio = result.get("_portfolio") or {}
