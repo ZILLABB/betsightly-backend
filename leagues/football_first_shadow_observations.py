@@ -460,6 +460,19 @@ def start_settlement_async(
     """Run settlement in a daemon thread without blocking predictions."""
     global _SETTLEMENT_LAST_STARTED
 
+    # The opt-in staging board-preparation command must not run settlement,
+    # including shadow-model observation settlement, as a hidden side effect.
+    if (
+        os.getenv("ENVIRONMENT", "").strip().lower() == "staging"
+        and os.getenv("BETSIGHTLY_STAGING_BOARD_ONCE", "")
+        == "CONFIRM_STAGING_ONLY"
+    ):
+        return {
+            "status": "SKIPPED",
+            "reason": "staging_board_only",
+            "shadow_only": True,
+        }
+
     if not table_exists(db_engine):
         return {
             "status": "SKIPPED",
