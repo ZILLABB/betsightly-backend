@@ -15,7 +15,9 @@ from datetime import datetime, timedelta, timezone
 from leagues.availability import BOOKING_BUFFER, parse_kickoff
 
 logger = logging.getLogger(__name__)
-MAX_AGE = timedelta(minutes=13)
+# Slightly exceeds the 15-minute worker tick to avoid a guaranteed gap.
+# Kickoff-minus-20-minute safety buffer still takes precedence.
+MAX_AGE = timedelta(minutes=20)
 
 
 def enabled() -> bool:
