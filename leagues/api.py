@@ -521,6 +521,38 @@ def get_live_scores():
         raise HTTPException(500, str(e))
 
 
+@router.get("/next-available")
+def get_next_available():
+    """Read-only qualified future inventory when Today's official board is thin.
+
+    Never books, publishes, settles or replaces the immutable Today's card.
+    Candidate prices come from the prepared snapshot, not code readback.
+    """
+    try:
+        from leagues.next_available import next_available_quality_board
+        picks, _, board = _public_prepared_board(7)
+        # The interactive engine may return an aged fallback to keep Builder
+        # usable. Do NOT advertise its historical SportyBet prices as fresh
+        # future picks. The preview must fail closed until scheduler refreshes
+        # the prepared board (no provider work in an HTTP request).
+        if board.get("stale"):
+            raise HTTPException(
+                503,
+                {
+                    "reason": "prepared_board_stale",
+                    "retryable": True,
+                    "board_age_seconds": board.get("age_seconds"),
+                    "refresh_started": board.get("refresh_started", False),
+                },
+            )
+        return {**next_available_quality_board(picks), "board": board}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Next-available inventory failed: %s", exc, exc_info=True)
+        raise HTTPException(500, "Next-available inventory could not be prepared")
+
+
 @router.get("/bookable-now")
 def get_bookable_now():
     """A slip built only from fixtures that have not kicked off yet.
