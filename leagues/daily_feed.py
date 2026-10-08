@@ -1261,7 +1261,8 @@ def _validate_bookable_now_portfolio(accumulators: dict, rollover: dict) -> dict
     }
 
 
-def build_bookable_now(all_picks: list[dict] | None = None, *, now: datetime | None = None) -> dict | None:
+def build_bookable_now(all_picks: list[dict] | None = None, *, now: datetime | None = None,
+                       preview_only: bool = False) -> dict | None:
     """A slip built only from fixtures that have not kicked off yet.
 
     Answers the problem the lock creates. The morning card must not change —
@@ -1311,7 +1312,8 @@ def build_bookable_now(all_picks: list[dict] | None = None, *, now: datetime | N
     banker_live, _ = filter_official_candidates(live, "banker")
     over_live, _ = filter_official_candidates(live, "over_1_5")
 
-    rollover = _build_rollover([], today)
+    # Future-time simulations must never touch the persisted rollover chain.
+    rollover = _build_rollover([], today, preview=preview_only)
 
     # Available Now obeys the same exposure rule as morning publication.
     _live_rollover_preallocation_card = {"rollover": rollover}
@@ -1404,6 +1406,22 @@ def build_bookable_now(all_picks: list[dict] | None = None, *, now: datetime | N
                     selected=False, games=[], total_odds=0, hit_probability=0,
                     reason="Live portfolio validation failed.",
                 )
+    if preview_only:
+        return {
+            "status": "success",
+            "available": any(d.get("selected") for d in accumulators.values()),
+            "preview_only": True,
+            "booking_codes_created": False,
+            "published_record_unchanged": True,
+            "date": today,
+            "generated_at": now.isoformat(),
+            "window_ends_at": window_end.isoformat(),
+            "rolling_window_hours": 30,
+            "kickoffs_remaining": len({p["match_id"] for p in live}),
+            "accumulators": accumulators,
+            "_portfolio": portfolio,
+        }
+
     if any(d.get("selected") for d in accumulators.values()):
         board = sportybet.fetch_board()
         _attach_live_bookings(accumulators, board)
