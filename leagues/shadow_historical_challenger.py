@@ -6,7 +6,9 @@ verification before shipping any fitted coefficients to the public engine.
 """
 from __future__ import annotations
 
-from collections import Counter
+from collections import defaultdict
+from datetime import date, timedelta
+from math import sqrt
 
 FEATURES = ("home_history", "away_history",
             "home_venue_history", "away_venue_history")
@@ -31,6 +33,83 @@ def _binary_brier(probabilities, labels) -> float:
     return sum(
         (float(p) - int(y)) ** 2 for p, y in zip(probabilities, labels)
     ) / len(labels)
+
+
+def paired_loss_diagnostics(
+    examples: list[dict], model_losses: list[float],
+    baseline_losses: list[float], *, minimum_league_n: int = 30,
+) -> dict:
+    """Track improvement and uncertainty on the SAME later fixtures.
+
+    Report a descriptive independent-match normal interval only; games from
+    the same league/day are dependent so this is NOT production evidence.
+    Source, champion and bookmaker comparisons are separate requirements.
+    """
+    if not (len(examples) == len(model_losses) == len(baseline_losses)):
+        raise ValueError("Paired scoring must use identical held-out fixtures")
+    if not examples:
+        return {"status": "NO_HOLDOUT"}
+    deltas = [float(base) - float(model)
+              for model, base in zip(model_losses, baseline_losses)]
+
+    def sample(indices: list[int]) -> dict:
+        n = len(indices)
+        if not n:
+            return {"n": 0, "status": "NO_EVIDENCE"}
+        difference = sum(deltas[i] for i in indices) / n
+        model_avg = sum(float(model_losses[i]) for i in indices) / n
+        base_avg = sum(float(baseline_losses[i]) for i in indices) / n
+        if n > 1:
+            variance = sum(
+                (deltas[i] - difference) ** 2 for i in indices
+            ) / (n - 1)
+            half_width = 1.96 * sqrt(variance / n)
+        else:
+            half_width = None
+        return {
+            "n": n,
+            "model_brier": round(model_avg, 6),
+            "baseline_brier": round(base_avg, 6),
+            "paired_improvement": round(difference, 6),
+            "model_better": bool(difference > 0),
+            "nominal_95pct_ci": (
+                [round(difference - half_width, 6),
+                 round(difference + half_width, 6)]
+                if half_width is not None else None
+            ),
+        }
+
+    latest = max(date.fromisoformat(x["match_date"]) for x in examples)
+    cutoff = latest - timedelta(days=90)
+    recent = [
+        i for i, row in enumerate(examples)
+        if date.fromisoformat(row["match_date"]) >= cutoff
+    ]
+    leagues: dict[str, list[int]] = defaultdict(list)
+    for i, example in enumerate(examples):
+        leagues[str(example.get("league_slug") or "unknown")].append(i)
+    per_league = {
+        slug: sample(indices) for slug, indices in sorted(leagues.items())
+        if len(indices) >= minimum_league_n
+    }
+    overall = sample(list(range(len(examples))))
+    lower = overall["nominal_95pct_ci"]
+    return {
+        "overall": overall,
+        "latest_90_days": {
+            "from": cutoff.isoformat(),
+            "through": latest.isoformat(),
+            **sample(recent),
+        },
+        "per_league_minimum_30_games": per_league,
+        "league_count_in_holdout": len(leagues),
+        "league_count_with_enough_matches": len(per_league),
+        "nominal_interval_excludes_zero": bool(lower and lower[0] > 0),
+        "independent_fixture_assumption_unproven": True,
+        "market_odds_comparison_available": False,
+        "champion_model_comparison_available": False,
+        "production_promotion_authorized": False,
+    }
 
 
 def evaluate_shadow(train: list[dict], holdout: list[dict], *,
@@ -77,7 +156,14 @@ def evaluate_shadow(train: list[dict], holdout: list[dict], *,
         naive_score = _binary_brier(
             [baseline] * len(holdout_labels), holdout_labels
         )
+        model_losses = [(float(p) - int(y)) ** 2
+                        for p, y in zip(preds, holdout_labels)]
+        baseline_losses = [(baseline - int(y)) ** 2
+                           for y in holdout_labels]
         report[market] = {
+            "paired_diagnostics": paired_loss_diagnostics(
+                holdout, model_losses, baseline_losses,
+            ),
             "status": "SHADOW_EVALUATED",
             "holdout_brier": round(model_score, 6),
             "training_base_rate_brier": round(naive_score, 6),
@@ -118,7 +204,17 @@ def evaluate_shadow(train: list[dict], holdout: list[dict], *,
             (class_probabilities - actual) ** 2, axis=1
         )))
         naive = float(np.mean(np.sum((priors - actual) ** 2, axis=1)))
+        per_match_model_losses = np.sum(
+            (class_probabilities - actual) ** 2, axis=1
+        ).tolist()
+        per_match_baseline_losses = np.sum(
+            (priors - actual) ** 2, axis=1
+        ).tolist()
         report["match_result"] = {
+            "paired_diagnostics": paired_loss_diagnostics(
+                holdout, per_match_model_losses,
+                per_match_baseline_losses,
+            ),
             "status": "SHADOW_EVALUATED",
             "holdout_multiclass_brier": round(brier, 6),
             "training_base_rate_brier": round(naive, 6),
@@ -138,4 +234,11 @@ def evaluate_shadow(train: list[dict], holdout: list[dict], *,
         "source_verified_independently": False,
         "champion_model_unchanged": True,
         "publishing_changed": False,
+        "production_promotion_authorized": False,
+        "evaluation_limitations": [
+            "Single chronological split, not rolling forward cross-validation",
+            "Only a pooled training-rate baseline, not the champion model",
+            "No paired bookmaker odds or closing-line value evaluation",
+            "Sources not independently verified",
+        ],
     }
