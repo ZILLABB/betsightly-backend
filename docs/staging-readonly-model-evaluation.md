@@ -215,3 +215,24 @@ The first explicitly authorized write creates the new table and index in the
 isolated staging database and inserts qualifying quotes, without touching the
 live cache or published results. **No standing cron schedule or production
 activation is implied by committing this script.** CI only tests the code.
+
+### Post-initialization read access (optional, staging only)
+
+The next manual staging evaluation includes
+`append_only_odds_archive` with an honest status if this new table has not
+yet been initialized. The staging evaluator's SELECT-only account may need
+one additional grant **after** the first authorized table creation. A
+staging administrator can separately grant SELECT on only the new table:
+
+```sql
+GRANT SELECT ON TABLE public.sportybet_odds_history_v1
+TO betsightly_eval_readonly;
+```
+
+Never substitute the staging admin URL for the evaluation GitHub secret.
+The existing preflight now refuses evaluation roles that can write this new
+table, and missing read access merely produces a reported access blocker.
+
+The append-only capture has intentionally not been executed on the live
+staging database in this code batch: the table remains uninitialized until
+an authorized staging write is performed. Production is unchanged.
