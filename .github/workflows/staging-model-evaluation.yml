@@ -1,0 +1,92 @@
+# Read-only BetSightly historical validation.
+# Manual only. No push, PR, schedule, deploy, publish, or booking triggers.
+# First register workflow on GitHub default branch before manual dispatch;
+# select the named staging branch when running it.
+name: Staging Model Evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      analysis:
+        description: "Read-only report(s) to run"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - walkforward
+          - evidence
+
+permissions:
+  contents: read
+
+concurrency:
+  group: betsightly-readonly-evaluation
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/feature/daily-tier-reach-and-builder-supply-20261009' }}
+    runs-on: ubuntu-latest
+    environment: betsightly-staging-evaluation
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      ENVIRONMENT: staging
+      ENABLE_BACKGROUND_JOBS: "false"
+      PREPARED_BOARD_PERSISTENCE_ENABLED: "true"
+      BETSIGHTLY_STAGING_BOARD_ONCE: CONFIRM_STAGING_ONLY
+      BETSIGHTLY_STAGING_HISTORY_BACKFILL: "false"
+      ALLOW_INTERACTIVE_BOARD_REFRESH: "false"
+      PGOPTIONS: "-c default_transaction_read_only=on -c statement_timeout=120000"
+      DATABASE_URL: ${{ secrets.BETSIGHTLY_STAGING_READONLY_DATABASE_URL }}
+
+    steps:
+      - name: Check that staging-only secret is configured
+        run: |
+          if [[ -z "${DATABASE_URL:-}" ]]; then
+            echo "::error::Missing staging-only environment secret BETSIGHTLY_STAGING_READONLY_DATABASE_URL"
+            exit 1
+          fi
+
+      - name: Checkout selected staging branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify runner is executing approved staging revision
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = "refs/heads/feature/daily-tier-reach-and-builder-supply-20261009"
+          echo "Staging branch validated."
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install evaluation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run staging read-only report
+        run: |
+          python -m scripts.run_staging_readonly_evaluation \
+            --mode "${{ inputs.analysis }}" \
+            --reports "staging_evaluation_reports"
+          cat staging_evaluation_reports/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload aggregate model reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: betsightly-staging-validation-${{ github.run_id }}
+          path: staging_evaluation_reports/
+          if-no-files-found: warn
+          retention-days: 14
