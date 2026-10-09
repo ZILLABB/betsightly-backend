@@ -112,3 +112,31 @@ books, promotes models or modifies production.
 Even after prospective shadow outcomes are settled, a true
 champion/challenger comparison remains blocked until synchronized
 same-fixture probability pairs and prices are collected and verified.
+
+## Phase 9: separate prospective champion/challenger comparison
+
+The GitHub evaluation now checks `public.football_first_shadow_observations`
+**separately** from the SportyBet market-shadow prices. This warehouse already
+contains paired, settled 1X2 probabilities for existing football-first runtime
+versions, but their fixtures overlap between versions. The evaluation reports
+fixture counts and multiclass Brier/log loss **per model version**, never pools
+the same match twice across versions and never authorizes promotion.
+
+The existing GitHub evaluation login was originally granted SELECT only on
+the two market/history evidence tables. If its output says
+`STAGING_READONLY_SELECT_GRANT_REQUIRED`, a staging database administrator
+may run **only on betsightly_db_staging**:
+
+```sql
+GRANT SELECT ON TABLE public.football_first_shadow_observations
+TO betsightly_eval_readonly;
+```
+
+Do not change the GitHub secret, assign admin credentials to Actions, or
+grant write privileges. The evaluation preflight explicitly refuses write
+permissions on all three evidence tables. The optional paired report remains
+permission-aware and does not fail the rest of the run if access is absent.
+
+A paired probabilistic comparison is **not** proof of sportsbook profitability.
+There is still no verified same-fixture closing-line cohort between this
+football-first table and the separately captured SportyBet prices.
