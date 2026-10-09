@@ -50,8 +50,52 @@ def preflight() -> str:
     return actual
 
 
+def warm_staging_history() -> dict:
+    """Warm history only after the caller verifies the isolated staging DB.
+
+    Preserve a previous complete cache if the new optional backfill fails,
+    rather than invalidating all daily predictions during a data upgrade.
+    Never run this warmup from public HTTP endpoints.
+    """
+    from leagues import base_rates, history_readiness, team_history
+
+    before = history_readiness.status()
+    prior = base_rates.get_base_rates(allow_refresh=False)
+    requested = (
+        not before["usable"]
+        or prior.get("_history_backfill_version")
+        != base_rates.HISTORY_BACKFILL_VERSION
+    )
+    if requested:
+        base_rates.get_base_rates(force=True)
+        # A new staging workspace may not yet have any complete team form.
+        if not history_readiness.status()["artifacts"]["team_history"]["complete"]:
+            team_history.load(force=True)
+
+    after = history_readiness.status()
+    result = {
+        "previous_state": before["state"],
+        "state": after["state"],
+        "usable": after["usable"],
+        "backfill_refresh_requested": requested,
+        "backfill_policy_applied": bool(
+            base_rates.get_base_rates(allow_refresh=False).get(
+                "_history_backfill_version"
+            ) == base_rates.HISTORY_BACKFILL_VERSION
+        ),
+    }
+    if not after["usable"]:
+        raise RuntimeError(
+            "Staging history is incomplete after explicit prewarm: "
+            + json.dumps(result, sort_keys=True)
+            + ". Restore complete history caches before rebuilding board."
+        )
+    return result
+
+
 def prepare_once() -> dict:
     database_name = preflight()
+    history = warm_staging_history()
     from leagues.engine import prepared_board_status, run_pipeline
 
     # Direct, single synchronous board build. No daily scheduler and no
@@ -60,6 +104,7 @@ def prepare_once() -> dict:
     status = prepared_board_status(days_ahead=7)
     result = {
         "database": database_name,
+        "history": history,
         "requested_days": 7,
         "fixture_count": len(fixtures),
         "candidate_count": len(picks),
