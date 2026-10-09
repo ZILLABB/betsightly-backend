@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from sqlalchemy import text
 
 from scripts.prepare_staging_board_once import preflight
 from leagues.chronological_training_data import build_examples, chronological_split
+from leagues.openfootball_match_history import plausible_season_date
 
 
 def training_data(*, min_history: int = 3, write_files: bool = False,
@@ -33,7 +34,7 @@ def training_data(*, min_history: int = 3, write_files: bool = False,
             )
         rows = [
             dict(row) for row in conn.execute(text("""
-                SELECT fixture_key, league_slug,
+                SELECT fixture_key, league_slug, season,
                        match_date, home_team, away_team, home_score,
                        away_score, source, source_sha256
                 FROM external_historical_results_v1
@@ -42,10 +43,24 @@ def training_data(*, min_history: int = 3, write_files: bool = False,
                 ORDER BY match_date,league_slug,fixture_key
             """)).mappings()
         ]
-    prepared = build_examples(rows, min_history=min_history)
+    # Existing staging imports are immutable. Exclude inconsistent source
+    # season/date rows from *all* downstream feature and training operations;
+    # do not mutate or silently delete provenance records.
+    clean = [
+        row for row in rows
+        if plausible_season_date(
+            str(row["season"]),
+            row["match_date"] if isinstance(row["match_date"], date)
+            else date.fromisoformat(str(row["match_date"])[:10]),
+        )
+    ]
+    rejected_season_dates = len(rows) - len(clean)
+    prepared = build_examples(clean, min_history=min_history)
     split = chronological_split(prepared["examples"])
     counts = {
         "database": database, "staging_only": True,
+        "raw_staging_rows": len(rows),
+        "excluded_invalid_season_dates": rejected_season_dates,
         "historical_result_rows": prepared["total_deduplicated_results"],
         "examples_with_pre_match_evidence": len(prepared["examples"]),
         "excluded": prepared["skipped"],
