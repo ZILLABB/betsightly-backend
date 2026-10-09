@@ -1,7 +1,7 @@
 """Read-only explanation of model return, before and after evidence shrinkage."""
 from collections import Counter
 
-from leagues.selection_quality import risk_adjusted_return, selection_probability
+from leagues.selection_quality import risk_adjusted_return
 
 
 def _raw_return(pick):
