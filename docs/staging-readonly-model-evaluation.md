@@ -269,3 +269,27 @@ To collect history routinely, a staging-specific capture operator still
 requires a secure, least-privilege writer identity and a new provider
 snapshot at each desired lead-time checkpoint. Do not enable production
 or create an unattended task with embedded admin credentials.
+
+### Fresh-source capture research mode (separate from the cached-board helper)
+
+An opt-in `--source live` mode can retrieve a **new** complete bookmaker
+board in the staging-only CLI process. It temporarily disables the normal
+SportyBet cache get/set hooks, so the source-only fetch does not mutate
+`bookmaker_cache` or run the prediction engine.
+
+A staging operator may preview a new source in read-only mode after
+setting `BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE=CONFIRM_SOURCE_ONLY_LIVE_FETCH`:
+
+```powershell
+# Same isolated staging database environment as documented above.
+$env:BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE = "CONFIRM_SOURCE_ONLY_LIVE_FETCH"
+$env:PGOPTIONS = "-c default_transaction_read_only=on"
+python -m scripts.capture_staging_odds_history --source live --dry-run
+```
+
+**Note:** A subsequent `--source live --write-staging` starts a *new* live
+provider fetch, not a replay of the preview. It is not executed by the
+PowerShell wrapper; its activation remains reserved for a separately
+approved staging writer and monitored capture job. Do not assume price
+values, even from the same fixture, stayed unchanged between requests.
+No claim of verified CLV is permitted by a fresh-source dry-run.
