@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 
 from scripts.audit_staging_model_comparison_evidence import (
     evidence_status, INVENTORY_QUERY, HISTORY_QUERY,
+    SETTLED_MARKET_METRICS_QUERY,
 )
 
 
@@ -60,3 +61,21 @@ def test_inventory_queries_are_read_only_and_require_real_prematch_odds():
     assert "mature_pending_rows" in statement
     assert "mature_pending_fixtures" in statement
     assert "NOW() - INTERVAL '3 hours'" in statement
+
+
+def test_settled_market_scoring_filters_real_prematch_verified_rows():
+    sql = str(SETTLED_MARKET_METRICS_QUERY).upper()
+    assert sql.strip().startswith("SELECT")
+    assert "STATUS = 'SETTLED'" in sql
+    assert "OUTCOME IN (0, 1)" in sql
+    assert "BOOKABLE_AT_CAPTURE = TRUE" in sql
+    assert "ODDS_ARE_REAL = TRUE" in sql
+    assert "OBSERVED_AT < KICKOFF" in sql
+    assert "COUNT(DISTINCT FIXTURE_ID)" in sql
+    assert "SETTLEMENT_SOURCE IS NOT NULL" in sql
+    assert "SETTLED_AT >= KICKOFF" in sql
+    assert "BINARY_BRIER" in sql
+    assert "BINARY_LOG_LOSS" in sql
+    assert all(word not in sql for word in (
+        "DELETE FROM", "UPDATE ", "INSERT INTO", "DROP TABLE"
+    ))
