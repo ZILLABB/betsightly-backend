@@ -32,7 +32,8 @@ def filter_plausible_season_rows(rows: list[dict]) -> tuple[list[dict], int]:
 
 def training_data(*, min_history: int = 3, write_files: bool = False,
                   output_prefix: str = "openfootball_shadow",
-                  evaluate: bool = False) -> dict:
+                  evaluate: bool = False,
+                  evaluate_walkforward: bool = False) -> dict:
     database = preflight()
     from database import engine
     with engine.connect() as conn:
@@ -82,6 +83,11 @@ def training_data(*, min_history: int = 3, write_files: bool = False,
         counts["shadow_evaluation"] = evaluate_shadow(
             split["train"], split["holdout"],
         )
+    if evaluate_walkforward:
+        from leagues.walkforward_shadow_validation import evaluate_walk_forward
+        counts["walk_forward_evaluation"] = evaluate_walk_forward(
+            prepared["examples"], folds=4, embargo_days=7,
+        )
     if write_files:
         prefix = Path(output_prefix)
         prefix.parent.mkdir(parents=True, exist_ok=True)
@@ -102,6 +108,10 @@ if __name__ == "__main__":
         "--evaluate-shadow", action="store_true",
         help="Train temporary, never-promoted logistic models on chronological data",
     )
+    parser.add_argument(
+        "--evaluate-walkforward", action="store_true",
+        help="Expanding-window four-fold shadow benchmark with 7-day embargo",
+    )
     parser.add_argument("--output-prefix", default="openfootball_shadow")
     opts = parser.parse_args()
     print(json.dumps(training_data(
@@ -109,4 +119,5 @@ if __name__ == "__main__":
         write_files=opts.write_files,
         output_prefix=opts.output_prefix,
         evaluate=opts.evaluate_shadow,
+        evaluate_walkforward=opts.evaluate_walkforward,
     ), sort_keys=True))
