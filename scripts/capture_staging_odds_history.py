@@ -262,6 +262,7 @@ def capture(*, write=False, db_engine=None, now=None, source="cache"):
         cache = json.loads(row[0])
     records, report = rows_from_cache(cache, now=now)
     report["source_mode"] = source
+    report["captured_from_existing_cache_only"] = source == "cache"
     report["network_requests_made"] = source == "live"
     report["staging_bookmaker_cache_mutated"] = False
     report.update({
