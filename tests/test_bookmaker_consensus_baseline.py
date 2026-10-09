@@ -108,3 +108,20 @@ def test_outside_date_duplicate_cannot_mask_requested_day_fixture():
     assert result["count"] == 1
     assert result["pre_match_forecasts"] == 1
     assert result["full_day_fixtures"][0]["home_team"] == "Real Club"
+
+
+def test_unlabelled_youth_competition_is_excluded_but_senior_women_are_supported():
+    u19 = fixture("youth-unlabelled", name="Sparta Prague")
+    u19["competition"] = "U19 1. Liga"
+    assert not u19.get("home_squad")
+    assert fixture_consensus(u19, date_wat="2026-10-09")["status"] == "NON_SENIOR_EXCLUDED"
+
+    under20 = fixture("under20-unlabelled", name="Boavista")
+    under20["competition"] = "U20 Carioca, Serie A"
+    assert fixture_consensus(under20, date_wat="2026-10-09")["status"] == "NON_SENIOR_EXCLUDED"
+
+    senior_women = fixture("women", name="Poland")
+    senior_women["competition"] = "FIFA World Cup, Women, Qualification, UEFA"
+    assert fixture_consensus(
+        senior_women, date_wat="2026-10-09"
+    )["status"] == "MARKET_BASELINE_ONLY"
