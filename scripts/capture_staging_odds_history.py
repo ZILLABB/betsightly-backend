@@ -235,13 +235,23 @@ def require_write_guard():
         )
 
 
-def capture(*, write=False, db_engine=None, now=None, source="cache"):
-    """Only an explicit staging-admin invocation can create/append rows."""
+def capture(*, write=False, db_engine=None, now=None, source="cache",
+            approve=None):
+    """Only an explicit staging-admin invocation can create/append rows.
+
+    For source=live, approval is invoked with the exact captured snapshot
+    report before it is persisted. The real provider is NEVER re-fetched
+    after approval; preview and write share one immutable in-memory quote set.
+    """
     database = preflight()
     if database != "betsightly_db_staging":
         raise RuntimeError("Wrong database identity")
     if write:
         require_write_guard()
+        if source == "live" and approve is None:
+            raise RuntimeError(
+                "Live source writes require same-snapshot operator review"
+            )
 
     if db_engine is None:
         from database import engine
@@ -274,7 +284,14 @@ def capture(*, write=False, db_engine=None, now=None, source="cache"):
     })
     if not write:
         return report
+    if approve is not None:
+        # A refused or missing confirmation cannot fall through into a write.
+        if approve(dict(report)) is not True:
+            report["mode"] = "OPERATOR_DECLINED"
+            return report
 
+    # The exact pre-reviewed records are inserted. Never call fetch_board a
+    # second time between the preview and this transaction.
     with db_engine.begin() as conn:
         if conn.execute(text("SHOW transaction_read_only")).scalar() != "off":
             raise RuntimeError("Writable staging transaction required")
@@ -302,14 +319,34 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--write-staging", action="store_true")
+    mode.add_argument(
+        "--review-live-and-write", action="store_true",
+        help="Fetch once, preview exact fresh quotes, then ask before staging insert",
+    )
     parser.add_argument(
         "--source", choices=("cache", "live"), default="cache",
         help="Cache-only by default; live requires separate source-only guard",
     )
     args = parser.parse_args()
-    print(json.dumps(capture(
-        write=args.write_staging, source=args.source
-    ), sort_keys=True))
+    if args.review_live_and_write:
+        if args.source != "live":
+            parser.error("--review-live-and-write requires --source live")
+
+        def approval(preview):
+            print("Fresh, verified SOURCE snapshot preview:", flush=True)
+            print(json.dumps(preview, indent=2, sort_keys=True), flush=True)
+            try:
+                reply = input(
+                    "Type CAPTURE STAGING ODDS to append exactly this snapshot: "
+                )
+            except EOFError:
+                return False
+            return reply == "CAPTURE STAGING ODDS"
+
+        result = capture(write=True, source="live", approve=approval)
+    else:
+        result = capture(write=args.write_staging, source=args.source)
+    print(json.dumps(result, sort_keys=True))
 
 
 if __name__ == "__main__":
