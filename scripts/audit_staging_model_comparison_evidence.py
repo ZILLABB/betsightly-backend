@@ -258,6 +258,8 @@ def audit() -> dict:
             "establish a trusted bookmaker closing line."
         ),
     }
+    from scripts.audit_staging_odds_history_capture import audit_odds_archive
+    report["append_only_odds_archive"] = audit_odds_archive(db_engine=engine)
     report["settled_market_scoring"] = {
         "status": "DESCRIPTIVE_ONLY_NO_PAIRED_CHAMPION_COMPARISON",
         "real_bookable_settled_observations": score_count,
