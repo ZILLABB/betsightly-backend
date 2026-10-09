@@ -124,7 +124,9 @@ def inventory_for_day(
     }
 
 
-def historical_coverage_from_staging(board: dict, date_wat: str) -> dict:
+def historical_coverage_from_staging(
+    board: dict, date_wat: str, fixtures: list[dict],
+) -> dict:
     """Read only the isolated, optional external training warehouse."""
     from database import engine as db_engine
     from sqlalchemy import text as sql_text
@@ -144,7 +146,14 @@ def historical_coverage_from_staging(board: dict, date_wat: str) -> dict:
     from leagues.staging_source_history_coverage import compare_coverage
     return {
         "status": "ANALYZED",
-        **compare_coverage(board, rows, date_wat),
+        **compare_coverage(
+            board, rows, date_wat,
+            existing_event_ids=frozenset(
+                str((fixture.get("odds") or {}).get("sportybet_event_id"))
+                for fixture in fixtures
+                if (fixture.get("odds") or {}).get("sportybet_event_id")
+            ),
+        ),
     }
 
 
@@ -193,7 +202,7 @@ def audit(target_wat_date: str, *, refresh_if_stale: bool = False) -> dict:
     forecast = coverage_funnel(fixtures, picks, date=target_wat_date)
 
     historical_coverage = historical_coverage_from_staging(
-        sportsbook, target_wat_date,
+        sportsbook, target_wat_date, fixtures,
     )
     return {
         "database": database,
