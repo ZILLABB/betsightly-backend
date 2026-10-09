@@ -28,6 +28,23 @@ LEAGUES = {
 MAX_BYTES = 3_000_000
 
 
+def plausible_season_date(season: str, played: date) -> bool:
+    """Northern-season competition dates must match the source file label.
+
+    The European leagues imported here play July through the following June.
+    A source labelled 2025-26 containing January 2025 results is a provenance
+    discrepancy; do not silently train on those mismatched dates.
+    """
+    if not (
+        len(season) == 7 and season[:4].isdigit()
+        and season[4] == "-" and season[5:].isdigit()
+        and int(season[5:]) == (int(season[:4]) + 1) % 100
+    ):
+        return False
+    start_year = int(season[:4])
+    return date(start_year, 7, 1) <= played < date(start_year + 1, 7, 1)
+
+
 def source_url(slug: str, season: str, *, revision: str = "master") -> str:
     if slug not in LEAGUES:
         raise ValueError(f"Unverified OpenFootball league: {slug}")
@@ -57,6 +74,7 @@ def parse_results(
     """Strict, deduplicated full-time results with source-level provenance."""
     if slug not in LEAGUES:
         raise ValueError(f"Unsupported league: {slug}")
+    source_url(slug, season)  # Validate filename/season shape before parsing.
     cutoff = as_of or datetime.now(timezone.utc).date()
     matches = payload.get("matches") if isinstance(payload, dict) else None
     if not isinstance(matches, list):
@@ -75,6 +93,11 @@ def parse_results(
             continue
         if played >= cutoff:
             rejected["unfinished_or_future"] = rejected.get("unfinished_or_future", 0) + 1
+            continue
+        if not plausible_season_date(season, played):
+            rejected["out_of_season_date"] = (
+                rejected.get("out_of_season_date", 0) + 1
+            )
             continue
         home = " ".join(str(match.get("team1") or "").split())
         away = " ".join(str(match.get("team2") or "").split())
