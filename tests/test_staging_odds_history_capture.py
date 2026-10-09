@@ -275,6 +275,7 @@ def test_fresh_source_readonly_preview_has_explicit_network_provenance(
     assert result["mode"] == "DRY_RUN_ONLY"
     assert result["database"] == "betsightly_db_staging"
     assert result["source_mode"] == "live"
+    assert result["captured_from_existing_cache_only"] is False
     assert result["network_requests_made"] is True
     assert result["staging_bookmaker_cache_mutated"] is False
     assert result["eligible_prices"] == 2
