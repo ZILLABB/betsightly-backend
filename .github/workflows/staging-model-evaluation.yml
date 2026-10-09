@@ -44,6 +44,7 @@ jobs:
       ALLOW_INTERACTIVE_BOARD_REFRESH: "false"
       PGOPTIONS: "-c default_transaction_read_only=on -c statement_timeout=120000"
       DATABASE_URL: ${{ secrets.BETSIGHTLY_STAGING_READONLY_DATABASE_URL }}
+      EVALUATION_MODE: ${{ inputs.analysis }}
 
     steps:
       - name: Check that staging-only secret is configured
@@ -78,7 +79,7 @@ jobs:
       - name: Run staging read-only report
         run: |
           python -m scripts.run_staging_readonly_evaluation \
-            --mode "${{ inputs.analysis }}" \
+            --mode "$EVALUATION_MODE" \
             --reports "staging_evaluation_reports"
           cat staging_evaluation_reports/summary.md >> "$GITHUB_STEP_SUMMARY"
 
