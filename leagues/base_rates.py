@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 CACHE_PATH = cache_path(Path(__file__).parent / "data" / "league_base_rates.json")
 CACHE_TTL = 7 * 24 * 3600          # recompute weekly
-HISTORY_CACHE_SCHEMA = 2  # ESPN monthly queries; schema 1 used rejected date ranges
+HISTORY_CACHE_SCHEMA = 3  # selective six-month history backfill; invalidate 45-day-only cache
 LOOKBACK_DAYS = 45                 # sample window
 MIN_SAMPLE = 10                    # below this, use global defaults
 MIN_PRIOR_SAMPLE = 20
