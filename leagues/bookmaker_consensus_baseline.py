@@ -54,13 +54,9 @@ def fixture_consensus(fixture: dict, *, date_wat: str) -> dict:
         "officially_publishable": False,
         "bookmaker_booking_validated": False,
     }
-    if not event_id or not home or not away or home.casefold() == away.casefold():
-        return {**base, "status": "UNVERIFIED_FIXTURE_IDENTITY"}
-    fields = " ".join((home, away, competition)).upper()
-    if any(word in fields for word in SIMULATED):
-        return {**base, "status": "SIMULATED_EXCLUDED"}
-    if fixture.get("home_squad") or fixture.get("away_squad"):
-        return {**base, "status": "NON_SENIOR_EXCLUDED"}
+    # Date scope must be checked BEFORE simulated/youth/identity policy.
+    # Otherwise a fixture from tomorrow gets counted as a rejected match
+    # today, inflating the daily total (441 against 383 on 2026-10-09).
     try:
         kickoff = datetime.fromtimestamp(
             float(fixture.get("kickoff_ms")) / 1000, tz=timezone.utc,
@@ -70,6 +66,13 @@ def fixture_consensus(fixture: dict, *, date_wat: str) -> dict:
     if kickoff.astimezone(WAT).date().isoformat() != date_wat:
         return {**base, "status": "WRONG_WAT_DAY"}
     base["kickoff_wat"] = kickoff.astimezone(WAT).isoformat()
+    if not event_id or not home or not away or home.casefold() == away.casefold():
+        return {**base, "status": "UNVERIFIED_FIXTURE_IDENTITY"}
+    fields = " ".join((home, away, competition)).upper()
+    if any(word in fields for word in SIMULATED):
+        return {**base, "status": "SIMULATED_EXCLUDED"}
+    if fixture.get("home_squad") or fixture.get("away_squad"):
+        return {**base, "status": "NON_SENIOR_EXCLUDED"}
     result = devig_market(prices, RESULT_MARKETS)
     if result is None:
         return {**base, "status": "INSUFFICIENT_REAL_ODDS"}
@@ -113,7 +116,7 @@ def full_day_baseline(board: dict, *, date_wat: str) -> dict:
         if event_id:
             seen.add(event_id)
         forecast = fixture_consensus(fixture, date_wat=date_wat)
-        if forecast["status"] in {"WRONG_WAT_DAY"}:
+        if forecast["status"] in {"WRONG_WAT_DAY", "INVALID_KICKOFF"}:
             continue
         entries.append(forecast)
     entries.sort(key=lambda x: (
