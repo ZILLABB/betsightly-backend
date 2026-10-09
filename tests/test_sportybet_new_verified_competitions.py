@@ -13,6 +13,13 @@ from leagues import sportybet
     ("Pro League", "sr:tournament:915", "sr:category:301", "irn.1"),
     ("Super League", "sr:tournament:1015", "sr:category:368", "idn.1"),
     ("Ligue 1", "sr:tournament:841", "sr:category:304", "alg.1"),
+    ("Championship", "sr:tournament:206", "sr:category:22", "sco.2"),
+    ("Super League", "sr:tournament:215", "sr:category:25", "sui.1"),
+    ("Premier League", "sr:tournament:218", "sr:category:86", "ukr.1"),
+    ("NB I", "sr:tournament:187", "sr:category:11", "hun.1"),
+    ("Premier League", "sr:tournament:266", "sr:category:66", "isr.1"),
+    ("Veikkausliiga", "sr:tournament:41", "sr:category:19", "fin.1"),
+    ("Thai League 1", "sr:tournament:1032", "sr:category:485", "tha.1"),
 ])
 def test_exact_provider_id_resolves_existing_competition(
     competition, tournament_id, category_id, slug,
