@@ -19,6 +19,7 @@ MAX_HISTORY_DAYS = 365
 
 def compare_coverage(
     board: dict, historical_rows: list[dict], target_day: str,
+    *, existing_event_ids: frozenset[str] = frozenset(),
 ) -> dict:
     from leagues import sportybet
     today = date.fromisoformat(target_day)
@@ -63,6 +64,9 @@ def compare_coverage(
         except (ValueError, TypeError, KeyError, OverflowError, OSError):
             continue
         if kickoff != today:
+            continue
+        if event_id in existing_event_ids:
+            states["ALREADY_MODELLED_FROM_ESPN"] += 1
             continue
         mapping = sportybet.registry_competition_match(
             str(entry.get("competition") or ""),
