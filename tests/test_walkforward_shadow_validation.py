@@ -15,7 +15,10 @@ def sample(n_days=320, matches_per_day=2):
         day = (date(2024, 1, 1) + timedelta(days=day_idx)).isoformat()
         for fixture_idx in range(matches_per_day):
             i = 3 * day_idx + fixture_idx
-            h, a = i % 4, (i * 7 + 1) % 4
+            # Include all three 1X2 outcomes and both binary goal classes.
+            # A fixed 4-result pattern accidentally had no draws, causing
+            # intentional MISSING_OUTCOME_CLASS in the model contract.
+            h, a = i % 4, (i * 5 + i // 3 + 1) % 4
             form = {
                 "matches": 5, "win_rate": (i % 7) / 7,
                 "draw_rate": (i % 5) / 5,
