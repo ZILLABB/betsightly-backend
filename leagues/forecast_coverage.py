@@ -10,6 +10,7 @@ from collections import Counter
 
 from leagues.engine import kickoff_wat_date
 from leagues.publication_policy import evaluate_leg
+from leagues.fixture_ranker import canonical_fixture_recommendations
 
 PRODUCTS = ("banker", "2_odds", "5_odds", "10_odds", "over_1_5", "rollover")
 
@@ -55,12 +56,15 @@ def coverage_funnel(fixtures: list[dict], picks: list[dict], *, date: str) -> di
         p for p in dated_picks
         if p.get("bookable") and p.get("odds_are_real")
     ]
+    ranked_picks = canonical_fixture_recommendations(
+        dated_picks, include_all_eligible=True, include_subfloor=True
+    )
     eligible_by_product = {}
     for product in PRODUCTS:
         reasons = Counter()
         qualified_ids = set()
         qualified_legs = 0
-        for pick in dated_picks:
+        for pick in ranked_picks:
             decision = evaluate_leg(pick, product)
             if decision["allowed"]:
                 qualified_legs += 1
@@ -87,6 +91,7 @@ def coverage_funnel(fixtures: list[dict], picks: list[dict], *, date: str) -> di
             fid not in by_fixture for fid in fixture_by_id
         ),
         "filtered_candidate_legs": len(dated_picks),
+        "ranked_candidate_legs": len(ranked_picks),
         "real_price_candidate_legs": len(candidates_with_real_prices),
         "real_price_and_exact_bookable_legs": len(
             candidates_with_exact_bookability
