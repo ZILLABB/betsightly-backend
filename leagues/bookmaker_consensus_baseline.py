@@ -110,14 +110,16 @@ def full_day_baseline(board: dict, *, date_wat: str) -> dict:
     entries = []
     seen = set()
     for _, fixture in _board_entries(board):
+        forecast = fixture_consensus(fixture, date_wat=date_wat)
+        if forecast["status"] in {"WRONG_WAT_DAY", "INVALID_KICKOFF"}:
+            continue
+        # Deduplicate AFTER date validation: a malformed/out-of-day copy
+        # cannot hide the real event within the requested WAT date.
         event_id = str(fixture.get("event_id") or "")
         if event_id and event_id in seen:
             continue
         if event_id:
             seen.add(event_id)
-        forecast = fixture_consensus(fixture, date_wat=date_wat)
-        if forecast["status"] in {"WRONG_WAT_DAY", "INVALID_KICKOFF"}:
-            continue
         entries.append(forecast)
     entries.sort(key=lambda x: (
         x.get("kickoff_wat", ""), x.get("competition", ""),
