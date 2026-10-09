@@ -17,7 +17,8 @@ publishes, settles or generates real booking codes.
   and write privileges on both evidence tables before querying.
 - GitHub token: `contents: read`; no checkout credential persistence.
 - No `push`, `pull_request`, scheduled, or background triggers.
-- Artifacts: `summary.md`, `walkforward.json`, `evidence.json`;
+- Artifacts: `summary.md`, `walkforward.json`, `evidence.json`,
+  and (in `all` mode) `settlement_dry_run.json`;
   14-day retention, no per-fixture predictions or connection strings.
 - Comparisons against actual champion and real odds remain **blocked**
   until matched, settled, verified historical evidence exists.
@@ -79,3 +80,35 @@ CI runs this test on PRs without connecting to any staging database.
 
 Workflow file: `.github/workflows/staging-model-evaluation.yml`.
 Python entrypoint: `python -m scripts.run_staging_readonly_evaluation --mode all`.
+
+## Phase 9: verified market-shadow settlement
+
+The `all` evaluation now runs an additional **read-only** settlement preview
+over mature rows from `public.market_shadow_forecasts_v1`. It uses verified
+ESPN 90-minute final scores, matches the *same league, normalized home/away
+names and kickoff within 90 minutes*, and requires a completed event. A
+missing, ambiguous, unsupported or provider-unavailable result stays pending.
+The report distinguishes `would_settle`, `would_void` and each unresolved
+reason. The GitHub environment secret remains a SELECT-only database role;
+the workflow **never settles or writes to PostgreSQL**.
+
+For a local authorized staging operator only, the separate command is:
+
+```powershell
+# After setting DATABASE_URL to the correct staging admin URL without printing
+# it and setting the staging preflight environment used by this project:
+python -m scripts.settle_staging_market_shadow --dry-run
+```
+
+Only after inspecting the dry-run, with distinct explicit authorization and
+a writable staging role (NEVER the read-only GitHub role), may the operator use
+`--write-staging`. The command requires
+`BETSIGHTLY_STAGING_MARKET_SHADOW_WRITE=CONFIRM_VERIFIED_SHADOW_SETTLEMENT_ONLY`,
+rejects execution under GitHub Actions, verifies the connected database is
+`betsightly_db_staging`, and updates **only** matching pending evidence rows.
+Reruns are idempotent. It never settles official product slips, publishes,
+books, promotes models or modifies production.
+
+Even after prospective shadow outcomes are settled, a true
+champion/challenger comparison remains blocked until synchronized
+same-fixture probability pairs and prices are collected and verified.
