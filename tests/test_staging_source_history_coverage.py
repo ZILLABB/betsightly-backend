@@ -71,3 +71,14 @@ def test_unknown_and_simulated_competition_stays_unmapped():
         "2026-10-09",
     )
     assert report["state_counts"]["UNMAPPED_COMPETITION"] == 1
+
+
+def test_already_modelled_fixture_not_counted_as_new_supply():
+    report = compare_coverage(
+        {"one": [_entry("123")]},
+        _rows(),
+        "2026-10-09",
+        existing_event_ids=frozenset({"123"}),
+    )
+    assert report["state_counts"]["ALREADY_MODELLED_FROM_ESPN"] == 1
+    assert report["potential_shadow_ready_count"] == 0
