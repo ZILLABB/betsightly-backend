@@ -111,6 +111,11 @@ def make_summary(mode: str, audit: dict | None,
             f"across {audit.get('mature_pending_settlement_fixtures', 0)} fixtures",
             f"- Voided observations: {audit.get('void_observations', 0)}",
             "- Blockers: " + ", ".join(audit["blockers"]),
+            f"- Real bookable settled observations scored: "
+            f"{(audit.get('settled_market_scoring') or {}).get('real_bookable_settled_observations', 0)}",
+            f"- Distinct fixtures scored: "
+            f"{(audit.get('settled_market_scoring') or {}).get('distinct_settled_fixtures', 0)}",
+            "- Settled market scores: **descriptive only; no paired champion comparison**",
         ]
     if settlement is not None:
         lines += [
