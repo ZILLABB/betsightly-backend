@@ -14,6 +14,7 @@ stop either.
 """
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
@@ -103,6 +104,10 @@ def test_an_unparseable_claim_time_does_not_wedge_the_day(run_date):
 def test_manual_start_claims_then_detaches_long_generation(monkeypatch, run_date):
     """The HTTP path returns before a seven-day pipeline is allowed to run."""
     monkeypatch.setattr("leagues.daily_feed._publish_date", lambda: run_date)
+    monkeypatch.setattr(
+        "leagues.daily_feed._wat_now",
+        lambda: datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc),
+    )
     calls = []
     threads = []
 
@@ -137,6 +142,10 @@ def test_manual_start_claims_then_detaches_long_generation(monkeypatch, run_date
 def test_detached_unhandled_failure_finishes_the_claim(monkeypatch, run_date):
     """A crash before normal step bookkeeping cannot leave ``running`` forever."""
     monkeypatch.setattr("leagues.daily_feed._publish_date", lambda: run_date)
+    monkeypatch.setattr(
+        "leagues.daily_feed._wat_now",
+        lambda: datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc),
+    )
 
     class ImmediateThread:
         def __init__(self, *, target, daemon, name):

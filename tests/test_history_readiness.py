@@ -20,7 +20,8 @@ def test_clean_ready_stale_and_absent_startup(tmp_path, monkeypatch):
     _paths(tmp_path, monkeypatch)
     assert history_readiness.status()["state"] == "ABSENT"
     assert not history_readiness.status()["usable"]
-    _write(base_rates.CACHE_PATH, {"_cache_schema": 2,
+    _write(base_rates.CACHE_PATH, {
+        "_cache_schema": base_rates.HISTORY_CACHE_SCHEMA,
                                    "_built_at": datetime.now(timezone.utc).isoformat(),
                                    "_priors": {"global": {"matches": 100}}})
     _write(team_history.CACHE_PATH, {"_cache_schema": 2,

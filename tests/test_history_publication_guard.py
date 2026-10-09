@@ -1,9 +1,17 @@
+from datetime import datetime, timezone
+
 from leagues import scheduler
 
 
 def test_failed_card_never_runs_booking_alert_or_distribution(monkeypatch):
     steps = []
     finished = []
+    # This case tests a claim after the 08:00 WAT publication gate,
+    # regardless of when GitHub Actions runs the test.
+    monkeypatch.setattr(
+        "leagues.daily_feed._wat_now",
+        lambda: datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc),
+    )
     monkeypatch.setattr(scheduler, "_claim", lambda *args: (True, ""))
     monkeypatch.setattr(scheduler, "_persist_progress", lambda *args: None)
     monkeypatch.setattr(scheduler, "_finish",

@@ -514,6 +514,16 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
         "raw_fetched_records": raw_fetched_records,
         "parsed_records": parsed_records,
         "unique_indexed_fixtures": unique_indexed_fixtures,
+        # A live paginated provider can change its advertised count between
+        # page 1 and the final page. Keep the actual unique event count and
+        # the observed difference separate; do not invent/remove an event to
+        # make the numbers appear equal.
+        "declared_count_difference": (
+            unique_indexed_fixtures - declared_total if declared_total else None
+        ),
+        "declared_count_changed_during_scan_possible": bool(
+            declared_total and unique_indexed_fixtures != declared_total
+        ),
         "duplicates_removed": duplicates_removed,
         "invalid_records": invalid_records,
         "page_count": page_count,
@@ -539,7 +549,9 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
 
     parsed_count = sum(1 for _ in _board_entries(board))
     logger.info(
-        f"sportybet board: {parsed_count}/{declared_total or '?'} unique fixtures "
+        f"sportybet board: {parsed_count} unique fixtures "
+        f"(provider declared {declared_total or '?'}, "
+        f"delta {parsed_count - declared_total if declared_total else 'unknown'}) "
         f"from {raw_fetched_records} records ({duplicates_removed} duplicates), "
         f"{page_count} page(s), complete={is_complete}")
     return board
@@ -1105,6 +1117,15 @@ _SPORTYBET_COMPETITION_IDS = {
     ("sr:tournament:203", "sr:category:21"): "rus.1",
     ("sr:tournament:210", "sr:category:152"): "srb.1",
 
+    # More exact senior competition IDs observed in the public SportyBet board.
+    ("sr:tournament:206", "sr:category:22"): "sco.2",  # Scottish Championship
+    ("sr:tournament:215", "sr:category:25"): "sui.1",  # Swiss Super League
+    ("sr:tournament:218", "sr:category:86"): "ukr.1",  # Ukrainian Premier League
+    ("sr:tournament:187", "sr:category:11"): "hun.1",  # Hungary NB I
+    ("sr:tournament:266", "sr:category:66"): "isr.1",  # Israel Premier League
+    ("sr:tournament:41", "sr:category:19"): "fin.1",  # Finnish Veikkausliiga
+    ("sr:tournament:1032", "sr:category:485"): "tha.1",  # Thai League 1
+
     # North America
     ("sr:tournament:242", "sr:category:26"): "usa.1",
     ("sr:tournament:1690", "sr:category:26"): "usa.nwsl",
@@ -1126,6 +1147,14 @@ _SPORTYBET_COMPETITION_IDS = {
 
     # Asia / Oceania
     ("sr:tournament:402", "sr:category:52"): "jpn.2",
+    ("sr:tournament:196", "sr:category:52"): "jpn.1",   # J1 League, Japan
+    ("sr:tournament:410", "sr:category:291"): "kor.1",  # K-League 1, Korea
+    ("sr:tournament:649", "sr:category:99"): "chn.1",   # Chinese Super League
+    ("sr:tournament:955", "sr:category:310"): "sau.1", # Saudi Pro League
+    ("sr:tournament:825", "sr:category:353"): "qat.1", # Qatar Stars League
+    ("sr:tournament:915", "sr:category:301"): "irn.1", # Persian Gulf Pro League
+    ("sr:tournament:1015", "sr:category:368"): "idn.1", # Indonesia top division
+    ("sr:tournament:841", "sr:category:304"): "alg.1", # Algeria Ligue 1
     ("sr:tournament:136", "sr:category:34"): "aus.1",
 
     # UEFA / international

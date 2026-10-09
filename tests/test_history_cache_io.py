@@ -39,7 +39,8 @@ def test_same_filesystem_refresh_claim_is_nonblocking_and_recoverable(tmp_path):
 
 def test_publication_reads_complete_stale_cache_without_refresh(tmp_path, monkeypatch):
     rate_path = tmp_path / "rates.json"
-    rate_data = {"_cache_schema": 2, "_priors": {"global": {"matches": 42}}}
+    rate_data = {"_cache_schema": base_rates.HISTORY_CACHE_SCHEMA,
+                 "_priors": {"global": {"matches": 42}}}
     rate_path.write_text(json.dumps(rate_data), encoding="utf-8")
     os.utime(rate_path, (time.time() - 999999, time.time() - 999999))
     monkeypatch.setattr(base_rates, "CACHE_PATH", rate_path)

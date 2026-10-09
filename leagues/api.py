@@ -535,6 +535,10 @@ def get_bookable_now():
     quietly reroll its losers.
     """
     try:
+        from leagues import live_card_store
+        if live_card_store.enabled():
+            # Read-only: no provider call or booking creation from public GET.
+            return live_card_store.load()
         from leagues.daily_feed import build_bookable_now
         picks, _, board = _public_prepared_board(2)
         result = build_bookable_now(all_picks=picks)
@@ -1429,6 +1433,7 @@ async def recommendation_diagnostics(date: str | None = None):
     try:
         from leagues.daily_feed import build_daily_accumulators, _publish_date
         from leagues.recommendation_board import build_recommendation_board
+        from leagues.forecast_coverage import coverage_funnel
 
         picks, fixtures, prepared = _public_prepared_board(4)
         board = build_recommendation_board(picks, fixtures, date=date)
@@ -1453,6 +1458,9 @@ async def recommendation_diagnostics(date: str | None = None):
             "status": "success",
             "date": board["date"],
             "board_summary": board["summary"],
+            "forecast_coverage": coverage_funnel(
+                fixtures, picks, date=board["date"]
+            ),
             "market_distribution": board["market_distribution"],
             "board": prepared,
             "daily_tiers": tiers,

@@ -32,10 +32,18 @@ logger = logging.getLogger(__name__)
 
 CACHE_PATH = cache_path(Path(__file__).parent / "data" / "league_base_rates.json")
 CACHE_TTL = 7 * 24 * 3600          # recompute weekly
-HISTORY_CACHE_SCHEMA = 2  # ESPN monthly queries; schema 1 used rejected date ranges
+# Retain the validated v2 cache until the v3 backfill is successfully built.
+# A forced schema migration previously made history readiness ABSENT and
+# blocked the full staging board. New backfill is tracked by policy metadata.
+HISTORY_CACHE_SCHEMA = 2
+HISTORY_BACKFILL_VERSION = 1
 LOOKBACK_DAYS = 45                 # sample window
 MIN_SAMPLE = 10                    # below this, use global defaults
 MIN_PRIOR_SAMPLE = 20
+# Only under-sampled leagues need older history. The second ESPN fetch is
+# bounded to avoid multiplying network fanout for 100+ configured leagues.
+BACKFILL_LOOKBACK_DAYS = 180
+MAX_UNDERSAMPLED_BACKFILLS = 24
 
 # Measured across all tracked leagues (see module docstring).
 GLOBAL_DEFAULTS = {
@@ -122,6 +130,29 @@ def _fetch_finished_range(slug: str, start: str, end: str, *,
     return scores
 
 
+
+def _append_scores(sample: dict, results: list[tuple[int, int]]) -> None:
+    """Count real regulation-time results from any historical source."""
+    for hs, as_ in results:
+        total = hs + as_
+        sample["n"] += 1
+        sample["goals"] += total
+        sample["home_goals"] += hs
+        sample["away_goals"] += as_
+        if total >= 2:
+            sample["o15"] += 1
+        if total >= 3:
+            sample["o25"] += 1
+        if hs > as_:
+            sample["home"] += 1
+        elif hs == as_:
+            sample["draw"] += 1
+        else:
+            sample["away"] += 1
+        if hs >= 1 and as_ >= 1:
+            sample["btts"] += 1
+
+
 def compute_base_rates(slugs: dict[str, str], *,
                        as_of: datetime | None = None) -> dict:
     """Measure base rates for each league slug. Leagues run in parallel."""
@@ -150,25 +181,45 @@ def compute_base_rates(slugs: dict[str, str], *,
                 failed_leagues.append(slug)
                 continue
             s = _empty()
-            for hs, as_ in results:
-                total = hs + as_
-                s["n"] += 1
-                s["goals"] += total
-                s["home_goals"] += hs
-                s["away_goals"] += as_
-                if total >= 2:
-                    s["o15"] += 1
-                if total >= 3:
-                    s["o25"] += 1
-                if hs > as_:
-                    s["home"] += 1
-                elif hs == as_:
-                    s["draw"] += 1
-                else:
-                    s["away"] += 1
-                if hs >= 1 and as_ >= 1:
-                    s["btts"] += 1
+            _append_scores(s, results)
             raw[slug] = s
+
+    # The original 45-day window often has no match results for a competition
+    # on an international break. Backfill only insufficient leagues with
+    # actual older scores; no invented prior and no quality-gate reduction.
+    # Windows do not overlap, so counting never double-uses the same match.
+    backfill = {}
+    previous_end = (now - timedelta(days=LOOKBACK_DAYS + 1)).strftime("%Y%m%d")
+    older_start = (now - timedelta(days=BACKFILL_LOOKBACK_DAYS)).strftime("%Y%m%d")
+    if BACKFILL_LOOKBACK_DAYS > LOOKBACK_DAYS:
+        from leagues.competition_registry import competition_for
+        eligible = sorted(
+            (slug for slug, row in raw.items() if row["n"] < MIN_SAMPLE),
+            key=lambda slug: (
+                -(competition_for(slug).priority
+                  if competition_for(slug) is not None else 0),
+                slug,
+            ),
+        )[:MAX_UNDERSAMPLED_BACKFILLS]
+        for slug in eligible:
+            before = raw[slug]["n"]
+            try:
+                older_scores = _fetch_finished_range(
+                    slug, older_start, previous_end, as_of=as_of,
+                )
+            except Exception as exc:
+                backfill[slug] = {
+                    "status": "UNAVAILABLE", "recent_matches": before,
+                    "error_type": type(exc).__name__,
+                }
+                continue
+            _append_scores(raw[slug], older_scores)
+            backfill[slug] = {
+                "status": "BACKFILLED" if older_scores else "NO_OLDER_RESULTS",
+                "recent_matches": before, "older_matches": len(older_scores),
+                "total_matches": raw[slug]["n"],
+                "ready_for_direct_history": raw[slug]["n"] >= MIN_SAMPLE,
+            }
 
     rates = {}
     for slug, s in raw.items():
@@ -195,6 +246,10 @@ def compute_base_rates(slugs: dict[str, str], *,
     rates["_priors"] = {key: _as_rates(sample) for key, sample in prior_samples.items()}
     rates["_cache_schema"] = HISTORY_CACHE_SCHEMA
     rates["_built_at"] = now.isoformat()
+    rates["_history_backfill"] = backfill
+    rates["_history_backfill_version"] = HISTORY_BACKFILL_VERSION
+    rates["_history_lookback_days"] = LOOKBACK_DAYS
+    rates["_history_max_lookback_days"] = BACKFILL_LOOKBACK_DAYS
     rates["_failed_leagues"] = sorted(failed_leagues)
     rates["_unavailable_leagues"] = sorted(unavailable_leagues)
     try:
