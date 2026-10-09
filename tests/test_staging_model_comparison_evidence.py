@@ -26,6 +26,8 @@ def test_disjoint_historical_football_and_october_odds_are_not_a_fair_cohort():
     assert "HISTORY_ENDS_BEFORE_FIRST_CAPTURED_ODDS" in result["blockers"]
     assert "NO_SETTLED_REAL_BOOKABLE_PREMATCH_OBSERVATIONS" in result["blockers"]
     assert result["database_writes"] is False
+    assert result["mature_pending_settlement_rows"] == 0
+    assert result["mature_pending_settlement_fixtures"] == 0
 
 
 def test_even_settled_rows_cannot_prove_champion_comparison_without_pair():
@@ -55,3 +57,6 @@ def test_inventory_queries_are_read_only_and_require_real_prematch_odds():
     assert "bookable_at_capture = TRUE" in statement
     assert "home_score IS NOT NULL" in statement
     assert "away_score IS NOT NULL" in statement
+    assert "mature_pending_rows" in statement
+    assert "mature_pending_fixtures" in statement
+    assert "NOW() - INTERVAL '3 hours'" in statement
