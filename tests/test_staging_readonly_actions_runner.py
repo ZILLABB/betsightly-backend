@@ -48,10 +48,11 @@ def test_rejects_wrong_environment_before_opening_db(monkeypatch, key, bad_value
 
 class FakeConnection:
     def __init__(self, *, readonly="on", write_history=False,
-                 write_shadow=False, superuser=False):
+                 write_shadow=False, write_paired=False, superuser=False):
         self.readonly = readonly
         self.write_history = write_history
         self.write_shadow = write_shadow
+        self.write_paired = write_paired
         self.superuser = superuser
 
     def __enter__(self):
@@ -75,6 +76,7 @@ class FakeConnection:
             return FakeResult({
                 "can_change_history": self.write_history,
                 "can_change_shadow": self.write_shadow,
+                "can_change_paired": self.write_paired,
             })
         raise AssertionError(f"Unexpected database query: {sql[:100]}")
 
@@ -98,6 +100,7 @@ class FakeResult:
     ({"readonly": "off"}, False),
     ({"write_history": True}, False),
     ({"write_shadow": True}, False),
+    ({"write_paired": True}, False),
     ({"superuser": True}, False),
 ])
 def test_database_role_must_be_select_only(monkeypatch, settings, accepted):
@@ -155,6 +158,10 @@ def test_evaluation_emits_aggregate_reports_not_predictions(monkeypatch, tmp_pat
             "real_bookable_pre_match_observations": 18,
             "settled_real_bookable_pre_match_observations": 0,
             "blockers": ["NO_SETTLED_REAL_BOOKABLE_PREMATCH_OBSERVATIONS"],
+            "prospective_match_result_pairs": {
+                "status": "STAGING_READONLY_SELECT_GRANT_REQUIRED",
+                "cohorts": [],
+            },
         },
     )
     monkeypatch.setattr(
@@ -187,6 +194,7 @@ def test_evaluation_emits_aggregate_reports_not_predictions(monkeypatch, tmp_pat
     assert "league" in summary
     assert "Verified-final settlement dry-run" in summary
     assert "Rows updated: 0" in summary
+    assert "Prospective 1X2 paired champion/challenger" in summary
 
 
 def test_workflow_is_manual_without_deploy_or_untrusted_shell_interpolation():
