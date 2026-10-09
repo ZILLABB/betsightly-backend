@@ -94,3 +94,17 @@ def test_wrong_day_precedes_identity_error():
     assert fixture_consensus(
         tomorrow_invalid_identity, date_wat="2026-10-09"
     )["status"] == "WRONG_WAT_DAY"
+
+
+def test_outside_date_duplicate_cannot_mask_requested_day_fixture():
+    # Some bookmaker snapshots may contain event IDs grouped more than once.
+    wrong_day = fixture("match-1", name="Other Day Club SRL")
+    wrong_day["kickoff_ms"] += 24 * 60 * 60 * 1000
+    today = fixture("match-1", name="Real Club")
+    result = full_day_baseline(
+        {"first": [wrong_day], "second": [today]},
+        date_wat="2026-10-09",
+    )
+    assert result["count"] == 1
+    assert result["pre_match_forecasts"] == 1
+    assert result["full_day_fixtures"][0]["home_team"] == "Real Club"
