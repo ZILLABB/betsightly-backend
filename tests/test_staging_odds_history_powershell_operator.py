@@ -52,8 +52,9 @@ def test_powershell_script_syntax_if_parser_is_installed():
         pytest.skip("PowerShell parser not installed in CI runner")
     source = SCRIPT.resolve().as_posix().replace("'", "''")
     statement = (
+        "$tokens = $null; $errors = $null; "
         "$null = [System.Management.Automation.Language.Parser]::ParseFile("
-        f"'{source}', [ref]$null, [ref]$errors); "
+        f"'{source}', [ref]$tokens, [ref]$errors); "
         "if ($errors.Count) { $errors | ForEach-Object { "
         "Write-Error $_.Message }; exit 1 }"
     )
