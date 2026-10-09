@@ -42,6 +42,20 @@ INVENTORY_QUERY = text("""
               AND odds_are_real = TRUE AND quoted_odds > 1
               AND bookable_at_capture = TRUE AND observed_at < kickoff
         ) AS settled_real_bookable_pre_match,
+        COUNT(*) FILTER (
+            WHERE status = 'pending'
+              AND kickoff <= NOW() - INTERVAL '3 hours'
+              AND observed_at < kickoff
+              AND home_score IS NULL AND away_score IS NULL
+        ) AS mature_pending_rows,
+        COUNT(DISTINCT fixture_id) FILTER (
+            WHERE status = 'pending'
+              AND kickoff <= NOW() - INTERVAL '3 hours'
+              AND observed_at < kickoff
+              AND home_score IS NULL AND away_score IS NULL
+        ) AS mature_pending_fixtures,
+        COUNT(*) FILTER (WHERE status = 'void') AS void_rows,
+        COUNT(*) FILTER (WHERE observed_at >= kickoff) AS invalid_prematch_rows,
         MIN(kickoff) AS first_forecast_kickoff,
         MAX(kickoff) AS last_forecast_kickoff
     FROM public.market_shadow_forecasts_v1
@@ -84,6 +98,10 @@ def evidence_status(shadow: dict, history: dict) -> dict:
         "status": "CHAMPION_COMPARISON_BLOCKED",
         "shadow_forecasts": int(shadow.get("forecasts") or 0),
         "shadow_unique_fixtures": int(shadow.get("forecast_fixtures") or 0),
+        "mature_pending_settlement_rows": int(shadow.get("mature_pending_rows") or 0),
+        "mature_pending_settlement_fixtures": int(shadow.get("mature_pending_fixtures") or 0),
+        "void_observations": int(shadow.get("void_rows") or 0),
+        "invalid_prematch_observations": int(shadow.get("invalid_prematch_rows") or 0),
         "real_priced_pre_match_observations": int(
             shadow.get("priced_pre_match") or 0
         ),
