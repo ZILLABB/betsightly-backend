@@ -293,3 +293,30 @@ PowerShell wrapper; its activation remains reserved for a separately
 approved staging writer and monitored capture job. Do not assume price
 values, even from the same fixture, stayed unchanged between requests.
 No claim of verified CLV is permitted by a fresh-source dry-run.
+
+### One-shot fresh source with preview of the exact persisted prices
+
+The staging PowerShell helper additionally supports `-LiveOnce`. It uses a single
+source-only bookmaker fetch in one Python process. It validates the complete
+snapshot and prints its original bookmaker timestamp, snapshot ID and price
+counts before asking for the exact phrase `CAPTURE STAGING ODDS`. Approval
+appends those SAME in-memory prices, without fetching them a second time.
+
+```powershell
+cd C:\Users\ZILLAB\Desktop\betsightly-stage-board
+git fetch origin
+git switch feature/daily-tier-reach-and-builder-supply-20261009
+git pull --ff-only origin feature/daily-tier-reach-and-builder-supply-20261009
+.\scripts\capture_staging_odds_history.ps1 -LiveOnce
+```
+
+The helper asks for a masked staging admin DB URL and restores process
+environment variables when complete. A stale cached board is irrelevant to
+this source-only live fetch. It does not write to the bookmaker cache, run
+predictions, settle forecasts, publish picks or change production.
+
+Do not confuse this with `-DryRunOnly`, which reads the old cached board and
+may fail due to the six-hour freshness cutoff. A source error or explicit
+decline makes no archive changes. `-LiveOnce` is not an unattended scheduler.
+Two genuinely different provider fetches are needed for price history;
+neither proves a verified closing line or CLV.
