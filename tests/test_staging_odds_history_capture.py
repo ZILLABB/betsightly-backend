@@ -103,6 +103,26 @@ def test_source_fixture_collision_cannot_overwrite_quote():
         capture.rows_from_cache(data, now=NOW)
 
 
+def test_event_id_cannot_merge_two_different_fixtures():
+    data = cache()
+    duplicate = deepcopy(data["fixtures"]["home|away"][0])
+    duplicate["away_team"] = "Entirely Different Club"
+    duplicate["prices"] = {"btts_yes": 1.70}
+    data["fixtures"]["other|away"] = [duplicate]
+    with pytest.raises(ValueError, match="multiple fixtures"):
+        capture.rows_from_cache(data, now=NOW)
+
+
+def test_same_event_id_and_fixture_can_merge_disjoint_active_markets():
+    data = cache()
+    duplicate = deepcopy(data["fixtures"]["home|away"][0])
+    duplicate["prices"] = {"btts_yes": 1.65}
+    data["fixtures"]["home|away"].append(duplicate)
+    rows, report = capture.rows_from_cache(data, now=NOW)
+    assert len(rows) == 3
+    assert report["eligible_fixtures"] == 1
+
+
 def test_conflicting_cache_metadata_does_not_create_history():
     data = cache()
     data["metadata"]["error"] = "page missing"
