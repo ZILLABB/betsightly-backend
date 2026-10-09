@@ -167,6 +167,29 @@ def audit(target_wat_date: str, *, refresh_if_stale: bool = False) -> dict:
     supply = diagnose_supply(picks, target_wat_date, now)
     from leagues.forecast_coverage import coverage_funnel
     forecast = coverage_funnel(fixtures, picks, date=target_wat_date)
+
+    # The public-domain historical result importer writes to a separate,
+    # staging-only shadow table. Do not synthesize history if it isn't there.
+    from database import engine as db_engine
+    from sqlalchemy import text as sql_text
+    historical_coverage = {"status": "HISTORY_NOT_INGESTED"}
+    with db_engine.connect() as conn:
+        table = conn.execute(sql_text(
+            "SELECT to_regclass('public.external_historical_results_v1')"
+        )).scalar()
+        if table is not None:
+            rows = [dict(row) for row in conn.execute(sql_text("""
+                SELECT fixture_key, league_slug, match_date,
+                       home_team, away_team
+                FROM external_historical_results_v1
+                WHERE match_date >= CAST(:date AS date) - INTERVAL '365 days'
+                  AND match_date < CAST(:date AS date)
+            """), {"date": target_wat_date}).mappings()]
+            from leagues.staging_source_history_coverage import compare_coverage
+            historical_coverage = {
+                "status": "ANALYZED",
+                **compare_coverage(sportsbook, rows, target_wat_date),
+            }
     return {
         "database": database,
         "target_wat_date": target_wat_date,
@@ -180,6 +203,7 @@ def audit(target_wat_date: str, *, refresh_if_stale: bool = False) -> dict:
         "per_day_fixture_inventory": cover,
         "official_target_day_eligibility": supply,
         "forecast_and_model_value_diagnostics": forecast,
+        "external_historical_match_coverage": historical_coverage,
         "seven_day_shadow_history_readiness_counts": shadow.get("readiness_counts") or {},
         "seven_day_ready_for_shadow_model": shadow.get("ready_for_shadow_model_count"),
         "seven_day_shadows_modelled": (
