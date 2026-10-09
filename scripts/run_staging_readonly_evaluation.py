@@ -78,11 +78,19 @@ def readonly_actions_preflight() -> dict:
                     CURRENT_USER,
                     'public.football_first_shadow_observations',
                     'INSERT, UPDATE, DELETE, TRUNCATE'
-                ) ELSE FALSE END AS can_change_paired
+                ) ELSE FALSE END AS can_change_paired,
+                CASE WHEN to_regclass(
+                    'public.sportybet_odds_history_v1'
+                ) IS NOT NULL THEN has_table_privilege(
+                    CURRENT_USER,
+                    'public.sportybet_odds_history_v1',
+                    'INSERT, UPDATE, DELETE, TRUNCATE'
+                ) ELSE FALSE END AS can_change_odds_history
         """)).mappings().one()
         if (row["superuser"] or privilege["can_change_history"]
                 or privilege["can_change_shadow"]
-                or privilege["can_change_paired"]):
+                or privilege["can_change_paired"]
+                or privilege["can_change_odds_history"]):
             raise RuntimeError(
                 "Refusing database role with write access; use SELECT-only "
                 "staging evaluation credentials"
@@ -129,6 +137,16 @@ def make_summary(mode: str, audit: dict | None,
             f"- Fixture-market combinations with multiple price captures: "
             f"{(audit.get('odds_history_readiness') or {}).get('fixture_markets_with_multiple_prices', 0)}",
             f"- CLV evidence: **{(audit.get('odds_history_readiness') or {}).get('status', 'UNAVAILABLE')}**",
+        ]
+        odds_archive = audit.get("append_only_odds_archive") or {}
+        lines += [
+            "",
+            "## Append-only SportyBet price history (independent source timestamps)",
+            f"- Archive status: **{odds_archive.get('status', 'UNAVAILABLE')}**",
+            f"- Captured snapshots: {odds_archive.get('distinct_snapshots', 0)}",
+            f"- Fixture-market pairs across snapshots: "
+            f"{odds_archive.get('fixture_markets_with_two_source_snapshots', 0)}",
+            "- Verified closing-line value: **not yet available**",
         ]
         paired = audit.get("prospective_match_result_pairs") or {}
         lines += [
