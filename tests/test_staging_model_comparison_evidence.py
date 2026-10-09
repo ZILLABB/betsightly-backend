@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 
 from scripts.audit_staging_model_comparison_evidence import (
     evidence_status, INVENTORY_QUERY, HISTORY_QUERY,
-    SETTLED_MARKET_METRICS_QUERY,
+    SETTLED_MARKET_METRICS_QUERY, ODDS_HISTORY_READINESS_QUERY,
 )
 
 
@@ -78,4 +78,23 @@ def test_settled_market_scoring_filters_real_prematch_verified_rows():
     assert "BINARY_LOG_LOSS" in sql
     assert all(word not in sql for word in (
         "DELETE FROM", "UPDATE ", "INSERT INTO", "DROP TABLE"
+    ))
+
+
+def test_odds_history_readiness_requires_multiple_prematch_capture_moments():
+    sql = str(ODDS_HISTORY_READINESS_QUERY).upper()
+    assert sql.strip().startswith("WITH BOOKABLE_PRICES AS")
+    assert "COUNT(DISTINCT SNAPSHOT_ID)" in sql
+    assert "COUNT(DISTINCT OBSERVED_AT)" in sql
+    assert "FIXTURE_ID, MARKET" in sql
+    assert "ODDS_ARE_REAL = TRUE" in sql
+    assert "QUOTED_ODDS > 1" in sql
+    assert "BOOKABLE_AT_CAPTURE = TRUE" in sql
+    assert "OBSERVED_AT < KICKOFF" in sql
+    assert "CAPTURE_MOMENTS >= 2" in sql
+    assert "RESEARCH_NEAR_CLOSE_PRICE_PAIRS" in sql
+    assert "INTERVAL '60 MINUTES'" in sql
+    assert "INTERVAL '30 MINUTES'" in sql
+    assert all(write not in sql for write in (
+        "INSERT INTO", "DELETE FROM", "UPDATE ", "DROP TABLE", "TRUNCATE "
     ))
