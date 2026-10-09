@@ -17,6 +17,19 @@ from leagues.chronological_training_data import build_examples, chronological_sp
 from leagues.openfootball_match_history import plausible_season_date
 
 
+def filter_plausible_season_rows(rows: list[dict]) -> tuple[list[dict], int]:
+    """Quarantine pre-existing source/date inconsistencies without DB writes."""
+    clean = [
+        row for row in rows
+        if plausible_season_date(
+            str(row["season"]),
+            row["match_date"] if isinstance(row["match_date"], date)
+            else date.fromisoformat(str(row["match_date"])[:10]),
+        )
+    ]
+    return clean, len(rows) - len(clean)
+
+
 def training_data(*, min_history: int = 3, write_files: bool = False,
                   output_prefix: str = "openfootball_shadow",
                   evaluate: bool = False) -> dict:
@@ -43,18 +56,9 @@ def training_data(*, min_history: int = 3, write_files: bool = False,
                 ORDER BY match_date,league_slug,fixture_key
             """)).mappings()
         ]
-    # Existing staging imports are immutable. Exclude inconsistent source
-    # season/date rows from *all* downstream feature and training operations;
-    # do not mutate or silently delete provenance records.
-    clean = [
-        row for row in rows
-        if plausible_season_date(
-            str(row["season"]),
-            row["match_date"] if isinstance(row["match_date"], date)
-            else date.fromisoformat(str(row["match_date"])[:10]),
-        )
-    ]
-    rejected_season_dates = len(rows) - len(clean)
+    # Existing staging imports are immutable. Preserve original rows for
+    # audit while excluding inconsistent dates from shadow model training.
+    clean, rejected_season_dates = filter_plausible_season_rows(rows)
     prepared = build_examples(clean, min_history=min_history)
     split = chronological_split(prepared["examples"])
     counts = {
