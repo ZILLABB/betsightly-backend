@@ -151,6 +151,8 @@ def audit(target_wat_date: str) -> dict:
     provider = prepared.get("provider") or {}
     shadow = provider.get("sportybet_shadow_supplemental") or {}
     supply = diagnose_supply(picks, target_wat_date, now)
+    from leagues.forecast_coverage import coverage_funnel
+    forecast = coverage_funnel(fixtures, picks, date=target_wat_date)
     return {
         "database": database,
         "target_wat_date": target_wat_date,
@@ -162,6 +164,7 @@ def audit(target_wat_date: str) -> dict:
         "sportybet_cache_snapshot": (cache.get("metadata") or {}).get("snapshot_id"),
         "per_day_fixture_inventory": cover,
         "official_target_day_eligibility": supply,
+        "forecast_and_model_value_diagnostics": forecast,
         "seven_day_shadow_history_readiness_counts": shadow.get("readiness_counts") or {},
         "seven_day_ready_for_shadow_model": shadow.get("ready_for_shadow_model_count"),
         "seven_day_shadows_modelled": (
