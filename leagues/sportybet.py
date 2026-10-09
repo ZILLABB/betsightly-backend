@@ -1132,6 +1132,8 @@ _SPORTYBET_COMPETITION_IDS = {
     ("sr:tournament:955", "sr:category:310"): "sau.1", # Saudi Pro League
     ("sr:tournament:825", "sr:category:353"): "qat.1", # Qatar Stars League
     ("sr:tournament:915", "sr:category:301"): "irn.1", # Persian Gulf Pro League
+    ("sr:tournament:1015", "sr:category:368"): "idn.1", # Indonesia top division
+    ("sr:tournament:841", "sr:category:304"): "alg.1", # Algeria Ligue 1
     ("sr:tournament:136", "sr:category:34"): "aus.1",
 
     # UEFA / international
