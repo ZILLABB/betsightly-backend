@@ -1,5 +1,6 @@
 """Staging-only bookmaker history never fabricates additional price captures."""
 from copy import deepcopy
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -184,3 +185,98 @@ def test_sql_only_writes_to_dedicated_history_table():
     assert "PUBLISHED_SLIPS" not in sql
     assert "MARKET_SHADOW_FORECASTS_V1" not in sql
     assert "BOOKMAKER_CACHE" not in sql
+
+
+class FakeSportyBet:
+    def __init__(self, *, complete=True, raise_error=False):
+        self.cached_reads = 0
+        self.cached_writes = 0
+        self.raise_error = raise_error
+        self.complete = complete
+        self.fetch_was_isolated = False
+        self._db_get = self.get_cache
+        self._db_set = self.set_cache
+
+    def get_cache(self, *_a, **_kw):
+        self.cached_reads += 1
+        return None
+
+    def set_cache(self, *_a, **_kw):
+        self.cached_writes += 1
+        raise AssertionError("Must not persist staging bookmaker cache")
+
+    def fetch_board(self, *, force=False):
+        assert force is True
+        assert self._db_get("bookmaker") is None
+        self._db_set("bookmaker", {})
+        self.fetch_was_isolated = True
+        payload = cache()
+        metadata = dict(payload["metadata"], is_complete=self.complete)
+        return {"__meta__": metadata, **payload["fixtures"]}
+
+
+def test_opt_in_fresh_source_isolated_from_bookmaker_cache(monkeypatch):
+    sportybet = FakeSportyBet()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv(
+        "BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE",
+        "CONFIRM_SOURCE_ONLY_LIVE_FETCH",
+    )
+    result = capture.fresh_bookmaker_cache(sportybet_module=sportybet)
+    assert result["metadata"]["snapshot_id"] == SID
+    assert result["fetched_at"] == FETCHED.timestamp()
+    assert result["fixtures"]
+    assert sportybet.fetch_was_isolated is True
+    assert sportybet.cached_reads == 0
+    assert sportybet.cached_writes == 0
+    assert sportybet._db_get == sportybet.get_cache
+    assert sportybet._db_set == sportybet.set_cache
+
+
+def test_fresh_source_restores_cache_handlers_after_failure(monkeypatch):
+    sportybet = FakeSportyBet(complete=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv(
+        "BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE",
+        "CONFIRM_SOURCE_ONLY_LIVE_FETCH",
+    )
+    with pytest.raises(ValueError, match="Incomplete live"):
+        capture.fresh_bookmaker_cache(sportybet_module=sportybet)
+    assert sportybet._db_get == sportybet.get_cache
+    assert sportybet._db_set == sportybet.set_cache
+    assert sportybet.cached_writes == 0
+
+
+def test_fresh_source_denies_unapproved_fetch_and_github_actions(monkeypatch):
+    sportybet = FakeSportyBet()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE", raising=False)
+    with pytest.raises(RuntimeError, match="source-only fetch guard"):
+        capture.fresh_bookmaker_cache(sportybet_module=sportybet)
+    monkeypatch.setenv(
+        "BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE",
+        "CONFIRM_SOURCE_ONLY_LIVE_FETCH",
+    )
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    with pytest.raises(RuntimeError, match="GitHub Actions"):
+        capture.fresh_bookmaker_cache(sportybet_module=sportybet)
+    assert sportybet.fetch_was_isolated is False
+
+
+def test_fresh_source_readonly_preview_has_explicit_network_provenance(
+    monkeypatch,
+):
+    monkeypatch.setattr(capture, "preflight", lambda: "betsightly_db_staging")
+    monkeypatch.setattr(capture, "fresh_bookmaker_cache", cache)
+    dummy = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    result = capture.capture(
+        write=False, db_engine=dummy, now=NOW, source="live"
+    )
+    assert result["mode"] == "DRY_RUN_ONLY"
+    assert result["database"] == "betsightly_db_staging"
+    assert result["source_mode"] == "live"
+    assert result["network_requests_made"] is True
+    assert result["staging_bookmaker_cache_mutated"] is False
+    assert result["eligible_prices"] == 2
+    assert result["rows_inserted"] == 0
+    assert result["clv_proven"] is False
