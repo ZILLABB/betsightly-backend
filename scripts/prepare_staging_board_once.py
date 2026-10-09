@@ -102,6 +102,35 @@ def warm_staging_history() -> dict:
     return result
 
 
+def source_health_summary(status: dict) -> dict:
+    """Explain independent provider quality without changing readiness."""
+    provider = status.get("provider") or {}
+    failed = sorted(set(str(s) for s in provider.get("failed_leagues") or []))
+    detail = provider.get("failed_league_details") or {}
+    return {
+        "espn_complete": bool(provider.get("complete", False)),
+        "espn_leagues_requested": int(provider.get("requested_league_count") or 0),
+        "espn_leagues_succeeded": int(provider.get("successful_league_count") or 0),
+        "espn_leagues_failed": len(failed),
+        "espn_failed_leagues": failed,
+        "espn_failed_reasons": {
+            slug: dict(detail.get(slug) or {})
+            for slug in failed
+        },
+        "espn_previous_snapshot_recovered_leagues": sorted(
+            str(s) for s in provider.get("recovered_leagues") or []
+        ),
+        "board_ready_independent_of_provider_completeness": bool(
+            status.get("ready")
+        ),
+        "note": (
+            "A degraded source response does not mean the stored board is "
+            "absent. These league failures remain missing or recovered; "
+            "do not mislabel provider coverage as complete."
+        ),
+    }
+
+
 def prepare_once() -> dict:
     database_name = preflight()
     history = warm_staging_history()
@@ -114,6 +143,7 @@ def prepare_once() -> dict:
     result = {
         "database": database_name,
         "history": history,
+        "source_health": source_health_summary(status),
         "requested_days": 7,
         "fixture_count": len(fixtures),
         "candidate_count": len(picks),
