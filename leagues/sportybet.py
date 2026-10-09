@@ -514,6 +514,16 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
         "raw_fetched_records": raw_fetched_records,
         "parsed_records": parsed_records,
         "unique_indexed_fixtures": unique_indexed_fixtures,
+        # A live paginated provider can change its advertised count between
+        # page 1 and the final page. Keep the actual unique event count and
+        # the observed difference separate; do not invent/remove an event to
+        # make the numbers appear equal.
+        "declared_count_difference": (
+            unique_indexed_fixtures - declared_total if declared_total else None
+        ),
+        "declared_count_changed_during_scan_possible": bool(
+            declared_total and unique_indexed_fixtures != declared_total
+        ),
         "duplicates_removed": duplicates_removed,
         "invalid_records": invalid_records,
         "page_count": page_count,
@@ -539,7 +549,9 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
 
     parsed_count = sum(1 for _ in _board_entries(board))
     logger.info(
-        f"sportybet board: {parsed_count}/{declared_total or '?'} unique fixtures "
+        f"sportybet board: {parsed_count} unique fixtures "
+        f"(provider declared {declared_total or '?'}, "
+        f"delta {parsed_count - declared_total if declared_total else 'unknown'}) "
         f"from {raw_fetched_records} records ({duplicates_removed} duplicates), "
         f"{page_count} page(s), complete={is_complete}")
     return board
