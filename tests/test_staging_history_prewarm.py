@@ -17,6 +17,7 @@ def _status(*, base=True, team=True):
 
 
 def test_old_complete_cache_is_kept_while_explicit_backfill_refreshes(monkeypatch):
+    monkeypatch.setenv("BETSIGHTLY_STAGING_HISTORY_BACKFILL", "true")
     cache = {"_cache_schema": 2, "_priors": {"global": {"matches": 41}}}
     calls = []
 
@@ -71,3 +72,26 @@ def test_preflight_guards_history_refresh_before_any_work(monkeypatch):
     ))
     with pytest.raises(RuntimeError, match="wrong database"):
         prepare.prepare_once()
+
+
+def test_normal_staging_board_uses_last_complete_history_without_expensive_backfill(
+    monkeypatch,
+):
+    monkeypatch.delenv("BETSIGHTLY_STAGING_HISTORY_BACKFILL", raising=False)
+    calls = []
+
+    def get_rates(*, force=False, allow_refresh=True):
+        if force:
+            calls.append("unexpected_network_backfill")
+        return {"_cache_schema": 2, "_priors": {"global": {"matches": 41}}}
+
+    monkeypatch.setattr(base_rates, "get_base_rates", get_rates)
+    monkeypatch.setattr(history_readiness, "status", lambda: _status())
+    monkeypatch.setattr(team_history, "load", lambda **kwargs: pytest.fail(
+        "A valid team cache must not be recomputed during ordinary preparation"
+    ))
+    report = prepare.warm_staging_history()
+    assert report["usable"] is True
+    assert report["backfill_refresh_requested"] is False
+    assert report["backfill_explicitly_requested"] is False
+    assert calls == []
