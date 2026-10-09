@@ -186,6 +186,46 @@ def rows_from_cache(cache: dict, *, now=None) -> tuple[list[dict], dict]:
     return list(deduped.values()), report
 
 
+def fresh_bookmaker_cache(*, sportybet_module=None):
+    """Get a genuinely new, complete bookmaker board without cache mutation.
+
+    Opt-in only, staging CLI process with background jobs disabled.
+    Ordinary model refresh, publishing and bookmaker_cache writes are NOT run.
+    """
+    if os.getenv("GITHUB_ACTIONS", "").lower() == "true":
+        raise RuntimeError("No live-bookmaker fetches in GitHub Actions")
+    if os.getenv("BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE") != (
+        "CONFIRM_SOURCE_ONLY_LIVE_FETCH"
+    ):
+        raise RuntimeError("Explicit staging source-only fetch guard required")
+    if sportybet_module is None:
+        from leagues import sportybet as sportybet_module
+    original_get = sportybet_module._db_get
+    original_set = sportybet_module._db_set
+    try:
+        sportybet_module._db_get = lambda *_a, **_kw: None
+        sportybet_module._db_set = lambda *_a, **_kw: None
+        board = sportybet_module.fetch_board(force=True)
+    finally:
+        sportybet_module._db_get = original_get
+        sportybet_module._db_set = original_set
+    if not isinstance(board, dict):
+        raise ValueError("No complete live SportyBet board")
+    metadata = dict(board.get("__meta__") or {})
+    if metadata.get("is_complete") is not True or metadata.get("error"):
+        raise ValueError("Incomplete live SportyBet board cannot be archived")
+    if not metadata.get("fetched_at") or not metadata.get("snapshot_id"):
+        raise ValueError("Live board lacks verified provider snapshot metadata")
+    fixtures = {k: v for k, v in board.items() if not k.startswith("__")}
+    if not fixtures:
+        raise ValueError("Live SportyBet board has no upcoming fixtures")
+    return {
+        "metadata": metadata,
+        "fetched_at": metadata["fetched_at"],
+        "fixtures": fixtures,
+    }
+
+
 def require_write_guard():
     if os.getenv("GITHUB_ACTIONS", "").lower() == "true":
         raise RuntimeError("GitHub Actions cannot write bookmaker price history")
@@ -195,7 +235,7 @@ def require_write_guard():
         )
 
 
-def capture(*, write=False, db_engine=None, now=None):
+def capture(*, write=False, db_engine=None, now=None, source="cache"):
     """Only an explicit staging-admin invocation can create/append rows."""
     database = preflight()
     if database != "betsightly_db_staging":
@@ -208,14 +248,22 @@ def capture(*, write=False, db_engine=None, now=None):
         db_engine = engine
     if db_engine.dialect.name != "postgresql":
         raise RuntimeError("PostgreSQL staging only")
-    with db_engine.connect() as conn:
-        row = conn.execute(text(
-            "SELECT v FROM public.bookmaker_cache WHERE k = 'sportybet_board'"
-        )).first()
-    if not row or not row[0]:
-        raise ValueError("SportyBet source cache not available")
-    cache = json.loads(row[0])
+    if source not in {"cache", "live"}:
+        raise ValueError("Unknown SportyBet source mode")
+    if source == "live":
+        cache = fresh_bookmaker_cache()
+    else:
+        with db_engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT v FROM public.bookmaker_cache WHERE k = 'sportybet_board'"
+            )).first()
+        if not row or not row[0]:
+            raise ValueError("SportyBet source cache not available")
+        cache = json.loads(row[0])
     records, report = rows_from_cache(cache, now=now)
+    report["source_mode"] = source
+    report["network_requests_made"] = source == "live"
+    report["staging_bookmaker_cache_mutated"] = False
     report.update({
         "database": database,
         "mode": "WRITE_STAGING" if write else "DRY_RUN_ONLY",
@@ -253,8 +301,14 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--write-staging", action="store_true")
+    parser.add_argument(
+        "--source", choices=("cache", "live"), default="cache",
+        help="Cache-only by default; live requires separate source-only guard",
+    )
     args = parser.parse_args()
-    print(json.dumps(capture(write=args.write_staging), sort_keys=True))
+    print(json.dumps(capture(
+        write=args.write_staging, source=args.source
+    ), sort_keys=True))
 
 
 if __name__ == "__main__":
