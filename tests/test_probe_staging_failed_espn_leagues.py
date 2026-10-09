@@ -73,3 +73,42 @@ def test_staging_preflight_runs_before_saved_snapshot_or_network(monkeypatch):
                         lambda: pytest.fail("must fail before cache read"))
     with pytest.raises(RuntimeError, match="wrong database"):
         probe_script.probe(today_wat())
+
+
+def test_year_fallback_can_diagnose_month_400_without_promoting_predictions(
+    monkeypatch,
+):
+    from leagues import espn_source
+    monkeypatch.setattr(probe_script, "preflight", lambda: "betsightly_db_staging")
+    calls = []
+    health = {}
+
+    def fetch(slug, dates):
+        calls.append((slug, dates))
+        if len(dates) == 6:
+            health[slug] = {"request_succeeded": False, "error": "HTTP 400"}
+            return []
+        health[slug] = {
+            "request_succeeded": True,
+            "provider_active": True,
+            "error": None,
+        }
+        return [{"event_id": "annual-fixture"}]
+
+    monkeypatch.setattr(espn_source, "_fetch_league", fetch)
+    monkeypatch.setattr(espn_source, "fetch_health",
+                        lambda: {k: dict(v) for k, v in health.items()})
+    report = probe_script.probe(
+        today_wat(), slugs=["alg.1"], probe_year_fallback=True,
+    )
+    row = report["per_league"][0]
+    assert row["state"] == "UNAVAILABLE"
+    assert row["http_or_transport_error"] == "HTTP 400"
+    assert row["year_query_probe"]["success"] is True
+    assert row["year_query_probe"]["scheduled_in_year"] == 1
+    assert calls == [
+        ("alg.1", datetime.now(timezone(timedelta(hours=1))).strftime("%Y%m")),
+        ("alg.1", datetime.now(timezone(timedelta(hours=1))).strftime("%Y")),
+    ]
+    assert report["prepared_board_refreshed"] is False
+    assert report["booking_codes_created"] is False
