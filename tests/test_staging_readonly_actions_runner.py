@@ -128,7 +128,23 @@ def test_wrong_actual_database_is_rejected(monkeypatch):
 
 
 def test_evaluation_emits_aggregate_reports_not_predictions(monkeypatch, tmp_path):
-    from scripts import audit_staging_model_comparison_evidence, export_staging_history_training
+    from scripts import (
+        audit_staging_model_comparison_evidence,
+        export_staging_history_training,
+        settle_staging_market_shadow,
+    )
+    monkeypatch.setattr(
+        settle_staging_market_shadow,
+        "reconcile", lambda **kwargs: {
+            "pending_mature_rows_checked": 9,
+            "verified_fixture_count": 1,
+            "would_settle": 8,
+            "would_void": 1,
+            "rows_updated": 0,
+            "unresolved": {},
+            "provider_failures": {},
+        },
+    )
     monkeypatch.setattr(runner, "readonly_actions_preflight", lambda: {
         "database": "betsightly_db_staging", "read_only": True,
     })
@@ -161,13 +177,16 @@ def test_evaluation_emits_aggregate_reports_not_predictions(monkeypatch, tmp_pat
     result = runner.run("all", tmp_path / "reports")
     assert result["status"] == "STAGING_READONLY_EVALUATED"
     assert sorted(result["report_files"]) == [
-        "evidence.json", "summary.md", "walkforward.json",
+        "evidence.json", "settlement_dry_run.json", "summary.md",
+        "walkforward.json",
     ]
     assert result["production_unchanged"] is True
     assert result["promotion_authorized"] is False
     summary = (tmp_path / "reports" / "summary.md").read_text()
     assert "CHAMPION_COMPARISON_BLOCKED" in summary
     assert "league" in summary
+    assert "Verified-final settlement dry-run" in summary
+    assert "Rows updated: 0" in summary
 
 
 def test_workflow_is_manual_without_deploy_or_untrusted_shell_interpolation():
