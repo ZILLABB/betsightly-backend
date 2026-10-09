@@ -88,7 +88,8 @@ def readonly_actions_preflight() -> dict:
 
 
 def make_summary(mode: str, audit: dict | None,
-                 walk: dict | None, preflight_report: dict) -> str:
+                 walk: dict | None, preflight_report: dict,
+                 settlement: dict | None = None) -> str:
     lines = [
         "# BetSightly staging model-evaluation report",
         "",
@@ -110,6 +111,18 @@ def make_summary(mode: str, audit: dict | None,
             f"across {audit.get('mature_pending_settlement_fixtures', 0)} fixtures",
             f"- Voided observations: {audit.get('void_observations', 0)}",
             "- Blockers: " + ", ".join(audit["blockers"]),
+        ]
+    if settlement is not None:
+        lines += [
+            "",
+            "## Verified-final settlement dry-run (no database writes)",
+            f"- Mature observations checked: {settlement['pending_mature_rows_checked']}",
+            f"- Verified fixtures: {settlement['verified_fixture_count']}",
+            f"- Would settle: {settlement['would_settle']}",
+            f"- Would void: {settlement['would_void']}",
+            f"- Rows updated: {settlement['rows_updated']}",
+            f"- Unresolved reasons: {json.dumps(settlement['unresolved'], sort_keys=True)}",
+            f"- Score-provider failures: {json.dumps(settlement['provider_failures'], sort_keys=True)}",
         ]
     if walk is not None:
         lines += [
@@ -142,6 +155,7 @@ def run(mode: str, report_dir: Path) -> dict:
     report_dir.mkdir(parents=True, exist_ok=True)
     evidence = None
     walk = None
+    settlement = None
     if mode in {"all", "evidence"}:
         from scripts.audit_staging_model_comparison_evidence import audit
         evidence = audit()
@@ -157,7 +171,14 @@ def run(mode: str, report_dir: Path) -> dict:
             json.dumps(data, indent=2, sort_keys=True, default=str) + "\n",
             encoding="utf-8",
         )
-    summary = make_summary(mode, evidence, walk, safety)
+    if mode == "all":
+        from scripts.settle_staging_market_shadow import reconcile
+        settlement = reconcile(write=False)
+        (report_dir / "settlement_dry_run.json").write_text(
+            json.dumps(settlement, indent=2, sort_keys=True, default=str) + "\n",
+            encoding="utf-8",
+        )
+    summary = make_summary(mode, evidence, walk, safety, settlement=settlement)
     (report_dir / "summary.md").write_text(summary, encoding="utf-8")
     return {
         "status": "STAGING_READONLY_EVALUATED",
