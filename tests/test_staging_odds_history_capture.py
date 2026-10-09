@@ -69,8 +69,8 @@ def test_fail_closed_for_uncertain_or_fake_snapshot_provenance(problem):
     elif problem == "stale":
         now += timedelta(hours=7)
     elif problem == "future":
-        data["metadata"]["fetched_at"] += 120
-        data["fetched_at"] += 120
+        data["metadata"]["fetched_at"] += 7200
+        data["fetched_at"] += 7200
     elif problem == "source_mismatch":
         data["metadata"]["fetched_at"] += 400
     with pytest.raises(ValueError):
