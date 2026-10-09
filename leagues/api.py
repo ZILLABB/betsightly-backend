@@ -1433,6 +1433,7 @@ async def recommendation_diagnostics(date: str | None = None):
     try:
         from leagues.daily_feed import build_daily_accumulators, _publish_date
         from leagues.recommendation_board import build_recommendation_board
+        from leagues.forecast_coverage import coverage_funnel
 
         picks, fixtures, prepared = _public_prepared_board(4)
         board = build_recommendation_board(picks, fixtures, date=date)
@@ -1457,6 +1458,9 @@ async def recommendation_diagnostics(date: str | None = None):
             "status": "success",
             "date": board["date"],
             "board_summary": board["summary"],
+            "forecast_coverage": coverage_funnel(
+                fixtures, picks, date=board["date"]
+            ),
             "market_distribution": board["market_distribution"],
             "board": prepared,
             "daily_tiers": tiers,
