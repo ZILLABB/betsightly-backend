@@ -14,6 +14,57 @@ from scripts.prepare_staging_board_once import preflight
 
 TIERS = ("rollover", "banker", "2_odds", "5_odds", "10_odds", "over_1_5")
 
+
+def disjoint_one_leg_capacity(allowed_by_product: dict[str, list[dict]]) -> dict:
+    """Upper bound on distinct products receiving even ONE unique fixture.
+
+    This is a bipartite matching, not a claim that 2x/5x/10x, rollover-chain,
+    or 10x min-odds targets have been met. It makes overlapping approvals
+    across six products visible instead of counting the same two games six times.
+    """
+    fixture_options = {
+        product: sorted({
+            str(p.get("match_id")) for p in allowed_by_product.get(product, [])
+            if p.get("match_id")
+        })
+        for product in TIERS
+    }
+    # Kuhn's augmenting-path algorithm: optimally match products to unique
+    # fixtures rather than greedily double-allocating a popular game.
+    owner: dict[str, str] = {}
+
+    def assign(product: str, visited: set[str]) -> bool:
+        for fid in fixture_options[product]:
+            if fid in visited:
+                continue
+            visited.add(fid)
+            current = owner.get(fid)
+            if current is None or assign(current, visited):
+                owner[fid] = product
+                return True
+        return False
+
+    for product in sorted(TIERS, key=lambda p: (len(fixture_options[p]), p)):
+        assign(product, set())
+
+    matching = {product: fid for fid, product in owner.items()}
+    union = {fid for ids in fixture_options.values() for fid in ids}
+    return {
+        "distinct_approved_fixture_union": len(union),
+        "max_products_with_one_unique_fixture_each": len(matching),
+        "products_with_zero_approved_fixtures": [
+            product for product in TIERS if not fixture_options[product]
+        ],
+        "one_leg_distinct_assignments": dict(sorted(matching.items())),
+        "all_six_one_leg_capacity_possible": len(matching) == len(TIERS),
+        "complete_slip_targets_verified": False,
+        "note": (
+            "This is only a theoretical one-leg per-product upper bound. "
+            "It does not satisfy accumulator target odds, rollover length, "
+            "the 10x leg limit or live booking-code readback."
+        ),
+    }
+
 def diagnose_supply(picks: list[dict], target_date_wat: str, now: datetime) -> dict:
     """Read-only counts of price, trust and publication gates for one WAT day.
 
@@ -47,18 +98,29 @@ def diagnose_supply(picks: list[dict], target_date_wat: str, now: datetime) -> d
         day, include_all_eligible=True,
     )
     products = {}
-    for product in ("banker", "2_odds", "5_odds", "10_odds", "over_1_5"):
-        # Daily 2x, 5x and 10x deliberately share the '5_odds' candidate
-        # contract; selection and final-slip validation are separate gates.
+    allowed_by_product = {}
+    for product in TIERS:
+        # Odds accumulators share a common quality contract. Rollover is a
+        # multi-day product; these counts describe only its first target day.
         policy = "5_odds" if product in {"2_odds", "5_odds", "10_odds"} else product
-        allowed, rejected = filter_official_candidates(canonical, policy)
+        # Unlike odds accumulators, Over 1.5 is explicitly market-specific.
+        # Earlier diagnostics incorrectly counted a home win or double-chance
+        # as an Over 1.5 candidate merely because it passed generic policy.
+        source = (
+            [p for p in canonical if p.get("market") == "over_1_5"]
+            if product == "over_1_5" else canonical
+        )
+        allowed, rejected = filter_official_candidates(source, policy)
+        allowed_by_product[product] = allowed
         products[product] = {
             "approved_legs": len(allowed),
             "approved_unique_fixtures": len({
-                str(p.get("match_id")) for p in allowed
+                str(p.get("match_id")) for p in allowed if p.get("match_id")
             }),
+            "evaluated_market_legs": len(source),
             "rejected_legs": len(rejected),
             "rejection_reasons": rejection_summary(rejected),
+            "date_scope": "TARGET_DAY_ONLY",
         }
     return {
         "forecast_legs_on_target_day": len(day),
@@ -71,7 +133,10 @@ def diagnose_supply(picks: list[dict], target_date_wat: str, now: datetime) -> d
             for p in day
         ),
         "products": products,
+        "cross_tier_feasibility": disjoint_one_leg_capacity(allowed_by_product),
         "note": (
+            "Rollover counts are target-day first-leg supply only, and "
+            "Over 1.5 counts only its own goal market. "
             "Counts are per-leg before cross-tier allocation, slip EV, "
             "SportyBet booking-code generation and live price readback. "
             "Rejection reasons overlap."
