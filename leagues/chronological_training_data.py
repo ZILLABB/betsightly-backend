@@ -23,7 +23,9 @@ def labels(home_goals: int, away_goals: int) -> dict:
 
 
 def _team_form(records: list[tuple[int, int]], size: int = 5) -> dict:
-    recent = records[-size:]
+    # Each record includes (goals_for, goals_against, venue). The
+    # average uses only the first two fields; venue is filtered separately.
+    recent = [(row[0], row[1]) for row in records[-size:]]
     if not recent:
         return {"matches": 0, "goals_for": None, "goals_against": None,
                 "win_rate": None, "draw_rate": None}
