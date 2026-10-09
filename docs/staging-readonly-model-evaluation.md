@@ -140,3 +140,29 @@ permission-aware and does not fail the rest of the run if access is absent.
 A paired probabilistic comparison is **not** proof of sportsbook profitability.
 There is still no verified same-fixture closing-line cohort between this
 football-first table and the separately captured SportyBet prices.
+
+## Repeatable local staging settlement (PowerShell)
+
+Instead of pasting the long manual environment setup each day, pull the current
+staging feature branch and use its guarded helper:
+
+```powershell
+git fetch origin
+git switch feature/daily-tier-reach-and-builder-supply-20261009
+git pull --ff-only origin feature/daily-tier-reach-and-builder-supply-20261009
+.\\scripts\\settle_staging_market_shadow.ps1 -DryRunOnly
+# After reviewing the dry-run, repeat without -DryRunOnly:
+.\\scripts\\settle_staging_market_shadow.ps1
+```
+
+The PowerShell helper prompts for the **staging administrator database URL**
+without echoing it, verifies the branch and the dry-run response, and requires
+typing `SETTLE STAGING` before a write. It restores prior process environment
+variables and clears the temporary secret. It cannot change production:
+the backend additionally checks the actual connected PostgreSQL database and
+the explicit staging-only write flag. Do not use the read-only GitHub secret for
+a manual write; GitHub Actions itself remains SELECT-only.
+
+If your PowerShell session blocks script execution by policy, use your
+organization's approved local execution procedure. Do not weaken machine-wide
+PowerShell security policy merely to run this helper.
