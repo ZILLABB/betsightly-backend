@@ -8,11 +8,21 @@ quality gates remain completely separate.
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime, timezone, timedelta
 
 WAT = timezone(timedelta(hours=1))
 RESULT_MARKETS = ("home_win", "draw", "away_win")
 SIMULATED = (" SRL", "SIMULATED", "VIRTUAL", "EFOOTBALL", "E-FOOTBALL")
+# SportyBet does not consistently populate home_squad/away_squad:
+# October 9 contained at least 20 U19/U20 fixtures with both fields blank.
+# Women's senior competitions are not youth fixtures.
+AGE_GROUP = re.compile(
+    r"(?<![A-Z0-9])U[- ]?(?:1[0-9]|2[0-3])(?![A-Z0-9])"
+    r"|\bUNDER[ -]?(?:1[0-9]|2[0-3])\b"
+    r"|\bYOUTH\b|\bACADEMY\b",
+    re.IGNORECASE,
+)
 
 
 def devig_market(prices: dict, markets: tuple[str, ...]):
@@ -71,7 +81,8 @@ def fixture_consensus(fixture: dict, *, date_wat: str) -> dict:
     fields = " ".join((home, away, competition)).upper()
     if any(word in fields for word in SIMULATED):
         return {**base, "status": "SIMULATED_EXCLUDED"}
-    if fixture.get("home_squad") or fixture.get("away_squad"):
+    if (fixture.get("home_squad") or fixture.get("away_squad")
+            or AGE_GROUP.search(fields)):
         return {**base, "status": "NON_SENIOR_EXCLUDED"}
     result = devig_market(prices, RESULT_MARKETS)
     if result is None:
