@@ -11,6 +11,8 @@ from leagues import sportybet
     ("Saudi Pro League", "sr:tournament:955", "sr:category:310", "sau.1"),
     ("Stars League", "sr:tournament:825", "sr:category:353", "qat.1"),
     ("Pro League", "sr:tournament:915", "sr:category:301", "irn.1"),
+    ("Super League", "sr:tournament:1015", "sr:category:368", "idn.1"),
+    ("Ligue 1", "sr:tournament:841", "sr:category:304", "alg.1"),
 ])
 def test_exact_provider_id_resolves_existing_competition(
     competition, tournament_id, category_id, slug,
