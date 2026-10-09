@@ -63,6 +63,7 @@ def parse_results(
         raise ValueError("Source is missing a valid matches array")
     unique = {}
     rejected = {}
+    duplicate_count = 0
     for match in matches:
         if not isinstance(match, dict):
             rejected["malformed_row"] = rejected.get("malformed_row", 0) + 1
@@ -98,10 +99,11 @@ def parse_results(
             "source_sha256": source_hash,
         }
         previous = unique.get(identity)
-        if previous is not None and (
-            previous["home_score"], previous["away_score"]
-        ) != score:
-            raise ValueError("Conflicting final scores for the same source match")
+        if previous is not None:
+            if (previous["home_score"], previous["away_score"]) != score:
+                raise ValueError("Conflicting final scores for the same source match")
+            duplicate_count += 1
+            continue
         unique[identity] = row
     rows = sorted(unique.values(), key=lambda row: (
         row["match_date"], row["league_slug"], row["fixture_key"]
@@ -109,7 +111,7 @@ def parse_results(
     return rows, {
         "league_slug": slug, "season": season, "source": SOURCE,
         "rows_in_source": len(matches), "accepted": len(rows),
-        "duplicates": sum(1 for k in []),  # count supplied below
+        "duplicates": duplicate_count,
         "rejections": dict(sorted(rejected.items())),
     }
 
