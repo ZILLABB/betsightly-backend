@@ -166,3 +166,52 @@ a manual write; GitHub Actions itself remains SELECT-only.
 If your PowerShell session blocks script execution by policy, use your
 organization's approved local execution procedure. Do not weaken machine-wide
 PowerShell security policy merely to run this helper.
+
+## Phase 9: append-only SportyBet odds-history capture (staging)
+
+The module `scripts.capture_staging_odds_history` prepares a dedicated
+`public.sportybet_odds_history_v1` table. It is **separate** from immutable
+model forecasts (`market_shadow_forecasts_v1`), the official predictions,
+booking codes, and the existing live bookmaker cache.
+
+Important integrity rules:
+
+- It reads **only** the existing, *complete* `sportybet_board` cache; it
+  neither calls the provider nor triggers a pipeline or a cache refresh.
+- Each captured price is stamped with the **original source fetched_at**
+  from cache and its immutable source snapshot ID, never the CLI run time.
+- A source must have matching metadata/cache timestamps, a complete board,
+  and be at most six hours old. Invalid odds, missing event IDs, and matches
+  near/past kickoff do not become evidence.
+- A unique primary key
+  `(snapshot_id, sportybet_event_id, market)` plus
+  `INSERT ... ON CONFLICT DO NOTHING` makes retries idempotent. There are
+  no updates/deletes to the odds warehouse.
+- Staging-only DB identity and the staging board preflight must pass.
+  `--write-staging` requires separate
+  `BETSIGHTLY_STAGING_ODDS_HISTORY_WRITE=CONFIRM_APPEND_ONLY_ODDS_HISTORY`.
+  GitHub Actions writes are refused. The **default mode is dry-run**.
+- Prices from a single cached snapshot **cannot establish CLV**. Future
+  distinct complete provider snapshots must first be captured at real
+  different fetch times, including credible near-kickoff prices, before a
+  verified CLV calculation can be implemented.
+
+When an authorized staging operator or dedicated staging job is ready:
+
+```powershell
+$env:ENVIRONMENT = "staging"
+$env:ENABLE_BACKGROUND_JOBS = "false"
+$env:PREPARED_BOARD_PERSISTENCE_ENABLED = "true"
+$env:BETSIGHTLY_STAGING_BOARD_ONCE = "CONFIRM_STAGING_ONLY"
+# DATABASE_URL must be the staging admin URL (never printed or committed).
+python -m scripts.capture_staging_odds_history --dry-run
+
+# Only after inspecting the preview, with an explicit authorized write:
+$env:BETSIGHTLY_STAGING_ODDS_HISTORY_WRITE = "CONFIRM_APPEND_ONLY_ODDS_HISTORY"
+python -m scripts.capture_staging_odds_history --write-staging
+```
+
+The first explicitly authorized write creates the new table and index in the
+isolated staging database and inserts qualifying quotes, without touching the
+live cache or published results. **No standing cron schedule or production
+activation is implied by committing this script.** CI only tests the code.
