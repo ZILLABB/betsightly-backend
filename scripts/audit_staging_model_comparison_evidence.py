@@ -60,6 +60,32 @@ INVENTORY_QUERY = text("""
         MAX(kickoff) AS last_forecast_kickoff
     FROM public.market_shadow_forecasts_v1
 """)
+# Descriptive market scores on the same real, bookable, prematch and
+# independently settled evidence. Outcomes on one fixture are correlated:
+# 'observations' is NOT a sample size of independent football matches.
+SETTLED_MARKET_METRICS_QUERY = text("""
+    SELECT model_version, market,
+           COUNT(*) AS observations,
+           COUNT(DISTINCT fixture_id) AS independent_fixtures,
+           SUM(CASE WHEN outcome = 1 THEN 1 ELSE 0 END) AS won_observations,
+           AVG(probability) AS avg_predicted_probability,
+           AVG(outcome::float) AS empirical_win_fraction,
+           AVG(POWER(probability - outcome, 2)) AS binary_brier,
+           AVG(-outcome * LN(GREATEST(probability, 0.000000000001))
+               -(1-outcome)*LN(GREATEST(1-probability, 0.000000000001)))
+               AS binary_log_loss
+    FROM public.market_shadow_forecasts_v1
+    WHERE status = 'settled'
+      AND outcome IN (0, 1)
+      AND probability BETWEEN 0 AND 1
+      AND odds_are_real = TRUE AND quoted_odds > 1
+      AND bookable_at_capture = TRUE AND observed_at < kickoff
+      AND home_score IS NOT NULL AND away_score IS NOT NULL
+      AND settlement_source IS NOT NULL AND settled_at >= kickoff
+    GROUP BY model_version, market
+    ORDER BY model_version, market
+""")
+
 HISTORY_QUERY = text("""
     SELECT
         COUNT(*) AS historical_rows,
@@ -145,7 +171,39 @@ def audit() -> dict:
             )
         shadow = dict(conn.execute(INVENTORY_QUERY).mappings().one())
         history = dict(conn.execute(HISTORY_QUERY).mappings().one())
-    return {"database": database, **evidence_status(shadow, history)}
+        scores = [
+            dict(row) for row in conn.execute(
+                SETTLED_MARKET_METRICS_QUERY
+            ).mappings()
+        ]
+    score_count = sum(int(item["observations"]) for item in scores)
+    scored_fixtures = None
+    if score_count:
+        with engine.connect() as conn:
+            scored_fixtures = conn.execute(text("""
+                SELECT COUNT(DISTINCT fixture_id)
+                FROM public.market_shadow_forecasts_v1
+                WHERE status = 'settled'
+                  AND outcome IN (0,1)
+                  AND probability BETWEEN 0 AND 1
+                  AND odds_are_real AND quoted_odds > 1
+                  AND bookable_at_capture AND observed_at < kickoff
+                  AND home_score IS NOT NULL AND away_score IS NOT NULL
+                  AND settlement_source IS NOT NULL AND settled_at >= kickoff
+            """)).scalar()
+    report = evidence_status(shadow, history)
+    report["settled_market_scoring"] = {
+        "status": "DESCRIPTIVE_ONLY_NO_PAIRED_CHAMPION_COMPARISON",
+        "real_bookable_settled_observations": score_count,
+        "distinct_settled_fixtures": int(scored_fixtures or 0),
+        "model_market_rows": scores,
+        "data_policy": (
+            "Same-fixture markets are correlated. Do not interpret rows "
+            "as independent matches or use tiny samples to promote models."
+        ),
+        "model_promotion_authorized": False,
+    }
+    return {"database": database, **report}
 
 
 if __name__ == "__main__":
