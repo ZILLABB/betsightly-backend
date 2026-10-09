@@ -112,6 +112,47 @@ def paired_loss_diagnostics(
     }
 
 
+def league_conditional_training_probs(
+    train: list[dict], holdout: list[dict],
+    train_classes: list[int], *, class_count: int,
+    prior_strength: float = 20.0,
+) -> list[list[float]]:
+    """Train-only league rates with an empirical-Bayes global fallback.
+
+    An unseen league gets the pooled training distribution. Small leagues
+    shrink toward that distribution, avoiding extreme 0%/100% estimates.
+    This does not use results from the holdout, odds, or future matches.
+    """
+    if len(train) != len(train_classes):
+        raise ValueError("League priors must have the same training fixtures")
+    if not train or not class_count > 1 or prior_strength < 0:
+        raise ValueError("Invalid league-prior training inputs")
+    if any(type(y) is not int or not 0 <= y < class_count
+           for y in train_classes):
+        raise ValueError("Invalid training outcome class")
+
+    global_counts = [0] * class_count
+    league_counts: dict[str, list[int]] = {}
+    for example, label in zip(train, train_classes):
+        global_counts[label] += 1
+        league = str(example.get("league_slug") or "UNKNOWN")
+        counts = league_counts.setdefault(league, [0] * class_count)
+        counts[label] += 1
+    global_probs = [count / len(train) for count in global_counts]
+    result = []
+    for row in holdout:
+        league = str(row.get("league_slug") or "UNKNOWN")
+        counts = league_counts.get(league, [0] * class_count)
+        n = sum(counts)
+        weights = [
+            (count + prior_strength * global_probs[i])
+            / (n + prior_strength) if n + prior_strength else global_probs[i]
+            for i, count in enumerate(counts)
+        ]
+        result.append(weights)
+    return result
+
+
 def evaluate_shadow(train: list[dict], holdout: list[dict], *,
                     min_training: int = 200,
                     min_holdout: int = 50) -> dict:
@@ -160,7 +201,24 @@ def evaluate_shadow(train: list[dict], holdout: list[dict], *,
                         for p, y in zip(preds, holdout_labels)]
         baseline_losses = [(baseline - int(y)) ** 2
                            for y in holdout_labels]
+        league_probs = league_conditional_training_probs(
+            train, holdout, [int(y) for y in train_labels],
+            class_count=2,
+        )
+        league_losses = [
+            (row[1] - int(y)) ** 2
+            for row, y in zip(league_probs, holdout_labels)
+        ]
         report[market] = {
+            "league_conditional_baseline_brier": round(
+                sum(league_losses) / len(holdout_labels), 6,
+            ),
+            "beats_league_conditional_baseline": bool(
+                sum(model_losses) < sum(league_losses)
+            ),
+            "paired_vs_league_conditional_baseline": paired_loss_diagnostics(
+                holdout, model_losses, league_losses,
+            ),
             "paired_diagnostics": paired_loss_diagnostics(
                 holdout, model_losses, baseline_losses,
             ),
@@ -210,7 +268,23 @@ def evaluate_shadow(train: list[dict], holdout: list[dict], *,
         per_match_baseline_losses = np.sum(
             (priors - actual) ** 2, axis=1
         ).tolist()
+        league_probs = np.asarray(league_conditional_training_probs(
+            train, holdout, [int(x) for x in train_classes],
+            class_count=3,
+        ), dtype=float)
+        league_losses = np.sum(
+            (league_probs - actual) ** 2, axis=1
+        ).tolist()
         report["match_result"] = {
+            "league_conditional_baseline_brier": round(
+                sum(league_losses) / len(holdout), 6,
+            ),
+            "beats_league_conditional_baseline": bool(
+                sum(per_match_model_losses) < sum(league_losses)
+            ),
+            "paired_vs_league_conditional_baseline": paired_loss_diagnostics(
+                holdout, per_match_model_losses, league_losses,
+            ),
             "paired_diagnostics": paired_loss_diagnostics(
                 holdout, per_match_model_losses,
                 per_match_baseline_losses,
@@ -237,7 +311,7 @@ def evaluate_shadow(train: list[dict], holdout: list[dict], *,
         "production_promotion_authorized": False,
         "evaluation_limitations": [
             "Single chronological split, not rolling forward cross-validation",
-            "Only a pooled training-rate baseline, not the champion model",
+            "Pooled and smoothed training-league baselines; neither is the production champion",
             "No paired bookmaker odds or closing-line value evaluation",
             "Sources not independently verified",
         ],
