@@ -86,6 +86,39 @@ SETTLED_MARKET_METRICS_QUERY = text("""
     ORDER BY model_version, market
 """)
 
+ODDS_HISTORY_READINESS_QUERY = text("""
+    WITH bookable_prices AS (
+        SELECT fixture_id, market, kickoff, observed_at
+        FROM public.market_shadow_forecasts_v1
+        WHERE odds_are_real = TRUE AND quoted_odds > 1
+          AND bookable_at_capture = TRUE AND observed_at < kickoff
+    ),
+    fixture_market AS (
+        SELECT fixture_id, market,
+               COUNT(DISTINCT observed_at) AS capture_moments,
+               MIN(observed_at) AS first_capture,
+               MAX(observed_at) AS last_capture,
+               MIN(kickoff) AS kickoff
+        FROM bookable_prices
+        GROUP BY fixture_id, market
+    )
+    SELECT
+        (SELECT COUNT(DISTINCT snapshot_id)
+         FROM public.market_shadow_forecasts_v1) AS warehouse_snapshots,
+        (SELECT COUNT(DISTINCT observed_at)
+         FROM public.market_shadow_forecasts_v1) AS warehouse_capture_moments,
+        COUNT(*) AS priced_fixture_markets,
+        COUNT(*) FILTER (
+            WHERE capture_moments >= 2
+        ) AS fixture_markets_with_multiple_prices,
+        COUNT(*) FILTER (
+            WHERE capture_moments >= 2
+              AND first_capture <= kickoff - INTERVAL '60 minutes'
+              AND last_capture >= kickoff - INTERVAL '30 minutes'
+        ) AS research_near_close_price_pairs
+    FROM fixture_market
+""")
+
 HISTORY_QUERY = text("""
     SELECT
         COUNT(*) AS historical_rows,
@@ -171,6 +204,9 @@ def audit() -> dict:
             )
         shadow = dict(conn.execute(INVENTORY_QUERY).mappings().one())
         history = dict(conn.execute(HISTORY_QUERY).mappings().one())
+        odds_history = dict(
+            conn.execute(ODDS_HISTORY_READINESS_QUERY).mappings().one()
+        )
         scores = [
             dict(row) for row in conn.execute(
                 SETTLED_MARKET_METRICS_QUERY
@@ -196,6 +232,32 @@ def audit() -> dict:
     report["prospective_match_result_pairs"] = audit_paired_challenger(
         db_engine=engine
     )
+    recent_pairs = int(odds_history.get("research_near_close_price_pairs") or 0)
+    report["odds_history_readiness"] = {
+        "status": (
+            "RESEARCH_PRICE_PAIRS_NEED_CLOSING_VALIDATION"
+            if recent_pairs > 0
+            else "NO_VERIFIED_NEAR_CLOSE_PRICE_PAIRS"
+        ),
+        "warehouse_snapshots": int(odds_history.get("warehouse_snapshots") or 0),
+        "warehouse_capture_moments": int(
+            odds_history.get("warehouse_capture_moments") or 0
+        ),
+        "real_bookable_priced_fixture_markets": int(
+            odds_history.get("priced_fixture_markets") or 0
+        ),
+        "fixture_markets_with_multiple_prices": int(
+            odds_history.get("fixture_markets_with_multiple_prices") or 0
+        ),
+        "research_near_close_price_pairs": recent_pairs,
+        "official_clv_authorized": False,
+        "production_promotion_authorized": False,
+        "note": (
+            "Captures of the same fixture and market at distinct times are "
+            "needed before CLV. Research near-close pairs alone do not "
+            "establish a trusted bookmaker closing line."
+        ),
+    }
     report["settled_market_scoring"] = {
         "status": "DESCRIPTIVE_ONLY_NO_PAIRED_CHAMPION_COMPARISON",
         "real_bookable_settled_observations": score_count,
