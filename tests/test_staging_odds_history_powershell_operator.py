@@ -3,6 +3,10 @@
 A Python dry-run must pass before the operator can authorize an append.
 """
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 
 SCRIPT = Path("scripts/capture_staging_odds_history.ps1")
@@ -40,3 +44,21 @@ def test_operator_only_temporarily_exports_database_credentials():
     assert "finally {" in code
     assert "[switch]$DryRunOnly" in code
     assert 'Write-Host "Cancelled. No database changes made."' in code
+
+
+def test_powershell_script_syntax_if_parser_is_installed():
+    """Parse without executing the script or ever requesting credentials."""
+    if not shutil.which("pwsh"):
+        pytest.skip("PowerShell parser not installed in CI runner")
+    source = SCRIPT.resolve().as_posix().replace("'", "''")
+    statement = (
+        "$null = [System.Management.Automation.Language.Parser]::ParseFile("
+        f"'{source}', [ref]$null, [ref]$errors); "
+        "if ($errors.Count) { $errors | ForEach-Object { "
+        "Write-Error $_.Message }; exit 1 }"
+    )
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-NonInteractive", "-Command", statement],
+        capture_output=True, text=True, check=False, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
