@@ -1126,6 +1126,12 @@ _SPORTYBET_COMPETITION_IDS = {
 
     # Asia / Oceania
     ("sr:tournament:402", "sr:category:52"): "jpn.2",
+    ("sr:tournament:196", "sr:category:52"): "jpn.1",   # J1 League, Japan
+    ("sr:tournament:410", "sr:category:291"): "kor.1",  # K-League 1, Korea
+    ("sr:tournament:649", "sr:category:99"): "chn.1",   # Chinese Super League
+    ("sr:tournament:955", "sr:category:310"): "sau.1", # Saudi Pro League
+    ("sr:tournament:825", "sr:category:353"): "qat.1", # Qatar Stars League
+    ("sr:tournament:915", "sr:category:301"): "irn.1", # Persian Gulf Pro League
     ("sr:tournament:136", "sr:category:34"): "aus.1",
 
     # UEFA / international
