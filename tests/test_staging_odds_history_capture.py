@@ -281,3 +281,129 @@ def test_fresh_source_readonly_preview_has_explicit_network_provenance(
     assert result["eligible_prices"] == 2
     assert result["rows_inserted"] == 0
     assert result["clv_proven"] is False
+
+
+class _LiveWriteConnection:
+    def __init__(self):
+        self.rows = {}
+        self.write_count = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, statement, params=None):
+        query = str(statement)
+        if "SHOW transaction_read_only" in query:
+            return SimpleNamespace(scalar=lambda: "off")
+        if query.strip().startswith("CREATE "):
+            return SimpleNamespace()
+        if "SELECT COUNT(*) FROM public.sportybet_odds_history_v1" in query:
+            sid = params["sid"]
+            return SimpleNamespace(
+                scalar=lambda: sum(1 for key in self.rows if key[0] == sid)
+            )
+        if "INSERT INTO public.sportybet_odds_history_v1" in query:
+            for row in params:
+                key = (row["snapshot_id"], row["sportybet_event_id"],
+                       row["market"])
+                if key not in self.rows:
+                    self.rows[key] = dict(row)
+                    self.write_count += 1
+            return SimpleNamespace()
+        raise AssertionError("Unexpected SQL: " + query[:100])
+
+
+class _LiveWriter:
+    dialect = SimpleNamespace(name="postgresql")
+
+    def __init__(self):
+        self.conn = _LiveWriteConnection()
+        self.transaction_attempts = 0
+
+    def begin(self):
+        self.transaction_attempts += 1
+        return self.conn
+
+
+def test_live_snapshot_decline_never_writes_or_refetches(monkeypatch):
+    writer = _LiveWriter()
+    fetched = []
+    monkeypatch.setattr(capture, "preflight", lambda: "betsightly_db_staging")
+    monkeypatch.setattr(capture, "require_write_guard", lambda: None)
+
+    def fetch_once():
+        fetched.append(True)
+        return cache()
+
+    monkeypatch.setattr(capture, "fresh_bookmaker_cache", fetch_once)
+    seen = []
+    result = capture.capture(
+        write=True, db_engine=writer, now=NOW, source="live",
+        approve=lambda preview: seen.append(preview) or False,
+    )
+    assert result["mode"] == "OPERATOR_DECLINED"
+    assert result["rows_inserted"] == 0
+    assert writer.transaction_attempts == 0
+    assert writer.conn.write_count == 0
+    assert len(fetched) == len(seen) == 1
+
+
+def test_live_snapshot_approval_writes_exact_pre_reviewed_prices_once(
+    monkeypatch,
+):
+    writer = _LiveWriter()
+    fetched = []
+    reviewed = []
+    monkeypatch.setattr(capture, "preflight", lambda: "betsightly_db_staging")
+    monkeypatch.setattr(capture, "require_write_guard", lambda: None)
+
+    def fetch_once():
+        fetched.append(True)
+        return cache()
+
+    monkeypatch.setattr(capture, "fresh_bookmaker_cache", fetch_once)
+
+    def approve(report):
+        assert report["source_mode"] == "live"
+        assert report["network_requests_made"] is True
+        assert report["rows_inserted"] == 0
+        reviewed.append(report["snapshot_id"])
+        return True
+
+    result = capture.capture(
+        write=True, db_engine=writer, now=NOW, source="live",
+        approve=approve,
+    )
+    assert len(fetched) == len(reviewed) == 1
+    assert result["snapshot_id"] == reviewed[0]
+    assert result["rows_inserted"] == 2
+    assert result["mode"] == "WRITE_STAGING"
+    assert {row["quoted_odds"] for row in writer.conn.rows.values()} == {
+        1.80, 1.26,
+    }
+    assert all(row["captured_at"] == FETCHED
+               for row in writer.conn.rows.values())
+
+    # Replaying a source snapshot cannot overwrite or duplicate the quotes.
+    result2 = capture.capture(
+        write=True, db_engine=writer, now=NOW, source="live",
+        approve=approve,
+    )
+    assert result2["rows_inserted"] == 0
+    assert result2["rows_already_captured"] == 2
+    assert writer.conn.write_count == 2
+
+
+def test_unreviewed_live_write_is_blocked_before_network_call(monkeypatch):
+    writer = _LiveWriter()
+    monkeypatch.setattr(capture, "preflight", lambda: "betsightly_db_staging")
+    monkeypatch.setattr(capture, "require_write_guard", lambda: None)
+    monkeypatch.setattr(
+        capture, "fresh_bookmaker_cache",
+        lambda: pytest.fail("must not fetch"),
+    )
+    with pytest.raises(RuntimeError, match="same-snapshot operator review"):
+        capture.capture(write=True, db_engine=writer, now=NOW, source="live")
