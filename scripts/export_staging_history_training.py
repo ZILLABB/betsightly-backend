@@ -17,7 +17,8 @@ from leagues.chronological_training_data import build_examples, chronological_sp
 
 
 def training_data(*, min_history: int = 3, write_files: bool = False,
-                  output_prefix: str = "openfootball_shadow") -> dict:
+                  output_prefix: str = "openfootball_shadow",
+                  evaluate: bool = False) -> dict:
     database = preflight()
     from database import engine
     with engine.connect() as conn:
@@ -57,6 +58,11 @@ def training_data(*, min_history: int = 3, write_files: bool = False,
         "production_unchanged": True,
         "files_written": [],
     }
+    if evaluate:
+        from leagues.shadow_historical_challenger import evaluate_shadow
+        counts["shadow_evaluation"] = evaluate_shadow(
+            split["train"], split["holdout"],
+        )
     if write_files:
         prefix = Path(output_prefix)
         prefix.parent.mkdir(parents=True, exist_ok=True)
@@ -73,10 +79,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--min-team-history", type=int, default=3)
     parser.add_argument("--write-files", action="store_true")
+    parser.add_argument(
+        "--evaluate-shadow", action="store_true",
+        help="Train temporary, never-promoted logistic models on chronological data",
+    )
     parser.add_argument("--output-prefix", default="openfootball_shadow")
     opts = parser.parse_args()
     print(json.dumps(training_data(
         min_history=opts.min_team_history,
         write_files=opts.write_files,
         output_prefix=opts.output_prefix,
+        evaluate=opts.evaluate_shadow,
     ), sort_keys=True))
