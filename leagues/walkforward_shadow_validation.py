@@ -100,6 +100,12 @@ def evaluate_walk_forward(
                 "n": diagnostic["n"],
                 "challenger_brier": diagnostic["model_brier"],
                 "baseline_brier": diagnostic["baseline_brier"],
+                "league_conditional_baseline_brier": report[
+                    "league_conditional_baseline_brier"
+                ],
+                "beats_league_conditional_baseline": report[
+                    "beats_league_conditional_baseline"
+                ],
                 "improvement": diagnostic["paired_improvement"],
                 "challenger_better": diagnostic["model_better"],
                 "nominal_95pct_ci": diagnostic["nominal_95pct_ci"],
@@ -120,6 +126,10 @@ def evaluate_walk_forward(
                          for row in measured) / n
         mean_base = sum(row["baseline_brier"] * row["n"]
                         for row in measured) / n
+        mean_league_base = sum(
+            row["league_conditional_baseline_brier"] * row["n"]
+            for row in measured
+        ) / n
         totals[market] = {
             "status": "WALK_FORWARD_EVALUATED",
             "test_matches": n,
@@ -129,9 +139,21 @@ def evaluate_walk_forward(
             ),
             "weighted_challenger_brier": round(mean_model, 6),
             "weighted_baseline_brier": round(mean_base, 6),
+            "weighted_league_conditional_baseline_brier": round(
+                mean_league_base, 6,
+            ),
             "weighted_improvement": round(mean_base - mean_model, 6),
+            "weighted_improvement_vs_league_conditional": round(
+                mean_league_base - mean_model, 6,
+            ),
+            "folds_beating_league_conditional_baseline": sum(
+                row["beats_league_conditional_baseline"] for row in measured
+            ),
             "consistently_better_in_all_folds": all(
                 row["challenger_better"] for row in measured
+            ) and len(measured) == folds,
+            "consistently_beats_league_conditional": all(
+                row["beats_league_conditional_baseline"] for row in measured
             ) and len(measured) == folds,
         }
 
@@ -146,8 +168,9 @@ def evaluate_walk_forward(
         "no_sportybet_odds_or_clv_comparison": True,
         "source_scores_independently_verified": False,
         "note": (
-            "Rolling evaluation beats a single split, but no bookmaker "
-            "price-based edge, model champion comparison, or independent "
+            "Includes harder train-only league-specific rate baselines, "
+            "but no bookmaker price-based edge, production champion comparison, "
+            "or independent "
             "result verification has been established."
         ),
     }
