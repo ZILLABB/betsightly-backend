@@ -62,3 +62,35 @@ def test_every_cached_unique_fixture_gets_a_review_row():
     assert report["pre_match_forecasts"] == 2
     assert report["statuses"]["SIMULATED_EXCLUDED"] == 1
     assert report["official_predictions_changed"] is False
+
+
+def test_out_of_day_youth_and_simulated_are_excluded_before_classifying_today():
+    today = fixture("today")
+    tomorrow = fixture("tomorrow", name="Club SRL")
+    tomorrow["kickoff_ms"] += 24 * 60 * 60 * 1000
+    tomorrow_youth = fixture("tomorrow-youth")
+    tomorrow_youth["kickoff_ms"] += 24 * 60 * 60 * 1000
+    tomorrow_youth["home_squad"] = "U19"
+    today_youth = fixture("youth")
+    today_youth["home_squad"] = "U19"
+    today_srl = fixture("srl", name="Club SRL")
+    board = {"all": [today, tomorrow, tomorrow_youth, today_youth, today_srl]}
+    report = full_day_baseline(board, date_wat="2026-10-09")
+    assert report["count"] == 3
+    assert report["statuses"] == {
+        "MARKET_BASELINE_ONLY": 1,
+        "NON_SENIOR_EXCLUDED": 1,
+        "SIMULATED_EXCLUDED": 1,
+    }
+    assert all(entry["date_wat"] == "2026-10-09" for entry in report["full_day_fixtures"])
+    assert {entry["event_id"] for entry in report["full_day_fixtures"]} == {
+        "today", "youth", "srl",
+    }
+
+
+def test_wrong_day_precedes_identity_error():
+    tomorrow_invalid_identity = fixture("tomorrow", name="Opponents FC")
+    tomorrow_invalid_identity["kickoff_ms"] += 24 * 60 * 60 * 1000
+    assert fixture_consensus(
+        tomorrow_invalid_identity, date_wat="2026-10-09"
+    )["status"] == "WRONG_WAT_DAY"
