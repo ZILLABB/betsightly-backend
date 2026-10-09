@@ -1105,6 +1105,15 @@ _SPORTYBET_COMPETITION_IDS = {
     ("sr:tournament:203", "sr:category:21"): "rus.1",
     ("sr:tournament:210", "sr:category:152"): "srb.1",
 
+    # More exact senior competition IDs observed in the public SportyBet board.
+    ("sr:tournament:206", "sr:category:22"): "sco.2",  # Scottish Championship
+    ("sr:tournament:215", "sr:category:25"): "sui.1",  # Swiss Super League
+    ("sr:tournament:218", "sr:category:86"): "ukr.1",  # Ukrainian Premier League
+    ("sr:tournament:187", "sr:category:11"): "hun.1",  # Hungary NB I
+    ("sr:tournament:266", "sr:category:66"): "isr.1",  # Israel Premier League
+    ("sr:tournament:41", "sr:category:19"): "fin.1",  # Finnish Veikkausliiga
+    ("sr:tournament:1032", "sr:category:485"): "tha.1",  # Thai League 1
+
     # North America
     ("sr:tournament:242", "sr:category:26"): "usa.1",
     ("sr:tournament:1690", "sr:category:26"): "usa.nwsl",
