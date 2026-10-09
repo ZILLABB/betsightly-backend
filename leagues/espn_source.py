@@ -455,6 +455,18 @@ def get_fixtures(days_ahead: int = 3, force: bool = False,
         "successful_league_count": len(successful),
         "requested_league_count": len(ESPN_CLUB_LEAGUES),
         "failed_league_count": len(failed),
+        # A degraded board must explain each failed source rather than
+        # exposing only the opaque total 99/116. Bounded, non-sensitive
+        # provider status from the same already-completed fetch attempt.
+        "failed_league_details": {
+            slug: {
+                "error": str((_FETCH_HEALTH.get(slug) or {}).get("error") or "unknown")[:180],
+                "failed_months": list(
+                    (_FETCH_HEALTH.get(slug) or {}).get("failed_months") or []
+                )[:3],
+            }
+            for slug in failed
+        },
         "recovered_leagues": recovered_leagues,
         "registry_version": _registry_version(),
         "cache_hit": False,
