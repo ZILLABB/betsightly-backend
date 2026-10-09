@@ -192,6 +192,10 @@ def audit() -> dict:
                   AND settlement_source IS NOT NULL AND settled_at >= kickoff
             """)).scalar()
     report = evidence_status(shadow, history)
+    from scripts.audit_staging_paired_challenger import audit_paired_challenger
+    report["prospective_match_result_pairs"] = audit_paired_challenger(
+        db_engine=engine
+    )
     report["settled_market_scoring"] = {
         "status": "DESCRIPTIVE_ONLY_NO_PAIRED_CHAMPION_COMPARISON",
         "real_bookable_settled_observations": score_count,
