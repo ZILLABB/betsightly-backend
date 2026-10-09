@@ -124,6 +124,11 @@ def make_summary(mode: str, audit: dict | None,
             f"- Distinct fixtures scored: "
             f"{(audit.get('settled_market_scoring') or {}).get('distinct_settled_fixtures', 0)}",
             "- Settled market scores: **descriptive only; no paired champion comparison**",
+            f"- Odds history capture snapshots: "
+            f"{(audit.get('odds_history_readiness') or {}).get('warehouse_snapshots', 0)}",
+            f"- Fixture-market combinations with multiple price captures: "
+            f"{(audit.get('odds_history_readiness') or {}).get('fixture_markets_with_multiple_prices', 0)}",
+            f"- CLV evidence: **{(audit.get('odds_history_readiness') or {}).get('status', 'UNAVAILABLE')}**",
         ]
         paired = audit.get("prospective_match_result_pairs") or {}
         lines += [
