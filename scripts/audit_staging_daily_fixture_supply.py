@@ -124,7 +124,7 @@ def inventory_for_day(
     }
 
 
-def audit(target_wat_date: str) -> dict:
+def audit(target_wat_date: str, *, refresh_if_stale: bool = False) -> dict:
     database = preflight()
     requested = date.fromisoformat(target_wat_date)
     today = datetime.now(WAT).date()
@@ -134,11 +134,25 @@ def audit(target_wat_date: str) -> dict:
     from leagues import sportybet
     from leagues.engine import prepared_board
     picks, fixtures, prepared = prepared_board(days_ahead=7)
+    refreshed = False
     if not prepared.get("ready") or prepared.get("stale"):
-        raise RuntimeError(
-            "Prepared board is missing/stale; run "
-            "python -m scripts.prepare_staging_board_once"
-        )
+        if not refresh_if_stale:
+            raise RuntimeError(
+                "Prepared staging board is missing/stale "
+                f"(age_seconds={prepared.get('age_seconds')}). "
+                "Run python -m scripts.prepare_staging_board_once or "
+                "explicitly specify --refresh-if-stale."
+            )
+        # Explicit CLI permission only. prepare_once repeats the staging
+        # environment, disabled-jobs and *actual DB identity* safety guards.
+        from scripts.prepare_staging_board_once import prepare_once
+        prepare_once()
+        refreshed = True
+        picks, fixtures, prepared = prepared_board(days_ahead=7)
+        if not prepared.get("ready") or prepared.get("stale"):
+            raise RuntimeError(
+                "Staging board remains unusable after explicit refresh"
+            )
 
     # Read the existing persisted SportyBet cache. Never call fetch_board(),
     # which may silently trigger a new provider request.
@@ -156,7 +170,8 @@ def audit(target_wat_date: str) -> dict:
     return {
         "database": database,
         "target_wat_date": target_wat_date,
-        "read_only": True,
+        "read_only": not refreshed,
+        "board_refreshed": refreshed,
         "publication_changed": False,
         "booking_codes_created": False,
         "prepared_snapshot": prepared.get("board_snapshot_id"),
@@ -176,5 +191,12 @@ def audit(target_wat_date: str) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date", required=True, help="YYYY-MM-DD WAT")
+    parser.add_argument(
+        "--refresh-if-stale", action="store_true",
+        help="Explicitly regenerate the staging-only prepared board if stale",
+    )
     args = parser.parse_args()
-    print(json.dumps(audit(args.date), sort_keys=True, default=str))
+    print(json.dumps(
+        audit(args.date, refresh_if_stale=args.refresh_if_stale),
+        sort_keys=True, default=str,
+    ))
