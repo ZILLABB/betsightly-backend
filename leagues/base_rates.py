@@ -32,7 +32,11 @@ logger = logging.getLogger(__name__)
 
 CACHE_PATH = cache_path(Path(__file__).parent / "data" / "league_base_rates.json")
 CACHE_TTL = 7 * 24 * 3600          # recompute weekly
-HISTORY_CACHE_SCHEMA = 3  # selective six-month history backfill; invalidate 45-day-only cache
+# Retain the validated v2 cache until the v3 backfill is successfully built.
+# A forced schema migration previously made history readiness ABSENT and
+# blocked the full staging board. New backfill is tracked by policy metadata.
+HISTORY_CACHE_SCHEMA = 2
+HISTORY_BACKFILL_VERSION = 1
 LOOKBACK_DAYS = 45                 # sample window
 MIN_SAMPLE = 10                    # below this, use global defaults
 MIN_PRIOR_SAMPLE = 20
@@ -243,6 +247,7 @@ def compute_base_rates(slugs: dict[str, str], *,
     rates["_cache_schema"] = HISTORY_CACHE_SCHEMA
     rates["_built_at"] = now.isoformat()
     rates["_history_backfill"] = backfill
+    rates["_history_backfill_version"] = HISTORY_BACKFILL_VERSION
     rates["_history_lookback_days"] = LOOKBACK_DAYS
     rates["_history_max_lookback_days"] = BACKFILL_LOOKBACK_DAYS
     rates["_failed_leagues"] = sorted(failed_leagues)
