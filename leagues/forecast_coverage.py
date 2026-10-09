@@ -11,6 +11,7 @@ from collections import Counter
 from leagues.engine import kickoff_wat_date
 from leagues.publication_policy import evaluate_leg
 from leagues.fixture_ranker import canonical_fixture_recommendations
+from leagues.model_value_diagnostics import summarize_value
 
 PRODUCTS = ("banker", "2_odds", "5_odds", "10_odds", "over_1_5", "rollover")
 
@@ -92,6 +93,7 @@ def coverage_funnel(fixtures: list[dict], picks: list[dict], *, date: str) -> di
         ),
         "filtered_candidate_legs": len(dated_picks),
         "ranked_candidate_legs": len(ranked_picks),
+        "model_value_diagnostics": summarize_value(ranked_picks),
         "real_price_candidate_legs": len(candidates_with_real_prices),
         "real_price_and_exact_bookable_legs": len(
             candidates_with_exact_bookability
