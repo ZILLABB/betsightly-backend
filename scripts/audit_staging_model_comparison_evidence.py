@@ -118,7 +118,7 @@ def evidence_status(shadow: dict, history: dict) -> dict:
         blockers.append("NO_SETTLED_REAL_BOOKABLE_PREMATCH_OBSERVATIONS")
     if ranges_disjoint:
         blockers.append("HISTORY_ENDS_BEFORE_FIRST_CAPTURED_ODDS")
-    blockers.append("NO_VERIFIED_SAME_FIXTURE_CHAMPION_CHALLENGER_PAIRS")
+    blockers.append("NO_VERIFIED_SAME_FIXTURE_CHAMPION_CHALLENGER_REAL_ODDS_PAIRS")
     blockers.append("NO_HISTORICAL_CLOSING_LINE_MATCHED_COHORT")
     return {
         "status": "CHAMPION_COMPARISON_BLOCKED",
