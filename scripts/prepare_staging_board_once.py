@@ -61,10 +61,18 @@ def warm_staging_history() -> dict:
 
     before = history_readiness.status()
     prior = base_rates.get_base_rates(allow_refresh=False)
+    # Normal board preparation should not repeatedly refetch months of
+    # historical football just because optional new backfill is unavailable.
+    # The operator must explicitly request the expansion. Always recover
+    # missing historical prerequisites, with production safely excluded.
+    explicit_backfill = _enabled(os.getenv("BETSIGHTLY_STAGING_HISTORY_BACKFILL"))
     requested = (
         not before["usable"]
-        or prior.get("_history_backfill_version")
-        != base_rates.HISTORY_BACKFILL_VERSION
+        or (
+            explicit_backfill
+            and prior.get("_history_backfill_version")
+            != base_rates.HISTORY_BACKFILL_VERSION
+        )
     )
     if requested:
         base_rates.get_base_rates(force=True)
@@ -78,6 +86,7 @@ def warm_staging_history() -> dict:
         "state": after["state"],
         "usable": after["usable"],
         "backfill_refresh_requested": requested,
+        "backfill_explicitly_requested": explicit_backfill,
         "backfill_policy_applied": bool(
             base_rates.get_base_rates(allow_refresh=False).get(
                 "_history_backfill_version"
