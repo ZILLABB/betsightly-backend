@@ -50,6 +50,10 @@ def test_supply_audit_explicit_refresh_reloads_then_evaluates(monkeypatch):
                         lambda *args: {"sportybet_fixture_count": 1})
     monkeypatch.setattr(audit, "diagnose_supply",
                         lambda *args: {"products": {}})
+    monkeypatch.setattr(
+        audit, "historical_coverage_from_staging",
+        lambda *args: {"status": "HISTORY_NOT_INGESTED"},
+    )
     monkeypatch.setattr(forecast_coverage, "coverage_funnel",
                         lambda *args, **kwargs: {"fixture_count": 1})
 
