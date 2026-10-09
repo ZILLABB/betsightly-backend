@@ -105,6 +105,10 @@ def make_summary(mode: str, audit: dict | None,
             f"- Real bookable pre-match: {audit['real_bookable_pre_match_observations']}",
             f"- Settled comparable observations: "
             f"{audit['settled_real_bookable_pre_match_observations']}",
+            f"- Past-kickoff pending observations awaiting verified results: "
+            f"{audit.get('mature_pending_settlement_rows', 0)} "
+            f"across {audit.get('mature_pending_settlement_fixtures', 0)} fixtures",
+            f"- Voided observations: {audit.get('void_observations', 0)}",
             "- Blockers: " + ", ".join(audit["blockers"]),
         ]
     if walk is not None:
