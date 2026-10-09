@@ -1,0 +1,175 @@
+name: Staging recovery HTTP smoke
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/recovery-staging-smoke.yml"
+      - "leagues/api.py"
+      - "leagues/next_available.py"
+      - "leagues/booking.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  staging-recovery-http-smoke:
+    if: github.head_ref == 'fix/recovery-integration-20261008' || github.ref_name == 'fix/recovery-integration-20261008'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STAGING_BASE: https://betsightly-backend-mdr1.onrender.com
+      EXPECT_STAGING_COMMIT: 286eb4f25973089f09466855614ba527c11d6ae3
+    steps:
+      - name: Check public staging routes without writes or credentials
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+          
+          base = os.environ["STAGING_BASE"].rstrip("/")
+          
+          def get(path, retries=2):
+              url = base + path
+              for attempt in range(retries):
+                  try:
+                      with urllib.request.urlopen(
+                          urllib.request.Request(
+                              url, headers={"Accept": "application/json", "User-Agent": "BetSightly-staging-smoke/1"}
+                          ), timeout=35,
+                      ) as resp:
+                          return resp.status, json.loads(resp.read().decode("utf-8"))
+                  except urllib.error.HTTPError as e:
+                      raw = e.read().decode("utf-8")
+                      try:
+                          body = json.loads(raw)
+                      except Exception:
+                          body = {"message": raw[:100]}
+                      if e.code in (502, 503, 504) and attempt + 1 < retries:
+                          time.sleep(12)
+                          continue
+                      return e.code, body
+                  except (TimeoutError, ConnectionError, urllib.error.URLError):
+                      if attempt + 1 == retries:
+                          raise
+                      time.sleep(12)
+          
+          # The staging service can cold-start. Use a bounded GET-only probe.
+          status, health = get("/api/health/", retries=5)
+          assert status == 200, f"Staging health returned {status}"
+          print("PASS /api/health/: 200")
+          
+          status, code_board = get("/api/leagues/bookings", retries=3)
+          assert status == 200, f"Public bookings route failed: {status}"
+          assert isinstance(code_board.get("bookings"), dict), "Invalid booking response shape"
+          fields = {
+              "status", "booking_status", "actionable", "failure_category",
+              "reason", "share_code", "share_url", "expires_at", "booked_leg_count",
+          }
+          for tier, booking in code_board["bookings"].items():
+              assert isinstance(booking, dict), f"{tier}: booking not an object"
+              assert set(booking) <= fields, f"{tier}: raw/private stored booking fields exposed"
+              if not booking.get("actionable"):
+                  assert not booking.get("share_code") and not booking.get("share_url"), (
+                      f"{tier}: nonactionable booking exposed live code"
+                  )
+          print(
+              "PASS /api/leagues/bookings: public allowlist, "
+              f"{len(code_board['bookings'])} tier statuses, "
+              f"{code_board.get('count', 0)} actionable; no raw stored payload."
+          )
+          
+          status, next_available = get("/api/leagues/next-available", retries=3)
+          board_unready = False
+          if status == 503:
+              detail = next_available.get("message") or next_available.get("detail") or {}
+              reason = detail.get("reason") if isinstance(detail, dict) else None
+              assert reason in {
+                  "prepared_board_stale", "board_refreshing", "history_not_ready"
+              }, f"Unexpected 503 from Next Available: {reason}"
+              board_unready = True
+              print(
+                  "DEGRADED /api/leagues/next-available: fail-closed 503 "
+                  f"reason={reason}; no stale odds served."
+              )
+          else:
+              assert status == 200, (
+                  "Staging next-available endpoint unavailable: "
+                  f"{status} (check stage prepared board and history readiness)"
+              )
+              assert next_available.get("status") == "success"
+              assert next_available.get("preview_only") is True
+              assert next_available.get("official_publication") is False
+              assert next_available.get("actionable") is False
+              assert next_available.get("bookable_code_verified") is False
+              dates = next_available.get("evaluated_dates", [])
+              assert isinstance(dates, list) and len(dates) >= 1
+              for row in dates:
+                  assert row["qualified_unique_fixture_count"] <= row["raw_fixture_count"]
+                  print(
+                      "STAGING DAILY QUALITY "
+                      f"date={row['fixture_date_wat']} "
+                      f"raw_fixtures={row['raw_fixture_count']} "
+                      f"qualified_unique={row['qualified_unique_fixture_count']} "
+                      f"qualified_selections={row['qualified_selection_count']} "
+                      f"ranked_selections={row['ranked_selection_count']} "
+                      f"rejections={json.dumps(row.get('rejection_reasons') or {}, sort_keys=True)}"
+                  )
+              chosen = next_available.get("next_available")
+              if chosen:
+                  assert chosen["fixture_target_date"] > next_available["publication_date_wat"]
+                  candidates = chosen.get("candidates", [])
+                  assert len(candidates) == len({str(p.get("match_id")) for p in candidates})
+                  for pick in candidates:
+                      assert not pick.get("booking") and not pick.get("share_code"), (
+                          "Next Available preview must not advertise code."
+                      )
+                  markets = {}
+                  for pick in candidates:
+                      market = str(pick.get("market_key") or pick.get("market") or "unknown")
+                      markets[market] = markets.get(market, 0) + 1
+                  print(
+                      "STAGING BEST QUALIFIED DAY "
+                      f"date={chosen['fixture_target_date']} "
+                      f"qualified_fixtures={chosen['qualified_unique_fixture_count']} "
+                      f"preview_market_distribution={json.dumps(markets, sort_keys=True)}"
+                  )
+              print(
+                  "PASS /api/leagues/next-available: "
+                  f"{len(dates)} dates analysed, available={next_available.get('available')}; "
+                  "not actionable or official."
+              )
+
+          status, daily = get("/api/leagues/daily-accumulators", retries=2)
+          assert status in (200, 404), f"Daily official route returned {status}"
+          if status == 200:
+              assert isinstance(daily.get("accumulators"), dict)
+              fixture_ids = []
+              for tier in ("rollover", "banker", "2_odds", "5_odds", "10_odds", "over_1_5"):
+                  card = daily["accumulators"].get(tier) or {}
+                  if not card.get("selected"):
+                      assert not (card.get("booking") or {}).get("actionable"), (
+                          f"{tier}: blocked tier exposed actionable code"
+                      )
+                      continue
+                  fixture_ids.extend(
+                      str(g.get("match_id")) for g in card.get("games") or []
+                      if g.get("match_id") is not None
+                  )
+              assert len(fixture_ids) == len(set(fixture_ids)), (
+                  "Official daily products duplicated a fixture."
+              )
+              print(f"PASS daily official card: unique fixtures; publication date {daily.get('date')}")
+          else:
+              print("INFO /api/leagues/daily-accumulators: no staged official card (404)")
+          
+          if board_unready:
+              raise AssertionError(
+                  "STAGING RELEASE BLOCKED: API works but no fresh model board is prepared"
+              )
+          print("STAGING HTTP SMOKE PASSED (GET-only; no booking or publishing requested)")
+          PY

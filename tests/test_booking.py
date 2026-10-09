@@ -915,3 +915,49 @@ def test_concurrent_generated_booking_requests_mint_one_code(monkeypatch):
         worker.join()
     assert len(calls) == 1
     assert [result["share_code"] for result in results] == ["ONE123", "ONE123"]
+
+
+def test_blocked_rollover_cannot_create_code_from_pending_chain(monkeypatch):
+    """October 8: the rejected rollover had a separately stored FULL code."""
+    monkeypatch.setattr("leagues.sportybet.fetch_board", lambda **kw: _board())
+    monkeypatch.setattr(B, "bookings_for", lambda *_: {})
+    monkeypatch.setattr(B, "create_booking", lambda *a, **k: (
+        (_ for _ in ()).throw(AssertionError("blocked rollover must not book"))
+    ))
+    report = B.book_card(DAY, {
+        "rollover": {
+            "selected": False,
+            "games": [],
+            "result_status": "PUBLICATION_POLICY_BLOCKED",
+            "days": [{
+                "date": DAY, "status": "pending",
+                "picks": [{
+                    "match_id": "blocked-1",
+                    "market": "over_1_5",
+                    "commence_time": "2099-08-24T19:00:00Z",
+                }],
+            }],
+        },
+    })
+    assert report["booked"] == []
+    assert "rollover: publication withheld" in report["skipped"]
+
+
+def test_withheld_or_empty_card_never_attaches_an_actionable_old_code(monkeypatch):
+    game = _game("Fulham", "Chelsea", "over_1_5")
+    old = _active_record([game])
+    monkeypatch.setattr(B, "bookings_for", lambda *_: {
+        "rollover": old, "banker": old, "over_1_5": old,
+    })
+    card = {
+        "rollover": {
+            "selected": False, "games": [],
+            "booking": {"actionable": True, "share_code": "OLD"},
+        },
+        "banker": {"selected": True, "games": [game]},
+        "over_1_5": {"selected": True, "games": []},
+    }
+    B.attach_bookings(DAY, card)
+    assert "booking" not in card["rollover"]
+    assert "booking" not in card["over_1_5"]
+    assert card["banker"]["booking"]["actionable"] is True
