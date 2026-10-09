@@ -2,10 +2,14 @@
 # This never fetches new bookmaker odds or refreshes/publishes the daily board.
 [CmdletBinding()]
 param(
-    [switch]$DryRunOnly
+    [switch]$DryRunOnly,
+    [switch]$LiveOnce
 )
 
 $ErrorActionPreference = "Stop"
+if ($DryRunOnly -and $LiveOnce) {
+    throw "Choose either -DryRunOnly or -LiveOnce, not both."
+}
 $expectedBranch = "feature/daily-tier-reach-and-builder-supply-20261009"
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
@@ -23,7 +27,8 @@ try {
     $names = @(
         "DATABASE_URL", "ENVIRONMENT", "ENABLE_BACKGROUND_JOBS",
         "PREPARED_BOARD_PERSISTENCE_ENABLED", "BETSIGHTLY_STAGING_BOARD_ONCE",
-        "PGOPTIONS", "BETSIGHTLY_STAGING_ODDS_HISTORY_WRITE"
+        "PGOPTIONS", "BETSIGHTLY_STAGING_ODDS_HISTORY_WRITE",
+        "BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE"
     )
     $before = @{}
     foreach ($name in $names) {
@@ -44,6 +49,22 @@ try {
         $env:BETSIGHTLY_STAGING_BOARD_ONCE = "CONFIRM_STAGING_ONLY"
         $env:PGOPTIONS = "-c default_transaction_read_only=on"
         Remove-Item Env:\BETSIGHTLY_STAGING_ODDS_HISTORY_WRITE -ErrorAction SilentlyContinue
+        Remove-Item Env:\BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE -ErrorAction SilentlyContinue
+
+        if ($LiveOnce) {
+            # The backend fetches ONE real complete board, displays the
+            # precise source snapshot, and demands operator approval before
+            # appending those exact same in-memory quotes to staging.
+            # No second live fetch, no staging bookmaker cache mutation.
+            Remove-Item Env:\PGOPTIONS -ErrorAction SilentlyContinue
+            $env:BETSIGHTLY_STAGING_ODDS_HISTORY_WRITE = "CONFIRM_APPEND_ONLY_ODDS_HISTORY"
+            $env:BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE = "CONFIRM_SOURCE_ONLY_LIVE_FETCH"
+            & $python -m scripts.capture_staging_odds_history --source live --review-live-and-write
+            if ($LASTEXITCODE -ne 0) {
+                throw "One-shot live staging odds capture failed or was interrupted."
+            }
+            return
+        }
 
         # The Python CLI verifies actual connected DB identity and original
         # bookmaker source timestamps before returning a JSON preview.
