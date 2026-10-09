@@ -42,7 +42,7 @@ def test_even_settled_rows_cannot_prove_champion_comparison_without_pair():
          "latest_completed_match_date": date(2026, 9, 20)},
     )
     assert "HISTORY_ENDS_BEFORE_FIRST_CAPTURED_ODDS" not in result["blockers"]
-    assert "NO_VERIFIED_SAME_FIXTURE_CHAMPION_CHALLENGER_PAIRS" in result["blockers"]
+    assert "NO_VERIFIED_SAME_FIXTURE_CHAMPION_CHALLENGER_REAL_ODDS_PAIRS" in result["blockers"]
     assert result["production_promotion_authorized"] is False
 
 
