@@ -236,3 +236,36 @@ table, and missing read access merely produces a reported access blocker.
 The append-only capture has intentionally not been executed on the live
 staging database in this code batch: the table remains uninitialized until
 an authorized staging write is performed. Production is unchanged.
+
+### Operator helper for initial archive capture
+
+The repository includes `scripts/capture_staging_odds_history.ps1`, a
+Windows PowerShell wrapper modelled on the already-validated settlement
+helper. It never enables a job or gives write access to GitHub Actions.
+
+```powershell
+cd C:\Users\ZILLAB\Desktop\betsightly-stage-board
+git fetch origin
+git switch feature/daily-tier-reach-and-builder-supply-20261009
+git pull --ff-only origin feature/daily-tier-reach-and-builder-supply-20261009
+.\scripts\capture_staging_odds_history.ps1 -DryRunOnly
+# Only if the provider snapshot is complete and not older than six hours:
+.\scripts\capture_staging_odds_history.ps1
+```
+
+The script prompts for the isolated **staging admin** database URL as a
+masked SecureString, starts in a read-only PostgreSQL session, validates
+the JSON preview, then separately requires typing `CAPTURE STAGING ODDS`
+before a write. The backend performs its staging-only checks again.
+The password and temporary authorization flags are restored/cleared at
+the end. Existing captured snapshots are not updated.
+
+**Run only with a truly new complete bookmaker snapshot.** Re-running a
+stale board cannot create another CLV observation. A failed preview should
+be diagnosed as missing/incomplete/stale source data, not worked around
+by changing the age guard or by replacing `fetched_at` with current time.
+
+To collect history routinely, a staging-specific capture operator still
+requires a secure, least-privilege writer identity and a new provider
+snapshot at each desired lead-time checkpoint. Do not enable production
+or create an unattended task with embedded admin credentials.
