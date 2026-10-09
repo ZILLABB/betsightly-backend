@@ -17,13 +17,13 @@ def _row(day, home, away, hg, ag, *, slug="eng.1", key=None):
 
 def test_same_day_matches_cannot_use_each_other_in_form_features():
     history = [
-        _row("2026-01-01", "Team A", "Team B", 1, 0),
-        _row("2026-01-02", "Team B", "Team A", 2, 0),
-        _row("2026-01-03", "Team A", "Team B", 1, 1),
-        _row("2026-01-04", "Team B", "Team A", 1, 0),
+        _row("2026-01-01", "Team Alpha", "Team Beta", 1, 0),
+        _row("2026-01-02", "Team Beta", "Team Alpha", 2, 0),
+        _row("2026-01-03", "Team Alpha", "Team Beta", 1, 1),
+        _row("2026-01-04", "Team Beta", "Team Alpha", 1, 0),
         # Two same-day rematches (artificial but tests leakage contract).
-        _row("2026-01-05", "Team A", "Team B", 5, 0),
-        _row("2026-01-05", "Team B", "Team A", 0, 5),
+        _row("2026-01-05", "Team Alpha", "Team Beta", 5, 0),
+        _row("2026-01-05", "Team Beta", "Team Alpha", 0, 5),
     ]
     report = build_examples(history, min_history=3)
     examples = [e for e in report["examples"]
