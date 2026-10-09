@@ -44,6 +44,11 @@ def test_operator_only_temporarily_exports_database_credentials():
     assert "finally {" in code
     assert "[switch]$DryRunOnly" in code
     assert 'Write-Host "Cancelled. No database changes made."' in code
+    assert "[switch]$LiveOnce" in code
+    assert 'if ($DryRunOnly -and $LiveOnce)' in code
+    assert "--source live --review-live-and-write" in code
+    assert "CONFIRM_SOURCE_ONLY_LIVE_FETCH" in code
+    assert "BETSIGHTLY_STAGING_ODDS_SOURCE_LIVE" in code
 
 
 def test_powershell_script_syntax_if_parser_is_installed():
