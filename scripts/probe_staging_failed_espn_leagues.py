@@ -40,7 +40,7 @@ def failed_from_saved_snapshot() -> tuple[list[str], str | None]:
 def probe(
     target_wat_date: str, *,
     slugs: list[str] | None = None,
-    max_leagues: int = 25,
+    max_leagues: int = 25, probe_year_fallback: bool = False,
 ) -> dict:
     database = preflight()
     requested = date.fromisoformat(target_wat_date)
@@ -74,12 +74,27 @@ def probe(
                 else "REACHABLE_EMPTY_RESPONSE" if succeeded
                 else "UNAVAILABLE"
             )
+            year_check = None
+            if probe_year_fallback and not succeeded:
+                # ESPN documents a yearly date filter in addition to month
+                # queries. Probe its actual response rather than assuming the
+                # 17 HTTP 400 competition IDs are permanently unsupported.
+                annual = espn_source._fetch_league(slug, str(requested.year))
+                year_health = espn_source.fetch_health().get(slug) or {}
+                year_check = {
+                    "query_shape": "YYYY",
+                    "success": bool(year_health.get("request_succeeded")),
+                    "provider_active": bool(year_health.get("provider_active")),
+                    "scheduled_in_year": len(annual),
+                    "error": year_health.get("error"),
+                }
             return {
                 "slug": slug,
                 "state": state,
                 "http_or_transport_error": health.get("error"),
                 "provider_active": active,
                 "scheduled_in_month": len(fixtures),
+                "year_query_probe": year_check,
             }
         except Exception as exc:
             return {
@@ -106,6 +121,7 @@ def probe(
         "requested_failed_leagues": len(slugs),
         "states": dict(sorted(counts.items())),
         "per_league": results,
+        "year_fallback_probed": probe_year_fallback,
         "source_diagnostic_only": True,
         "prepared_board_refreshed": False,
         "publishing_changed": False,
@@ -122,6 +138,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date", required=True)
     parser.add_argument(
+        "--probe-year", action="store_true",
+        help="Also try the documented YYYY filter for monthly HTTP 400 "
+             "leagues, without publishing or modifying the fixture cache",
+    )
+    parser.add_argument(
         "--slugs", default=None,
         help="Optional comma-separated ESPN slugs; defaults to failed leagues "
              "from saved staging board",
@@ -130,4 +151,6 @@ if __name__ == "__main__":
     slugs = None if opts.slugs is None else [
         slug.strip() for slug in opts.slugs.split(",") if slug.strip()
     ]
-    print(json.dumps(probe(opts.date, slugs=slugs), sort_keys=True))
+    print(json.dumps(probe(
+        opts.date, slugs=slugs, probe_year_fallback=opts.probe_year,
+    ), sort_keys=True))
