@@ -104,6 +104,7 @@ def rows_from_cache(cache: dict, *, now=None) -> tuple[list[dict], dict]:
     deduped = {}
     rejected = {}
     fixture_ids = set()
+    identities = {}
     for entry in _source_entries(cache["fixtures"]):
         event_id = str(entry.get("event_id") or "").strip()
         if not event_id or len(event_id) > 128:
@@ -127,6 +128,13 @@ def rows_from_cache(cache: dict, *, now=None) -> tuple[list[dict], dict]:
                 "started_or_near_kickoff", 0
             ) + 1
             continue
+        # A bookmaker event ID must resolve to one fixture, even when
+        # distinct partial pages list disjoint markets for that event.
+        # Otherwise a collision silently joins unrelated odds as one match.
+        identity = (home, away, kickoff)
+        earlier_identity = identities.setdefault(event_id, identity)
+        if earlier_identity != identity:
+            raise ValueError("One source event ID mapped to multiple fixtures")
         prices = entry.get("prices") or {}
         if not isinstance(prices, dict):
             rejected["bad_price_map"] = rejected.get("bad_price_map", 0) + 1
