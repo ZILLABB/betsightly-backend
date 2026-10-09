@@ -25,7 +25,7 @@ def pick(mid, *, approved=False):
         "market_floor_eligible": True,
         "safe_tier_eligible": approved,
         "market_trust_state": "TRUSTED",
-        "odds": 1.4,
+        "odds": 1.4 if approved else 1.1,
         "odds_are_real": True,
         "bookable": True,
     }
