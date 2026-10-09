@@ -213,6 +213,7 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
         end = datetime.strptime(end_text, "%Y%m%d").date()
         fixtures: list[dict] = []
         failures: list[tuple[str, str]] = []
+        failed_retryable = []
         any_active = False
         last_success = None
         while month <= end:
@@ -224,6 +225,7 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
                 last_success = health.get("last_successful_fetch") or last_success
             else:
                 failures.append((month_key, str(health.get("error") or "unknown")))
+                failed_retryable.append(health.get("retryable") is not False)
             month = (month.replace(day=28) + timedelta(days=4)).replace(day=1)
         _FETCH_HEALTH[slug] = {
             "provider_active": any_active,
@@ -231,6 +233,10 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
             "scheduled_fixture_count": len(fixtures),
             "last_successful_fetch": last_success,
             "failed_months": [key for key, _ in failures],
+            # A month-level HTTP 400 is a rejected request, not a transient
+            # provider failure. Retry other errors, but avoid hammering 17
+            # unsupported/rejected leagues three times per board refresh.
+            "retryable": any(failed_retryable) if failures else False,
             "error": "; ".join(f"{key}: {err}" for key, err in failures)[:180]
                      if failures else None,
         }
@@ -245,6 +251,8 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
                 "provider_active": False,
                 "request_succeeded": False,
                 "error": f"HTTP {resp.status_code}",
+                "http_status": resp.status_code,
+                "retryable": resp.status_code not in {400, 404, 410, 422},
             }
             return []
         payload = resp.json()
@@ -253,6 +261,7 @@ def _fetch_league(slug: str, date_range: str) -> list[dict]:
             "provider_active": False,
             "request_succeeded": False,
             "error": str(e)[:180],
+            "retryable": True,
         }
         logger.debug(f"ESPN fetch failed {slug}: {e}")
         return []
@@ -399,6 +408,7 @@ def get_fixtures(days_ahead: int = 3, force: bool = False,
         pending = [
             slug for slug in attempted
             if not (_FETCH_HEALTH.get(slug) or {}).get("request_succeeded")
+            and (_FETCH_HEALTH.get(slug) or {}).get("retryable") is not False
         ]
 
     # Provider registries occasionally overlap competitions. Preserve the
