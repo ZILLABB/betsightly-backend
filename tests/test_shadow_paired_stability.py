@@ -6,7 +6,24 @@ import pytest
 from leagues.shadow_historical_challenger import (
     evaluate_shadow, paired_loss_diagnostics,
 )
-from tests.test_shadow_historical_challenger import example
+from leagues.chronological_training_data import labels
+
+
+def example(i):
+    played = date(2024, 1, 1) + timedelta(days=i)
+    home_goals, away_goals = (i * 7) % 4, (i * 3 + 1) % 3
+    form = {
+        "matches": 5, "win_rate": (i % 4) / 5,
+        "draw_rate": .2, "goals_for": (i % 5) / 2,
+        "goals_against": (i % 3) / 2,
+    }
+    return {
+        "match_date": played.isoformat(),
+        "league_slug": "eng.1" if i % 2 else "fra.1",
+        "labels": labels(home_goals, away_goals),
+        "home_history": form, "away_history": form,
+        "home_venue_history": form, "away_venue_history": form,
+    }
 
 
 def test_paired_score_reports_unseen_dates_and_each_sufficient_league():
