@@ -71,10 +71,18 @@ def readonly_actions_preflight() -> dict:
                     CURRENT_USER,
                     'public.market_shadow_forecasts_v1',
                     'INSERT, UPDATE, DELETE, TRUNCATE'
-                ) AS can_change_shadow
+                ) AS can_change_shadow,
+                CASE WHEN to_regclass(
+                    'public.football_first_shadow_observations'
+                ) IS NOT NULL THEN has_table_privilege(
+                    CURRENT_USER,
+                    'public.football_first_shadow_observations',
+                    'INSERT, UPDATE, DELETE, TRUNCATE'
+                ) ELSE FALSE END AS can_change_paired
         """)).mappings().one()
         if (row["superuser"] or privilege["can_change_history"]
-                or privilege["can_change_shadow"]):
+                or privilege["can_change_shadow"]
+                or privilege["can_change_paired"]):
             raise RuntimeError(
                 "Refusing database role with write access; use SELECT-only "
                 "staging evaluation credentials"
@@ -117,6 +125,24 @@ def make_summary(mode: str, audit: dict | None,
             f"{(audit.get('settled_market_scoring') or {}).get('distinct_settled_fixtures', 0)}",
             "- Settled market scores: **descriptive only; no paired champion comparison**",
         ]
+        paired = audit.get("prospective_match_result_pairs") or {}
+        lines += [
+            "",
+            "## Prospective 1X2 paired champion/challenger (separate from odds)",
+            f"- Access/evidence status: **{paired.get('status', 'unavailable')}**",
+        ]
+        for cohort in paired.get("cohorts") or []:
+            lines += [
+                f"- {cohort['model_version']}: "
+                f"{cohort['independent_fixtures']} independent fixtures, "
+                f"champion Brier {cohort['champion_multiclass_brier']}, "
+                f"challenger Brier {cohort['challenger_multiclass_brier']}, "
+                f"minimum for review {cohort['minimum_research_review_fixtures']}",
+            ]
+        lines.append(
+            "- Paired model evidence has **no matched SportyBet closing odds**; "
+            "no model promotion is authorized."
+        )
     if settlement is not None:
         lines += [
             "",
