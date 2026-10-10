@@ -6,9 +6,10 @@ all pending picks' games have finished (~3h after last kickoff).
 
 Scores source priority:
   1. ESPN — primary, with regulation-time and date-scoped evidence
-  2. football-data.org — rate-limited secondary, when free token configured
-  3. TheSportsDB — opt-in development fallback (free feed is sparse)
-  4. The Odds API — remaining configured fallback
+  2. OpenLigaDB — keyless German league regulation-time finals, cached
+  3. football-data.org — rate-limited secondary, when free token configured
+  4. TheSportsDB — opt-in development fallback (free feed is sparse)
+  5. The Odds API — remaining configured fallback
 
 API-Football is retired from the live settlement fetch path; the historical
 adapter remains only for legacy use.
@@ -567,6 +568,15 @@ def _collect_scores_for_picks(
                 finished[key] = {"ambiguous": True}
             elif not prior:
                 finished[key] = payload
+
+    # Explicit German domestic-league results can supplement an unavailable
+    # ESPN final. All OpenLigaDB matches must independently prove FT (90 min).
+    # Never infer the league from names alone or modify published slips.
+    unresolved = missing()
+    if allow_fallback and unresolved:
+        from services.openligadb_score_source import openligadb_finals
+        german = openligadb_finals(unresolved)
+        merge(_index_free_finals(german), "openligadb")
 
     # Free, narrowly scoped fallback. Do not call suspended API-Football:
     # only gather finished 90-minute results; never rewrite prediction legs.
