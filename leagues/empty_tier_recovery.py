@@ -81,6 +81,14 @@ def _validate_candidate(tier: str, candidate: dict, booking: dict) -> None:
              "5_odds": 4.0, "10_odds": 10.0}[tier]
     if actual < lower or actual < selected * 0.98:
         raise ValueError("SportyBet readback odds are below the allowed price")
+    # A small but genuine downward bookmaker reprice can erase the model
+    # value floor. Adjust the verified slip-return by actual/quoted odds.
+    from leagues.publication_policy import MIN_SLIP_MODEL_RETURN
+    repriced_return = (
+        float(policy["model_estimated_return"]) * actual / selected
+    )
+    if repriced_return < MIN_SLIP_MODEL_RETURN:
+        raise ValueError("current SportyBet prices remove the model-value edge")
     if tier == "10_odds" and len(games) > 20:
         raise ValueError("10 Odds recovery exceeds the 20-leg cap")
 
