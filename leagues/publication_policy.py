@@ -148,6 +148,15 @@ def evaluate_slip(games: list[dict], product: str) -> dict:
     model_return = prod(leg["risk_adjusted_return"] for leg in legs) if legs else 0.0
     if games and model_return < MIN_SLIP_MODEL_RETURN:
         reasons.append("NEGATIVE_SLIP_MODEL_VALUE")
+    # A 10 Odds product must actually deliver >=10.00x, including after a
+    # pre-publication SportyBet replacement. A near-10x quality-capped result
+    # may be useful in Builder, but advertising it as official 10 Odds is not.
+    if product == "10_odds" and games:
+        actual_odds = prod(float(game.get("odds") or 0) for game in games)
+        if actual_odds < 10.0:
+            reasons.append("TEN_ODDS_TARGET_NOT_REACHED")
+        if len(games) > 20:
+            reasons.append("TEN_ODDS_LEG_LIMIT_EXCEEDED")
     return {
         "allowed": bool(games) and not reasons,
         "policy_version": POLICY_VERSION,
@@ -163,6 +172,10 @@ def evaluate_slip(games: list[dict], product: str) -> dict:
 
 def _reason_copy(reasons: list[str]) -> str:
     reasons = set(reasons)
+    if "TEN_ODDS_TARGET_NOT_REACHED" in reasons:
+        return "10 Odds withheld: no verified, policy-qualified ticket reaches 10.00x."
+    if "TEN_ODDS_LEG_LIMIT_EXCEEDED" in reasons:
+        return "10 Odds withheld: a ticket may contain at most 20 unique match selections."
     if "FRIENDLY_COMPETITION" in reasons:
         return "No qualifying slip: friendlies are excluded from official BetSightly products."
     if "NEGATIVE_MODEL_VALUE" in reasons or "NEGATIVE_SLIP_MODEL_VALUE" in reasons:
