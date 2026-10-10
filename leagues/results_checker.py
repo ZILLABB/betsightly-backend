@@ -5,8 +5,13 @@ Smart scheduling: polls every hour but only calls APIs once
 all pending picks' games have finished (~3h after last kickoff).
 
 Scores source priority:
-  1. API-Football (api-sports.io) — 100 free calls/day, no quota issues
-  2. The Odds API — fallback if API-Football unavailable
+  1. ESPN — primary, with regulation-time and date-scoped evidence
+  2. football-data.org — rate-limited secondary, when free token configured
+  3. TheSportsDB — opt-in development fallback (free feed is sparse)
+  4. The Odds API — remaining configured fallback
+
+API-Football is retired from the live settlement fetch path; the historical
+adapter remains only for legacy use.
 
 Public entry points:
 - check_all_pending() — scan all unresolved chain days, update statuses
@@ -492,6 +497,29 @@ def _known_score_slugs(picks: list[dict]) -> set[str] | None:
 
 
 
+def _index_free_finals(rows: list[dict]) -> Dict[str, Dict[str, Any]]:
+    """Strict UTC-date team matching with ambiguous-collision protection."""
+    finished: Dict[str, Dict[str, Any]] = {}
+    for result in rows:
+        if not result.get("completed"):
+            continue
+        date = str(result.get("date") or "")[:10]
+        home = _normalize_name(result.get("home") or "")
+        away = _normalize_name(result.get("away") or "")
+        if not date or not home or not away:
+            continue
+        key = f"{home}|{away}|{date}"
+        old = finished.get(key)
+        if old and (old.get("provider_event_id") != result.get("provider_event_id")
+                    or old.get("provider") != result.get("provider")
+                    or old.get("home_score") != result.get("home_score")
+                    or old.get("away_score") != result.get("away_score")):
+            finished[key] = {"ambiguous": True}
+        elif not old:
+            finished[key] = result
+    return finished
+
+
 def _collect_scores_for_picks(
     picks: list[dict],
     *,
@@ -540,16 +568,22 @@ def _collect_scores_for_picks(
             elif not prior:
                 finished[key] = payload
 
+    # Free, narrowly scoped fallback. Do not call suspended API-Football:
+    # only gather finished 90-minute results; never rewrite prediction legs.
     unresolved = missing()
-    api_keys = sport_keys(unresolved, set(APIFOOTBALL_LEAGUES), True)
-    if (
-        allow_fallback
-        and unresolved
-        and api_keys
-        and _get_apifootball_key()
-    ):
-        merge(_collect_apifootball_scores(api_keys, dates[0], dates[-1]),
-              "api-football")
+    if allow_fallback and unresolved:
+        from services.free_football_score_sources import football_data_finals
+        fdo = football_data_finals(dates[0], dates[-1])
+        merge(_index_free_finals(fdo), "football-data.org")
+
+    unresolved = missing()
+    if allow_fallback and unresolved:
+        from services.free_football_score_sources import sportsdb_finals
+        sportsdb = sportsdb_finals([
+            str(row.get("commence_time") or row.get("kickoff") or
+                row.get("date") or "")[:10] for row in unresolved
+        ])
+        merge(_index_free_finals(sportsdb), "thesportsdb")
 
     unresolved = missing()
     odds_keys = sport_keys(unresolved)
@@ -563,7 +597,7 @@ def _collect_scores_for_picks(
 
     logger.info("Score collection picks=%s resolved=%s sources=%s fallback_leagues=%s",
                 len(picks), len(picks) - len(missing()), ",".join(sources) or "none",
-                len(api_keys))
+                len(odds_keys))
     return finished, "+".join(sources) or "none"
 
 
