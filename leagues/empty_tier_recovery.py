@@ -149,6 +149,9 @@ def recover_empty_tier(*, publish_date: str, tier: str, candidate: dict,
                     if not card:
                         return {"status": "NO_CARD"}
                     payload = json.loads(card.payload or "{}")
+                    current = payload.get(tier)
+                    if _selected(current):
+                        return {"status": "ALREADY_FILLED"}
                     # Another repair or the morning run can reserve fixtures
                     # while the bookmaker request is in flight. Recheck after
                     # taking the card's row lock, not only during selection.
@@ -181,9 +184,6 @@ def recover_empty_tier(*, publish_date: str, tier: str, candidate: dict,
                     ):
                         return {"status": "FIXTURE_CONFLICT",
                                 "reason": "a fixture is already published or booked on another tier"}
-                    current = payload.get(tier)
-                    if _selected(current):
-                        return {"status": "ALREADY_FILLED"}
                     fingerprints = {
                         name: leg_fingerprint(value.get("games") or [])
                         for name, value in payload.items() if _selected(value)
