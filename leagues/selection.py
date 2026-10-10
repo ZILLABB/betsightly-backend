@@ -184,6 +184,195 @@ def _bound_search_space(candidates: list[dict]) -> list[dict]:
     return sorted(bounded, key=_cost)
 
 
+# The legacy 18-candidate exact search cannot evaluate a genuine 20-leg
+# ticket. Beam search is used ONLY when a large, independently approved pool
+# exists. Its CPU and memory costs are bounded even for a rich Saturday slate.
+_LONG_BEAM_WIDTH = 240
+_LONG_BEAM_CANDIDATES = 120
+_LONG_PER_BAND = 30
+_LONG_PER_GROUP_BAND = 10
+
+
+def _long_search_pool(candidates: list[dict]) -> list[dict]:
+    """Keep substantially more market/price-diverse legs for long tickets."""
+    from leagues.selection_quality import selection_probability
+    selected = []
+    for lo, hi in _PRICE_BANDS:
+        band = sorted(
+            (p for p in candidates if lo <= p["odds"] < hi),
+            key=lambda p: (
+                _cost(p), -selection_probability(p),
+                str(p["match_id"]), str(p["market"]),
+            ),
+        )
+        groups = {}
+        for pick in band:
+            if len([p for p in selected if lo <= p["odds"] < hi]) >= _LONG_PER_BAND:
+                break
+            group = str(pick["market_group"])
+            if groups.get(group, 0) >= _LONG_PER_GROUP_BAND:
+                continue
+            groups[group] = groups.get(group, 0) + 1
+            selected.append(pick)
+    # Interleave price bands instead of letting one band use all the quota.
+    return _bound_long_price_space(selected)
+
+
+def _bound_long_price_space(candidates: list[dict]) -> list[dict]:
+    if len(candidates) <= _LONG_BEAM_CANDIDATES:
+        return sorted(candidates, key=_cost)
+    bands = [
+        sorted((p for p in candidates if lo <= p["odds"] < hi), key=_cost)
+        for lo, hi in _PRICE_BANDS
+    ]
+    result = []
+    index = 0
+    while len(result) < _LONG_BEAM_CANDIDATES:
+        found = False
+        for band in bands:
+            if index < len(band):
+                result.append(band[index])
+                found = True
+                if len(result) >= _LONG_BEAM_CANDIDATES:
+                    break
+        if not found:
+            break
+        index += 1
+    return sorted(result, key=_cost)
+
+
+def _beam_long_accumulator(
+    candidates: list[dict],
+    target_odds: float,
+    max_picks: int,
+    min_ev: float,
+    max_leg_ev: float,
+    prefer: str,
+    band_low: float,
+    band_high: float,
+) -> tuple[list[dict], float, float] | None:
+    """Bounded long-combination search with the exact selector's risk gates.
+
+    Expansion obeys one selection per fixture, market-group exposure caps,
+    team-scoring caps, and the optional Under cap. Final selection applies
+    the same joint-return / per-leg-EV / target-band checks as exact search.
+    This is heuristic, not a proof that no valid combination exists.
+    """
+    from leagues.selection_quality import selection_probability
+    from leagues.picks import ESTIMATE_MARGIN
+
+    if not candidates or max_picks < 1 or target_odds <= 1.0:
+        return None
+    data = []
+    for p in candidates:
+        odds = float(p["odds"])
+        probability = max(1e-8, min(1.0, selection_probability(p)))
+        group = str(p["market_group"])
+        data.append((
+            p, str(p["match_id"]), group, exposure_group(group),
+            math.log(odds), math.log(probability),
+            float(p.get("market_margin") if p.get("market_margin") is not None
+                  else ESTIMATE_MARGIN - 1.0),
+            bool(p.get("bookable")),
+            str(p.get("market") or "").startswith("under_"),
+        ))
+
+    log_lo = math.log(target_odds * band_low)
+    log_hi = math.log(target_odds * band_high)
+    target_log = math.log(target_odds)
+    # (indices, last, fixtures, groups, team_goals, unders,
+    #  log_odds, log_probability, margin_sum, bookable_count)
+    frontier = [((), -1, frozenset(), {}, 0, 0, 0.0, 0.0, 0.0, 0)]
+    best = best_key = fallback = fallback_key = None
+
+    for depth in range(1, min(max_picks, len(data)) + 1):
+        expanded = []
+        for state in frontier:
+            indices, last, fixtures, groups, team_goals, unders, log_odds, log_p, margin, bookable = state
+            for index in range(last + 1, len(data)):
+                pick, fixture, group, exposure, price_log, p_log, cut, can_book, is_under = data[index]
+                if fixture in fixtures or groups.get(group, 0) >= MARKET_CAP:
+                    continue
+                new_team_goals = team_goals + (exposure == "team_to_score")
+                if new_team_goals > TEAM_TO_SCORE_CAP:
+                    continue
+                new_unders = unders + is_under
+                if UNDER_CAP is not None and new_unders > UNDER_CAP:
+                    continue
+                new_groups = dict(groups)
+                new_groups[group] = new_groups.get(group, 0) + 1
+                new_price = log_odds + price_log
+                new_probability = log_p + p_log
+                new_margin = margin + cut
+                new_bookable = bookable + can_book
+                newer = (
+                    indices + (index,), index, fixtures | {fixture},
+                    new_groups, new_team_goals, new_unders,
+                    new_price, new_probability, new_margin, new_bookable,
+                )
+                expanded.append(newer)
+
+                model_return_log = new_price + new_probability
+                if (new_price < log_lo
+                        or model_return_log < math.log(max(min_ev, 1e-12))
+                        or model_return_log / depth > math.log(max_leg_ev)):
+                    continue
+                joint = math.exp(new_probability)
+                combined = math.exp(new_price)
+                score = joint if prefer == "joint" else math.exp(model_return_log)
+                key = (
+                    round(score / _SCORE_TIE_BAND),
+                    new_bookable == depth,
+                    new_bookable,
+                    -(new_margin / depth),
+                )
+                result = ([data[i][0] for i in newer[0]], combined, joint)
+                if new_price <= log_hi:
+                    if best_key is None or key > best_key:
+                        best, best_key = result, key
+                elif fallback_key is None or key > fallback_key:
+                    fallback, fallback_key = result, key
+
+        if not expanded:
+            break
+        if depth >= max_picks:
+            break
+
+        # Preserve different odds-progress bands to avoid pruning every
+        # short-priced long path in favor of one aggressive early multiplier.
+        # Within each band, prefer less risk, bookability and group diversity.
+        bins = {}
+        ideal = target_log * depth / max_picks
+        for state in expanded:
+            price = state[6]
+            bin_id = int(price / 0.12)
+            rank = (
+                -abs(price - ideal),
+                state[7],  # larger joint probability
+                state[9] == depth,
+                len(state[3]),  # market diversification
+                -state[8],
+                -state[1],
+            )
+            bucket = bins.setdefault(bin_id, [])
+            bucket.append((rank, state))
+        # Equal capacity across price-progress bands, then global filling.
+        retained = []
+        quota = max(4, _LONG_BEAM_WIDTH // max(1, len(bins)))
+        leftovers = []
+        for bucket in bins.values():
+            bucket.sort(key=lambda x: x[0], reverse=True)
+            retained.extend(bucket[:quota])
+            leftovers.extend(bucket[quota:])
+        if len(retained) < _LONG_BEAM_WIDTH:
+            leftovers.sort(key=lambda x: x[0], reverse=True)
+            retained.extend(leftovers[:_LONG_BEAM_WIDTH - len(retained)])
+        retained.sort(key=lambda x: x[0], reverse=True)
+        frontier = [state for _, state in retained[:_LONG_BEAM_WIDTH]]
+
+    return best or fallback
+
+
 def select_accumulator(
     picks: list[dict],
     target_odds: float,
@@ -255,7 +444,26 @@ def select_accumulator(
     # could reach 5x or 10x at all — those tiers came back empty however the
     # gates were set. Banding guarantees the search can actually buy the
     # multiplier it is being asked for.
+    # Exact search remains the reference on small pools. Larger qualified
+    # slates use a bounded 120-candidate beam so 19/20-leg paths can exist.
+    # Never expand the search by weakening market, confidence or EV policy.
+    long_result = None
+    if max_picks > 8 and len(candidates) > _MAX_SEARCH_CANDIDATES:
+        long_pool = _long_search_pool(candidates)
+        long_result = _beam_long_accumulator(
+            long_pool, target_odds, max_picks, min_ev, max_leg_ev,
+            prefer, band_low, band_high,
+        )
     candidates = _bound_search_space(_stratify(candidates))
+    if long_result:
+        chosen, combined, joint = long_result
+        if prefer_real_odds:
+            chosen.sort(key=lambda p: (
+                not p["odds_are_real"], -selection_probability(p)
+            ))
+        else:
+            chosen.sort(key=lambda p: -selection_probability(p))
+        return chosen, round(combined, 2), round(joint, 4)
 
     # Widened from 0.85. With every leg capped at 1.45, the multiplier a slip
     # can reach moves in coarse steps — seven legs reached 8.25x against a
