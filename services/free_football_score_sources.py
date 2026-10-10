@@ -160,7 +160,9 @@ def football_data_finals(start: str, end: str) -> list[dict]:
                    headers={"X-Auth-Token": token}, key=key)
     if payload is None:
         return []
-    matches = payload.get("_cached_matches") if "_cached_matches" in payload else payload.get("matches")
+    if "_cached_matches" in payload:
+        return list(payload["_cached_matches"])
+    matches = payload.get("matches")
     if not isinstance(matches, list):
         return []
     rows = [row for item in matches if isinstance(item, dict)
@@ -207,8 +209,10 @@ def sportsdb_finals(dates: list[str]) -> list[dict]:
                        params={"d": date, "s": "Soccer"}, key=key)
         if payload is None:
             continue
-        events = (payload.get("_cached_matches") if "_cached_matches" in payload
-                  else payload.get("events"))
+        if "_cached_matches" in payload:
+            results.extend(payload["_cached_matches"])
+            continue
+        events = payload.get("events")
         if not isinstance(events, list):
             continue
         rows = [row for event in events if isinstance(event, dict)
