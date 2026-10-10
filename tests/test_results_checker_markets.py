@@ -438,15 +438,23 @@ def test_partial_espn_coverage_uses_fallback_only_for_missing_pick(monkeypatch):
     monkeypatch.setattr(results_checker, "_collect_espn_scores_ranged",
                         lambda start, end, slugs: {
                             "alpha|beta|2026-09-22": {"home_score": 2, "away_score": 0}})
+    from services import free_football_score_sources as free
     requested = []
-    monkeypatch.setattr(results_checker, "_get_apifootball_key", lambda: "configured")
     monkeypatch.setattr(results_checker, "_get_odds_api_key", lambda: "")
+    monkeypatch.setattr(free, "football_data_finals",
+                        lambda start, end: requested.append((start, end)) or [{
+                            "home": "Gamma", "away": "Delta", "date": "2026-09-22",
+                            "home_score": 1, "away_score": 1,
+                            "provider": "football-data.org", "completed": True,
+                            "provider_event_id": "fdo-fixture-1",
+                        }])
+    monkeypatch.setattr(free, "sportsdb_finals", lambda dates: [])
     monkeypatch.setattr(results_checker, "_collect_apifootball_scores",
-                        lambda keys, start, end: requested.append(keys) or {
-                            "gamma|delta|2026-09-22": {"home_score": 1, "away_score": 1}})
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            AssertionError("API-Football is retired")))
     scores, source = results_checker._collect_scores_for_picks(picks)
-    assert requested == [["soccer_spain_segunda_division"]]
-    assert source == "espn+api-football"
+    assert requested == [("2026-09-22", "2026-09-22")]
+    assert source == "espn+football-data.org"
     assert _lookup_score(scores, "Alpha", "Beta", "2026-09-22")["home_score"] == 2
     assert _lookup_score(scores, "Gamma", "Delta", "2026-09-22")["home_score"] == 1
 

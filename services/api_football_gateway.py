@@ -548,7 +548,17 @@ def api_football_get(
     api_key=None,
     timeout=30,
 ):
-    """The only runtime network gateway to API-Football."""
+    """The only runtime network gateway to API-Football.
+
+    The retired source is disabled by default in production and staging;
+    offline/dev compatibility remains available for historical tooling.
+    """
+    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+    default = "false" if environment in {"production", "prod", "staging"} else "true"
+    enabled = os.getenv("API_FOOTBALL_ENABLED", default).strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        logger.debug("API-Football provider disabled")
+        return None
     key = (
         api_key
         or api_football_key()
