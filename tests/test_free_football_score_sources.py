@@ -52,7 +52,7 @@ def test_fdo_uses_token_header_and_honors_remaining_quota(monkeypatch):
     calls = []
     class Response:
         status_code = 200
-        headers = {"X-Requests-Available-Minute": "0",
+        headers = {"X-RequestsAvailable": "0",
                    "X-RequestCounter-Reset": "43"}
         def json(self):
             return {"matches": [_sample_fdo()]}
