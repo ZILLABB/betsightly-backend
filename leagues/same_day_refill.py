@@ -61,9 +61,12 @@ def _claim_hour(engine, key: str, day: str, now: datetime) -> bool:
         retried = conn.execute(text(
             "UPDATE same_day_refill_attempts SET status='running',"
             " started_at=:t,finished_at=NULL,result=NULL"
-            " WHERE window_key=:w AND status='board_refreshing'"
+            " WHERE window_key=:w"
+            " AND (status='board_refreshing' OR"
+            " (status='complete' AND result LIKE :old_unavailable))"
             " AND started_at<=:cutoff"
-        ), {"w": key, "t": now.isoformat(), "cutoff": cutoff})
+        ), {"w": key, "t": now.isoformat(), "cutoff": cutoff,
+            "old_unavailable": '%"status": "BOARD_UNAVAILABLE"%'})
         return retried.rowcount == 1
 
 
