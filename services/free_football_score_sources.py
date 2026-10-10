@@ -65,7 +65,8 @@ def _get(name: str, url: str, *, params: dict, headers: dict | None = None,
             url, params=params, headers=headers or {}, timeout=12,
         )
         if name == "football-data.org":
-            remaining = response.headers.get("X-Requests-Available-Minute")
+            remaining = (response.headers.get("X-RequestsAvailable")
+                         or response.headers.get("X-Requests-Available-Minute"))
             if remaining is not None:
                 try:
                     if int(remaining) <= 1:
