@@ -10,6 +10,7 @@ import json
 import logging
 import threading
 from datetime import datetime, timezone
+from math import prod
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -34,14 +35,55 @@ def _selected(data: object) -> bool:
     return isinstance(data, dict) and bool(data.get("selected") and data.get("games"))
 
 
-def _require_exact_booking(record: dict, tier: str) -> None:
-    if tier == "over_1_5":
-        return
-    if not (record.get("status") == "active"
-            and record.get("booking_status") in {"FULL", "REBUILT_FULL"}
-            and record.get("readback_validation") == "PASSED"
-            and record.get("share_code")):
+RECOVERABLE_TIERS = frozenset({"banker", "2_odds", "5_odds", "10_odds"})
+
+
+def _validate_candidate(tier: str, candidate: dict, booking: dict) -> None:
+    """Fail closed even when a repair endpoint calls this function directly."""
+    from leagues.availability import all_games_actionable
+    from leagues.publication_policy import evaluate_slip
+
+    if tier not in RECOVERABLE_TIERS:
+        raise ValueError("tier is not eligible for automatic recovery")
+    games = candidate.get("games") or []
+    if not games or not all_games_actionable(games):
+        raise ValueError("every recovery fixture must be safely before kickoff")
+    fixture_ids = [str(game.get("match_id") or "") for game in games]
+    if not all(fixture_ids) or len(fixture_ids) != len(set(fixture_ids)):
+        raise ValueError("recovery must use unique identified fixtures")
+    policy = evaluate_slip(games, tier)
+    if not policy["allowed"]:
+        raise ValueError("official publication policy rejected recovery: "
+                         + ",".join(policy["reasons"]))
+
+    if not (booking.get("status") == "active"
+            and booking.get("booking_status") in {"FULL", "REBUILT_FULL"}
+            and booking.get("readback_validation") == "PASSED"
+            and booking.get("share_code")):
         raise ValueError("exact SportyBet booking/readback is required")
+    if (int(booking.get("booked_leg_count") or 0) != len(games)
+            or int(booking.get("excluded_leg_count") or 0) != 0
+            or int(booking.get("replacement_count") or 0) != 0):
+        raise ValueError("booked leg count or replacements differ from recovery")
+    booked_games = booking.get("final_booked_legs")
+    if (not isinstance(booked_games, list)
+            or leg_fingerprint(booked_games) != leg_fingerprint(games)):
+        raise ValueError("SportyBet readback legs differ from the published recovery")
+
+    try:
+        actual = float(booking.get("actual_sportybet_odds") or 0)
+        selected = prod(float(game.get("odds") or 0) for game in games)
+    except (TypeError, ValueError):
+        raise ValueError("recovery price is invalid") from None
+    # Never turn a genuine 10 Odds publication into a cheaper 9x ticket.
+    # The other product bands follow the same existing selector floor.
+    lower = {"banker": 1.0, "2_odds": 1.84,
+             "5_odds": 4.0, "10_odds": 10.0}[tier]
+    if actual < lower or actual < selected * 0.98:
+        raise ValueError("SportyBet readback odds are below the allowed price")
+    if tier == "10_odds" and len(games) > 20:
+        raise ValueError("10 Odds recovery exceeds the 20-leg cap")
+
 
 
 def _ensure_provenance_table(conn) -> None:
@@ -87,12 +129,10 @@ def recover_empty_tier(*, publish_date: str, tier: str, candidate: dict,
         return {"status": "UNREACHABLE", "best_reachable": candidate.get("best_reachable"),
                 "reason": candidate.get("reason")}
     try:
-        _require_exact_booking(booking, tier)
+        _validate_candidate(tier, candidate, booking)
     except ValueError as exc:
-        return {"status": "BOOKING_FAILED", "reason": str(exc)}
+        return {"status": "BLOCKED", "reason": str(exc)}
     games = list(candidate.get("games") or [])
-    if any(game.get("started") for game in games):
-        return {"status": "STALE", "reason": "candidate contains a started fixture"}
 
     # The row lock below covers multiple workers; this small local lock avoids
     # SQLite and single-process deployments producing a lock-timeout instead
@@ -109,6 +149,22 @@ def recover_empty_tier(*, publish_date: str, tier: str, candidate: dict,
                     if not card:
                         return {"status": "NO_CARD"}
                     payload = json.loads(card.payload or "{}")
+                    # Another repair or the morning run can reserve fixtures
+                    # while the bookmaker request is in flight. Recheck after
+                    # taking the card's row lock, not only during selection.
+                    claimed = {
+                        str(game.get("match_id"))
+                        for name, value in payload.items()
+                        if name != tier and isinstance(value, dict)
+                        and value.get("selected")
+                        for game in (value.get("games") or [])
+                        if game.get("match_id")
+                    }
+                    if claimed.intersection(
+                        str(game.get("match_id")) for game in games
+                    ):
+                        return {"status": "FIXTURE_CONFLICT",
+                                "reason": "a fixture is already published on another tier"}
                     current = payload.get(tier)
                     if _selected(current):
                         return {"status": "ALREADY_FILLED"}
@@ -124,7 +180,7 @@ def recover_empty_tier(*, publish_date: str, tier: str, candidate: dict,
                         return {"status": "ALREADY_FILLED"}
                     session.add(PublishedSlip(
                         date=publish_date, category=tier, picks=json.dumps(games),
-                        total_odds=float(candidate.get("total_odds") or 0),
+                        total_odds=round(float(booking["actual_sportybet_odds"]), 2),
                         hit_probability=float(candidate.get("hit_probability") or 0),
                         presentation=candidate.get("presentation", "accumulator"),
                         policy_version=PUBLISHED_SELECTION_POLICY_VERSION,
@@ -138,6 +194,11 @@ def recover_empty_tier(*, publish_date: str, tier: str, candidate: dict,
                          "at": datetime.now(timezone.utc).isoformat(), "snap": decision_snapshot_id,
                          "detail": json.dumps({"candidate": candidate, "booking": booking,
                                                "existing_tier_fingerprints": fingerprints})})
+                    candidate = {**candidate,
+                                 "total_odds": round(
+                                     float(booking["actual_sportybet_odds"]), 2),
+                                 "result_status": "SAME_DAY_RECOVERED",
+                                 "recovered_at": datetime.now(timezone.utc).isoformat()}
                     payload[tier] = candidate
                     payload["_card_revision"] = int(payload.get("_card_revision", 1)) + 1
                     payload["_last_updated_at"] = datetime.now(timezone.utc).isoformat()
