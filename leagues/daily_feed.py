@@ -1025,9 +1025,9 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
 def recover_today_empty_tiers() -> dict:
     """Fill eligible empty tiers from the already prepared board only.
 
-    This is a future scheduler entry point, deliberately not enabled by the
-    scheduler.  It never calls ``run_pipeline`` and therefore cannot turn a
-    maintenance action into an ESPN/history/ELO rebuild.
+    Scheduler-owned hourly refill only, using the existing prepared board.
+    It never calls ``run_pipeline``, rewrites already-selected tickets or
+    relaxes the official publication contract.
     """
     from leagues.engine import kickoff_wat_date, prepared_board_status, prepared_pipeline
     from leagues.picks import MIN_PUBLISHABLE_CONFIDENCE, to_game
@@ -1041,7 +1041,7 @@ def recover_today_empty_tiers() -> dict:
     if not card:
         return {"status": "NO_CARD", "tiers": {}}
     board_status = prepared_board_status(days_ahead=7)
-    if not board_status.get("ready"):
+    if not board_status.get("ready") or board_status.get("stale"):
         return {"status": "BOARD_UNAVAILABLE", "tiers": {}, "board": board_status}
     picks, _ = prepared_pipeline(days_ahead=7)
     target_day = card.get("_fixture_target_date") or publish_date
@@ -1058,7 +1058,9 @@ def recover_today_empty_tiers() -> dict:
     reserved_selection_ids = set()
     reserved_teams = set()
 
-    for product in OFFICIAL_PORTFOLIO_PRODUCTS:
+    # Singles are also real customer exposures: no recovery leg may repeat
+    # an Over 1.5 selection, even with a different outcome.
+    for product in ALL_DAILY_PRODUCT_NAMES:
         current = card.get(product) or {}
         if not (
             isinstance(current, dict)
@@ -1095,8 +1097,8 @@ def recover_today_empty_tiers() -> dict:
     rules = {
         "banker": (None, 1, 0.80),
         "2_odds": (2.0, 4, .92),
-        "5_odds": (5.0, 8, .80),
-        "10_odds": (10.0, 10, .80),
+        "5_odds": (5.0, OFFICIAL_FIVE_MAX_LEGS, .80),
+        "10_odds": (10.0, OFFICIAL_TEN_MAX_LEGS, OFFICIAL_TEN_BAND_LOW),
     }
     out = {}
     board = None
@@ -1125,9 +1127,31 @@ def recover_today_empty_tiers() -> dict:
             out[tier] = {"status": "UNREACHABLE", "reason": reason,
                          "best_reachable": 0.0, "binding_constraint": "QUALITY_POLICY"}
             continue
-        candidate = {"selected": True, "games": _by_kickoff([to_game(p) for p in selected]),
-                     "total_odds": round(odds, 2), "hit_probability": round(probability, 4),
-                     "presentation": "accumulator"}
+        from leagues.publication_policy import evaluate_slip
+        games = _by_kickoff([to_game(p) for p in selected])
+        decision = evaluate_slip(games, tier)
+        if not decision["allowed"]:
+            out[tier] = {"status": "POLICY_BLOCKED",
+                         "reason": ",".join(decision["reasons"])}
+            continue
+        candidate = {
+            "selected": True, "games": games,
+            "total_odds": round(odds, 2),
+            "hit_probability": round(probability, 4),
+            "presentation": "accumulator",
+            "sportybet_ticket_type": "accumulator",
+            "publication_policy": decision,
+            "model_estimated_return": decision["model_estimated_return"],
+            "booking_rule": (
+                {"selector": "banker", "safe_only": True}
+                if tier == "banker" else {
+                    "selector": "accumulator", "target": target,
+                    "max_picks": max_picks,
+                    "min_confidence": MIN_PUBLISHABLE_CONFIDENCE,
+                    "min_ev": MIN_SLIP_MODEL_RETURN, "band_low": band_low,
+                }
+            ),
+        }
         board = board or sportybet.fetch_board()
         booking = create_booking(candidate["games"], board, booking_status="FULL",
                                  original_games=candidate["games"], predicted_odds=candidate["total_odds"])
