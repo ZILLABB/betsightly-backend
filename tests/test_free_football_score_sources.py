@@ -1,6 +1,4 @@
 """Free provider adapters must not corrupt official 90-minute settlement."""
-from datetime import datetime
-
 from leagues import results_checker
 from services import free_football_score_sources as source
 
