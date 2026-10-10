@@ -503,6 +503,16 @@ def _ensure_today_generated():
     except Exception as e:
         logger.error("Daily loop: live booking refresh failed: %s", e)
 
+    # A missing morning tier is not automatically lost for the whole day.
+    # This runner owns one hourly attempt under a durable database claim;
+    # it never reruns publication or touches already-selected tickets.
+    try:
+        from leagues.same_day_refill import run_if_due
+        run_if_due()
+    except Exception as e:
+        logger.error("Daily loop: same-day tier refill failed: %s", e)
+        log_pool_exception("daily_refill_pool_timeout", e, step="tier_refill")
+
     # Subscriber alerts used to fire from here, guarded by a dict held in
     # process memory. That dict is empty in a new process, so every deploy and
     # every restart announced the day again — one notification per push, and

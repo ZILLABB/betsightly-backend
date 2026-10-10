@@ -13,20 +13,27 @@ from leagues import picks_db
 def _game(name="A"):
     return {"match_id": name, "home_team": f"Home {name}", "away_team": f"Away {name}",
             "market": "over_1_5", "prediction": "Over 1.5", "odds": 1.5,
-            "confidence": .75, "kickoff": "2099-01-01T12:00:00Z", "started": False}
+            "confidence": .75, "selection_probability": .75,
+            "safe_tier_eligible": True, "market_floor_eligible": True,
+            "market_trust_state": "TRUSTED", "bookable": True,
+            "odds_are_real": True, "risk_adjusted_return": 1.02,
+            "kickoff": "2099-01-01T12:00:00Z", "started": False}
 
 
 def _candidate():
-    return {"selected": True, "games": [_game()], "total_odds": 1.5,
-            "hit_probability": .75, "presentation": "accumulator"}
+    # A genuine seven-leg 10 Odds candidate. A 1.5x single is NOT 10 Odds.
+    games = [_game(f"fixture-{i}") for i in range(7)]
+    return {"selected": True, "games": games, "total_odds": round(1.5 ** 7, 2),
+            "hit_probability": .75 ** 7, "presentation": "accumulator"}
 
 
 def _booking():
     return {"status": "active", "booking_status": "FULL", "readback_validation": "PASSED",
-            "share_code": "ABC123", "share_url": "https://example.test", "legs": 1,
-            "original_leg_count": 1, "booked_leg_count": 1, "excluded_leg_count": 0,
-            "replacement_count": 0, "predicted_tier_odds": 1.5,
-            "actual_sportybet_odds": 1.5}
+            "share_code": "ABC123", "share_url": "https://example.test", "legs": 7,
+            "original_leg_count": 7, "booked_leg_count": 7, "excluded_leg_count": 0,
+            "replacement_count": 0, "predicted_tier_odds": round(1.5 ** 7, 2),
+            "actual_sportybet_odds": round(1.5 ** 7, 2),
+            "final_booked_legs": _candidate()["games"]}
 
 
 def _db(monkeypatch):
@@ -66,7 +73,7 @@ def test_recovery_is_idempotent_and_rejects_failed_booking(monkeypatch):
     bad = {**_booking(), "readback_validation": "FAILED"}
     assert recovery.recover_empty_tier(
         publish_date="2099-01-01", tier="10_odds", candidate=_candidate(),
-        booking=bad)["status"] == "BOOKING_FAILED"
+        booking=bad)["status"] == "BLOCKED"
     with eng.begin() as conn:
         assert conn.execute(text("SELECT count(*) FROM published_slips")).scalar_one() == 0
     good = recovery.recover_empty_tier(publish_date="2099-01-01", tier="10_odds",
@@ -132,3 +139,44 @@ def test_two_independent_threads_publish_empty_tier_once(monkeypatch, tmp_path):
         assert conn.execute(text("SELECT count(*) FROM published_slips")).scalar_one() == 1
         assert conn.execute(text("SELECT count(*) FROM tier_bookings")).scalar_one() == 1
         assert conn.execute(text("SELECT count(*) FROM tier_recovery_provenance")).scalar_one() == 1
+
+
+def test_ten_odds_recovery_rejects_repriced_nine_odds(monkeypatch):
+    eng = _db(monkeypatch)
+    _card(eng, {"10_odds": {"selected": False, "games": []}})
+    booking = {**_booking(), "actual_sportybet_odds": 9.8}
+    result = recovery.recover_empty_tier(
+        publish_date="2099-01-01", tier="10_odds",
+        candidate=_candidate(), booking=booking)
+    assert result["status"] == "BLOCKED"
+    with eng.begin() as conn:
+        assert conn.execute(text("SELECT count(*) FROM published_slips")).scalar_one() == 0
+
+
+def test_recovery_never_reuses_an_over_one_five_fixture(monkeypatch):
+    eng = _db(monkeypatch)
+    _card(eng, {
+        "over_1_5": {"selected": True, "games": [_game("fixture-0")]},
+        "10_odds": {"selected": False, "games": []},
+    })
+    result = recovery.recover_empty_tier(
+        publish_date="2099-01-01", tier="10_odds",
+        candidate=_candidate(), booking=_booking())
+    assert result["status"] == "FIXTURE_CONFLICT"
+    with eng.begin() as conn:
+        assert conn.execute(text("SELECT count(*) FROM published_slips")).scalar_one() == 0
+
+
+def test_recovery_rejects_stale_or_unverified_selection(monkeypatch):
+    eng = _db(monkeypatch)
+    _card(eng, {"10_odds": {"selected": False, "games": []}})
+    selected = _candidate()
+    selected["games"][0]["kickoff"] = "2000-01-01T12:00:00Z"
+    assert recovery.recover_empty_tier(
+        publish_date="2099-01-01", tier="10_odds",
+        candidate=selected, booking=_booking())["status"] == "BLOCKED"
+    untrusted = _candidate()
+    untrusted["games"][0]["safe_tier_eligible"] = False
+    assert recovery.recover_empty_tier(
+        publish_date="2099-01-01", tier="10_odds",
+        candidate=untrusted, booking=_booking())["status"] == "BLOCKED"
