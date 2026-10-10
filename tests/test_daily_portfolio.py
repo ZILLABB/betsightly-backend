@@ -69,6 +69,18 @@ def test_official_products_have_no_exact_selection_overlap_when_board_is_suffici
                for entry in diagnostics.values())
     assert accumulators["_portfolio"]["portfolio_version"] == "official_exposure_v1"
     assert accumulators["_portfolio"]["portfolio_validation"]["valid"] is True
+    # Over 1.5 singles must never repeat a match from any accumulator.
+    assert daily_feed.all_daily_fixture_conflicts(accumulators) == []
+    over_ids = {
+        str(pick["match_id"])
+        for pick in accumulators["over_1_5"]["games"]
+    }
+    accumulator_ids = {
+        str(pick["match_id"])
+        for tier in daily_feed.OFFICIAL_PORTFOLIO_PRODUCTS
+        for pick in accumulators[tier]["games"]
+    }
+    assert over_ids.isdisjoint(accumulator_ids)
     final_ids = [
         selection_id
         for product in diagnostics.values()
@@ -259,12 +271,13 @@ def test_october_three_shared_losses_cannot_be_republished_in_5_and_10(monkeypat
     assert not (incident_ids & final_ten)
     assert not (final_five & final_ten)
 
-    assert {
-        selection_id.split("|", 1)[0]
-        for selection_id in final_ten
-    } == alternative_ids
-
-    assert products["10_odds"]["decision"] == "DIVERSIFIED"
+    # The fake independent optimizer quoted 9.40x after exposure removal
+    # while its three actual market prices multiply to substantially less.
+    # Under the honest 10.00x contract, that must be withheld rather than
+    # advertised as a full 10 Odds ticket.
+    assert not final_ten
+    assert result["accumulators"]["10_odds"]["selected"] is False
+    assert "10.00x" in result["accumulators"]["10_odds"]["reason"]
 
 
 
