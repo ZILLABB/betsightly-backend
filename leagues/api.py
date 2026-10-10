@@ -649,43 +649,95 @@ async def trigger_tier_booking(force: bool = False):
 
 @router.get("/bookings")
 async def get_bookings(date: str | None = None):
-    """Booking codes for a publishing day, and why any tier has none."""
-    from leagues.booking import bookings_for, leg_fingerprint
+    """Expose only publication-approved and locally actionable booking codes.
+
+    The database may retain FULL SportyBet codes for historical, withheld or
+    subsequently invalidated slips. Never return those raw records through a
+    public endpoint: all codes are matched to the immutable published card
+    and verified with the local booking lifecycle first.
+    """
+    from leagues.booking import bookings_for, booking_lifecycle
     from leagues.daily_feed import _publish_date, build_daily_accumulators
+
     day = date or _publish_date()
     stored = bookings_for(day)
-
-    # Why a tier on the card has no code, answered from the same place the
-    # codes are read. Stored bookings and the served card agreeing on every
-    # input while the card still carries nothing is a gap that cannot be seen
-    # from either endpoint alone.
-    attach: dict = {}
+    current_day = _publish_date()
+    card = {}
     try:
+        # This method reads the already locked publication. It must never
+        # generate, book, reprice or mutate historical results.
         card = build_daily_accumulators(allow_generation=False) or {}
-        accs = card.get("accumulators") or {}
-        attach = {
-            "card_date": card.get("date"),
-            "dates_match": card.get("date") == day,
-            "tiers_on_card": sorted(accs.keys()),
-            "tiers_stored": sorted(stored.keys()),
-            "carrying_a_booking": sorted(
-                k for k, v in accs.items()
-                if isinstance(v, dict) and v.get("booking")),
-            "fingerprints": {
-                k: {"stored": (stored.get(k) or {}).get("leg_fingerprint"),
-                    "live": leg_fingerprint((v or {}).get("games") or [])}
-                for k, v in accs.items()
-                if isinstance(v, dict) and (stored.get(k) or {}).get("leg_fingerprint")
-            },
-        }
-    except Exception as e:
-        attach = {"error": f"{type(e).__name__}: {e}"}
+    except Exception:
+        logger.exception("Public booking list could not load the locked card")
+    accs = card.get("accumulators") or {}
+    dates_match = (card.get("date") == day and day == current_day)
 
-    return {"status": "success", "date": day,
-            "count": sum(1 for v in stored.values()
-                         if v.get("status") == "active"),
-            "bookings": stored,
-            "attach": attach}
+    sanitized = {}
+    for tier, record in stored.items():
+        category = accs.get(tier)
+        eligible = (
+            dates_match
+            and isinstance(category, dict)
+            and category.get("selected") is True
+            and bool(category.get("games"))
+            and category.get("result_status") != "PUBLICATION_POLICY_BLOCKED"
+            and (category.get("publication_policy") or {}).get("allowed") is not False
+        )
+        checked = (
+            booking_lifecycle(
+                record, category.get("games") or [],
+                allow_partial_singles=(
+                    tier == "over_1_5"
+                    and category.get("presentation") == "singles"
+                ),
+            )
+            if eligible else None
+        )
+        actionable = bool(checked and checked.get("actionable"))
+        # Allowlist public fields rather than spreading the stored row: raw
+        # payload/detail may contain an old SportyBet share code or its URL.
+        sanitized[tier] = {
+            "status": (
+                checked.get("status", "unavailable")
+                if checked else "unavailable"
+            ),
+            "booking_status": (
+                checked.get("booking_status") if checked else "UNAVAILABLE"
+            ),
+            "actionable": actionable,
+            "failure_category": (
+                checked.get("failure_category") if checked
+                else "PUBLICATION_NOT_ACTIONABLE"
+            ),
+            "reason": (
+                checked.get("reason") if checked
+                else "This booking is not part of an actionable published card."
+            ),
+            "share_code": checked.get("share_code") if actionable else None,
+            "share_url": checked.get("share_url") if actionable else None,
+            "expires_at": checked.get("expires_at") if checked else None,
+            "booked_leg_count": (
+                checked.get("booked_leg_count") if checked else 0
+            ),
+        }
+
+    attach = {
+        "card_date": card.get("date"),
+        "dates_match": dates_match,
+        "tiers_on_card": sorted(accs.keys()),
+        "tiers_stored": sorted(stored.keys()),
+        "carrying_a_booking": sorted(
+            tier for tier, entry in sanitized.items()
+            if entry["actionable"]
+        ),
+    }
+    return {
+        "status": "success",
+        "date": day,
+        "count": sum(1 for entry in sanitized.values() if entry["actionable"]),
+        "bookings": sanitized,
+        "attach": attach,
+    }
 
 
 # Built slips, keyed on (target, horizon, day). Generating one runs the

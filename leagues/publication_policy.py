@@ -256,5 +256,41 @@ def enforce_card_policy(accumulators: dict) -> dict:
             category["publication_policy"] = decision
         report["products"][product] = decision
 
+    # Post-booking promotion can change the final set after individual
+    # tier validation. Enforce the shared *fixture* exposure invariant on the
+    # final customer-facing cards, including Over 1.5 (October 8 incident).
+    claimed: dict[str, str] = {}
+    for product in OFFICIAL_PRODUCTS:
+        category = accumulators.get(product)
+        if not isinstance(category, dict) or not category.get("selected"):
+            continue
+        fixtures = [str(g.get("match_id") or "") for g in category.get("games") or []]
+        seen: set[str] = set()
+        conflicts: list[str] = []
+        for fixture_id in fixtures:
+            if not fixture_id:
+                continue
+            if fixture_id in seen or fixture_id in claimed:
+                conflicts.append(fixture_id)
+            seen.add(fixture_id)
+        if conflicts:
+            decision = {
+                "allowed": False,
+                "policy_version": POLICY_VERSION,
+                "product": product,
+                "reasons": ["DUPLICATE_FIXTURE_ACROSS_OFFICIAL_PRODUCTS"],
+                "duplicate_fixture_ids": sorted(set(conflicts)),
+                "conflicts_with": sorted({
+                    claimed[fixture_id] for fixture_id in conflicts
+                    if fixture_id in claimed
+                }),
+            }
+            _withhold(category, decision)
+            report["products"][product] = decision
+            continue
+        for fixture_id in fixtures:
+            if fixture_id:
+                claimed[fixture_id] = product
+
     accumulators["_publication_policy"] = report
     return report
