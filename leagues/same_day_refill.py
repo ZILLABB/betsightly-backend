@@ -52,7 +52,22 @@ def _claim_hour(engine, key: str, day: str, now: datetime) -> bool:
             " VALUES (:w,:d,:t,'running')"
             " ON CONFLICT (window_key) DO NOTHING"
         ), {"w": key, "d": day, "t": now.isoformat()})
-        return result.rowcount == 1
+        if result.rowcount == 1:
+            return True
+        # A stale board contains no safe, current selections. Let the next
+        # 15-minute scheduler tick retry after prewarming, but never rerun a
+        # successful/failed bookmaker attempt in this WAT hour.
+        cutoff = (now - timedelta(minutes=5)).isoformat()
+        retried = conn.execute(text(
+            "UPDATE same_day_refill_attempts SET status='running',"
+            " started_at=:t,finished_at=NULL,result=NULL"
+            " WHERE window_key=:w"
+            " AND (status='board_refreshing' OR"
+            " (status='complete' AND result LIKE :old_unavailable))"
+            " AND started_at<=:cutoff"
+        ), {"w": key, "t": now.isoformat(), "cutoff": cutoff,
+            "old_unavailable": '%"status": "BOARD_UNAVAILABLE"%'})
+        return retried.rowcount == 1
 
 
 def _finish_hour(engine, key: str, status: str, report: dict) -> None:
@@ -122,7 +137,12 @@ def run_if_due(now: datetime | None = None) -> dict:
                     )
                 except Exception as exc:
                     logger.warning("same-day board refresh failed: %s", exc)
-        _finish_hour(engine, key, "complete", outcome)
+        _finish_hour(
+            engine, key,
+            "board_refreshing" if outcome["status"] == "BOARD_UNAVAILABLE"
+            else "complete",
+            outcome,
+        )
         if outcome["recovered"]:
             # Invalidate only this worker's in-process cache; other web
             # processes will observe the persisted card after their TTL.
