@@ -160,11 +160,27 @@ def recover_empty_tier(*, publish_date: str, tier: str, candidate: dict,
                         for game in (value.get("games") or [])
                         if game.get("match_id")
                     }
+                    # Rollover isn't stored in daily_cards. Its booked
+                    # replacement fixtures still reserve exposure, and must
+                    # be considered alongside every original card fixture.
+                    from leagues.booking import _ensure_table
+                    _ensure_table(conn)
+                    booked_rows = conn.execute(text(
+                        "SELECT detail FROM tier_bookings WHERE publish_date=:d"
+                    ), {"d": publish_date}).fetchall()
+                    for row in booked_rows:
+                        try:
+                            detail = json.loads(row[0] or "{}")
+                        except (TypeError, ValueError):
+                            return {"status": "BOOKING_DATA_INVALID"}
+                        for game in (detail.get("final_booked_legs") or []):
+                            if game.get("match_id"):
+                                claimed.add(str(game["match_id"]))
                     if claimed.intersection(
                         str(game.get("match_id")) for game in games
                     ):
                         return {"status": "FIXTURE_CONFLICT",
-                                "reason": "a fixture is already published on another tier"}
+                                "reason": "a fixture is already published or booked on another tier"}
                     current = payload.get(tier)
                     if _selected(current):
                         return {"status": "ALREADY_FILLED"}
