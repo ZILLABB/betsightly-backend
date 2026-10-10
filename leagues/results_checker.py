@@ -573,7 +573,13 @@ def _collect_scores_for_picks(
     unresolved = missing()
     if allow_fallback and unresolved:
         from services.free_football_score_sources import football_data_finals
-        fdo = football_data_finals(dates[0], dates[-1])
+        # A settlement batch may span months. Bound the free API call to
+        # the most recent eight calendar days, rather than rejecting the
+        # entire historical range or exhausting the provider quota.
+        newest = datetime.strptime(dates[-1], "%Y-%m-%d").date()
+        earliest = max(datetime.strptime(dates[0], "%Y-%m-%d").date(),
+                       newest - timedelta(days=7))
+        fdo = football_data_finals(earliest.isoformat(), newest.isoformat())
         merge(_index_free_finals(fdo), "football-data.org")
 
     unresolved = missing()
