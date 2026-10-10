@@ -1307,7 +1307,7 @@ def test_game_count_explicit_markets_request_all_eligible_candidates(monkeypatch
     }
 
 
-def test_strongest_does_not_request_all_eligible_candidates(monkeypatch):
+def test_strongest_preserves_all_approved_market_alternatives(monkeypatch):
     picks = [
         _pick(
             1,
@@ -1351,7 +1351,7 @@ def test_strongest_does_not_request_all_eligible_candidates(monkeypatch):
     })
 
     assert result["status"] == "success"
-    assert seen["include_all_eligible"] is False
+    assert seen["include_all_eligible"] is True
 
 
 def test_game_count_protects_scarce_requested_market_from_abundant_fixture_conflict(
