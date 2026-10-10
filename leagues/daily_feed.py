@@ -1083,6 +1083,16 @@ def recover_today_empty_tiers() -> dict:
                 if team:
                     reserved_teams.add(team)
 
+    # The daily card excludes the separately persisted Rollover chain, and
+    # booking replacements may differ from original official fixture IDs.
+    # Reserve their final bookmaker-confirmed fixtures before optimizing.
+    from leagues.booking import bookings_for
+    for booked in bookings_for(publish_date).values():
+        for game in (booked.get("final_booked_legs") or []):
+            fixture_id = str(game.get("match_id") or "")
+            if fixture_id:
+                reserved_fixture_ids.add(fixture_id)
+
     def recovery_available(source: list) -> list:
         return [
             pick
