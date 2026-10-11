@@ -49,6 +49,7 @@ def tier_supply_diagnostics(
     *,
     used: dict[str, list[dict]] | None = None,
     market_cap: int = DEFAULT_CAP,
+    tier_market_caps: dict[str, int] | None = None,
 ) -> dict:
     """Explain cap-bound infeasibility without changing published choices."""
     used = used or {}
@@ -67,10 +68,11 @@ def tier_supply_diagnostics(
 
     products = {}
     for tier, target in (("5_odds", 5.0), ("10_odds", 10.0)):
+        product_cap = (tier_market_caps or {}).get(tier, market_cap)
         baseline = optimistic_ceiling(
-            qualified, market_cap=market_cap)
+            qualified, market_cap=product_cap)
         unreserved = optimistic_ceiling(
-            remaining, market_cap=market_cap)
+            remaining, market_cap=product_cap)
         alternative = {
             str(cap): optimistic_ceiling(
                 qualified, market_cap=cap)["maximum_optimistic_odds"]
@@ -80,7 +82,7 @@ def tier_supply_diagnostics(
         after_reservations = unreserved["maximum_optimistic_odds"] < target
         products[tier] = {
             "target": target,
-            "policy_market_cap": market_cap,
+            "policy_market_cap": product_cap,
             "optimistic_with_policy_cap": baseline["maximum_optimistic_odds"],
             "optimistic_after_existing_reservations":
                 unreserved["maximum_optimistic_odds"],
