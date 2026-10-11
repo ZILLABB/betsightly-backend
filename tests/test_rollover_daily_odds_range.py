@@ -20,6 +20,12 @@ def _pick(index, odds=1.5, p=.69):
         "market_floor_eligible": True,
         "market_trust_state": "TRUSTED",
         "market_margin": .03,
+        "trust": {
+            "evidence_state": "SUPPORTED",
+            "evidence_strength": 1.0,
+            "evidence_adjusted_probability": p,
+            "trust_grade": "A",
+        },
     }
 
 
