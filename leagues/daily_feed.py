@@ -1876,6 +1876,9 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                     "odds": p["odds"],
                     "odds_are_real": p["odds_are_real"],
                     "confidence": p["confidence"],
+                    "model_draw_probability": (
+                        ((p.get("_model") or {}).get("probabilities") or {}).get("draw")
+                    ),
                     "raw_confidence": p.get("raw_confidence"),
                     "safe_tier_eligible": p.get("safe_tier_eligible", False),
                     "calibration_sample": p.get("calibration_sample", 0),
@@ -1930,6 +1933,7 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                 "market": pk.get("market_key"),
                 "bookable": pk.get("bookable", False),
                 "confidence": pk.get("confidence", 0.5),
+                "model_draw_probability": pk.get("model_draw_probability"),
                 "estimated_odds": pk.get("odds"),
                 "odds": pk.get("odds"),
                 "real_odds": pk.get("odds") if pk.get("odds_are_real") else None,
