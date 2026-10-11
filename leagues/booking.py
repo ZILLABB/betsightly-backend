@@ -1331,13 +1331,16 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
                     predicted_odds=predicted_odds,
                     ticket_type=data.get("sportybet_ticket_type", "accumulator"))
             else:
-                minimum = 1 if tier in ("banker", "over_1_5") else 2
-                if len(available_original) >= minimum:
+                # Never mint a misleading partial accumulator booking.
+                # Only the independently listed Over 1.5 singles can remain
+                # individually usable if a different single is unavailable.
+                singles = (tier == "over_1_5"
+                           and data.get("presentation") == "singles")
+                if singles and len(available_original) >= 1:
                     record = create_booking(
                         available_original, board, allow_partial=True,
                         booking_status="PARTIAL", original_games=games,
-                        predicted_odds=predicted_odds,
-                        ticket_type=data.get("sportybet_ticket_type", "accumulator"))
+                        predicted_odds=predicted_odds, ticket_type="singles")
                     record["excluded_legs"] = unavailable_original
                     record["excluded_leg_count"] = len(unavailable_original)
                     record["partial"] = True
@@ -1358,6 +1361,22 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
                         "replacements": [],
                         "reason": "no valid full, rebuilt, or partial ticket",
                     }
+        if tier == "10_odds" and record.get("status") == "active":
+            # A bookmaker can accept every leg but reprice below the 10x
+            # product minimum after the morning card was locked.
+            # Record the rejection; never present the lower-odds code as 10x.
+            try:
+                booked_odds = float(record.get("actual_sportybet_odds") or 0)
+            except (ValueError, TypeError, OverflowError):
+                booked_odds = 0
+            if booked_odds < 10:
+                record = dict(record)
+                record.update(
+                    status="invalid", booking_status="VALIDATION_FAILED",
+                    failure_category="TEN_ODDS_TARGET_NOT_REACHED",
+                    reason="SportyBet readback odds are below the required 10.00x",
+                    share_code=None, share_url=None,
+                )
         if tier == "rollover" and record.get("status") == "active":
             from leagues.rollover_odds_policy import rollover_odds_in_range
             if not rollover_odds_in_range(record.get("actual_sportybet_odds")):
@@ -1505,6 +1524,14 @@ def attach_bookings(publish_date: str, accumulators: dict,
         record = stored.get(tier)
         if not record:
             continue
+        if tier == "10_odds":
+            try:
+                booked_odds = float(record.get("actual_sportybet_odds") or 0)
+            except (TypeError, ValueError, OverflowError):
+                booked_odds = 0
+            if booked_odds < 10:
+                data.pop("booking", None)
+                continue
         if tier == "rollover":
             from leagues.rollover_odds_policy import rollover_odds_in_range
             if not rollover_odds_in_range(record.get("actual_sportybet_odds")):
