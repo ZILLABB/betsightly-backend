@@ -98,6 +98,9 @@ def test_rollover_selection_is_excluded_from_later_official_products(monkeypatch
     rollover_game.update({
         "home_team": "Home 0", "away_team": "Away 0",
         "market_key": picks[0]["market"],
+        # Test fixture models a published 2x+ rollover; previously this fake
+        # ticket was only 1.30x and must now be rejected by official policy.
+        "odds": 2.10,
     })
 
     monkeypatch.setattr("leagues.engine.run_pipeline", lambda **_: (picks, fixtures))
@@ -105,7 +108,7 @@ def test_rollover_selection_is_excluded_from_later_official_products(monkeypatch
     monkeypatch.setattr(daily_feed, "_load_locked", lambda _: None)
     monkeypatch.setattr(daily_feed, "_build_rollover", lambda *_, **kw: {
         "selected": True, "games": [rollover_game], "chain": [], "chain_length": 1,
-        "total_odds": 1.3, "today_hit_probability": .72,
+        "total_odds": 2.10, "today_hit_probability": .72,
     })
     monkeypatch.setattr(daily_feed, "_archive", lambda *_: None)
     monkeypatch.setattr("leagues.picks_db.save_card", lambda *_: False)
@@ -311,7 +314,7 @@ def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
         "market_key": "under_4_5",
         "prediction": "Under 4.5 Goals",
         # This regression tests fixture exposure for a PUBLISHED Rollover.
-        "odds": 1.30,
+        "odds": 2.10,
         "confidence": .80,
         "market_floor_eligible": True,
         "safe_tier_eligible": True,
@@ -330,7 +333,7 @@ def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
             "games": [rollover_game],
             "chain": [],
             "chain_length": 1,
-            "total_odds": 1.30,
+            "total_odds": 2.10,
             "today_hit_probability": .80,
         },
     )
