@@ -105,6 +105,48 @@ def _add_missing_columns(engine) -> None:
             logger.warning(f"could not add column {name}: {e}")
 
 
+def forecast_evidence_for_archive(game: dict) -> dict:
+    """Immutable pre-kickoff input fields for future shadow scoreline reviews.
+
+    Never infer missing goals, recreate old forecasts, or insert a settlement
+    result into the evidence. No new provider call is made.
+    """
+    import math
+
+    def numeric(key: str, ceiling: float, *, floor: float = 0.0):
+        try:
+            raw = game.get(key)
+            if raw is None:
+                return None
+            value = float(raw)
+            if math.isfinite(value) and floor <= value <= ceiling:
+                return round(value, 6)
+        except (ValueError, TypeError, OverflowError):
+            pass
+        return None
+
+    return {
+        "expected_home_goals": numeric("expected_home_goals", 15.0),
+        "expected_away_goals": numeric("expected_away_goals", 15.0),
+        "expected_goals": numeric("expected_goals", 30.0),
+        "model_home_win_probability": numeric(
+            "model_home_win_probability", 1.0
+        ),
+        "model_away_win_probability": numeric(
+            "model_away_win_probability", 1.0
+        ),
+        "model_draw_probability": numeric("model_draw_probability", 1.0),
+        "bookmaker_home_win_odds": numeric(
+            "bookmaker_home_win_odds", 1000.0, floor=1.01
+        ),
+        "bookmaker_away_win_odds": numeric(
+            "bookmaker_away_win_odds", 1000.0, floor=1.01
+        ),
+        "calibration_group": game.get("calibration_group"),
+        "calibration_sample": game.get("calibration_sample"),
+    }
+
+
 def archive_slip(date: str, category: str, games: list[dict],
                  total_odds: float, hit_probability: float,
                  presentation: str = "accumulator") -> bool:
@@ -164,6 +206,7 @@ def archive_slip(date: str, category: str, games: list[dict],
                     # The trained ensemble's shadow opinion, stored so it can
                     # be scored against the same outcome as the published pick.
                     "ml_confidence": g.get("ml_confidence"),
+                    **forecast_evidence_for_archive(g),
                     "home_team_logo": g.get("home_team_logo"),
                     "away_team_logo": g.get("away_team_logo"),
                     "status": "pending",

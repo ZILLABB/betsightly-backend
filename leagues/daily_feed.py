@@ -1860,6 +1860,15 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                     "leg_number": p["_fixture"].get("leg_number"),
                     "commence_time": p["_fixture"]["commence_time"],
                     "prediction": p["prediction"],
+                    "expected_home_goals": (
+                        ((p.get("_model") or {}).get("expected_goals") or {}).get("home")
+                    ),
+                    "expected_away_goals": (
+                        ((p.get("_model") or {}).get("expected_goals") or {}).get("away")
+                    ),
+                    "expected_goals": (
+                        ((p.get("_model") or {}).get("expected_goals") or {}).get("total")
+                    ),
                     "market": p["market_group"],
                     # The specific market, not just its group. `market` above
                     # holds the group and is left alone because settlement and
@@ -1938,6 +1947,9 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                 "date": pk.get("commence_time", ""),
                 "kickoff": pk.get("commence_time", ""),
                 "prediction": pk.get("prediction", ""),
+                "expected_home_goals": pk.get("expected_home_goals"),
+                "expected_away_goals": pk.get("expected_away_goals"),
+                "expected_goals": pk.get("expected_goals"),
                 "prediction_type": pk.get("market", "match_result"),
                 # Every other tier publishes the specific market under this
                 # key; rollover omitted it entirely. Absent on chains stored
