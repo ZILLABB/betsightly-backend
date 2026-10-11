@@ -112,3 +112,37 @@ def test_final_card_guard_withholds_invalid_accumulator():
     assert accumulators["2_odds"]["selected"] is False
     assert accumulators["2_odds"]["result_status"] == "PUBLICATION_POLICY_BLOCKED"
     assert report["products"]["2_odds"]["allowed"] is False
+
+
+
+def test_stale_positive_expected_return_cannot_override_repriced_bad_leg():
+    # A selection quoted at 1.45 may have been positive-value, but after a
+    # SportyBet repricing to 1.15 its cached value is not authoritative.
+    leg = pick(confidence=.75, odds=1.15)
+    leg["risk_adjusted_return"] = 1.50
+    decision = evaluate_leg(leg, "10_odds")
+    assert not decision["allowed"]
+    assert "NEGATIVE_MODEL_VALUE" in decision["reasons"]
+    assert decision["risk_adjusted_return"] < 1.0
+
+
+def test_stale_negative_expected_return_cannot_override_current_quote():
+    leg = pick(confidence=.75, odds=1.45)
+    leg["risk_adjusted_return"] = -999
+    decision = evaluate_leg(leg, "5_odds")
+    assert decision["allowed"]
+    assert decision["risk_adjusted_return"] >= 1.0
+
+
+def test_nan_cached_value_is_ignored_when_recomputing():
+    leg = pick(confidence=.75, odds=1.15)
+    leg["risk_adjusted_return"] = float("nan")
+    decision = evaluate_leg(leg, "banker")
+    assert not decision["allowed"]
+    assert "NEGATIVE_MODEL_VALUE" in decision["reasons"]
+
+
+def test_repriced_slip_is_fail_closed_even_with_stale_cached_return():
+    leg = pick(confidence=.75, odds=1.15)
+    leg["risk_adjusted_return"] = 1.4
+    assert not evaluate_slip([leg], "2_odds")["allowed"]
