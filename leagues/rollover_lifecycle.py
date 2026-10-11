@@ -63,3 +63,31 @@ def chain_state(days: list[dict], today: str, target_days: int = 3) -> dict:
         "day_number": len(ordered) + 1,
         "active_date": None,
     }
+
+
+def allow_append_day(prior_days: list[dict], new_day: dict,
+                     chain_start_date: str) -> bool:
+    """Persistence boundary: never insert future stage after non-wins.
+
+    Even if a caller bypasses the presentation policy, the database write
+    must require a contiguous won history and strictly increasing dates.
+    Existing archived rows are never rewritten by this guard.
+    """
+    try:
+        number = int(new_day["day_number"])
+        date = str(new_day["date"])
+        if number not in (1, 2, 3) or len(date) != 10:
+            return False
+        if number == 1:
+            return not prior_days and date >= chain_start_date
+        if len(prior_days) != number - 1:
+            return False
+        ordered = sorted(prior_days, key=lambda d: int(d["day_number"]))
+        return all(
+            int(day["day_number"]) == idx
+            and day["status"] == "won"
+            and str(day["date"]) < date
+            for idx, day in enumerate(ordered, start=1)
+        ) and len({day["date"] for day in ordered}) == len(ordered)
+    except (KeyError, TypeError, ValueError):
+        return False

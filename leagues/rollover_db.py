@@ -158,6 +158,24 @@ def append_day(chain_start_date: str, day: Dict[str, Any]) -> bool:
             ).first()
             if existing:
                 return True
+            from leagues.rollover_lifecycle import allow_append_day
+            previous = (
+                db.query(RolloverDay)
+                .filter(RolloverDay.chain_start_date == chain_start_date)
+                .order_by(RolloverDay.day_number.asc())
+                .all()
+            )
+            prior_days = [
+                {"day_number": old.day_number, "date": old.date,
+                 "status": old.status}
+                for old in previous
+            ]
+            if not allow_append_day(prior_days, day, chain_start_date):
+                logger.warning(
+                    "Blocked invalid rollover progression for %s stage %s",
+                    chain_start_date, day.get("day_number"),
+                )
+                return False
             row = RolloverDay(
                 chain_start_date=chain_start_date,
                 day_number=day["day_number"],
