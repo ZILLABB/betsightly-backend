@@ -78,3 +78,57 @@ def test_tied_favourite_is_not_guessed():
     pick = _pick(home=.35, away=.35, home_odds=2.6, away_odds=2.6)
     assert "DNB_NOT_MODEL_FAVOURITE" in dnb_strength_reasons(pick)
     assert "DNB_NOT_BOOKMAKER_FAVOURITE" in dnb_strength_reasons(pick)
+
+
+def test_pick_builder_drops_model_bookmaker_dnb_disagreement(monkeypatch):
+    from leagues.picks import build_picks
+    monkeypatch.setattr(
+        "leagues.sportybet.availability_from_fixture",
+        lambda fixture, market: {
+            "sportybet_available": True, "status": "BOOKABLE",
+            "event_id": "fixture",
+        },
+    )
+    fixture = {
+        "match_id": "fixture", "home": {"name": "Home"},
+        "away": {"name": "Away"},
+        "odds": {
+            "home_win": 3.10, "away_win": 2.15,
+            "dnb_home": 1.40, "dnb_away": 1.80,
+            "provider": "SportyBet",
+        },
+    }
+    model = {
+        "probabilities": {
+            "home_win": .56, "away_win": .20, "draw": .24,
+            "dnb_home": .79, "dnb_away": .21,
+        }
+    }
+    candidates = build_picks(fixture, model, min_confidence=.65,
+                             fit={"groups": {}})
+    assert not any(p["market"] == "dnb_home" for p in candidates)
+
+
+def test_pick_builder_can_select_agreed_home_favourite(monkeypatch):
+    from leagues.picks import build_picks
+    monkeypatch.setattr(
+        "leagues.sportybet.availability_from_fixture",
+        lambda fixture, market: {"sportybet_available": True,
+                                 "status": "BOOKABLE"},
+    )
+    fixture = {
+        "match_id": "fixture", "home": {"name": "Home"},
+        "away": {"name": "Away"},
+        "odds": {"home_win": 1.60, "away_win": 4.10,
+                 "dnb_home": 1.32, "dnb_away": 4.10,
+                 "provider": "SportyBet"},
+    }
+    model = {
+        "probabilities": {
+            "home_win": .56, "away_win": .20, "draw": .24,
+            "dnb_home": .78, "dnb_away": .22,
+        },
+    }
+    candidates = build_picks(fixture, model, min_confidence=.65,
+                             fit={"groups": {}})
+    assert any(p["market"] == "dnb_home" for p in candidates)
