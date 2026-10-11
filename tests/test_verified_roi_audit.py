@@ -48,12 +48,12 @@ def test_pending_void_and_estimated_quotes_are_excluded():
 def test_official_slip_and_independent_singles_are_not_confused():
     result = audited_market_roi([
         _slip("5_odds", [_leg("A", "won"), _leg("B", "won")],
-              status="won", odds=5.12),
+              status="won", odds=1.96),
         _slip("over_1_5", [_leg("C", "won", 1.3),
                              _leg("D", "lost", 1.4)], status="lost",
               odds=1.82, slip_id=2),
     ])
-    assert result["products"]["5_odds"]["flat_one_unit_net"] == 4.12
+    assert result["products"]["5_odds"]["flat_one_unit_net"] == 0.96
     assert result["products"]["over_1_5"]["flat_one_unit_net"] == -0.7
     assert result["actual_wager_profit_claim"] is False
 
@@ -86,3 +86,22 @@ def test_database_reader_is_bounded_and_read_only(monkeypatch):
     assert history_calls == [365]
     assert report["lookback_days"] == 365
     assert report["distinct_settled_fixture_markets"] == 0
+
+
+def test_product_roi_excludes_unverified_archived_accumulator():
+    report = audited_market_roi([
+        _slip("5_odds", [_leg("A", "won", real=False),
+                          _leg("B", "won")], status="won", odds=4.8),
+    ])
+    assert "5_odds" not in report["products"]
+    assert report["excluded"]["product_unverified_accumulator_price"] == 1
+
+
+def test_product_roi_excludes_inconsistent_archived_accumulator():
+    report = audited_market_roi([
+        _slip("10_odds", [_leg("A", "won", odds=1.5),
+                           _leg("B", "won", odds=1.5)],
+              status="won", odds=10.16),
+    ])
+    assert "10_odds" not in report["products"]
+    assert report["excluded"]["product_inconsistent_accumulator_price"] == 1
