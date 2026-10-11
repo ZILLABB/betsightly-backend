@@ -264,6 +264,11 @@ try:
     from leagues.prepared_board_store import ensure_table as _prepared_board_ensure_table
     _prepared_board_ensure_table()
 
+    # Additive, append-only Phase 9 bookmaker price evidence table.
+    # No historical odds are backfilled or mislabeled as closing prices.
+    from leagues.odds_history_warehouse import ensure_tables as _odds_history_tables
+    _odds_history_tables()
+
     logger.info("Runtime data tables verified")
 except Exception as e:
     logger.warning(f"Could not ensure runtime data tables: {e}")
