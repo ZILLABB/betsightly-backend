@@ -47,6 +47,23 @@ _GENERATED_BOOKING_LOCKS_GUARD = threading.Lock()
 _TIER_BOOKING_LOCK = threading.Lock()
 BOOKING_RECHECK_SECONDS = 15 * 60
 
+def _rechecked_tier_price_qualified(tier: str, price: object) -> bool:
+    """A held tier code cannot remain active after out-of-band repricing."""
+    if tier not in {"rollover", "10_odds"}:
+        return True
+    try:
+        from math import isfinite
+        odds = float(price)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not isfinite(odds):
+        return False
+    if tier == "rollover":
+        from leagues.rollover_odds_policy import rollover_odds_in_range
+        return rollover_odds_in_range(odds)
+    return odds >= 10.0
+
+
 
 def _base() -> str:
     from leagues.sportybet import BASE_URL as SB
@@ -1280,9 +1297,10 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
             prior, games, allow_partial_singles=(tier == "over_1_5"))
         reusable = bool(prior_checked and prior_checked.get("actionable")
                         and not force)
-        if tier == "rollover" and reusable:
-            from leagues.rollover_odds_policy import rollover_odds_in_range
-            reusable = rollover_odds_in_range(prior.get("actual_sportybet_odds"))
+        if reusable and tier in {"rollover", "10_odds"}:
+            reusable = _rechecked_tier_price_qualified(
+                tier, prior.get("actual_sportybet_odds")
+            )
         if reusable and _booking_recheck_due(prior):
             # A live board and readback, not the existence of an old code,
             # decide whether this edition is still placeable. The official
@@ -1296,6 +1314,15 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
                 valid, reason, actual_odds = validate_code_details(
                     prior["share_code"], selections)
                 reusable = bool(valid)
+                # Readback can reprice a once-valid code outside its tier
+                # minimum. Do not update/store/skip it as an active booking.
+                if reusable and tier in {"rollover", "10_odds"}:
+                    reusable = _rechecked_tier_price_qualified(tier, actual_odds)
+                    if not reusable:
+                        logger.warning(
+                            "Tier %s held code repriced outside contract: %s",
+                            tier, actual_odds,
+                        )
                 if reusable:
                     prior["checked_at"] = datetime.now(timezone.utc).isoformat()
                     if actual_odds is not None:
