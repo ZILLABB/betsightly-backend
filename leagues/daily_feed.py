@@ -1884,16 +1884,17 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                 for p in chosen
             ],
         }
+        # Never show a new stage unless persistence accepted its history.
+        # A failed write must not fall back to a local file on Render, where
+        # the next request might advertise a stage that was never archived.
+        if not preview and db_available:
+            if not _db_append(chain["start_date"], new_day):
+                logger.error("Rollover day %s rejected by persistence guard",
+                             new_day["date"])
+                continue
         chain["days"].append(new_day)
         needed -= 1
-
-        if preview:
-            pass
-        elif db_available:
-            if not _db_append(chain["start_date"], new_day):
-                logger.error(f"Rollover day {new_day['date']} not persisted")
-                _save("rollover_chain.json", chain)
-        else:
+        if not preview and not db_available:
             _save("rollover_chain.json", chain)
 
     cumulative = 1.0
