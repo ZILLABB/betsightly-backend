@@ -86,6 +86,9 @@ def evaluate_leg(pick: dict, product: str) -> dict:
         reasons.append("ESTIMATED_PRICE")
     if _is_friendly(pick):
         reasons.append("FRIENDLY_COMPETITION")
+    if (pick.get("market_key") or pick.get("market")) in ("dnb_home", "dnb_away"):
+        from leagues.dnb_strength_policy import dnb_strength_reasons
+        reasons.extend(dnb_strength_reasons(pick))
 
     minimum_probability = (
         BANKER_MIN_PROBABILITY if product == "banker"
@@ -178,6 +181,8 @@ def _reason_copy(reasons: list[str]) -> str:
         return "10 Odds withheld: no verified, policy-qualified ticket reaches 10.00x."
     if "TEN_ODDS_LEG_LIMIT_EXCEEDED" in reasons:
         return "10 Odds withheld: a ticket may contain at most 20 unique match selections."
+    if any(str(reason).startswith("DNB_") for reason in reasons):
+        return "Draw No Bet withheld: model and SportyBet 1X2 must agree on the stronger team."
     if "FRIENDLY_COMPETITION" in reasons:
         return "No qualifying slip: friendlies are excluded from official BetSightly products."
     if "NEGATIVE_MODEL_VALUE" in reasons or "NEGATIVE_SLIP_MODEL_VALUE" in reasons:

@@ -13,6 +13,8 @@ def _pick(index: int, kickoff: str) -> dict:
         "away": {"name": f"Away {index}", "logo": None},
         "league": "Portfolio League", "league_slug": "portfolio",
         "competition_type": "LEAGUE", "competition_historical_sample": 100,
+        # Realistic 1X2 favourite evidence for synthetic home-side DNB legs.
+        "odds": {"home_win": 1.60, "away_win": 4.10},
     }
     confidence = .72
     return {
@@ -34,7 +36,8 @@ def _pick(index: int, kickoff: str) -> dict:
         "_fixture": fixture,
         "_model": {
             "expected_goals": {"home": 1.5, "away": 1.1, "total": 2.6},
-            "probabilities": {"draw": .25}, "has_market": True,
+            "probabilities": {"home_win": .56, "away_win": .19,
+                              "draw": .25}, "has_market": True,
         },
     }
 
