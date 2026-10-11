@@ -119,3 +119,15 @@ def test_accumulator_prefers_stronger_conservative_leg_over_hot_raw_confidence()
     )
     assert chosen[0]["match_id"] == "supported"
     assert joint == pytest.approx(selection_probability(supported), abs=1.1e-4)
+
+
+
+def test_dnb_persisted_probability_keeps_push_aware_value_after_conversion():
+    original = _pick(market="dnb_home", confidence=.75, odds=1.45,
+                     _model={"probabilities": {"draw": .29}})
+    display = _pick(market="dnb_home", confidence=.75, odds=1.45,
+                    model_draw_probability=.29)
+    assert risk_adjusted_return(display) == risk_adjusted_return(original)
+    assert risk_adjusted_return(display) == pytest.approx(
+        .75 * .71 * 1.45 + .29, abs=1e-6,
+    )
