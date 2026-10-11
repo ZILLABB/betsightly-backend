@@ -829,6 +829,33 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
             ),
         }
 
+    # Preserve a read-only explanation of today's selection bottlenecks.
+    # Never use a relaxed-cap shadow bound to decide official publication.
+    from leagues.selection import MARKET_CAP
+    from leagues.tier_supply_diagnostics import tier_supply_diagnostics
+    _used_products = {
+        "rollover": rollover.get("games") or [],
+        "banker": banker[0],
+        "2_odds": two[0],
+        "5_odds": five[0],
+        "10_odds": ten[0],
+        "over_1_5": over_picks,
+    }
+    portfolio_diagnostics["tier_supply_diagnostics"] = tier_supply_diagnostics(
+        official_source, used=_used_products, market_cap=MARKET_CAP,
+    )
+    logger.info(
+        "tier_supply date=%s qualified=%s distinct=%s groups=%s "
+        "5x_block=%s 10x_block=%s remaining=%s",
+        publish_date,
+        portfolio_diagnostics["tier_supply_diagnostics"]["qualified_selections"],
+        portfolio_diagnostics["tier_supply_diagnostics"]["qualified_fixtures"],
+        portfolio_diagnostics["tier_supply_diagnostics"]["by_market_group"],
+        portfolio_diagnostics["tier_supply_diagnostics"]["products"]["5_odds"]["reason_code"],
+        portfolio_diagnostics["tier_supply_diagnostics"]["products"]["10_odds"]["reason_code"],
+        portfolio_diagnostics["tier_supply_diagnostics"]["remaining_qualified_fixtures"],
+    )
+
     thin = "Not enough matches today to build this safely — check back tomorrow."
 
     _built_at = now.isoformat()
