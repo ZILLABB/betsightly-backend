@@ -109,6 +109,65 @@ def _claim(run_date: str, force: bool) -> tuple[bool, str]:
         return True, ""
 
 
+def _report_for_storage(report: dict) -> str:
+    """Keep every step auditable without truncating JSON or leaking share codes.
+
+    Raw multi-league provider diagnostics belong in the immutable board
+    snapshots, not the daily-run row. An 8,000-character prefix previously
+    cut the final card/booking/distribution status off entirely.
+    """
+    import json
+    import math
+
+    def json_safe(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if isinstance(value, dict):
+            return {str(k): json_safe(v) for k, v in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [json_safe(v) for v in value]
+        return value
+
+    compact = {k: v for k, v in report.items() if k != "steps"}
+    compact["steps"] = {}
+    for name, step in (report.get("steps") or {}).items():
+        if not isinstance(step, dict):
+            compact["steps"][name] = {"status": "invalid"}
+            continue
+        kept = {k: v for k, v in step.items() if k != "detail"}
+        detail = step.get("detail")
+        if name == "weekly_board" and isinstance(detail, dict):
+            fields = ("ready", "generated_at", "requested_days",
+                      "coverage_start", "coverage_end", "fixture_count",
+                      "candidate_count", "provider_state")
+            summary = {k: detail[k] for k in fields if k in detail}
+            provider = detail.get("provider") or {}
+            if isinstance(provider, dict):
+                summary["provider"] = {
+                    "state": provider.get("state") or provider.get("provider_state"),
+                    "requested_league_count": len(provider.get("leagues_requested") or []),
+                    "failed_league_count": len(provider.get("failed_leagues") or []),
+                    "generated_at": provider.get("generated_at"),
+                }
+            kept["detail"] = summary
+        elif name == "book" and isinstance(detail, dict):
+            # The report must show coverage, not customer-facing share codes.
+            def tier_names(items):
+                return [str(item).split(":", 1)[0] for item in (items or [])]
+            kept["detail"] = {
+                "date": detail.get("date"),
+                "booked_tiers": tier_names(detail.get("booked")),
+                "skipped_tiers": tier_names(detail.get("skipped")),
+                "failure_reasons": [
+                    str(item)[:160] for item in (detail.get("failed") or [])
+                ][:30],
+            }
+        else:
+            kept["detail"] = detail
+        compact["steps"][name] = kept
+    return json.dumps(json_safe(compact), default=str, allow_nan=False)
+
+
 def _finish(run_date: str, report: dict) -> None:
     import json
     from sqlalchemy import text
@@ -120,7 +179,7 @@ def _finish(run_date: str, report: dict) -> None:
                 text("UPDATE daily_runs SET status = :s, heartbeat_at = :t, finished_at = :t,"
                      " report = :r WHERE run_date = :d"),
                 {"d": run_date, "s": report.get("status", "complete"),
-                 "t": _now(), "r": json.dumps(report)[:8000]})
+                 "t": _now(), "r": _report_for_storage(report)})
     except Exception as e:
         logger.warning(f"daily run bookkeeping failed: {e}")
 
@@ -136,7 +195,7 @@ def _persist_progress(run_date: str, report: dict) -> None:
             conn.execute(text(
                 "UPDATE daily_runs SET status = 'running', heartbeat_at = :t, report = :r "
                 "WHERE run_date = :d"),
-                {"d": run_date, "t": _now(), "r": json.dumps(report)[:8000]})
+                {"d": run_date, "t": _now(), "r": _report_for_storage(report)})
     except Exception as exc:
         logger.warning(f"daily run progress bookkeeping failed: {exc}")
 
