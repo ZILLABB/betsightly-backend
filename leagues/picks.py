@@ -268,6 +268,16 @@ def build_picks(
         if market in ("home_or_away", "over_3_5"):
             continue
 
+        # DNB is intended as draw protection on the stronger side.
+        # Do not infer strength from home/away order; require both the
+        # unconditional 1X2 model and SportyBet's 1X2 prices to agree.
+        if market in ("dnb_home", "dnb_away"):
+            from leagues.dnb_strength_policy import dnb_strength_reasons
+            if dnb_strength_reasons({
+                "market": market, "_model": model, "_fixture": fixture
+            }):
+                continue
+
         real_key = REAL_ODDS_KEY.get(market)
         real_price = odds.get(real_key) if real_key else None
 
@@ -509,6 +519,14 @@ def to_game(pick: dict) -> dict:
         "model_draw_probability": (
             (m.get("probabilities") or {}).get("draw")
         ),
+        "model_home_win_probability": (
+            (m.get("probabilities") or {}).get("home_win")
+        ),
+        "model_away_win_probability": (
+            (m.get("probabilities") or {}).get("away_win")
+        ),
+        "bookmaker_home_win_odds": (f.get("odds") or {}).get("home_win"),
+        "bookmaker_away_win_odds": (f.get("odds") or {}).get("away_win"),
         "risk_adjusted_return": pick.get("risk_adjusted_return"),
         "sportybet_odds": pick.get("sportybet_odds"),
         "raw_break_even_probability": pick.get("raw_break_even_probability"),
