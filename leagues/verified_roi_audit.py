@@ -134,6 +134,17 @@ def audited_market_roi(slips: list[dict]) -> dict:
             price = 0
         if status not in {"won", "lost"} or not math.isfinite(price) or price <= 1:
             continue
+        # Archived product odds require price provenance for every leg.
+        # A mismatch cannot be called a verified accumulator return.
+        legs = slip.get("picks") or []
+        verified = [_price(leg) for leg in legs]
+        if not legs or any(v is None for v in verified):
+            excluded["product_unverified_accumulator_price"] += 1
+            continue
+        combined = math.prod(verified)
+        if not math.isclose(combined, price, rel_tol=0.01, abs_tol=0.02):
+            excluded["product_inconsistent_accumulator_price"] += 1
+            continue
         products[product].append({
             "won": int(status == "won"),
             "price": price,
