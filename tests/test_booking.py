@@ -823,7 +823,7 @@ def test_book_card_rebuilds_with_a_qualified_exactly_bookable_replacement(monkey
     assert original == before, "booking variants must not rewrite the prediction"
 
 
-def test_accumulator_falls_back_to_a_clearly_partial_ticket(monkeypatch):
+def test_accumulator_does_not_book_partial_ticket(monkeypatch):
     board = _exact_board()
     last = {"selections": []}
     monkeypatch.setattr(B, "_post_share",
@@ -843,11 +843,12 @@ def test_accumulator_falls_back_to_a_clearly_partial_ticket(monkeypatch):
             "_booking_candidates": {"games": []}}
     B.book_card(DAY, card)
     record = B.bookings_for(DAY)["5_odds"]
-    assert record["booking_status"] == "PARTIAL"
+    assert record["booking_status"] == "UNAVAILABLE"
+    assert record["status"] == "unavailable"
+    assert record["share_code"] is None
     assert record["original_leg_count"] == 3
-    assert record["booked_leg_count"] == 2
+    assert record["booked_leg_count"] == 0
     assert record["excluded_leg_count"] == 1
-    assert record["ticket_type"] == "accumulator"
 
 
 def test_generated_booking_reuses_same_valid_fingerprint(monkeypatch):
