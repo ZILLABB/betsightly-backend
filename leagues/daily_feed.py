@@ -829,6 +829,54 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
             ),
         }
 
+    # Preserve a read-only explanation of today's selection bottlenecks.
+    # Never use a relaxed-cap shadow bound to decide official publication.
+    from leagues.selection import MARKET_CAP
+    from leagues.tier_supply_diagnostics import tier_supply_diagnostics
+    _used_products = {
+        "rollover": rollover.get("games") or [],
+        "banker": banker[0],
+        "2_odds": two[0],
+        "5_odds": five[0],
+        "10_odds": ten[0],
+        "over_1_5": over_picks,
+    }
+    portfolio_diagnostics["tier_supply_diagnostics"] = tier_supply_diagnostics(
+        official_source, used=_used_products, market_cap=MARKET_CAP,
+    )
+    logger.info(
+        "tier_supply date=%s qualified=%s distinct=%s groups=%s "
+        "5x_block=%s 10x_block=%s remaining=%s",
+        publish_date,
+        portfolio_diagnostics["tier_supply_diagnostics"]["qualified_selections"],
+        portfolio_diagnostics["tier_supply_diagnostics"]["qualified_fixtures"],
+        portfolio_diagnostics["tier_supply_diagnostics"]["by_market_group"],
+        portfolio_diagnostics["tier_supply_diagnostics"]["products"]["5_odds"]["reason_code"],
+        portfolio_diagnostics["tier_supply_diagnostics"]["products"]["10_odds"]["reason_code"],
+        portfolio_diagnostics["tier_supply_diagnostics"]["remaining_qualified_fixtures"],
+    )
+
+    # Display truthful, reproducible cap failures instead of blaming the
+    # football schedule. Existing locked cards are never rewritten.
+    _bounds = portfolio_diagnostics["tier_supply_diagnostics"]["products"]
+    for _tier, _choice in (("5_odds", five), ("10_odds", ten)):
+        _record = _bounds[_tier]
+        if _choice[0] or not _record["policy_cap_proves_unreachable"]:
+            continue
+        _cap = _record["policy_market_cap"]
+        _max_odds = _record["optimistic_with_policy_cap"]
+        _target = _record["target"]
+        _explanation = (
+            f"Today's approved bookable markets cannot reach {_target:g}x "
+            f"under the current market-diversification rule "
+            f"(at most {_cap} legs per group; optimistic ceiling "
+            f"{_max_odds:.2f}x). No unverified picks were added."
+        )
+        if _tier == "5_odds":
+            five_why = _explanation
+        else:
+            ten_why = _explanation
+
     thin = "Not enough matches today to build this safely — check back tomorrow."
 
     _built_at = now.isoformat()
