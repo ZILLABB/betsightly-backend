@@ -94,6 +94,13 @@ async def decision_quality_report(days: int = 30):
     return quality_report(days)
 
 
+@router.get("/odds-history-status", dependencies=[Depends(require_api_key)])
+async def odds_history_status():
+    """Phase 9 warehouse readback; absent close quotes never become fake CLV."""
+    from leagues.odds_history_warehouse import warehouse_status
+    return warehouse_status()
+
+
 @router.get("/verified-roi", dependencies=[Depends(require_api_key)])
 async def verified_roi_report(days: int = 90):
     """Read-only: deduplicated real-price market evidence and published ticket ROI.
