@@ -242,3 +242,66 @@ def test_run_daily_job_skips_a_completed_day(monkeypatch, run_date):
     result = S.run_daily_job(publish=True)
     assert result["status"] == "skipped"
     assert called == []
+
+
+
+def test_large_board_report_retains_later_booking_and_distribution_steps():
+    import json
+    from leagues.scheduler import _report_for_storage
+
+    report = {
+        "run_date": "2026-10-12", "status": "complete", "failed": [],
+        "steps": {
+            "weekly_board": {
+                "status": "complete",
+                "detail": {
+                    "ready": True, "fixture_count": 617, "candidate_count": 5035,
+                    "provider": {
+                        "leagues_requested": [str(i) for i in range(2000)],
+                        "failed_leagues": ["a", "b"],
+                    },
+                },
+            },
+            "card": {"status": "complete", "detail": {
+                "tiers": {"banker": 1, "10_odds": 7},
+            }},
+            "book": {"status": "complete", "detail": {
+                "date": "2026-10-12",
+                "booked": ["10_odds: PRIVATE123", "banker: PRIVATE456"],
+                "skipped": ["2_odds: SECRET_CODE"],
+                "failed": ["5_odds: no exact full ticket"],
+            }},
+            "distribute": {"status": "complete", "detail": {"sent": 1}},
+        },
+    }
+
+    encoded = _report_for_storage(report)
+    payload = json.loads(encoded)
+    assert len(encoded) < 8000
+    assert payload["steps"]["weekly_board"]["detail"]["fixture_count"] == 617
+    assert payload["steps"]["weekly_board"]["detail"]["provider"]["requested_league_count"] == 2000
+    assert payload["steps"]["card"]["detail"]["tiers"]["banker"] == 1
+    assert payload["steps"]["book"]["detail"]["booked_tiers"] == ["10_odds", "banker"]
+    assert payload["steps"]["book"]["detail"]["skipped_tiers"] == ["2_odds"]
+    assert payload["steps"]["book"]["detail"]["failure_reasons"] == [
+        "5_odds: no exact full ticket"
+    ]
+    assert payload["steps"]["distribute"]["status"] == "complete"
+    assert "PRIVATE123" not in encoded
+    assert "PRIVATE456" not in encoded
+    assert "SECRET_CODE" not in encoded
+
+
+def test_daily_run_report_is_valid_json_when_metrics_are_not_finite():
+    import json
+    from leagues.scheduler import _report_for_storage
+
+    report = {"status": "complete", "steps": {
+        "settle": {"status": "complete", "detail": {
+            "mean": float("nan"), "max": float("inf"),
+        }},
+    }}
+    blob = _report_for_storage(report)
+    assert json.loads(blob)["steps"]["settle"]["detail"] == {
+        "mean": None, "max": None,
+    }
