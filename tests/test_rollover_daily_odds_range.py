@@ -7,7 +7,7 @@ from leagues import selection, publication_policy, booking
 from leagues.rollover_odds_policy import rollover_odds_in_range
 
 
-def _pick(index, odds=1.5, p=.75):
+def _pick(index, odds=1.5, p=.69):
     return {
         "match_id": f"match-{index}",
         "market": "over_1_5", "market_group": "goals",
@@ -37,7 +37,7 @@ def test_rollover_picks_highest_joint_ticket_within_range():
     selected, odds, joint = selection.select_rollover_day(games)
     assert len(selected) == 2
     assert odds == 2.25
-    assert joint == pytest.approx(.5625)
+    assert joint == pytest.approx(.4761)
 
 
 def test_rollover_allows_three_or_four_x_when_target_is_higher():
