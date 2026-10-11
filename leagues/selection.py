@@ -705,7 +705,9 @@ def select_rollover_day(picks: list[dict], target_odds: float = 2.0,
         min_confidence=0.65,
         # Two legs give up about 11% to the margin; below this the day is not
         # worth staking however good the multiplier looks.
-        min_ev=0.85,
+        # Align selector with the publication contract: a sub-break-even
+        # modelled ticket must never be the endorsed rollover selection.
+        min_ev=1.0,
         # The chain needs every day to land, so the safest day that reaches the
         # target wins — not the most valuable one. Optimising value here was
         # picking a 44% day over a 69% day because it paid more, which is how
