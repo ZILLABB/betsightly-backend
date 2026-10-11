@@ -856,6 +856,27 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         portfolio_diagnostics["tier_supply_diagnostics"]["remaining_qualified_fixtures"],
     )
 
+    # Display truthful, reproducible cap failures instead of blaming the
+    # football schedule. Existing locked cards are never rewritten.
+    _bounds = portfolio_diagnostics["tier_supply_diagnostics"]["products"]
+    for _tier, _choice in (("5_odds", five), ("10_odds", ten)):
+        _record = _bounds[_tier]
+        if _choice[0] or not _record["policy_cap_proves_unreachable"]:
+            continue
+        _cap = _record["policy_market_cap"]
+        _max_odds = _record["optimistic_with_policy_cap"]
+        _target = _record["target"]
+        _explanation = (
+            f"Today's approved bookable markets cannot reach {_target:g}x "
+            f"under the current market-diversification rule "
+            f"(at most {_cap} legs per group; optimistic ceiling "
+            f"{_max_odds:.2f}x). No unverified picks were added."
+        )
+        if _tier == "5_odds":
+            five_why = _explanation
+        else:
+            ten_why = _explanation
+
     thin = "Not enough matches today to build this safely — check back tomorrow."
 
     _built_at = now.isoformat()
