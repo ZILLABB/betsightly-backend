@@ -1107,7 +1107,9 @@ def _select_bookable_variant(candidates: list, rule: dict) -> tuple[list, float,
         min_confidence=rule.get("min_confidence", 0.65),
         min_ev=rule.get("min_ev", 0.0),
         prefer=rule.get("prefer", "joint"),
-        band_low=rule.get("band_low", 0.80), canonicalize=False)
+        band_low=rule.get("band_low", 0.80), canonicalize=False,
+        **({"market_cap": rule["market_cap"]}
+           if "market_cap" in rule else {}))
 
 
 def _replacement_details(original: list, final: list, unavailable: list) -> list:

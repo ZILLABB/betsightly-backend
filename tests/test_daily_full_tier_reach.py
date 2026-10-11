@@ -66,7 +66,7 @@ def test_official_selection_attempts_twenty_legs_for_five_and_ten(monkeypatch):
     calls = []
 
     def trace(pool, target, max_picks, min_confidence, min_ev,
-              prefer="joint", band_low=.80, canonicalize=True):
+              prefer="joint", band_low=.80, canonicalize=True, market_cap=None):
         calls.append((target, max_picks, band_low, canonicalize))
         return ([], 0.0, 0.0), "Test portfolio search caps only"
 

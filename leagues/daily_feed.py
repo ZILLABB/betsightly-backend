@@ -57,6 +57,9 @@ OFFICIAL_PORTFOLIO_PRODUCTS = ("rollover", "banker", "2_odds", "5_odds", "10_odd
 OFFICIAL_FIVE_MAX_LEGS = 20
 OFFICIAL_TEN_MAX_LEGS = 20
 OFFICIAL_TEN_BAND_LOW = 1.0
+# High-target product may use seven independently approved goals fixtures.
+# Never relax the calibrated probability, expected-return or booking gates.
+OFFICIAL_TEN_MARKET_CAP = 7
 
 # Every customer-facing product uses exclusive fixtures, including Over 1.5
 # singles. A different market is not a different match-level exposure.
@@ -258,7 +261,7 @@ def _save(filename: str, data):
 def _select_tier(picks: list, target: float, max_picks: int,
                  min_confidence: float, min_ev: float,
                  prefer: str = "joint", band_low: float = 0.80,
-                 canonicalize: bool = True):
+                 canonicalize: bool = True, market_cap: int | None = None):
     """Select a tier, and say which of the two reasons left it empty.
 
     A blank tier has two quite different causes and they were reported with
@@ -269,15 +272,16 @@ def _select_tier(picks: list, target: float, max_picks: int,
     """
     from leagues.selection import select_accumulator
 
+    cap_options = {"market_cap": market_cap} if market_cap is not None else {}
     sel = select_accumulator(picks, target, max_picks, min_confidence,
                              min_ev=min_ev, prefer=prefer, band_low=band_low,
-                             canonicalize=canonicalize)
+                             canonicalize=canonicalize, **cap_options)
     if sel[0]:
         return sel, None
 
     ungated = select_accumulator(picks, target, max_picks, min_confidence,
                                  min_ev=0.0, prefer=prefer, band_low=band_low,
-                                 canonicalize=canonicalize)
+                                 canonicalize=canonicalize, **cap_options)
     if ungated[0]:
         _, total, joint = ungated
         return sel, (
@@ -456,7 +460,8 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         canonicalize=False)
     independent_ten, ten_why = _select_tier(
         official_source, 10.0, OFFICIAL_TEN_MAX_LEGS, FLOOR, MIN_SLIP_MODEL_RETURN,
-        band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False)
+        band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False,
+        market_cap=OFFICIAL_TEN_MARKET_CAP)
 
     fixture_uses = {
         str(game.get("match_id")) for game in rollover.get("games", [])
@@ -636,7 +641,8 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         "10_odds", independent_ten, official_source,
         lambda pool: _select_tier(
             pool, 10.0, OFFICIAL_TEN_MAX_LEGS, FLOOR, MIN_SLIP_MODEL_RETURN,
-            band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False)[0])
+            band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False,
+            market_cap=OFFICIAL_TEN_MARKET_CAP)[0])
 
     # A defensive invariant for future selector changes.  The individual
     # searches above are allowed to quality-cap or withhold, but publication
@@ -843,6 +849,7 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     }
     portfolio_diagnostics["tier_supply_diagnostics"] = tier_supply_diagnostics(
         official_source, used=_used_products, market_cap=MARKET_CAP,
+        tier_market_caps={"10_odds": OFFICIAL_TEN_MARKET_CAP},
     )
     logger.info(
         "tier_supply date=%s qualified=%s distinct=%s groups=%s "
@@ -920,7 +927,8 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
                               "max_picks": OFFICIAL_TEN_MAX_LEGS,
                               "min_confidence": FLOOR,
                               "min_ev": MIN_SLIP_MODEL_RETURN,
-                              "band_low": OFFICIAL_TEN_BAND_LOW}),
+                              "band_low": OFFICIAL_TEN_BAND_LOW,
+                              "market_cap": OFFICIAL_TEN_MARKET_CAP}),
             "over_1_5": mk_cat(
                 (over_picks, over_total, over_avg) if over_picks else ([], 0, 0),
                 "Very Safe",
@@ -1089,7 +1097,11 @@ def recover_today_empty_tiers() -> dict:
     if not card:
         return {"status": "NO_CARD", "tiers": {}}
     board_status = prepared_board_status(days_ahead=7)
-    if not board_status.get("ready") or board_status.get("stale"):
+    # prepared_board_status already enforces the bounded six-hour stale-safe
+    # snapshot window and requires future fixtures. A one-hour TTL expiry
+    # alone must not block scheduler-owned recovery from an available board.
+    # Kickoff filtering and live SportyBet booking verification still apply.
+    if not board_status.get("ready"):
         return {"status": "BOARD_UNAVAILABLE", "tiers": {}, "board": board_status}
     picks, _ = prepared_pipeline(days_ahead=7)
     target_day = card.get("_fixture_target_date") or publish_date
@@ -1179,6 +1191,8 @@ def recover_today_empty_tiers() -> dict:
                 MIN_SLIP_MODEL_RETURN,
                 band_low=band_low,
                 canonicalize=False,
+                **({"market_cap": OFFICIAL_TEN_MARKET_CAP}
+                   if tier == "10_odds" else {}),
             )
             selected, odds, probability = selected
         if not selected:
@@ -1207,6 +1221,8 @@ def recover_today_empty_tiers() -> dict:
                     "max_picks": max_picks,
                     "min_confidence": MIN_PUBLISHABLE_CONFIDENCE,
                     "min_ev": MIN_SLIP_MODEL_RETURN, "band_low": band_low,
+                    **({"market_cap": OFFICIAL_TEN_MARKET_CAP}
+                       if tier == "10_odds" else {}),
                 }
             ),
         }
@@ -1485,7 +1501,8 @@ def build_bookable_now(all_picks: list[dict] | None = None, *, now: datetime | N
         team_uses.update(_pick_teams(pick))
     ten, _ = _select_tier(
         available(official_live), 10.0, OFFICIAL_TEN_MAX_LEGS, F, MIN_SLIP_MODEL_RETURN,
-        band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False)
+        band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False,
+        market_cap=OFFICIAL_TEN_MARKET_CAP)
 
     # Reserve the same fixtures for every customer-facing product, including
     # the independent Over 1.5 singles list.
