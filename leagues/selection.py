@@ -682,40 +682,32 @@ def select_banker(picks: list[dict], max_picks: int = 1,
 
 def select_rollover_day(picks: list[dict], target_odds: float = 2.0,
                         max_picks: int = 6) -> tuple[list[dict], float, float]:
-    """One rollover day, aiming at `target_odds` with the best hit rate.
+    """Choose the most likely verified 2.00x–4.00x daily rollover ticket.
 
-    Odds and probability are inverses, so a daily target is a choice about how
-    long the chain can be, not just about payout. With the 65% floor a leg is
-    priced at most 1.45, which means roughly:
-
-        1.13x/day  84% a day   10 days completes 17%    pays  3.4x
-        2.00x/day  45% a day   10 days completes 0.03%  pays 1024x
-        2.00x/day  45% a day    3 days completes 9.1%   pays  8.0x
-
-    A ten-day chain at 2x is not a hard challenge, it is a rounding error — the
-    previous version aimed at 1.9x over ten days and went 0 for 4 with every
-    loss caused by the second leg. Two odds a day is a perfectly good target;
-    it just has to be paired with a chain short enough to finish, which is why
-    TARGET_DAYS came down with it.
+    2.00x is a floor, not an instruction to chase 4.00x. The selected slip
+    maximises estimated joint hit probability subject to the existing
+    fixture-uniqueness, probability, trust and model-value rules. The general
+    accumulator selector can return an overshooting fallback, so a strict
+    product-specific price check is essential before publishing.
     """
-    return select_accumulator(
-        picks,
-        target_odds=target_odds,
+    from leagues.rollover_odds_policy import (
+        ROLLOVER_MIN_ODDS, ROLLOVER_MAX_ODDS, rollover_odds_in_range,
+    )
+    if not ROLLOVER_MIN_ODDS <= target_odds <= ROLLOVER_MAX_ODDS:
+        return [], 0.0, 0.0
+    chosen, combined, joint = select_accumulator(
+        picks, target_odds=target_odds,
         max_picks=max_picks,
         min_confidence=0.65,
-        # Two legs give up about 11% to the margin; below this the day is not
-        # worth staking however good the multiplier looks.
-        # Align selector with the publication contract: a sub-break-even
-        # modelled ticket must never be the endorsed rollover selection.
         min_ev=1.0,
-        # The chain needs every day to land, so the safest day that reaches the
-        # target wins — not the most valuable one. Optimising value here was
-        # picking a 44% day over a 69% day because it paid more, which is how
-        # you build a chain out of its least likely links.
         prefer="joint",
-        # The product promises a 2x–3x daily slot. Two strong legs normally
-        # win, but up to six shorter, safer prices are allowed when they have
-        # a higher joint chance. The ceiling is permission, not a quota.
         band_low=1.0,
-        band_high=1.5,
+        band_high=ROLLOVER_MAX_ODDS / target_odds,
     )
+    # Use actual leg product rather than a rounded selector price: a 1.999x
+    # or 4.001x slip must not masquerade as 2.00x / 4.00x.
+    real_combined = math.prod(float(p["odds"]) for p in chosen) if chosen else 0.0
+    if not (chosen and real_combined >= target_odds
+            and rollover_odds_in_range(real_combined)):
+        return [], 0.0, 0.0
+    return chosen, round(real_combined, 2), joint
