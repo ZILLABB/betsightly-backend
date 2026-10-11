@@ -100,3 +100,69 @@ def test_booking_attacher_keeps_valid_3x_code(monkeypatch):
                               "games": [_pick(1), _pick(2)]}}
     result = booking.attach_bookings("2026-10-11", published)
     assert result["rollover"]["booking"]["share_code"] == "VALID3"
+
+
+@pytest.mark.parametrize("tier,old_price,new_price,rebooked_price", [
+    ("rollover", 2.24, 1.822, 2.31),
+    ("10_odds", 10.24, 9.82, 10.31),
+])
+def test_held_code_repriced_below_tier_must_be_rebooked(
+    monkeypatch, tier, old_price, new_price, rebooked_price
+):
+    """Never mark a held code fresh after an out-of-policy readback."""
+    from leagues import sportybet
+    games = [
+        {"match_id": f"match-{i}", "market": "over_1_5",
+         "home_team": f"Home {i}", "away_team": f"Away {i}",
+         "kickoff": "2099-01-01T18:00:00Z"}
+        for i in (1, 2)
+    ]
+    prior = {
+        "status": "active", "booking_status": "FULL",
+        "share_code": "OLD_CODE",
+        "actual_sportybet_odds": old_price,
+        "final_booked_legs": games,
+    }
+    saved = []
+    monkeypatch.setattr(booking, "bookings_for", lambda _: {tier: prior})
+    monkeypatch.setattr(sportybet, "fetch_board", lambda **_: {"ok": True})
+    monkeypatch.setattr(
+        booking, "booking_lifecycle",
+        lambda record, games, **kwargs: {"actionable": True},
+    )
+    monkeypatch.setattr(booking, "_booking_recheck_due", lambda _: True)
+    monkeypatch.setattr(booking, "_revalidate_games", lambda games, board: (games, []))
+    monkeypatch.setattr(
+        booking, "selections_for",
+        lambda games, board: ([{"eventId": g["match_id"]} for g in games], []),
+    )
+    monkeypatch.setattr(
+        booking, "validate_code_details",
+        lambda code, selections: (True, "ok", new_price),
+    )
+    monkeypatch.setattr(
+        booking, "create_booking",
+        lambda *args, **kwargs: {
+            "status": "active", "booking_status": "FULL",
+            "share_code": "REBOOKED", "actual_sportybet_odds": rebooked_price,
+            "final_booked_legs": games,
+        },
+    )
+    monkeypatch.setattr(booking, "_store", lambda day, t, record: saved.append(record))
+    monkeypatch.setattr(booking, "_audit", lambda *args, **kwargs: None)
+
+    report = booking.book_card("2099-01-01", {
+        tier: {"selected": True, "games": games, "total_odds": old_price}
+    })
+    assert not report["skipped"]
+    assert len(report["booked"]) == 1
+    assert [r["share_code"] for r in saved] == ["REBOOKED"]
+
+
+@pytest.mark.parametrize("tier,price", [
+    ("rollover", 1.822), ("rollover", 4.01),
+    ("10_odds", 9.99), ("rollover", float("nan")),
+    ("10_odds", float("inf")), ("rollover", None),
+])
+def test_recheck_price_gate_is_fail_closed(tier, price):
+    assert not booking._rechecked_tier_price_qualified(tier, price)
