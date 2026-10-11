@@ -94,6 +94,16 @@ async def decision_quality_report(days: int = 30):
     return quality_report(days)
 
 
+@router.get("/verified-roi", dependencies=[Depends(require_api_key)])
+async def verified_roi_report(days: int = 90):
+    """Read-only: deduplicated real-price market evidence and published ticket ROI.
+
+    Never infer user winnings, bet placement, or future profitability.
+    """
+    from leagues.verified_roi_audit import production_roi_report
+    return production_roi_report(days)
+
+
 @router.post("/decision-replay/{snapshot_id}",
              dependencies=[Depends(require_api_key)])
 async def replay_decision_snapshot(snapshot_id: str,
