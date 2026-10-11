@@ -1879,6 +1879,18 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                     "model_draw_probability": (
                         ((p.get("_model") or {}).get("probabilities") or {}).get("draw")
                     ),
+                    "model_home_win_probability": (
+                        ((p.get("_model") or {}).get("probabilities") or {}).get("home_win")
+                    ),
+                    "model_away_win_probability": (
+                        ((p.get("_model") or {}).get("probabilities") or {}).get("away_win")
+                    ),
+                    "bookmaker_home_win_odds": (
+                        (p.get("_fixture") or {}).get("odds") or {}
+                    ).get("home_win"),
+                    "bookmaker_away_win_odds": (
+                        (p.get("_fixture") or {}).get("odds") or {}
+                    ).get("away_win"),
                     "raw_confidence": p.get("raw_confidence"),
                     "safe_tier_eligible": p.get("safe_tier_eligible", False),
                     "calibration_sample": p.get("calibration_sample", 0),
@@ -1935,6 +1947,10 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                 "bookable": pk.get("bookable", False),
                 "confidence": pk.get("confidence", 0.5),
                 "model_draw_probability": pk.get("model_draw_probability"),
+                "model_home_win_probability": pk.get("model_home_win_probability"),
+                "model_away_win_probability": pk.get("model_away_win_probability"),
+                "bookmaker_home_win_odds": pk.get("bookmaker_home_win_odds"),
+                "bookmaker_away_win_odds": pk.get("bookmaker_away_win_odds"),
                 "estimated_odds": pk.get("odds"),
                 "odds": pk.get("odds"),
                 "real_odds": pk.get("odds") if pk.get("odds_are_real") else None,
