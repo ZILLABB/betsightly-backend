@@ -201,6 +201,7 @@ def test_october_three_shared_losses_cannot_be_republished_in_5_and_10(monkeypat
         prefer="joint",
         band_low=0.80,
         canonicalize=True,
+        market_cap=None,
     ):
         by_match = {
             str(pick["match_id"]): pick for pick in pool
