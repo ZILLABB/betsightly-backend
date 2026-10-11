@@ -1267,6 +1267,9 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
             prior, games, allow_partial_singles=(tier == "over_1_5"))
         reusable = bool(prior_checked and prior_checked.get("actionable")
                         and not force)
+        if tier == "rollover" and reusable:
+            from leagues.rollover_odds_policy import rollover_odds_in_range
+            reusable = rollover_odds_in_range(prior.get("actual_sportybet_odds"))
         if reusable and _booking_recheck_due(prior):
             # A live board and readback, not the existence of an old code,
             # decide whether this edition is still placeable. The official
@@ -1355,6 +1358,21 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
                         "replacements": [],
                         "reason": "no valid full, rebuilt, or partial ticket",
                     }
+        if tier == "rollover" and record.get("status") == "active":
+            from leagues.rollover_odds_policy import rollover_odds_in_range
+            if not rollover_odds_in_range(record.get("actual_sportybet_odds")):
+                # Preserve the receipt/evidence in the audit row, but do not
+                # expose a live code outside the published daily price band.
+                # A bookmaker price may move after selection/readback.
+                record = dict(record)
+                record["status"] = "invalid"
+                record["booking_status"] = "VALIDATION_FAILED"
+                record["failure_category"] = "ROLLOVER_ODDS_OUT_OF_RANGE"
+                record["reason"] = (
+                    "Actual SportyBet rollover odds are outside 2.00x–4.00x"
+                )
+                record["share_code"] = None
+                record["share_url"] = None
         _store(publish_date, tier, record)
         if tier != "over_1_5":
             claimed_replacements.update(
@@ -1487,6 +1505,13 @@ def attach_bookings(publish_date: str, accumulators: dict,
         record = stored.get(tier)
         if not record:
             continue
+        if tier == "rollover":
+            from leagues.rollover_odds_policy import rollover_odds_in_range
+            if not rollover_odds_in_range(record.get("actual_sportybet_odds")):
+                # Do not resurface legacy or stale out-of-band prices. The
+                # stored booking row is kept for the honest historical audit.
+                data.pop("booking", None)
+                continue
         data["booking"] = booking_lifecycle(
             record, data.get("games") or [], now,
             allow_partial_singles=(tier == "over_1_5" and
