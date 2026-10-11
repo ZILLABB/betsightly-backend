@@ -13,6 +13,7 @@ from collections import Counter
 from math import prod
 
 from leagues.selection_quality import risk_adjusted_return, selection_probability
+from leagues.rollover_odds_policy import rollover_odds_in_range
 
 POLICY_VERSION = "official_publication_v1"
 MIN_LEG_MODEL_RETURN = 1.0
@@ -151,6 +152,10 @@ def evaluate_slip(games: list[dict], product: str) -> dict:
     # A 10 Odds product must actually deliver >=10.00x, including after a
     # pre-publication SportyBet replacement. A near-10x quality-capped result
     # may be useful in Builder, but advertising it as official 10 Odds is not.
+    if product == "rollover" and games:
+        actual_odds = prod(float(game.get("odds") or 0) for game in games)
+        if not rollover_odds_in_range(actual_odds):
+            reasons.append("ROLLOVER_ODDS_OUT_OF_RANGE")
     if product == "10_odds" and games:
         actual_odds = prod(float(game.get("odds") or 0) for game in games)
         if actual_odds < 10.0:
@@ -172,6 +177,8 @@ def evaluate_slip(games: list[dict], product: str) -> dict:
 
 def _reason_copy(reasons: list[str]) -> str:
     reasons = set(reasons)
+    if "ROLLOVER_ODDS_OUT_OF_RANGE" in reasons:
+        return "Rollover withheld: verified daily odds must be between 2.00x and 4.00x."
     if "TEN_ODDS_TARGET_NOT_REACHED" in reasons:
         return "10 Odds withheld: no verified, policy-qualified ticket reaches 10.00x."
     if "TEN_ODDS_LEG_LIMIT_EXCEEDED" in reasons:
