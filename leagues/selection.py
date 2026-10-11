@@ -126,7 +126,7 @@ _PER_BAND_GROUP = 4
 _MAX_SEARCH_CANDIDATES = 18
 
 
-def _stratify(candidates: list[dict]) -> list[dict]:
+def _stratify(candidates: list[dict], per_band_group: int = _PER_BAND_GROUP) -> list[dict]:
     """Best few candidates per price band, keeping the bands market-diverse.
 
     Cost favours short prices, so drawing a flat top-N produced a list of
@@ -143,7 +143,7 @@ def _stratify(candidates: list[dict]) -> list[dict]:
             if picked >= _PER_BAND:
                 break
             g = p["market_group"]
-            if taken.get(g, 0) >= _PER_BAND_GROUP:
+            if taken.get(g, 0) >= per_band_group:
                 continue
             taken[g] = taken.get(g, 0) + 1
             out.append(p)
@@ -458,7 +458,8 @@ def select_accumulator(
             long_pool, target_odds, max_picks, min_ev, max_leg_ev,
             prefer, band_low, band_high, market_cap=market_cap,
         )
-    candidates = _bound_search_space(_stratify(candidates))
+    candidates = _bound_search_space(_stratify(
+        candidates, per_band_group=max(_PER_BAND_GROUP, market_cap)))
     if long_result:
         chosen, combined, joint = long_result
         if prefer_real_odds:
