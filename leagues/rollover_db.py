@@ -274,39 +274,11 @@ def ensure_table():
 
 
 def cleanup_old_chains(keep_recent_chains: int = 3) -> int:
+    """Preserve settled rollover evidence for calibration and loss audits.
+
+    Previous scheduler cleanup deleted old won/lost chains after only three
+    challenges. That biases historical analyses and erases evidence of losing
+    selections. Size management belongs to a separately approved archival
+    policy, never to routine result settlement.
     """
-    Remove old completed chains from the DB.
-
-    Keeps the most recent `keep_recent_chains` chain_start_date groups.
-    Anything older is deleted. Returns the number of rows removed.
-
-    Run periodically (e.g. weekly) to keep the table tidy.
-    """
-    try:
-        db = SessionLocal()
-        try:
-            # Get distinct start dates, newest first
-            rows = (
-                db.query(RolloverDay.chain_start_date)
-                .distinct()
-                .order_by(RolloverDay.chain_start_date.desc())
-                .all()
-            )
-            all_starts = [r[0] for r in rows]
-            if len(all_starts) <= keep_recent_chains:
-                return 0  # Nothing to clean
-
-            old_starts = all_starts[keep_recent_chains:]
-            deleted = (
-                db.query(RolloverDay)
-                .filter(RolloverDay.chain_start_date.in_(old_starts))
-                .delete(synchronize_session=False)
-            )
-            db.commit()
-            logger.info(f"Cleaned up {deleted} rows from {len(old_starts)} old chains")
-            return deleted
-        finally:
-            db.close()
-    except Exception as e:
-        logger.warning(f"Rollover cleanup failed: {e}")
-        return 0
+    return 0
