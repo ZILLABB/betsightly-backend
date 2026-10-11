@@ -250,6 +250,7 @@ def _beam_long_accumulator(
     prefer: str,
     band_low: float,
     band_high: float,
+    market_cap: int = MARKET_CAP,
 ) -> tuple[list[dict], float, float] | None:
     """Bounded long-combination search with the exact selector's risk gates.
 
@@ -291,7 +292,7 @@ def _beam_long_accumulator(
             indices, last, fixtures, groups, team_goals, unders, log_odds, log_p, margin, bookable = state
             for index in range(last + 1, len(data)):
                 pick, fixture, group, exposure, price_log, p_log, cut, can_book, is_under = data[index]
-                if fixture in fixtures or groups.get(group, 0) >= MARKET_CAP:
+                if fixture in fixtures or groups.get(group, 0) >= market_cap:
                     continue
                 new_team_goals = team_goals + (exposure == "team_to_score")
                 if new_team_goals > TEAM_TO_SCORE_CAP:
@@ -385,6 +386,7 @@ def select_accumulator(
     band_low: float = 0.80,
     band_high: float = 1.45,
     canonicalize: bool = True,
+    market_cap: int = MARKET_CAP,
 ) -> tuple[list[dict], float, float]:
     """Pick the best slip that reaches `target_odds`.
 
@@ -406,6 +408,8 @@ def select_accumulator(
     """
     from leagues.fixture_ranker import canonical_fixture_recommendations
     from leagues.selection_quality import selection_probability
+    if not isinstance(market_cap, int) or isinstance(market_cap, bool) or not 1 <= market_cap <= 20:
+        raise ValueError("market_cap must be an integer between 1 and 20")
     if canonicalize:
         picks = canonical_fixture_recommendations(picks, safe_only=target_odds <= 2.0)
     pool = [
@@ -452,7 +456,7 @@ def select_accumulator(
         long_pool = _long_search_pool(candidates)
         long_result = _beam_long_accumulator(
             long_pool, target_odds, max_picks, min_ev, max_leg_ev,
-            prefer, band_low, band_high,
+            prefer, band_low, band_high, market_cap=market_cap,
         )
     candidates = _bound_search_space(_stratify(candidates))
     if long_result:
@@ -495,7 +499,7 @@ def select_accumulator(
                 fixtures_used.add(p["match_id"])
                 g = p["market_group"]
                 groups[g] = groups.get(g, 0) + 1
-                if groups[g] > MARKET_CAP:
+                if groups[g] > market_cap:
                     ok = False
                     break
                 exposure = exposure_group(g)
