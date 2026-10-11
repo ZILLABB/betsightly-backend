@@ -426,6 +426,19 @@ def get_fixtures(days_ahead: int = 3, force: bool = False,
         if (_FETCH_HEALTH.get(slug) or {}).get("request_succeeded")
     )
     failed = sorted(slug for slug in ESPN_CLUB_LEAGUES if slug not in successful)
+    # Retain the precise ESPN failures after bounded retries. Settlement
+    # providers are independent: a degraded fixture board does not mean
+    # football-data.org or other score providers are unavailable.
+    failed_league_errors = {
+        slug: str((_FETCH_HEALTH.get(slug) or {}).get("error") or "unknown")[:180]
+        for slug in failed
+    }
+    if failed:
+        logger.warning(
+            "ESPN fixture coverage incomplete: %s/%s leagues succeeded; "
+            "failed leagues=%s",
+            len(successful), len(ESPN_CLUB_LEAGUES), failed_league_errors,
+        )
     recovered_leagues: list[str] = []
     if failed and previous_payload:
         recovered = [fixture for fixture in previous_payload.get("fixtures") or []
@@ -455,6 +468,7 @@ def get_fixtures(days_ahead: int = 3, force: bool = False,
         "successful_league_count": len(successful),
         "requested_league_count": len(ESPN_CLUB_LEAGUES),
         "failed_league_count": len(failed),
+        "failed_league_errors": failed_league_errors,
         "recovered_leagues": recovered_leagues,
         "registry_version": _registry_version(),
         "cache_hit": False,

@@ -86,6 +86,9 @@ def test_one_failed_month_is_not_reported_complete(monkeypatch, tmp_path):
     assert calls == ["202609", "202610"] * 3
     assert espn_source.cache_metadata()["complete"] is False
     assert espn_source.cache_metadata()["failed_leagues"] == ["eng.1"]
+    assert espn_source.cache_metadata()["failed_league_errors"] == {
+        "eng.1": "202610: HTTP 503",
+    }
     assert espn_source.fetch_health()["eng.1"]["failed_months"] == ["202610"]
 
 
@@ -100,3 +103,24 @@ def test_valid_empty_month_is_success(monkeypatch, tmp_path):
     assert fixtures == []
     assert calls == ["202609"]
     assert espn_source.cache_metadata()["complete"] is True
+
+
+def test_degraded_metadata_does_not_discard_valid_league_results(monkeypatch, tmp_path):
+    def get(url, params, timeout):
+        if "failing" in url:
+            return FakeResponse(code=503)
+        return FakeResponse(events=[event("oct", "2026-10-12T15:00:00Z")])
+
+    prepare_source(monkeypatch, tmp_path, get)
+    monkeypatch.setattr(espn_source, "ESPN_CLUB_LEAGUES", {
+        "eng.1": "Premier League", "failing": "Unavailable League",
+    })
+    fixtures = espn_source.get_fixtures(
+        days_ahead=7, now=datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
+    )
+    metadata = espn_source.cache_metadata()
+    assert [row["event_id"] for row in fixtures] == ["oct"]
+    assert metadata["complete"] is False
+    assert metadata["successful_league_count"] == 1
+    assert metadata["failed_league_count"] == 1
+    assert metadata["failed_league_errors"] == {"failing": "202610: HTTP 503"}
