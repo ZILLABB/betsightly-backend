@@ -306,10 +306,21 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         allow_generation = False
 
     now_ts = _time.time()
-    if (preview is None and not force and _accum_cache["result"]
-            and _accum_cache["result"].get("publication_date") == _publish_date()
-            and (now_ts - _accum_cache["ts"]) < _ACCUM_CACHE_TTL):
-        return _accum_cache["result"]
+    cached_result = _accum_cache.get("result")
+    cache_ttl = _ACCUM_CACHE_TTL
+    if isinstance(cached_result, dict) and cached_result.get("locked"):
+        # A scheduler may recover an empty tier in Postgres without restarting
+        # every web worker. Don't keep serving an empty 10x for 15 minutes:
+        # short-cache only the *incomplete* published card. Full cards keep
+        # the existing cheap 15-minute cache.
+        cached_tiers = cached_result.get("accumulators") or {}
+        if any(not (cached_tiers.get(name) or {}).get("selected")
+               for name in ("banker", "2_odds", "5_odds", "10_odds")):
+            cache_ttl = min(cache_ttl, 60)
+    if (preview is None and not force and cached_result
+            and cached_result.get("publication_date") == _publish_date()
+            and (now_ts - _accum_cache["ts"]) < cache_ttl):
+        return cached_result
 
     from leagues.engine import run_pipeline, picks_for_date
     from leagues.selection import select_accumulator, select_banker
@@ -1235,6 +1246,11 @@ def recover_today_empty_tiers() -> dict:
         out[tier] = recovery
 
         if recovery.get("status") == "RECOVERED":
+            # This process must expose the atomically updated, already-locked
+            # publication on its next read, rather than serving a pre-recovery
+            # in-memory card for another 15 minutes. Other workers shorten
+            # incomplete-card cache lifetimes to 60 seconds above.
+            _accum_cache.update({"result": None, "ts": 0})
             for pick in selected:
                 fixture_id = str(pick.get("match_id") or "")
                 if fixture_id:
