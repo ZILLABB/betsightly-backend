@@ -234,6 +234,19 @@ def _store(publish_date: str, tier: str, record: dict) -> None:
                     "detail": json.dumps(record), "d": publish_date, "t": tier})
     except Exception as e:
         logger.warning(f"booking persist failed for {tier}: {e}")
+    else:
+        # Record only validated, exact sportsbook leg prices; the closing
+        # observation is a separate future evidence event, never inferred
+        # from a booking receipt. A warehouse failure cannot affect
+        # official booking persistence or expose an unsafe code.
+        if record.get("status") == "active" and (
+                record.get("readback_validation") == "PASSED"):
+            try:
+                from leagues.odds_history_warehouse import capture_validated_booking
+                capture_validated_booking(publish_date, tier, record)
+            except Exception as exc:
+                logger.warning("bookmaker quote capture failed tier=%s: %s",
+                               tier, exc)
 
 
 def booking_editions_for(publish_date: str, tier: str) -> list[dict]:
