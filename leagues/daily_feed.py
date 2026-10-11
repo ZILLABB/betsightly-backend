@@ -1757,6 +1757,7 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
     """Short chain, one slot per match day, persisted to Postgres."""
     from leagues.engine import kickoff_wat_date, picks_for_date
     from leagues.selection import select_rollover_day
+    from leagues.rollover_lifecycle import chain_state
     from leagues.picks import to_game
 
     try:
@@ -1780,27 +1781,16 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
     else:
         chain = {"start_date": today, "days": [], "status": "active"}
 
-    # Retire a chain that has drifted far past its start
-    if chain.get("start_date"):
-        try:
-            start = datetime.strptime(chain["start_date"], "%Y-%m-%d")
-            if (datetime.utcnow() - start).days > 45:
-                if db_available:
-                    _db_reset(chain["start_date"])
-                chain = {"start_date": today, "days": [], "status": "active"}
-        except Exception:
-            chain = {"start_date": today, "days": [], "status": "active"}
-
-    # Result status belongs to the result checker.  This reader used to void
-    # an entire day solely because its date was two days old, before the
-    # checker had a chance to grade the scores it *could* find.  That both
-    # erased real wins/losses and made chains appear never to complete.
-
-    # Start fresh once the chain is complete
-    if len(chain.get("days", [])) >= TARGET_DAYS:
-        if all(d.get("status") in ("won", "lost", "void") for d in chain["days"]):
-            logger.info(f"Chain {chain.get('start_date')} complete — starting a new one")
-            chain = {"start_date": today, "days": [], "status": "active"}
+    # A lost or voided day stops this challenge immediately. A new chain
+    # starts only after the last already-published day, without deleting
+    # historical rows or invalidating any SportyBet ticket already created.
+    # An unresolved old fixture blocks progression until verified settlement.
+    decision = chain_state(chain.get("days", []), today, TARGET_DAYS)
+    if decision["new_chain"]:
+        logger.info("Rollover chain %s ended (%s), new day-one eligible %s",
+                    chain.get("start_date"), decision["status"], today)
+        chain = {"start_date": today, "days": [], "status": "active"}
+        decision = chain_state([], today, TARGET_DAYS)
 
     used_matches = {
         pk.get("match_id")
@@ -1817,16 +1807,18 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
         d = kickoff_wat_date(p["_fixture"]["commence_time"])
         if d is None:
             continue
-        if d >= today:
+        # Never plan Day 2 or Day 3 before earlier days are won. The next
+        # dated stage is selected by the next scheduled run, not pre-sold today.
+        if d == today:
             by_date.setdefault(d, []).append(p)
 
     last_date = chain["days"][-1]["date"] if chain.get("days") else ""
-    needed = TARGET_DAYS - len(chain.get("days", []))
+    needed = 1 if decision["can_generate"] else 0
 
     for date in sorted(by_date):
         if needed <= 0:
             break
-        if date <= last_date:
+        if date != today or date <= last_date:
             continue
         # A challenge advertised as the safest route cannot be where a new,
         # uncalibrated market collects its first results.  Require the same
@@ -1908,10 +1900,14 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
     for d in chain.get("days", []):
         cumulative *= d.get("combined_odds", 1.0)
 
+    # Legacy precommitted days remain in the audited chain but are no longer
+    # advertised as active rollover picks after an earlier leg/day loses.
+    visible_state = chain_state(chain.get("days", []), today, TARGET_DAYS)
     today_day = next(
-        (d for d in chain.get("days", []) if d["date"] >= today and d.get("status") == "pending"),
+        (d for d in chain.get("days", [])
+         if d["date"] == today and d.get("status") == "pending"),
         None,
-    )
+    ) if visible_state["status"] == "active" else None
     games = []
     if today_day:
         for pk in today_day.get("picks", []):
@@ -1952,7 +1948,18 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
         # as total_odds made the category tab advertise "1746x".
         "total_odds": round(today_odds, 2),
         "risk_level": "Challenge",
-        "reason": None if games else "No safe rollover slot for today",
+        "reason": (
+            None if games
+            else "Rollover challenge stopped after a lost day; past tickets remain in results."
+            if visible_state["status"] == "failed"
+            else "Rollover challenge voided; previous picks remain in results."
+            if visible_state["status"] == "voided"
+            else "Previous rollover day must settle as won before another day is published."
+            if visible_state["status"] in {"awaiting_settlement", "awaiting_previous_win",
+                                            "awaiting_result"}
+            else "No safe rollover selection for today."
+        ),
+        "challenge_status": visible_state["status"],
         "chain": chain.get("days", []),
         "chain_length": len(chain.get("days", [])),
         "target_days": TARGET_DAYS,
@@ -1963,5 +1970,5 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                 float(d.get("hit_probability") or d.get("avg_confidence") or 0)
                 for d in chain.get("days", [])
             ), 4
-        ) if chain.get("days") else None,
+        ) if len(chain.get("days", [])) == TARGET_DAYS else None,
     }
