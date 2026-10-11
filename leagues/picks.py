@@ -506,6 +506,9 @@ def to_game(pick: dict) -> dict:
         "trust": pick.get("trust"),
         "evidence_adjusted_probability": pick.get("evidence_adjusted_probability"),
         "selection_probability": pick.get("selection_probability"),
+        "model_draw_probability": (
+            (m.get("probabilities") or {}).get("draw")
+        ),
         "risk_adjusted_return": pick.get("risk_adjusted_return"),
         "sportybet_odds": pick.get("sportybet_odds"),
         "raw_break_even_probability": pick.get("raw_break_even_probability"),

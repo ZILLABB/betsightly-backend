@@ -62,15 +62,10 @@ def evaluate_leg(pick: dict, product: str) -> dict:
     """Return the single authoritative publication decision for one leg."""
     reasons: list[str] = []
     probability = selection_probability(pick)
-    try:
-        stored_return = pick.get("risk_adjusted_return")
-        model_return = (
-            float(stored_return)
-            if stored_return is not None
-            else risk_adjusted_return(pick)
-        )
-    except (TypeError, ValueError):
-        model_return = risk_adjusted_return(pick)
+    # Always derive admission value from the leg's CURRENT price and
+    # conservative probability. The cached risk_adjusted_return can belong
+    # to an earlier quote and must never override a booking-time reprice.
+    model_return = risk_adjusted_return(pick)
     trust = pick.get("trust") or {}
     trust_grade = trust.get("trust_grade") or pick.get("trust_grade")
     trust_state = pick.get("market_trust_state")

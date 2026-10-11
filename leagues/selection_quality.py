@@ -83,7 +83,8 @@ def risk_adjusted_return(pick: dict) -> float:
     odds = max(1.0, _number(pick.get("odds"), 1.0))
     if pick.get("market") in {"dnb_home", "dnb_away"}:
         draw = _number(
-            ((pick.get("_model") or {}).get("probabilities") or {}).get("draw")
+            ((pick.get("_model") or {}).get("probabilities") or {}).get("draw"),
+            _number(pick.get("model_draw_probability")),
         )
         if draw is not None:
             draw = max(0.0, min(1.0, draw))
