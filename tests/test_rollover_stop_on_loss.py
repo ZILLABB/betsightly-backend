@@ -151,3 +151,33 @@ def test_database_append_guard_rejects_old_failed_chain_stage():
                                 _day(2, "2026-10-09"), "2026-10-08")
     assert allow_append_day([], _day(1, "2026-10-12"),
                             "2026-10-12")
+
+
+def test_failed_persistence_never_advertises_unarchived_rollover(monkeypatch):
+    fixture = {
+        "match_id": "ro-1", "prediction": "Over 1.5 Goals",
+        "market": "over_1_5", "market_group": "goals",
+        "odds": 2.01, "odds_are_real": True, "confidence": .7,
+        "bookable": True, "safe_tier_eligible": True,
+        "_fixture": {
+            "commence_time": "2026-10-11T15:00:00Z",
+            "home": {"name": "Home"}, "away": {"name": "Away"},
+            "league": "Test League",
+        },
+    }
+    monkeypatch.setattr("leagues.rollover_db.load_chain",
+                        lambda _: {"start_date": "2026-10-11", "days": [],
+                                   "status": "active"})
+    monkeypatch.setattr("leagues.rollover_db.append_day",
+                        lambda *_: False)
+    monkeypatch.setattr("leagues.daily_feed._trusted_rollover_picks",
+                        lambda picks: picks)
+    monkeypatch.setattr("leagues.selection.select_rollover_day",
+                        lambda picks: (picks, 2.01, .7))
+    monkeypatch.setattr("leagues.daily_feed._save",
+                        lambda *_: (_ for _ in ()).throw(
+                            AssertionError("no local persistence fallback")))
+    result = daily_feed._build_rollover([fixture], "2026-10-11")
+    assert not result["selected"]
+    assert result["games"] == []
+    assert result["chain"] == []
