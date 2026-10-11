@@ -128,7 +128,13 @@ def _report_for_storage(report: dict) -> str:
             return [json_safe(v) for v in value]
         return value
 
-    compact = {k: v for k, v in report.items() if k != "steps"}
+    # Keep only stable orchestration metadata. Arbitrary provider/debug
+    # keys can be megabytes; the original writer capped records at 8 KB.
+    root_keys = {
+        "run_date", "status", "failed", "started_at",
+        "finished_at", "error", "reason",
+    }
+    compact = {k: v for k, v in report.items() if k in root_keys}
     compact["steps"] = {}
     for name, step in (report.get("steps") or {}).items():
         if not isinstance(step, dict):
