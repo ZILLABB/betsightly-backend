@@ -849,6 +849,7 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     }
     portfolio_diagnostics["tier_supply_diagnostics"] = tier_supply_diagnostics(
         official_source, used=_used_products, market_cap=MARKET_CAP,
+        tier_market_caps={"10_odds": OFFICIAL_TEN_MARKET_CAP},
     )
     logger.info(
         "tier_supply date=%s qualified=%s distinct=%s groups=%s "
