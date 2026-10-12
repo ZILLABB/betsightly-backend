@@ -181,3 +181,58 @@ def test_failed_persistence_never_advertises_unarchived_rollover(monkeypatch):
     assert not result["selected"]
     assert result["games"] == []
     assert result["chain"] == []
+
+
+
+def _new_rollover_candidate(*, trusted=True):
+    return {
+        "match_id": "new-rollover-fixture",
+        "prediction": "Over 1.5 Goals",
+        "market": "over_1_5", "market_group": "goals",
+        "odds": 2.1, "odds_are_real": True, "confidence": .75,
+        "bookable": True, "safe_tier_eligible": trusted,
+        "calibration_sample": 100,
+        "_fixture": {
+            "commence_time": "2026-10-13T15:00:00Z",
+            "home": {"name": "New Home"}, "away": {"name": "New Away"},
+            "league": "Test League", "league_slug": "eng.1",
+            "competition_type": "LEAGUE",
+        },
+    }
+
+
+def test_rollover_public_card_retains_safe_eligibility(monkeypatch):
+    from leagues.publication_policy import evaluate_slip
+
+    candidate = _new_rollover_candidate()
+    saved = []
+    monkeypatch.setattr("leagues.rollover_db.load_chain",
+                        lambda _: {"start_date": "2026-10-13",
+                                   "days": [], "status": "active"})
+    monkeypatch.setattr("leagues.rollover_db.append_day",
+                        lambda start, day: saved.append(day) or True)
+    monkeypatch.setattr("leagues.selection.select_rollover_day",
+                        lambda _: ([candidate], 2.1, .75))
+    result = daily_feed._build_rollover([candidate], "2026-10-13")
+    assert len(saved) == 1
+    assert result["selected"] is True
+    assert result["games"][0]["safe_tier_eligible"] is True
+    assert result["games"][0]["league_slug"] == "eng.1"
+    assert evaluate_slip(result["games"], "rollover")["allowed"] is True
+
+
+def test_rollover_fails_policy_before_database_append(monkeypatch):
+    candidate = _new_rollover_candidate(trusted=False)
+    monkeypatch.setattr("leagues.rollover_db.load_chain",
+                        lambda _: {"start_date": "2026-10-13",
+                                   "days": [], "status": "active"})
+    monkeypatch.setattr("leagues.daily_feed._trusted_rollover_picks",
+                        lambda picks: picks)
+    monkeypatch.setattr("leagues.selection.select_rollover_day",
+                        lambda _: ([candidate], 2.1, .75))
+    monkeypatch.setattr("leagues.rollover_db.append_day",
+                        lambda *_: (_ for _ in ()).throw(
+                            AssertionError("unpublishable stage persisted")))
+    result = daily_feed._build_rollover([candidate], "2026-10-13")
+    assert result["selected"] is False
+    assert result["chain"] == []
