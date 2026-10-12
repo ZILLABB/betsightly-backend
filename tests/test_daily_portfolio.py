@@ -485,3 +485,88 @@ def test_available_now_final_portfolio_fails_closed_for_duplicate_fixture():
     # zero final overlap rather than interpreting an attempted duplicate.
     assert portfolio["portfolio_validation"]["valid"] is True
     assert portfolio["portfolio_validation"]["fixture_overlap_count"] == 0
+
+
+
+def test_joint_optimizer_recovers_10x_without_repeating_earlier_fixtures(monkeypatch):
+    """Banker-first withholds 10x; joint allocation can find three valid tiers."""
+    from math import prod
+
+    target = (datetime.now(timezone.utc) + timedelta(days=2)).date().isoformat()
+    kickoff = f"{target}T18:00:00Z"
+    picks = [_pick(i, kickoff) for i in range(18)]
+    # Seven validated Over1.5 legs can form the 10x in this regression.
+    for pick in picks:
+        pick.update(market="over_1_5", market_group="goals",
+                    prediction="Over 1.5 Goals")
+
+    by_id = {pick["match_id"]: pick for pick in picks}
+
+    def fake_select_banker(pool, **kwargs):
+        available = {p["match_id"] for p in pool}
+        for name in ("fixture-0", "fixture-9"):
+            if name in available:
+                leg = by_id[name]
+                return [leg], 1.45, .72
+        return [], 0.0, 0.0
+
+    def fake_select_tier(pool, target_odds, *args, **kwargs):
+        available = {p["match_id"] for p in pool}
+        if target_odds == 5:
+            return ([], 0.0, 0.0), "No independent 5 odds in fixture"
+        if target_odds == 10:
+            wanted = [f"fixture-{i}" for i in range(7)]
+        elif {"fixture-1", "fixture-2"} <= available:
+            wanted = ["fixture-1", "fixture-2"]
+        else:
+            wanted = ["fixture-7", "fixture-8"]
+        if not set(wanted) <= available:
+            return ([], 0.0, 0.0), "Not enough unused fixtures"
+        selected = [by_id[key] for key in wanted]
+        return (selected, round(prod(p["odds"] for p in selected), 3),
+                round(.72 ** len(selected), 4)), None
+
+    monkeypatch.setattr("leagues.selection.select_banker",
+                        fake_select_banker)
+    monkeypatch.setattr(daily_feed, "_select_tier", fake_select_tier)
+    monkeypatch.setattr(daily_feed, "_build_rollover", lambda *a, **kw: {
+        "selected": False, "games": [], "chain": [], "chain_length": 0,
+    })
+
+    result = daily_feed.build_daily_accumulators(preview={
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "target_wat_date": target, "picks": picks,
+        "fixtures": [p["_fixture"] for p in picks],
+    })
+    card = result["accumulators"]
+    allocation = card["_portfolio"]["allocation_search"]
+    assert allocation["orders_evaluated"] >= 2
+    assert allocation["eligible_tiers"] >= 3
+    assert card["10_odds"]["selected"] is True
+    assert card["10_odds"]["total_odds"] >= 10.0
+    assert len(card["10_odds"]["games"]) == 7
+    assert card["banker"]["selected"] is True
+    assert card["2_odds"]["selected"] is True
+    assert daily_feed.all_daily_fixture_conflicts(card) == []
+    assert card["_portfolio"]["portfolio_validation"]["valid"] is True
+
+
+def test_optimizer_baseline_remains_when_all_four_tiers_covered(monkeypatch):
+    target = (datetime.now(timezone.utc) + timedelta(days=2)).date().isoformat()
+    picks = [_pick(i, f"{target}T18:00:00Z") for i in range(48)]
+    monkeypatch.setattr("leagues.selection.select_banker",
+                        lambda pool, **kw: ([pool[0]], 1.45, .72))
+    monkeypatch.setattr(daily_feed, "_build_rollover", lambda *a, **kw: {
+        "selected": False, "games": [], "chain": [], "chain_length": 0,
+    })
+    result = daily_feed.build_daily_accumulators(preview={
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "target_wat_date": target, "picks": picks,
+        "fixtures": [p["_fixture"] for p in picks],
+    })
+    report = result["accumulators"]["_portfolio"]["allocation_search"]
+    if report["eligible_tiers"] == 4:
+        assert report["orders_evaluated"] == 1
+        assert report["chosen_order"] == [
+            "banker", "2_odds", "5_odds", "10_odds",
+        ]
