@@ -1908,6 +1908,16 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                 for p in chosen
             ],
         }
+        # The archival boundary must obey the same publication contract as
+        # the public card. Otherwise an unpublishable stage could be stored
+        # and receive a SportyBet code despite being hidden by the card gate.
+        from leagues.publication_policy import evaluate_slip
+        day_policy = evaluate_slip(new_day["picks"], "rollover")
+        if not day_policy["allowed"]:
+            logger.warning("Rollover stage %s withheld before persistence: %s",
+                           new_day["date"], day_policy["reasons"])
+            continue
+
         # Never show a new stage unless persistence accepted its history.
         # A failed write must not fall back to a local file on Render, where
         # the next request might advertise a stage that was never archived.
@@ -1957,6 +1967,11 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                 # cannot be booked rather than being booked wrongly.
                 "market": pk.get("market_key"),
                 "bookable": pk.get("bookable", False),
+                "safe_tier_eligible": pk.get("safe_tier_eligible", False),
+                "calibration_sample": pk.get("calibration_sample", 0),
+                "league_slug": pk.get("league_slug"),
+                "competition_type": pk.get("competition_type"),
+                "raw_confidence": pk.get("raw_confidence"),
                 "confidence": pk.get("confidence", 0.5),
                 "model_draw_probability": pk.get("model_draw_probability"),
                 "model_home_win_probability": pk.get("model_home_win_probability"),
