@@ -500,6 +500,17 @@ def test_joint_optimizer_recovers_10x_without_repeating_earlier_fixtures(monkeyp
         pick.update(market="over_1_5", market_group="goals",
                     prediction="Over 1.5 Goals")
 
+    # Banker has a stricter *conservative* >=72% policy floor. Make the
+    # explicitly selected Banker candidates actually qualify for that gate.
+    for i in (0, 9):
+        leg = picks[i]
+        leg["confidence"] = .80
+        leg["raw_confidence"] = .80
+        leg["ml_confidence"] = .79
+        leg["market_implied_probability"] = .78
+        leg["trust"]["evidence_adjusted_probability"] = .80
+        leg["trust"]["lower_reliability_bound"] = .78
+
     by_id = {pick["match_id"]: pick for pick in picks}
 
     def fake_select_banker(pool, **kwargs):
