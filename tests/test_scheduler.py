@@ -268,7 +268,8 @@ def test_large_board_report_retains_later_booking_and_distribution_steps():
             "book": {"status": "complete", "detail": {
                 "date": "2026-10-12",
                 "booked": ["10_odds: PRIVATE123", "banker: PRIVATE456"],
-                "skipped": ["2_odds: SECRET_CODE"],
+                "skipped": ["2_odds: SECRET_CODE",
+                            "rollover: publication withheld"],
                 "failed": ["5_odds: no exact full ticket"],
             }},
             "distribute": {"status": "complete", "detail": {"sent": 1}},
@@ -282,7 +283,18 @@ def test_large_board_report_retains_later_booking_and_distribution_steps():
     assert payload["steps"]["weekly_board"]["detail"]["provider"]["requested_league_count"] == 2000
     assert payload["steps"]["card"]["detail"]["tiers"]["banker"] == 1
     assert payload["steps"]["book"]["detail"]["booked_tiers"] == ["10_odds", "banker"]
-    assert payload["steps"]["book"]["detail"]["skipped_tiers"] == ["2_odds"]
+    assert payload["steps"]["book"]["detail"]["skipped_tiers"] == [
+        "2_odds", "rollover",
+    ]
+    assert payload["steps"]["book"]["detail"]["newly_booked_tiers"] == [
+        "10_odds", "banker",
+    ]
+    assert payload["steps"]["book"]["detail"]["reused_verified_tiers"] == [
+        "2_odds",
+    ]
+    assert payload["steps"]["book"]["detail"]["withheld_tiers"] == [
+        "rollover",
+    ]
     assert payload["steps"]["book"]["detail"]["failure_reasons"] == [
         "5_odds: no exact full ticket"
     ]

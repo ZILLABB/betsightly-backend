@@ -160,10 +160,22 @@ def _report_for_storage(report: dict) -> str:
             # The report must show coverage, not customer-facing share codes.
             def tier_names(items):
                 return [str(item).split(":", 1)[0] for item in (items or [])]
+            skipped = [str(item) for item in (detail.get("skipped") or [])]
+            reused = [
+                item for item in skipped
+                if ":" in item and "publication withheld" not in item.lower()
+            ]
+            withheld = [
+                item for item in skipped if "publication withheld" in item.lower()
+            ]
             kept["detail"] = {
                 "date": detail.get("date"),
+                "newly_booked_tiers": tier_names(detail.get("booked")),
                 "booked_tiers": tier_names(detail.get("booked")),
-                "skipped_tiers": tier_names(detail.get("skipped")),
+                "reused_verified_tiers": tier_names(reused),
+                "withheld_tiers": tier_names(withheld),
+                # Retained for backwards compatibility with prior reports.
+                "skipped_tiers": tier_names(skipped),
                 "failure_reasons": [
                     str(item)[:160] for item in (detail.get("failed") or [])
                 ][:30],
