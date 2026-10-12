@@ -541,7 +541,7 @@ def test_joint_optimizer_recovers_10x_without_repeating_earlier_fixtures(monkeyp
     card = result["accumulators"]
     allocation = card["_portfolio"]["allocation_search"]
     assert allocation["orders_evaluated"] >= 2
-    assert allocation["eligible_tiers"] >= 3
+    assert allocation["eligible_tiers"] >= 3, allocation
     assert card["10_odds"]["selected"] is True
     assert card["10_odds"]["total_odds"] >= 10.0
     assert len(card["10_odds"]["games"]) == 7
@@ -555,7 +555,8 @@ def test_optimizer_baseline_remains_when_all_four_tiers_covered(monkeypatch):
     target = (datetime.now(timezone.utc) + timedelta(days=2)).date().isoformat()
     picks = [_pick(i, f"{target}T18:00:00Z") for i in range(48)]
     monkeypatch.setattr("leagues.selection.select_banker",
-                        lambda pool, **kw: ([pool[0]], 1.45, .72))
+                        lambda pool, **kw: ([pool[0]], 1.45, .72)
+                        if pool else ([], 0.0, 0.0))
     monkeypatch.setattr(daily_feed, "_build_rollover", lambda *a, **kw: {
         "selected": False, "games": [], "chain": [], "chain_length": 0,
     })
