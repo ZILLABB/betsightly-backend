@@ -82,8 +82,10 @@ def test_official_selection_attempts_twenty_legs_for_five_and_ten(monkeypatch):
         "fixtures": [p["_fixture"] for p in picks],
     })
     assert result["locked"] is False
-    assert len([c for c in calls if c[0] == 5.0]) == 2
-    assert len([c for c in calls if c[0] == 10.0]) == 2
+    # One independent selection plus one attempt for each bounded joint order.
+    # The optimizer short-circuits when all tiers are already covered.
+    assert 2 <= len([c for c in calls if c[0] == 5.0]) <= 5
+    assert 2 <= len([c for c in calls if c[0] == 10.0]) <= 5
     assert all(cap == 20 for t, cap, lo, _ in calls if t in {5.0, 10.0})
     assert all(lo == 1.0 for t, cap, lo, _ in calls if t == 10.0)
     assert result["accumulators"]["10_odds"]["booking_rule"]["max_picks"] == 20
