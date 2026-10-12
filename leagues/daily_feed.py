@@ -635,25 +635,112 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         }
         return adjusted
 
-    banker = _portfolio_product(
-        "banker", independent_banker, banker_source,
-        lambda pool: select_banker(pool, canonicalize=False))
-    two = _portfolio_product(
-        "2_odds", independent_two, official_source,
-        lambda pool: _select_tier(
+    # Compare complete, non-overlapping portfolio allocations, not only the
+    # legacy banker-first greedy order. Every trial runs the *same* gated
+    # selectors and fixture/selection exposure checks as a normal publication.
+    # A bounded list keeps scheduler memory and run time predictable; no
+    # public request can initiate this computation in production.
+    independent_by_product = {
+        "banker": independent_banker,
+        "2_odds": independent_two,
+        "5_odds": independent_five,
+        "10_odds": independent_ten,
+    }
+    source_by_product = {
+        "banker": banker_source,
+        "2_odds": official_source,
+        "5_odds": official_source,
+        "10_odds": official_source,
+    }
+    selectors = {
+        "banker": lambda pool: select_banker(pool, canonicalize=False),
+        "2_odds": lambda pool: _select_tier(
             pool, 2.0, 4, FLOOR, MIN_SLIP_MODEL_RETURN,
-            band_low=0.92, canonicalize=False)[0])
-    five = _portfolio_product(
-        "5_odds", independent_five, official_source,
-        lambda pool: _select_tier(
+            band_low=0.92, canonicalize=False)[0],
+        "5_odds": lambda pool: _select_tier(
             pool, 5.0, OFFICIAL_FIVE_MAX_LEGS, FLOOR, MIN_SLIP_MODEL_RETURN,
-            canonicalize=False)[0])
-    ten = _portfolio_product(
-        "10_odds", independent_ten, official_source,
-        lambda pool: _select_tier(
+            canonicalize=False)[0],
+        "10_odds": lambda pool: _select_tier(
             pool, 10.0, OFFICIAL_TEN_MAX_LEGS, FLOOR, MIN_SLIP_MODEL_RETURN,
             band_low=OFFICIAL_TEN_BAND_LOW, canonicalize=False,
-            market_cap=OFFICIAL_TEN_MARKET_CAP)[0])
+            market_cap=OFFICIAL_TEN_MARKET_CAP)[0],
+    }
+    candidate_orders = (
+        ("banker", "2_odds", "5_odds", "10_odds"),  # legacy baseline
+        ("10_odds", "banker", "2_odds", "5_odds"),
+        ("5_odds", "10_odds", "banker", "2_odds"),
+        ("banker", "10_odds", "5_odds", "2_odds"),
+    )
+    original_claims = (
+        set(fixture_uses), set(selection_uses), set(team_uses),
+    )
+    rollover_diagnostic = portfolio_diagnostics["products"]["rollover"]
+    best_score = None
+    best_trial = None
+    attempts = []
+    from leagues.publication_policy import evaluate_slip
+
+    for order in candidate_orders:
+        fixture_uses, selection_uses, team_uses = (
+            set(original_claims[0]), set(original_claims[1]),
+            set(original_claims[2]),
+        )
+        portfolio_diagnostics["products"] = {"rollover": rollover_diagnostic}
+        trial = {
+            name: _portfolio_product(
+                name, independent_by_product[name],
+                source_by_product[name], selectors[name],
+            ) for name in order
+        }
+        # Score only selections that pass the very same final policy used
+        # after booking. A nominal 10x combination that fails a leg-level
+        # gate must not win the optimizer's coverage comparison.
+        valid = {
+            name: bool(trial[name][0])
+            and evaluate_slip(trial[name][0], name)["allowed"]
+            for name in independent_by_product
+        }
+        completed = sum(valid.values())
+        score = (
+            completed,
+            int(valid["banker"]),
+            int(valid["2_odds"]),
+            int(valid["10_odds"]),
+            int(valid["5_odds"]),
+            round(sum(
+                trial[name][2] for name in valid if valid[name]
+            ), 6),
+        )
+        attempts.append({
+            "order": list(order), "valid_tiers": completed,
+            "selected": sorted(name for name in valid if valid[name]),
+        })
+        if best_score is None or score > best_score:
+            best_score = score
+            best_trial = (
+                trial, dict(portfolio_diagnostics["products"]),
+                (set(fixture_uses), set(selection_uses), set(team_uses)),
+                order,
+            )
+        if completed == len(independent_by_product):
+            break
+
+    allocations, final_diagnostics, final_claims, chosen_order = best_trial
+    portfolio_diagnostics["products"] = final_diagnostics
+    fixture_uses, selection_uses, team_uses = final_claims
+    portfolio_diagnostics["official_product_order"] = list(chosen_order)
+    portfolio_diagnostics["allocation_search"] = {
+        "strategy": "bounded_joint_portfolio_orders_v1",
+        "orders_evaluated": len(attempts),
+        "chosen_order": list(chosen_order),
+        "eligible_tiers": int(best_score[0]),
+        "attempts": attempts,
+        "safety_contract_unchanged": True,
+    }
+    banker = allocations["banker"]
+    two = allocations["2_odds"]
+    five = allocations["5_odds"]
+    ten = allocations["10_odds"]
 
     # A defensive invariant for future selector changes.  The individual
     # searches above are allowed to quality-cap or withhold, but publication
