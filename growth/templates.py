@@ -158,8 +158,12 @@ def codes(data: dict, platform: str, ref: str | None = None) -> dict | None:
     lines += _code_board_tier(rollover_tier, rollover_heading) + [""]
 
     singles = data.get("over_1_5") or {}
-    lines += _code_board_tier(singles, "⚽ *OVER 1.5 ACCUMULATOR*") + [""]
-    lines += [
+    single_legs = singles.get("legs") or []
+    lines += ["⚽ *OVER 1.5 SINGLES*",
+              f"{len(single_legs)} independent pick"
+              + ("" if len(single_legs) == 1 else "s"),
+              "Bet separately.",
+              "See today's full list on BetSightly.", "",
               "⚠️ SportyBet prices can change.",
               "Always inspect the loaded selections and current odds before staking.",
               "", f"[Open today's predictions]({url})"]
