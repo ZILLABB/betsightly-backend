@@ -30,6 +30,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Leagues"])
 
 
+class PrivateBuilderWinsRequest(BaseModel):
+    # Per-browser pseudonym; public endpoint never enumerates visitors.
+    anonymous_id: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/slip-builder/visitor-wins")
+def private_builder_wins(request: PrivateBuilderWinsRequest):
+    """Return only winning prediction tickets created on this device.
+
+    No API key on this end-user endpoint. An unguessable browser-local UUID
+    acts as the capability; it must never be put into a URL or analytics.
+    """
+    from fastapi.responses import JSONResponse
+    from leagues.visitor_notifications import winning_notifications
+    report = winning_notifications(request.anonymous_id)
+    return JSONResponse(
+        report, headers={"Cache-Control": "no-store, private",
+                         "Pragma": "no-cache"}
+    )
+
+
 @router.get(
     "/slip-builder/v2/staging-evidence-status",
     dependencies=[Depends(require_api_key)],
