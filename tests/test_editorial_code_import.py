@@ -32,3 +32,16 @@ def test_import_rejects_unmapped_selection():
     }), patch.object(sportybet, "_board_entries", return_value=[("x", {"event_id": "123"})]):
         with pytest.raises(ValueError, match="cannot be mapped"):
             M.import_share_code("ABC123", "2_odds", board=board)
+
+
+def test_import_reports_exact_unsupported_selection():
+    board = {"match": {"event_id": "sr:match:74165904"}}
+    payload = {"bizCode": 10000, "data": {"ticket": {"selections": [{
+        "eventId": "sr:match:74165904", "marketId": "999",
+        "specifier": "", "outcomeId": "999"
+    }]}}}
+    with patch("leagues.booking._read_share", return_value=payload), patch.object(
+        sportybet, "_board_entries", return_value=[("match", board["match"])]
+    ):
+        with pytest.raises(ValueError, match="marketId=999"):
+            M.import_share_code("s8uamw", "2_odds", board=board)
