@@ -53,7 +53,7 @@ _WIN_SQL = text("""
     FROM visitor_tickets t
     JOIN won_sets w ON t.selected = w.selected
     WHERE ARRAY_LENGTH(t.selected, 1) = t.leg_count
-      AND NOT ARRAY_POSITION(t.selected, NULL) IS NOT NULL
+      AND ARRAY_POSITION(t.selected, NULL) IS NULL
     GROUP BY t.id, t.created_at, t.generated_odds, t.leg_count
     ORDER BY MAX(w.settled_at) DESC, t.created_at DESC
     LIMIT :limit
