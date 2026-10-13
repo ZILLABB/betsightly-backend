@@ -310,12 +310,15 @@ def publish(tier: str, lines: str) -> dict:
 def overlay_on_card(date: str, accumulators: dict) -> dict:
     """Only populate genuinely empty tiers; never rewrite an automated slip."""
     merged = dict(accumulators)
+    from leagues.booking import booking_lifecycle
     for tier, record in list_published(date).items():
         if tier not in TIERS or (merged.get(tier) or {}).get("selected"):
             continue
+        games = record["games"]
+        booking = booking_lifecycle(record["booking"], games)
         merged[tier] = {
             "selected": True,
-            "games": record["games"],
+            "games": games,
             "total_odds": record["total_odds"],
             "hit_probability": None,
             "reason": "Admin-curated selection; statistical confidence not evaluated",
@@ -323,7 +326,8 @@ def overlay_on_card(date: str, accumulators: dict) -> dict:
             "sportybet_ticket_type": "accumulator",
             "editorial_manual": True,
             "source": "admin_curated",
-            "booking": record["booking"],
-            "booking_code": record["booking"].get("share_code"),
+            "booking": booking,
+            "booking_code": (booking or {}).get("share_code"),
+            "risk_level": "Unscored editorial accumulator",
         }
     return merged
