@@ -381,7 +381,7 @@ def import_share_code(code: str, tier: str, *, board=None) -> dict:
         if len(matches) != 1:
             raise ValueError(f"Event {event}: market or outcome cannot be mapped safely")
         rows.append(f"{event},{matches[0]}")
-    lines = "\\n".join(rows)
+    lines = "\n".join(rows)
     result = preview(tier, lines, board=live_board)
     result["lines"] = lines
     result["imported_share_code"] = code
