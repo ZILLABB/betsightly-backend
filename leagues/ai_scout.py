@@ -151,7 +151,9 @@ def _schema() -> dict:
 
 def _response_text(body: dict) -> str:
     if body.get("status") != "completed":
-        raise ValueError("OpenAI response was not completed")
+        status = str(body.get("status") or "unknown")[:36]
+        reason = str((body.get("incomplete_details") or {}).get("reason") or "none")[:64]
+        raise ValueError(f"OpenAI response {status}; reason={reason}")
     for item in body.get("output") or []:
         if item.get("type") == "message":
             for segment in item.get("content") or []:
@@ -239,7 +241,7 @@ def _call_openai(candidates: list[dict], *, http_client=None) -> dict:
         + json.dumps(candidates, separators=(",", ":"), ensure_ascii=True)
     )
     request = {
-        "model": model, "store": False, "max_output_tokens": 1400,
+        "model": model, "store": False, "max_output_tokens": 5000,
         "tools": [{"type": "web_search", "search_context_size": "low"}],
         "include": ["web_search_call.action.sources"],
         "input": [{"role": "user", "content": prompt}],
@@ -355,7 +357,8 @@ def scheduler_shadow_tick(day: str, last_attempt_day: str | None,
         return day
     except Exception as exc:
         LOG.warning(
-            "AI Scout independent research failed date=%s error_type=%s",
+            "AI Scout independent research failed date=%s error_type=%s reason=%s",
             day, type(exc).__name__,
+            str(exc)[:120] if isinstance(exc, ValueError) else "request_failed",
         )
         return day
