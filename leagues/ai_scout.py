@@ -131,7 +131,8 @@ def _schema() -> dict:
                 "items": {
                     "type": "object", "additionalProperties": False,
                     "required": ["candidate_id", "verdict", "rationale",
-                                 "verification_gap", "request_price_refresh"],
+                                 "verification_gap", "request_price_refresh",
+                                 "source_urls"],
                     "properties": {
                         "candidate_id": {"type": "string"},
                         "verdict": {"type": "string", "enum": [
@@ -140,6 +141,7 @@ def _schema() -> dict:
                         "rationale": {"type": "string"},
                         "verification_gap": {"type": "string"},
                         "request_price_refresh": {"type": "boolean"},
+                        "source_urls": {"type": "array", "items": {"type": "string"}},
                     },
                 },
             }},
@@ -177,7 +179,7 @@ def parse_response(body: dict, candidates: list[dict]) -> list[dict]:
     if not isinstance(parsed, dict) or not isinstance(parsed.get("assessments"), list):
         raise ValueError("invalid scout schema")
     lookup = {c["candidate_id"]: c for c in candidates}
-    sources = _trusted_source_urls(body)
+    sources = set(_trusted_source_urls(body))
     output, seen = [], set()
     for row in parsed["assessments"]:
         if not isinstance(row, dict):
@@ -190,20 +192,24 @@ def parse_response(body: dict, candidates: list[dict]) -> list[dict]:
                            "NO_ADDITIONAL_EVIDENCE"}:
             continue
         seen.add(key)
+        # Per-fixture attribution. A citation discovered while researching
+        # Fixture A is not evidence for Fixture B without an explicit link.
+        cited = row.get("source_urls") or []
+        verified = sorted({u for u in cited if isinstance(u, str) and u in sources})[:4]
         item = {
             **lookup[key],
             "verdict": verdict,
-            "rationale": str(row.get("rationale") or "")[:500],
+            "rationale": (str(row.get("rationale") or "")[:500]
+                          if verified else
+                          "No independently attributed web source was verified for this match."),
             "verification_gap": str(row.get("verification_gap") or "")[:350],
             "request_price_refresh": row.get("request_price_refresh") is True,
-            "source_urls": sources,
-            "web_sources_available": bool(sources),
+            "source_urls": verified,
+            "web_sources_available": bool(verified),
             "research_only": True,
             "bookmaker_code_verified": False,
         }
-        # A web-search call can return zero valid sources; avoid implying
-        # sourced injury / lineup facts when none could be verified.
-        if not sources and verdict == "RESEARCH_PRIORITY":
+        if not verified and verdict == "RESEARCH_PRIORITY":
             item["verdict"] = "NEEDS_VERIFICATION"
         output.append(item)
     return output
@@ -224,8 +230,11 @@ def _call_openai(candidates: list[dict], *, http_client=None) -> dict:
         "Avoid made-up injuries, lineups, odds, scores or certainties. Do not "
         "change model probabilities, invent bookmaker prices or recommend a "
         "bet without evidence. Evaluate all candidate IDs and return only "
-        "the structured verdicts specified in the schema. When evidence is "
-        "unavailable, say so; a low-priority/no-news result is acceptable. "
+        "the structured verdicts specified in the schema. Each assessment's "
+        "source_urls must contain HTTPS links for THAT MATCH only, from your "
+        "actual web searches; do not attach sources from other fixtures. "
+        "Use an empty list if no link supports that specific assessment. "
+        "When evidence is unavailable, say so; a no-news result is acceptable. "
         "These results are RESEARCH, NOT verified tickets.\nCandidates:\n"
         + json.dumps(candidates, separators=(",", ":"), ensure_ascii=True)
     )
