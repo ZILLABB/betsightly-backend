@@ -29,6 +29,49 @@ router = APIRouter(tags=["Growth"])
 public_router = APIRouter(tags=["Growth Public"])
 
 
+
+# ── Protected manual prediction desk ───────────────────────
+from pydantic import BaseModel, Field
+
+
+class ManualTierRequest(BaseModel):
+    tier: str = Field(min_length=3, max_length=20)
+    lines: str = Field(min_length=3, max_length=6000)
+
+
+@router.get("/manual-tiers", dependencies=[Depends(require_admin)])
+def manual_tiers_status():
+    from leagues.editorial_manual import _today, list_published
+    day = _today()
+    return {
+        "date": day, "published": {
+            k: {"tier": k, "total_odds": v.get("total_odds"),
+                "leg_count": len(v.get("games") or []),
+                "share_code": (v.get("booking") or {}).get("share_code"),
+                "source": "admin_curated"}
+            for k, v in list_published(day).items()
+        },
+    }
+
+
+@router.post("/manual-tiers/preview", dependencies=[Depends(require_admin)])
+def preview_manual_tier(body: ManualTierRequest):
+    from leagues.editorial_manual import preview
+    try:
+        return preview(body.tier, body.lines)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/manual-tiers/publish", dependencies=[Depends(require_admin)])
+def publish_manual_tier(body: ManualTierRequest):
+    from leagues.editorial_manual import publish
+    try:
+        return publish(body.tier, body.lines)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 # ── Public: tracking beacon ────────────────────────────────
 
 @public_router.post("/track")
