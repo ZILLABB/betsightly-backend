@@ -473,6 +473,33 @@ def run_daily_job(force: bool = False, publish: bool = True,
     else:
         report["steps"]["distribute"] = {"ok": True, "detail": "skipped"}
 
+    # Post-publication independent research: optional, bounded and non-critical.
+    # It cannot block an official slip, cause repeat notifications or change
+    # published predictions. This always executes after booking/distribution.
+    if os.getenv("AI_SCOUT_ENABLED", "false").lower() in ("1", "true", "yes", "on"):
+        try:
+            from leagues.ai_scout import run_once
+            scout = run_once(day=run_date)
+            report["steps"]["ai_scout"] = {
+                "ok": scout.get("status") in (
+                    "SHADOW_EVIDENCE_ONLY", "ALREADY_CAPTURED",
+                ),
+                "detail": {
+                    "status": scout.get("status"),
+                    "candidate_count": scout.get("candidate_count"),
+                    "source_backed_review_count": scout.get(
+                        "source_backed_review_count"),
+                    "research_only": True,
+                },
+            }
+        except Exception as exc:
+            logger.warning("Optional AI Scout shadow failed: %s",
+                           type(exc).__name__)
+            report["steps"]["ai_scout"] = {
+                "ok": False, "detail": {"status": "RESEARCH_UNAVAILABLE",
+                                         "research_only": True},
+            }
+
     report["finished_at"] = _now()
     if report["failed"]:
         report["status"] = "partial"
