@@ -81,6 +81,7 @@ def _body(cid, *, tool_urls=None, verdict="RESEARCH_PRIORITY"):
                 "rationale": "Report suggests a review.",
                 "verification_gap": "Lineups not confirmed.",
                 "request_price_refresh": True,
+                "source_urls": tool_urls or [],
             }],
         })}],
     })
