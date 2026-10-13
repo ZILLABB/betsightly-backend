@@ -287,13 +287,13 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
         for i, leg in enumerate(legs[:3]):
             lines.append(
                 f"{NUM_EMOJI[i]} {leg['home_team']} v {leg['away_team']} — "
-                f"{leg['prediction']} ({safe_confidence(leg['confidence'])})"
+                f"{leg['prediction']} ({_confidence_text(leg)})"
             )
         lines += ["", url]
         thread = [
             f"{NUM_EMOJI[i]} {l['home_team']} v {l['away_team']}\n"
             f"{l['prediction']} @ {l['odds']:.2f}\n"
-            f"Model confidence {safe_confidence(l['confidence'])}"
+            f"Model confidence {_confidence_text(l)}"
             for i, l in enumerate(legs)
         ]
         return {"text": "\n".join(lines), "thread": thread, "url": url}
@@ -303,7 +303,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
         for i, leg in enumerate(legs):
             caption.append(
                 f"{NUM_EMOJI[i]} {leg['home_team']} v {leg['away_team']} — "
-                f"{leg['prediction']} ({safe_confidence(leg['confidence'])})"
+                f"{leg['prediction']} ({_confidence_text(leg)})"
             )
         caption += ["", "Full card — link in bio", "",
                     "#football #footballtips #predictions #bettingtips"]
@@ -326,7 +326,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
         for i, leg in enumerate(legs):
             lines.append(
                 f"{i + 1}. {leg['home_team']} vs {leg['away_team']} ({leg['league']})\n"
-                f"    {leg['prediction']} — {safe_confidence(leg['confidence'])} confidence @ {_odds_str(leg)}"
+                f"    {leg['prediction']} — {_confidence_text(leg)} confidence @ {_odds_str(leg)}"
             )
         lines += ["", f"See the full card: {url}"]
         return {"text": "\n".join(lines), "url": url}
@@ -336,7 +336,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
         for i, leg in enumerate(legs):
             script.append(
                 f"Number {i + 1}. {leg['home_team']} against {leg['away_team']}. "
-                f"{leg['prediction']}, {safe_confidence(leg['confidence'])} confidence."
+                f"{leg['prediction']}, {_confidence_text(leg)} confidence."
             )
         script.append("These are probabilities. Some of them will lose — that is what a probability means.")
         return {
@@ -367,7 +367,9 @@ def accumulator(data: dict, platform: str, tier_key: str = "two_odds",
 
     # Stating the landing chance next to the multiplier is the whole point: a
     # 9x slip that lands 8% of the time reads as a jackpot without it.
-    honesty = f"All {len(legs)} legs must land — that happens about {hit:.0%} of the time."
+    honesty = (f"All {len(legs)} legs must land — that happens about {hit:.0%} of the time."
+               if tier.get("model_probability_available", True) else
+               "Admin-curated ticket — no model-estimated landing probability available.")
 
     if platform == "telegram":
         lines = [f"{emoji} *{tier['label']} Accumulator*",
@@ -376,7 +378,7 @@ def accumulator(data: dict, platform: str, tier_key: str = "two_odds",
             lines += [
                 f"• *{leg['home_team']} vs {leg['away_team']}*",
                 f"    {leg['prediction']} @ {_odds_str(leg)} "
-                f"({safe_confidence(leg['confidence'])})",
+                f"({_confidence_text(leg)})",
             ]
         lines += ["", f"\U0001f4b5 Total odds: *{tier['total_odds']:.2f}x*",
                   f"\U0001f4ca {honesty}"]
@@ -388,7 +390,7 @@ def accumulator(data: dict, platform: str, tier_key: str = "two_odds",
         body = [f"{emoji} {tier['label']} — {tier['total_odds']:.2f}x", ""]
         for leg in legs[:4]:
             body.append(f"• {leg['home_team']} v {leg['away_team']}: {leg['prediction']}")
-        body += ["", f"Lands ~{hit:.0%} of the time.", url]
+        body += ["", honesty, url]
         return {"text": "\n".join(body), "url": url}
 
     if platform == "instagram":
@@ -414,14 +416,13 @@ def accumulator(data: dict, platform: str, tier_key: str = "two_odds",
         script = [f"Today's {tier['label']} accumulator."]
         for leg in legs:
             script.append(f"{leg['home_team']} against {leg['away_team']}, {leg['prediction']}.")
-        script += [f"That pays {tier['total_odds']:.2f} times your stake.",
-                   f"Every leg has to land. That happens about {hit:.0%} of the time."]
+        script += [f"That pays {tier['total_odds']:.2f} times your stake.", honesty]
         return {
             "hook": f"A {tier['total_odds']:.2f}x accumulator for today.",
             "script": script,
             "cta": "Full card — link in bio.",
             "title": f"{tier['label']} Accumulator — {tier['total_odds']:.2f}x",
-            "description": f"{len(legs)} legs, lands ~{hit:.0%} of the time. {url}",
+            "description": f"{len(legs)} legs. {honesty} {url}",
             "url": url,
         }
 
@@ -450,7 +451,7 @@ def rollover(data: dict, platform: str, ref: str | None = None) -> dict | None:
             lines += [
                 f"• *{leg['home_team']} vs {leg['away_team']}*",
                 f"    {leg['prediction']} @ {_odds_str(leg)} "
-                f"({safe_confidence(leg['confidence'])})",
+                f"({_confidence_text(leg)})",
             ]
         lines += ["", f"💵 Today’s odds: *{tier['total_odds']:.2f}x*",
                   f"📊 Today’s slip lands about *{hit:.0%}* of the time."]
@@ -482,9 +483,13 @@ def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
     if not tier.get("selected") or not tier.get("legs"):
         return None
     legs = tier["legs"]
-    average = sum(float(leg.get("confidence") or 0) for leg in legs) / len(legs)
+    scored_legs = [leg for leg in legs if not _is_unscored(leg)]
+    average = (sum(float(leg.get("confidence") or 0) for leg in scored_legs) / len(scored_legs)
+               if scored_legs else None)
     count_line = f"{len(legs)} independent pick" + ("" if len(legs) == 1 else "s")
-    average_line = f"Average pick confidence: {safe_confidence(average)}"
+    average_line = (f"Average pick confidence: {safe_confidence(average)}"
+                    if all(not _is_unscored(leg) for leg in legs)
+                    else "Model confidence: unavailable for admin-curated selections")
     url = build_url("predictions", channel=platform, campaign="over_15",
                     content="over_1_5", ref=ref)
 
@@ -495,7 +500,7 @@ def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
         for leg in legs:
             lines += [
                 f"• *{leg['home_team']} vs {leg['away_team']}*",
-                f"    {leg['league']} · {safe_confidence(leg['confidence'])} @ {_odds_str(leg)}",
+                f"    {leg['league']} · {_confidence_text(leg)} @ {_odds_str(leg)}",
             ]
         lines += ["", f"[Full singles list]({url})"]
         return {"text": "\n".join(lines), "parse_mode": "Markdown", "url": url}
@@ -505,7 +510,7 @@ def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
                 average_line, "Bet separately.", ""]
         for leg in legs[:4]:
             body.append(f"• {leg['home_team']} v {leg['away_team']} "
-                        f"({safe_confidence(leg['confidence'])})")
+                        f"({_confidence_text(leg)})")
         body += ["", url]
         return {"text": "\n".join(body), "url": url}
 
@@ -514,7 +519,7 @@ def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
                average_line, "BET SEPARATELY", ""]
         for leg in legs:
             cap.append(f"• {leg['home_team']} v {leg['away_team']} — "
-                       f"{safe_confidence(leg['confidence'])}")
+                       f"{_confidence_text(leg)}")
         cap += ["", "Full singles list — link in bio", "",
                 "#over15 #footballtips #goals"]
         card = {
@@ -530,7 +535,7 @@ def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
                  average_line, "Bet separately.", ""]
         for leg in legs:
             lines.append(f"• {leg['home_team']} vs {leg['away_team']} ({leg['league']}) — "
-                         f"{safe_confidence(leg['confidence'])} @ {_odds_str(leg)}")
+                         f"{_confidence_text(leg)} @ {_odds_str(leg)}")
         lines += ["", "See the full singles list on BetSightly.", "", url]
         return {"text": "\n".join(lines), "url": url}
 
@@ -538,7 +543,7 @@ def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
         return {
             "hook": "Independent goals picks for today.",
             "script": [f"{l['home_team']} against {l['away_team']}, over one point five goals, "
-                       f"{safe_confidence(l['confidence'])} confidence." for l in legs]
+                       f"{_confidence_text(l)} confidence." for l in legs]
                       + [f"These are {count_line.lower()}. Bet them separately.",
                          average_line + "."],
             "cta": "Full singles list — link in bio.",
