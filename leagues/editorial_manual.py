@@ -64,6 +64,8 @@ def parse_input(lines: str, tier: str) -> list[tuple[str, str]]:
                 c not in "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:-_"
                 for c in event):
             raise ValueError(f"Row {n}: invalid SportyBet event ID")
+        aliases = {"1.5": "over_1_5", "o1.5": "over_1_5", "over 1.5": "over_1_5", "over1.5": "over_1_5", "over_1.5": "over_1_5", "2.5": "over_2_5", "o2.5": "over_2_5", "over 2.5": "over_2_5"}
+        market = aliases.get(market.lower().strip(), market.lower().strip().replace(" ", "_"))
         if market not in MARKET_TO_SPORTYBET:
             raise ValueError(f"Row {n}: {market!r} is not a mapped SportyBet market")
         if tier == "over_1_5" and market != "over_1_5":
@@ -331,3 +333,58 @@ def overlay_on_card(date: str, accumulators: dict) -> dict:
             "risk_level": "Unscored editorial accumulator",
         }
     return merged
+
+
+def import_share_code(code: str, tier: str, *, board=None) -> dict:
+    """Resolve an existing SportyBet share code into exact canonical manual rows.
+
+    Import is read-only. Publishing remains the existing separate verified path.
+    Never infer a selection from teams alone or silently drop unmatched legs.
+    """
+    import re
+    from leagues import sportybet
+    from leagues.booking import _read_share
+    if tier not in TIERS:
+        raise ValueError("Unknown prediction tier")
+    code = code.strip()
+    if not re.fullmatch(r"[A-Za-z0-9]{4,32}", code):
+        raise ValueError("Enter a valid SportyBet booking code")
+    try:
+        response = _read_share(code)
+    except Exception as exc:
+        LOG.warning("SportyBet code lookup failed: %s", type(exc).__name__)
+        raise ValueError("Could not retrieve this SportyBet code. Check the code and retry.") from None
+    if response.get("bizCode") != 10000:
+        raise ValueError("SportyBet did not recognize this code")
+    data = response.get("data") or {}
+    selections = (data.get("ticket") or {}).get("selections") or []
+    if not selections or len(selections) > MAX_LEGS[tier]:
+        raise ValueError(f"Ticket must contain 1–{MAX_LEGS[tier]} selections for {tier}")
+    if data.get("unavailableOutcomes"):
+        raise ValueError("This booking code has unavailable selections")
+    live_board = board if board is not None else sportybet.fetch_board(force=True)
+    from leagues.sportybet import MARKET_TO_SPORTYBET, _board_entries
+    ids = {str(s.get("eventId") or "") for s in selections}
+    entries = {str(entry.get("event_id")): entry for _, entry in _board_entries(live_board)
+               if str(entry.get("event_id")) in ids}
+    rows = []
+    for selection in selections:
+        event = str(selection.get("eventId") or "")
+        entry = entries.get(event)
+        if not entry:
+            raise ValueError(f"Event {event} is missing from the current SportyBet board")
+        actual = (str(selection.get("marketId")), str(selection.get("specifier") or ""),
+                  str(selection.get("outcomeId")))
+        matches = [market for market, (market_id, specifier, outcome_id)
+                   in MARKET_TO_SPORTYBET.items()
+                   if (str(market_id), str(specifier or ""), str(outcome_id)) == actual]
+        if len(matches) != 1:
+            raise ValueError(f"Event {event}: market or outcome cannot be mapped safely")
+        rows.append(f"{event},{matches[0]}")
+    lines = "\\n".join(rows)
+    result = preview(tier, lines, board=live_board)
+    result["lines"] = lines
+    result["imported_share_code"] = code
+    result["import_mode"] = "sportybet_code"
+    result["note"] = "Import preview only. Publishing creates and verifies a fresh matching code."
+    return result
