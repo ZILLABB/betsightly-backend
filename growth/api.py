@@ -86,6 +86,13 @@ def publish_manual_tier(body: ManualTierRequest):
         raise HTTPException(422, str(exc))
 
 
+@public_router.get("/editorial-results")
+def public_editorial_results(limit: int = Query(30, ge=1, le=90)):
+    """Separate manual slip results, never official engine analytics."""
+    from leagues.editorial_settlement import editorial_result_history
+    return editorial_result_history(limit=limit)
+
+
 # ── Public: tracking beacon ────────────────────────────────
 
 @public_router.post("/track")

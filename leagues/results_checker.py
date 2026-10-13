@@ -1337,6 +1337,21 @@ def run_loop():
                 f"Slip settlement failed: {e}"
             )
 
+        # Human-curated bookmaker slips have their own history and never
+        # enter official model accuracy, ROI, or calibration. Still settle
+        # every leg against verified finals using the same scoring evaluator.
+        try:
+            from leagues.editorial_settlement import settle_pending_manual
+            manual_summary = settle_pending_manual(
+                allow_fallback=allow_fallback
+            )
+            _record_settlement_component("editorial_manual", manual_summary)
+        except Exception as exc:
+            _record_settlement_error("editorial_manual", exc)
+            logger.warning(
+                "Editorial settlement failed: %s", type(exc).__name__
+            )
+
         try:
             builder_summary = (
                 settle_builder_predictions(
