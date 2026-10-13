@@ -143,6 +143,36 @@ def get_daily_accumulators():
         raise HTTPException(500, str(e))
 
 
+@router.get("/ai-scout/watchlist")
+def get_ai_scout_watchlist():
+    """Read-only research watchlist, never official picks or booked codes."""
+    from leagues.ai_scout import latest
+    return latest()
+
+
+@router.get("/ai-scout/status", dependencies=[Depends(require_api_key)])
+def get_ai_scout_status():
+    """Admin-only availability; never exposes the OpenAI credential."""
+    from leagues.ai_scout import enabled, latest
+    return {
+        "enabled": enabled(),
+        "key_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "latest": latest(),
+        "research_only": True,
+    }
+
+
+@router.post("/ai-scout/run", dependencies=[Depends(require_api_key)])
+def trigger_ai_scout():
+    """Explicit admin-only shadow refresh; never runs public publication."""
+    from leagues.ai_scout import run_once
+    try:
+        return run_once()
+    except Exception as exc:
+        logger.warning("AI scout shadow run failed: %s", type(exc).__name__)
+        raise HTTPException(503, "AI Scout research unavailable")
+
+
 @router.get("/history-readiness")
 def get_history_readiness():
     """Credential-free evidence readiness, without provider or database URLs."""
