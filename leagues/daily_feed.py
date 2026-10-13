@@ -354,6 +354,13 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
             _first = locked.pop("_first_published_at", None)
             _fixture_target = locked.pop("_fixture_target_date", publish_date)
             locked.pop("_publication_date", None)
+            from leagues.editorial_manual import overlay_on_card
+            displayed = overlay_on_card(
+                publish_date,
+                _attach_bookings(
+                    publish_date, _mark_started(locked, now), now,
+                ),
+            )
             result = {
                 "status": "success",
                 "date": publish_date,
@@ -365,9 +372,11 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
                 "revision": _rev,
                 "first_published_at": _first,
                 "last_updated_at": _updated,
-                "total_fixtures": sum(len(c.get("games", [])) for c in locked.values() if isinstance(c, dict)),
-                "accumulators": _attach_bookings(
-                    publish_date, _mark_started(locked, now), now),
+                "total_fixtures": sum(
+                    len(c.get("games", []))
+                    for c in displayed.values() if isinstance(c, dict)
+                ),
+                "accumulators": displayed,
             }
             _accum_cache.update({"result": result, "ts": now_ts})
             return result
