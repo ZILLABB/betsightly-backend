@@ -20,7 +20,7 @@ def test_query_exactly_matches_complete_ticket_and_scopes_anonymous_visitor():
     assert "p.final_status = 'won'" in query
     assert "h.booking_validated IS TRUE" in query
     assert "ORDER BY s.selection_fingerprint::text" in query
-    assert "FROM user_ticket_selections" in query
+    assert "JOIN user_ticket_selections" in query
     assert "FROM builder_predictions" in query
 
 
