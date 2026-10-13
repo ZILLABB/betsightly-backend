@@ -878,7 +878,34 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         if len(over_picks) >= OVER_MAX_PICKS:
             break
 
+    # Differentiate absence of trusted Over 1.5 picks from valid picks that
+    # have already been committed to another official slip, typically Rollover.
+    # The distinction matters when the site shows visitors an empty tier.
+    qualified_over = [
+        p for p in over_source
+        if p.get("market") == "over_1_5"
+        and selection_probability(p) >= OVER_MIN_CONFIDENCE
+    ]
+    over_claimed_count = sum(
+        str(p.get("match_id")) in over_reserved for p in qualified_over
+    )
+    over_exposure_exhausted = (
+        bool(qualified_over) and not over_picks
+        and over_claimed_count == len(qualified_over)
+    )
+    over_empty_reason = (
+        "Today's qualifying Over 1.5 fixtures are already committed to "
+        "Rollover or another published tier. We do not repeat the same "
+        "matches across official products."
+        if over_exposure_exhausted
+        else "No additional Over 1.5 selection met today's verified "
+             "confidence, evidence, price and availability rules."
+    )
+
     portfolio_diagnostics["over_1_5_allocation"] = {
+        "eligible_before_exposure": len(qualified_over),
+        "already_reserved_eligible": over_claimed_count,
+        "exposure_exhausted": over_exposure_exhausted,
         "reserved_fixture_count": len(over_reserved),
         "excluded_due_to_fixture_exposure": sorted({
             str(p.get("match_id")) for p in over_source
@@ -1030,7 +1057,7 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
             "over_1_5": mk_cat(
                 (over_picks, over_total, over_avg) if over_picks else ([], 0, 0),
                 "Very Safe",
-                "No match cleared the Over 1.5 confidence bar today.",
+                over_empty_reason,
                 presentation="singles",
                 booking_rule={"selector": "over_1_5", "min_confidence":
                               OVER_MIN_CONFIDENCE, "max_picks": OVER_MAX_PICKS},
@@ -1049,6 +1076,11 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
             "_fixture_target_date": target_date,
         },
     }
+
+    if over_exposure_exhausted:
+        result["accumulators"]["over_1_5"]["result_status"] = (
+            "EXPOSURE_CAPPED"
+        )
 
     # Explain portfolio exposure decisions directly on the public product.
     # A withheld tier is not an unexplained selector failure: it was available
