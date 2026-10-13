@@ -334,3 +334,28 @@ def run_once(day: str | None = None, *, picks=None, now=None,
     return {k: report[k] for k in ("status", "date", "run_id",
              "candidate_count", "source_backed_review_count",
              "research_only", "official_predictions_unchanged")}
+
+
+def scheduler_shadow_tick(day: str, last_attempt_day: str | None,
+                          *, runner=None) -> str | None:
+    """Post-publication catch-up, never an official daily generation step.
+
+    A completed daily-run claim must not prevent research from starting later
+    after an OpenAI key is configured. Only NO_API_KEY and BOARD_UNAVAILABLE
+    retry; a failed paid request is not automatically repeated every 15 min.
+    """
+    if not enabled() or last_attempt_day == day:
+        return last_attempt_day
+    try:
+        result = (runner or run_once)(day=day)
+        status = str(result.get("status") or "UNKNOWN")
+        LOG.info("AI Scout independent catch-up date=%s status=%s", day, status)
+        if status in {"NO_API_KEY", "BOARD_UNAVAILABLE"}:
+            return last_attempt_day
+        return day
+    except Exception as exc:
+        LOG.warning(
+            "AI Scout independent research failed date=%s error_type=%s",
+            day, type(exc).__name__,
+        )
+        return day

@@ -571,6 +571,7 @@ def _start_daily_generation_loop():
         except Exception as e:
             logger.error(f"Weekly board prewarm failed to start: {e}")
         last_published = None
+        last_scout_attempt_day = None
         while True:
             try:
                 from leagues.engine import start_history_prewarm
@@ -626,6 +627,16 @@ def _start_daily_generation_loop():
                 # tick rather than racing its in-flight booking/distribution.
                 if allow_general_refresh:
                     _ensure_today_generated()
+
+                # Catch up an opt-in AI research shadow even when today's
+                # official daily job was already completed before key setup.
+                # Never re-publish slips, create codes, or retry costly API
+                # failures repeatedly in the same process.
+                if wat.hour >= 8:
+                    from leagues.ai_scout import scheduler_shadow_tick
+                    last_scout_attempt_day = scheduler_shadow_tick(
+                        wat_day, last_scout_attempt_day,
+                    )
             except Exception as e:
                 logger.error(f"Daily generation loop iteration failed: {e}")
             _time.sleep(900)
