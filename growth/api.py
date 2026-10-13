@@ -54,6 +54,20 @@ def manual_tiers_status():
     }
 
 
+class ManualCodeImportRequest(BaseModel):
+    tier: str = Field(min_length=3, max_length=20)
+    code: str = Field(min_length=4, max_length=32)
+
+
+@router.post("/manual-tiers/import-code", dependencies=[Depends(require_admin)])
+def import_manual_code(body: ManualCodeImportRequest):
+    from leagues.editorial_manual import import_share_code
+    try:
+        return import_share_code(body.code, body.tier)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 @router.post("/manual-tiers/preview", dependencies=[Depends(require_admin)])
 def preview_manual_tier(body: ManualTierRequest):
     from leagues.editorial_manual import preview
