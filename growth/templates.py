@@ -311,7 +311,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
                  "match": f"{l['home_team']} vs {l['away_team']}",
                  "league": l["league"],
                  "prediction": l["prediction"],
-                 "confidence": safe_confidence(l["confidence"]),
+                 "confidence": _confidence_text(l),
                  "odds": f"{l['odds']:.2f}"}
                 for i, l in enumerate(legs)
             ],
@@ -335,7 +335,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
                 f"Number {i + 1}. {leg['home_team']} against {leg['away_team']}. "
                 f"{leg['prediction']}, {_confidence_text(leg)}."
             )
-        script.append("These are probabilities. Some of them will lose — that is what a probability means.")
+        script.append("No result is guaranteed. Admin-curated selections are not model-scored." if any(_is_unscored(l) for l in legs) else "These are probabilities. Some of them will lose — that is what a probability means.")
         return {
             "hook": f"Our top {len(legs)} football picks for today.",
             "script": script,
