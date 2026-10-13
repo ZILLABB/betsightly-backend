@@ -55,6 +55,11 @@ def _is_actionable(kickoff: str | None, started: bool = False) -> bool:
 
 def _leg(game: dict, tier: str | None = None) -> dict:
     """One pick, flattened to the fields any channel might render."""
+    # Editorial imports have no model posterior; do not display their
+    # legacy numeric zero as a 1% confidence claim in growth content.
+    scored = (not game.get("editorial_manual")
+              and game.get("model_probability_available") is not False
+              and game.get("confidence") is not None)
     conf = game.get("confidence") or 0.0
     odds = game.get("odds") or game.get("estimated_odds") or 0.0
     kickoff = game.get("kickoff") or game.get("date")
@@ -73,6 +78,9 @@ def _leg(game: dict, tier: str | None = None) -> dict:
         "market": game.get("market"),
         "market_group": game.get("prediction_type"),
         "confidence": round(float(conf), 4),
+        "model_probability_available": scored,
+        "editorial_manual": bool(game.get("editorial_manual")),
+        "source": game.get("source") or ("admin_curated" if game.get("editorial_manual") else "model"),
         "odds": round(float(odds), 2),
         "odds_are_real": bool(game.get("odds_are_real")),
         "started": started,
@@ -128,6 +136,9 @@ def _tier_block(key: str, cat: dict) -> dict:
         "reason": cat.get("reason"),
         "total_odds": round(total, 2),
         "hit_probability": round(hit, 4),
+        "model_probability_available": bool(games) and not cat.get("editorial_manual")
+                                       and cat.get("hit_probability") is not None,
+        "editorial_manual": bool(cat.get("editorial_manual")),
         # Payout times the chance it lands. Published so no channel has to
         # imply a slip is better than it is.
         "expected_value": round(total * hit, 4) if total and hit else None,
