@@ -158,12 +158,8 @@ def codes(data: dict, platform: str, ref: str | None = None) -> dict | None:
     lines += _code_board_tier(rollover_tier, rollover_heading) + [""]
 
     singles = data.get("over_1_5") or {}
-    single_legs = singles.get("legs") or []
-    lines += ["⚽ *OVER 1.5 SINGLES*",
-              f"{len(single_legs)} independent pick"
-              + ("" if len(single_legs) == 1 else "s"),
-              "Bet separately.",
-              "See today's full list on BetSightly.", "",
+    lines += _code_board_tier(singles, "⚽ *OVER 1.5 ACCUMULATOR*") + [""]
+    lines += [
               "⚠️ SportyBet prices can change.",
               "Always inspect the loaded selections and current odds before staking.",
               "", f"[Open today's predictions]({url})"]
@@ -226,7 +222,8 @@ def best_pick(data: dict, platform: str, ref: str | None = None) -> dict | None:
 
     if platform in ("tiktok", "youtube"):
         return {
-            "hook": f"One pick for today, and here's why the model likes it.",
+            "hook": ("Today's admin-curated football pick." if _is_unscored(leg)
+                     else "One pick for today, and here's why the model likes it."),
             "script": [
                 f"{match}, {leg['league']}.",
                 (f"{leg['prediction']} was selected by the admin without a model probability." if _is_unscored(leg) else f"Our model gives {leg['prediction']} a {conf} chance."),
@@ -293,7 +290,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
         thread = [
             f"{NUM_EMOJI[i]} {l['home_team']} v {l['away_team']}\n"
             f"{l['prediction']} @ {l['odds']:.2f}\n"
-            f"Model confidence {_confidence_text(l)}"
+            f"{'Admin-curated; no model score' if _is_unscored(l) else 'Model confidence ' + _confidence_text(l)}"
             for i, l in enumerate(legs)
         ]
         return {"text": "\n".join(lines), "thread": thread, "url": url}
@@ -326,7 +323,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
         for i, leg in enumerate(legs):
             lines.append(
                 f"{i + 1}. {leg['home_team']} vs {leg['away_team']} ({leg['league']})\n"
-                f"    {leg['prediction']} — {_confidence_text(leg)} confidence @ {_odds_str(leg)}"
+                f"    {leg['prediction']} — {_confidence_text(leg)} @ {_odds_str(leg)}"
             )
         lines += ["", f"See the full card: {url}"]
         return {"text": "\n".join(lines), "url": url}
@@ -336,7 +333,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
         for i, leg in enumerate(legs):
             script.append(
                 f"Number {i + 1}. {leg['home_team']} against {leg['away_team']}. "
-                f"{leg['prediction']}, {_confidence_text(leg)} confidence."
+                f"{leg['prediction']}, {_confidence_text(leg)}."
             )
         script.append("These are probabilities. Some of them will lose — that is what a probability means.")
         return {
@@ -344,7 +341,7 @@ def daily_5(data: dict, platform: str, ref: str | None = None) -> dict | None:
             "script": script,
             "cta": "Full card on the site — link in bio.",
             "title": f"Top {len(legs)} Football Predictions Today",
-            "description": f"Today's {len(legs)} highest-confidence picks. {url}",
+            "description": f"Today's {len(legs)} published selections. {url}",
             "url": url,
         }
 
@@ -543,7 +540,7 @@ def over_15(data: dict, platform: str, ref: str | None = None) -> dict | None:
         return {
             "hook": "Independent goals picks for today.",
             "script": [f"{l['home_team']} against {l['away_team']}, over one point five goals, "
-                       f"{_confidence_text(l)} confidence." for l in legs]
+                       f"{_confidence_text(l)}." for l in legs]
                       + [f"These are {count_line.lower()}. Bet them separately.",
                          average_line + "."],
             "cta": "Full singles list — link in bio.",
