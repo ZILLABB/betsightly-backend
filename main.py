@@ -571,6 +571,7 @@ def _start_daily_generation_loop():
         except Exception as e:
             logger.error(f"Weekly board prewarm failed to start: {e}")
         last_published = None
+        last_scout_attempt_day = None
         while True:
             try:
                 from leagues.engine import start_history_prewarm
@@ -626,6 +627,39 @@ def _start_daily_generation_loop():
                 # tick rather than racing its in-flight booking/distribution.
                 if allow_general_refresh:
                     _ensure_today_generated()
+
+                # Research-only AI Scout must NOT be owned solely by the
+                # already-claimed morning publisher. Enabling an API key after
+                # 08:00 WAT should also start today's independent analysis.
+                # One attempt per process/day limits spending on API failures;
+                # no-key and cold-board states can be retried next loop tick.
+                if (
+                    wat.hour >= 8
+                    and last_scout_attempt_day != wat_day
+                    and os.getenv("AI_SCOUT_ENABLED", "").strip().lower()
+                    in {"1", "true", "yes", "on"}
+                ):
+                    try:
+                        from leagues.ai_scout import run_once
+                        scout = run_once(day=wat_day)
+                        scout_status = scout.get("status")
+                        logger.info(
+                            "AI Scout daily independent research: date=%s status=%s",
+                            wat_day, scout_status,
+                        )
+                        if scout_status not in {
+                            "NO_API_KEY", "BOARD_UNAVAILABLE",
+                        }:
+                            last_scout_attempt_day = wat_day
+                    except Exception as exc:
+                        # A failed third-party research request must never
+                        # affect official bets or spam repeated paid calls.
+                        last_scout_attempt_day = wat_day
+                        logger.warning(
+                            "AI Scout independent research failed date=%s "
+                            "error_type=%s",
+                            wat_day, type(exc).__name__,
+                        )
             except Exception as e:
                 logger.error(f"Daily generation loop iteration failed: {e}")
             _time.sleep(900)
