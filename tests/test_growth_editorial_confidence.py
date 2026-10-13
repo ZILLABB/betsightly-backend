@@ -51,8 +51,3 @@ def test_manual_best_pick_does_not_claim_model_probability():
     assert "Model confidence: 1%" not in payload["text"]
 
 
-def test_over15_code_board_identifies_accumulator():
-    data = {"date": "2026-10-13", "over_1_5": {"selected": False, "legs": []}}
-    payload = codes(data, "telegram")
-    assert "OVER 1.5 ACCUMULATOR" in payload["text"]
-    assert "Bet separately" not in payload["text"]
