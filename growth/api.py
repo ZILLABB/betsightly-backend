@@ -41,14 +41,19 @@ class ManualTierRequest(BaseModel):
 
 @router.get("/manual-tiers", dependencies=[Depends(require_admin)])
 def manual_tiers_status():
-    from leagues.editorial_manual import _today, list_published
+    from leagues.editorial_manual import _today, list_published, _can_republish, history_for
     day = _today()
     return {
         "date": day, "published": {
             k: {"tier": k, "total_odds": v.get("total_odds"),
                 "leg_count": len(v.get("games") or []),
                 "share_code": (v.get("booking") or {}).get("share_code"),
-                "source": "admin_curated"}
+                "source": "admin_curated",
+                 "can_republish": _can_republish(v),
+                 "prior_editions": len(history_for(day, k)),
+                 "games": [{"home_team": g.get("home_team"), "away_team": g.get("away_team"),
+                            "market": g.get("market"), "kickoff": g.get("kickoff"),
+                            "odds": g.get("odds")} for g in v.get("games") or []]}
             for k, v in list_published(day).items()
         },
     }
