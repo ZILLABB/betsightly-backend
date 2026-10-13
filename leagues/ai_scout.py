@@ -248,7 +248,11 @@ def _call_openai(candidates: list[dict], *, http_client=None) -> dict:
         "text": {"format": _schema()},
     }
     own = http_client is None
-    client = http_client or httpx.Client(timeout=35.0)
+    # Responses web_search may consult multiple sources for six fixtures.
+    # Runs only in scheduler/admin research workers, never a public GET.
+    client = http_client or httpx.Client(
+        timeout=httpx.Timeout(120.0, connect=10.0)
+    )
     try:
         response = client.post(
             "https://api.openai.com/v1/responses", json=request,
