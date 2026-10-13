@@ -357,7 +357,8 @@ def scheduler_shadow_tick(day: str, last_attempt_day: str | None,
         return day
     except Exception as exc:
         LOG.warning(
-            "AI Scout independent research failed date=%s error_type=%s",
+            "AI Scout independent research failed date=%s error_type=%s reason=%s",
             day, type(exc).__name__,
+            str(exc)[:120] if isinstance(exc, ValueError) else "request_failed",
         )
         return day
