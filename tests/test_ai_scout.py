@@ -139,3 +139,35 @@ def test_api_request_never_sends_ticket_or_user_data(monkeypatch):
             return FakeResponse()
     result = ai_scout._call_openai([candidate], http_client=FakeClient())
     assert result["status"] == "completed"
+
+
+def test_incomplete_response_reports_safe_reason_without_untrusted_content():
+    import pytest
+    body = {
+        "status": "incomplete",
+        "incomplete_details": {"reason": "max_output_tokens"},
+        "output": [],
+    }
+    with pytest.raises(ValueError, match="reason=max_output_tokens"):
+        ai_scout.parse_response(body, [{"candidate_id": "abc"}])
+
+
+def test_openai_budget_allows_web_research_and_structured_output(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-credential")
+    class Fake:
+        def post(self, url, *, json, headers):
+            assert json["max_output_tokens"] >= 4000
+            assert json["store"] is False
+            assert json["text"]["format"]["strict"] is True
+            class Resp:
+                def raise_for_status(self): pass
+                def json(self): return {"status":"completed", "output":[
+                    {"type":"message", "content":[{"type":"output_text",
+                    "text": '{"assessments":[]}'}]}
+                ]}
+            return Resp()
+    response = ai_scout._call_openai(
+        [{"candidate_id": "abc", "market": "over_1_5"}],
+        http_client=Fake()
+    )
+    assert response["status"] == "completed"
