@@ -645,8 +645,53 @@ def _start_daily_generation_loop():
     logger.info("Daily generation loop started (15 min checks, publishes 08:00 WAT)")
 
 
+def _start_ai_scout_research_once():
+    """Post-deploy key activation: research an existing day's board, never republish.
+
+    Today may have completed before the OpenAI key was configured. The daily
+    generation claim must NOT be forced to run again. This small daemon reads
+    the prepared board and writes independent AI shadow evidence only.
+    """
+    from leagues.ai_scout import enabled
+    if not enabled() or not os.getenv("OPENAI_API_KEY", "").strip():
+        logger.info("AI Scout bootstrap inactive: flag or credential unavailable")
+        return
+
+    import time as _time
+
+    def _work():
+        # The board is hydrated asynchronously when the service boots.
+        _time.sleep(12)
+        for attempt in range(5):
+            try:
+                from leagues.ai_scout import latest, run_once
+                previous = latest()
+                if previous.get("status") == "SHADOW_EVIDENCE_ONLY":
+                    return
+                outcome = run_once()
+                logger.info(
+                    "AI Scout post-key bootstrap: %s (attempt=%d)",
+                    outcome.get("status"), attempt + 1,
+                )
+                if outcome.get("status") in ("SHADOW_EVIDENCE_ONLY",
+                                             "ALREADY_CAPTURED",
+                                             "NO_CANDIDATES"):
+                    return
+                if outcome.get("status") != "BOARD_UNAVAILABLE":
+                    return
+            except Exception as exc:
+                logger.warning("AI Scout post-key bootstrap unsuccessful: %s",
+                               type(exc).__name__)
+                return
+            _time.sleep(90)
+
+    threading.Thread(target=_work, name="ai-scout-bootstrap",
+                     daemon=True).start()
+
+
 if SCHEDULER_JOBS_ENABLED:
     _start_daily_generation_loop()
+    _start_ai_scout_research_once()
 else:
     logger.info(
         "Daily scheduler disabled "
