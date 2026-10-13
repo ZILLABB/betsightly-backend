@@ -43,6 +43,40 @@ def _ensure(conn):
             PRIMARY KEY (publish_date, tier)
         )
     """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS editorial_tier_slip_history (
+            publish_date VARCHAR(10) NOT NULL,
+            tier VARCHAR(24) NOT NULL,
+            edition INTEGER NOT NULL,
+            archived_at TIMESTAMPTZ NOT NULL,
+            detail TEXT NOT NULL,
+            PRIMARY KEY (publish_date, tier, edition)
+        )
+    """))
+
+def _can_republish(existing: dict, at=None) -> bool:
+    """A new edition is permitted only after every previous leg kicked off."""
+    at = at or _now()
+    games = existing.get("games") or []
+    if not games:
+        return False
+    try:
+        kickoffs = [datetime.fromisoformat(str(g["kickoff"]).replace("Z", "+00:00"))
+                    for g in games]
+        return all(t.tzinfo is not None and t <= at for t in kickoffs)
+    except (KeyError, ValueError, TypeError):
+        return False
+
+def history_for(date: str, tier: str) -> list[dict]:
+    try:
+        with _engine().connect() as conn:
+            rows = conn.execute(text(
+                "SELECT detail FROM editorial_tier_slip_history "
+                "WHERE publish_date=:d AND tier=:t ORDER BY edition"),
+                {"d": date, "t": tier}).scalars().all()
+        return [json.loads(row) for row in rows]
+    except Exception:
+        return []
 
 def parse_input(lines: str, tier: str) -> list[tuple[str, str]]:
     """Accepted lines: SportyBet event ID,canonical_market (also CSV files)."""
@@ -220,8 +254,8 @@ def preview(tier: str, lines: str, *, board=None, now=None) -> dict:
     if (card.get(tier) or {}).get("selected"):
         raise ValueError(f"{tier} already has an immutable official slip today")
     manual = list_published(day)
-    if tier in manual:
-        raise ValueError(f"{tier} already has a published manual slip")
+    if tier in manual and not _can_republish(manual[tier], at):
+        raise ValueError(f"{tier} already has a manual ticket with games not yet started")
     live_board = board if board is not None else sportybet.fetch_board(force=True)
     games = _current_bookable_games(requested, live_board, now=at, date=day)
     _check_exposure(games, card, bookings_for(day), manual, tier=tier)
@@ -283,8 +317,19 @@ def publish(tier: str, lines: str) -> dict:
             "SELECT tier, detail FROM editorial_tier_slips WHERE publish_date=:d"
         ), {"d": day}).all()
         manual = {key: json.loads(value) for key, value in existing}
-        if tier in manual:
-            raise ValueError("This tier was published in another session")
+        previous = manual.get(tier)
+        if previous and not _can_republish(previous):
+            raise ValueError("This tier has a manual ticket with games not yet started")
+        if previous:
+            history_count = conn.execute(text(
+                "SELECT COUNT(*) FROM editorial_tier_slip_history "
+                "WHERE publish_date=:d AND tier=:t"), {"d": day, "t": tier}).scalar()
+            conn.execute(text(
+                "INSERT INTO editorial_tier_slip_history "
+                "(publish_date,tier,edition,archived_at,detail) "
+                "VALUES (:d,:t,:v,:at,:detail)"),
+                {"d": day, "t": tier, "v": int(history_count) + 1,
+                 "at": _now(), "detail": json.dumps(previous)})
         locked = conn.execute(text(
             "SELECT payload FROM daily_cards WHERE publish_date=:d"
         ), {"d": day}).scalar()
@@ -293,12 +338,17 @@ def publish(tier: str, lines: str) -> dict:
             raise ValueError("This tier already has an immutable engine slip")
         # Every originally verified booking keeps its fixture reservation.
         _check_exposure(revised, card, bookings_for(day), manual, tier=tier)
-        conn.execute(text(
-            "INSERT INTO editorial_tier_slips"
-            " (publish_date,tier,created_at,detail)"
-            " VALUES (:d,:t,:at,:detail)"
-        ), {"d": day, "t": tier, "at": _now(),
-            "detail": json.dumps(payload)})
+        if previous:
+            conn.execute(text(
+                "UPDATE editorial_tier_slips SET created_at=:at, detail=:detail "
+                "WHERE publish_date=:d AND tier=:t"),
+                {"d": day, "t": tier, "at": _now(), "detail": json.dumps(payload)})
+        else:
+            conn.execute(text(
+                "INSERT INTO editorial_tier_slips "
+                "(publish_date,tier,created_at,detail) "
+                "VALUES (:d,:t,:at,:detail)"),
+                {"d": day, "t": tier, "at": _now(), "detail": json.dumps(payload)})
     # Clear any in-process day cache; locked reads also have a short TTL.
     from leagues import daily_feed
     daily_feed._accum_cache.update({"result": None, "ts": 0})
@@ -306,6 +356,7 @@ def publish(tier: str, lines: str) -> dict:
         "status": "PUBLISHED", "date": day, "tier": tier,
         "total_odds": actual, "leg_count": len(revised),
         "share_code": booked["share_code"],
+        "replaced_previous": bool(previous),
         "editorial_manual": True, "official_engine_record_unchanged": True,
     }
 

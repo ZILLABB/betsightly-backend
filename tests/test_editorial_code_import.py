@@ -32,3 +32,24 @@ def test_import_rejects_unmapped_selection():
     }), patch.object(sportybet, "_board_entries", return_value=[("x", {"event_id": "123"})]):
         with pytest.raises(ValueError, match="cannot be mapped"):
             M.import_share_code("ABC123", "2_odds", board=board)
+
+
+def test_manual_ticket_cannot_be_republished_before_all_kickoffs():
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 10, 13, 10, tzinfo=timezone.utc)
+    record = {"games": [
+        {"kickoff": (now-timedelta(hours=1)).isoformat()},
+        {"kickoff": (now+timedelta(hours=1)).isoformat()},
+    ]}
+    assert M._can_republish(record, now) is False
+
+
+def test_manual_ticket_can_be_republished_after_all_kickoffs():
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 10, 13, 10, tzinfo=timezone.utc)
+    record = {"games": [
+        {"kickoff": (now-timedelta(hours=2)).isoformat()},
+        {"kickoff": (now-timedelta(minutes=1)).isoformat()},
+    ]}
+    assert M._can_republish(record, now) is True
+    assert M._can_republish({"games": []}, now) is False
