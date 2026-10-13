@@ -87,6 +87,13 @@ async def track(request: Request, payload: dict = Body(default={})):
     return {"ok": True}
 
 
+@public_router.get("/editorial-slips")
+def public_editorial_slips():
+    """Separate admin-curated opinions from the immutable model record."""
+    from leagues.manual_desk import public_slips
+    return public_slips()
+
+
 # ── Public: crawler-facing match pages ─────────────────────
 
 @public_router.get("/p/{slug}", response_class=HTMLResponse)
@@ -196,6 +203,36 @@ async def admin_logout(response: Response):
 @router.get("/admin/me")
 async def admin_me(admin: str = Depends(require_admin)):
     return {"ok": True, "admin": admin}
+
+
+@router.get("/manual-desk", response_class=HTMLResponse)
+def manual_prediction_desk(admin: str = Depends(require_admin)):
+    """Same-origin, cookie-authenticated editor workbench."""
+    from growth.manual_desk_ui import HTML
+    return HTMLResponse(HTML)
+
+
+@router.post("/manual-desk/preview")
+def manual_prediction_preview(payload: dict = Body(...),
+                              admin: str = Depends(require_admin)):
+    from leagues.manual_desk import preview
+    try:
+        return preview(payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/manual-desk/publish")
+def manual_prediction_publish(payload: dict = Body(...),
+                              admin: str = Depends(require_admin)):
+    from leagues.manual_desk import publish
+    try:
+        return publish(payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("Manual publication failed: %s", type(exc).__name__)
+        raise HTTPException(503, "Manual publication unavailable; nothing published")
 
 
 # ── Admin: dataset + content ───────────────────────────────
