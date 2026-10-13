@@ -375,11 +375,39 @@ def import_share_code(code: str, tier: str, *, board=None) -> dict:
             raise ValueError(f"Event {event} is missing from the current SportyBet board")
         actual = (str(selection.get("marketId")), str(selection.get("specifier") or ""),
                   str(selection.get("outcomeId")))
+        # Bookmaker readback can encode a line as an object, omit trailing
+        # zeroes, or return an extra parameter beside the total. Normalise
+        # only equivalent forms; never guess an outcome or substitute a market.
+        def normalized_spec(value):
+            if isinstance(value, dict):
+                value = ";".join(f"{k}={v}" for k, v in sorted(value.items()))
+            parts = []
+            for part in str(value or "").split(";"):
+                part = part.strip()
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    if k.strip() == "total":
+                        try:
+                            v = str(float(v)).rstrip("0").rstrip(".")
+                        except ValueError:
+                            pass
+                    part = k.strip() + "=" + v.strip()
+                if part:
+                    parts.append(part)
+            return ";".join(sorted(parts))
+        actual = (actual[0], normalized_spec(selection.get("specifier")),
+                  actual[2])
         matches = [market for market, (market_id, specifier, outcome_id)
                    in MARKET_TO_SPORTYBET.items()
-                   if (str(market_id), str(specifier or ""), str(outcome_id)) == actual]
+                   if (str(market_id), normalized_spec(specifier), str(outcome_id)) == actual]
         if len(matches) != 1:
-            raise ValueError(f"Event {event}: market or outcome cannot be mapped safely")
+            raise ValueError(
+                f"Event {event}: unsupported SportyBet selection "
+                f"(marketId={actual[0]}, specifier={actual[1] or 'none'}, "
+                f"outcomeId={actual[2]}). This selection cannot be imported "
+                "safely; use a supported football market or enter the "
+                "correct canonical event ID and market manually."
+            )
         rows.append(f"{event},{matches[0]}")
     lines = "\n".join(rows)
     result = preview(tier, lines, board=live_board)
