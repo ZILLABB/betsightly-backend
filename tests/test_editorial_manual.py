@@ -442,3 +442,33 @@ def test_growth_telegram_does_not_invent_model_probabilities_for_manual_rollover
     assert "Admin-curated" in message["text"]
     assert "0%" not in message["text"]
     assert "lands about" not in message["text"]
+
+
+def test_manual_chain_stage_rehydrates_public_card_with_market_key(monkeypatch):
+    from leagues import daily_feed, rollover_db
+    item = {
+        "day_number": 1, "date": "2026-10-14", "status": "pending",
+        "combined_odds": 2.4, "hit_probability": None,
+        "editorial_manual": True,
+        "picks": [{
+            "match_id": "sportybet:52587", "sportybet_event_id": "52587",
+            "home_team": "Arsenal", "away_team": "Lille",
+            "league": "Test League", "commence_time": "2026-10-14T20:00:00+00:00",
+            "prediction": "Over 1.5", "market": "goals",
+            "market_key": "over_1_5", "odds": 2.4,
+            "odds_are_real": True, "bookable": True,
+            "editorial_manual": True, "confidence": None,
+        }],
+    }
+    monkeypatch.setattr(rollover_db, "load_chain", lambda day: {
+        "start_date": "2026-10-14", "days": [item], "status": "active",
+    })
+    card = daily_feed._build_rollover([], "2026-10-14")
+    assert card["selected"] is True
+    assert card["editorial_manual"] is True
+    assert card["source"] == "admin_curated"
+    assert card["total_odds"] == 2.4
+    assert card["today_hit_probability"] is None
+    assert card["games"][0]["market"] == "over_1_5"
+    assert card["games"][0]["confidence"] is None
+    assert card["games"][0]["editorial_manual"] is True
