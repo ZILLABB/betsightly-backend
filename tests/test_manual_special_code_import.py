@@ -116,3 +116,20 @@ def test_mixed_specials_do_not_silently_drop_unsupported_legs(monkeypatch):
     with pytest.raises(ValueError, match="Event 124"):
         manual.import_share_code("ABC123", "2_odds", board={},
                                  convert_special=True)
+
+
+def test_1up_bookmaker_outcome_label_cannot_contradict_outcome_id():
+    with pytest.raises(ValueError, match="cannot be converted safely"):
+        manual._resolve_import_market({
+            "marketId": "999", "marketName": "1X2 - 1UP",
+            "outcomeId": "1", "outcomeName": "Away",
+        }, convert_special=True)
+
+
+def test_early_goals_under_cannot_be_incorrectly_imported_as_over():
+    with pytest.raises(ValueError, match="cannot be converted safely"):
+        manual._resolve_import_market({
+            "marketId": "999", "marketName": "Over/Under - Early Goals",
+            "outcomeId": "12", "outcomeName": "Under 1.5",
+            "specifier": "total=1.5",
+        }, convert_special=True)
