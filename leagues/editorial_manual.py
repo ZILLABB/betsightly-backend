@@ -23,6 +23,23 @@ MAX_LEGS = {"banker": 1, "2_odds": 12, "5_odds": 20,
 MIN_ODDS = {"banker": 1.01, "2_odds": 2.0, "5_odds": 5.0,
             "10_odds": 10.0, "over_1_5": 1.01}
 
+# Keep the old database tier key for settlement and historical results.
+MANUAL_OVER_GOALS = frozenset({"over_1_5", "over_2_5", "over_3_5", "over_4_5"})
+
+def _over_display_conflict(card: dict, tier: str, replace: bool) -> bool:
+    if replace and tier != "over_1_5":
+        raise ValueError("Only Over Goals can replace a current tier's display")
+    return bool((card.get(tier) or {}).get("selected")) and not replace
+
+def _avoid_original_over_games(games: list, card: dict) -> None:
+    original = (card.get("over_1_5") or {}).get("games") or []
+    ids = {str(g.get("sportybet_event_id")) for g in original if g.get("sportybet_event_id")}
+    ids |= {str(g.get("match_id")) for g in original if g.get("match_id")}
+    if any(str(g.get("sportybet_event_id")) in ids or
+           str(g.get("match_id")) in ids for g in games):
+        raise ValueError("This match is on today's original Over Goals slip. "
+                         "Choose a different fixture; the original remains in Results.")
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -64,12 +81,18 @@ def parse_input(lines: str, tier: str) -> list[tuple[str, str]]:
                 c not in "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:-_"
                 for c in event):
             raise ValueError(f"Row {n}: invalid SportyBet event ID")
-        aliases = {"1.5": "over_1_5", "o1.5": "over_1_5", "over 1.5": "over_1_5", "over1.5": "over_1_5", "over_1.5": "over_1_5", "2.5": "over_2_5", "o2.5": "over_2_5", "over 2.5": "over_2_5"}
+        aliases = {
+            alias: "over_" + line.replace(".", "_")
+            for line in ("1.5", "2.5", "3.5", "4.5")
+            for alias in (line, "o" + line, "over " + line,
+                          "over" + line, "over_" + line.replace(".", "_"))
+        }
         market = aliases.get(market.lower().strip(), market.lower().strip().replace(" ", "_"))
         if market not in MARKET_TO_SPORTYBET:
             raise ValueError(f"Row {n}: {market!r} is not a mapped SportyBet market")
-        if tier == "over_1_5" and market != "over_1_5":
-            raise ValueError("Over 1.5 tier only accepts over_1_5")
+        if tier == "over_1_5" and market not in MANUAL_OVER_GOALS:
+            raise ValueError("Over Goals only accepts total-goals Over 1.5, "
+                             "2.5, 3.5 or 4.5 when available at SportyBet")
         if (event, market) in results or any(e == event for e, _ in results):
             raise ValueError(f"Row {n}: fixture repeated in the same ticket")
         results.append((event, market))
@@ -207,7 +230,8 @@ def list_published(date: str | None = None) -> dict[str, dict]:
     except Exception:
         return {}
 
-def preview(tier: str, lines: str, *, board=None, now=None) -> dict:
+def preview(tier: str, lines: str, *, board=None, now=None,
+            replace_official_over: bool = False) -> dict:
     """Admin-only price preview. Never writes a card or creates a booking."""
     from leagues import sportybet
     from leagues.picks_db import load_card
@@ -217,14 +241,18 @@ def preview(tier: str, lines: str, *, board=None, now=None) -> dict:
     day = at.astimezone(WAT).date().isoformat()
     requested = parse_input(lines, tier)
     card = load_card(day) or {}
-    if (card.get(tier) or {}).get("selected"):
-        raise ValueError(f"{tier} already has an immutable official slip today")
+    if _over_display_conflict(card, tier, replace_official_over):
+        raise ValueError(f"{tier} already has an immutable official slip today. "
+                         "Choose explicit Over Goals display replacement; "
+                         "the original stays in official results.")
     manual = list_published(day)
     if tier in manual:
         raise ValueError(f"{tier} already has a published manual slip")
     live_board = board if board is not None else sportybet.fetch_board(force=True)
     games = _current_bookable_games(requested, live_board, now=at, date=day)
     _check_exposure(games, card, bookings_for(day), manual, tier=tier)
+    if replace_official_over:
+        _avoid_original_over_games(games, card)
     total = round(prod(g["odds"] for g in games), 3)
     check_tier_target(tier, total, len(games))
     return {
@@ -232,21 +260,27 @@ def preview(tier: str, lines: str, *, board=None, now=None) -> dict:
         "games": games, "total_odds": total,
         "booking_code_created": False, "research_only": False,
         "editorial_manual": True,
+        "replaces_official_display": bool(replace_official_over),
+        "original_official_record_preserved": True,
     }
 
-def publish(tier: str, lines: str) -> dict:
+def publish(tier: str, lines: str, *,
+            replace_official_over: bool = False) -> dict:
     """Full bookmaker readback first, then atomic one-way publication."""
     from leagues import sportybet
     from leagues.booking import create_booking, bookings_for
     from leagues.picks_db import load_card
 
-    inspected = preview(tier, lines)
+    inspected = preview(tier, lines, replace_official_over=replace_official_over)
     day, games = inspected["date"], inspected["games"]
     board = sportybet.fetch_board(force=True)
     # Fresh booking-time repricing and kickoff validation.
     revised = _current_bookable_games(parse_input(lines, tier), board, date=day)
-    _check_exposure(revised, load_card(day) or {}, bookings_for(day),
+    original_card = load_card(day) or {}
+    _check_exposure(revised, original_card, bookings_for(day),
                     list_published(day), tier=tier)
+    if replace_official_over:
+        _avoid_original_over_games(revised, original_card)
     odds = round(prod(g["odds"] for g in revised), 3)
     check_tier_target(tier, odds, len(revised))
     booked = create_booking(
@@ -272,6 +306,8 @@ def publish(tier: str, lines: str) -> dict:
         "booking": booked, "published_at": _now().isoformat(),
         "model_probability_available": False,
         "settlement_track": "editorial_separate",
+        "replaces_official_display": bool(replace_official_over),
+        "original_official_record_preserved": True,
     }
     with _engine().begin() as conn:
         _ensure(conn)
@@ -289,8 +325,10 @@ def publish(tier: str, lines: str) -> dict:
             "SELECT payload FROM daily_cards WHERE publish_date=:d"
         ), {"d": day}).scalar()
         card = json.loads(locked) if locked else {}
-        if (card.get(tier) or {}).get("selected"):
+        if _over_display_conflict(card, tier, replace_official_over):
             raise ValueError("This tier already has an immutable engine slip")
+        if replace_official_over:
+            _avoid_original_over_games(revised, card)
         # Every originally verified booking keeps its fixture reservation.
         _check_exposure(revised, card, bookings_for(day), manual, tier=tier)
         conn.execute(text(
@@ -307,14 +345,19 @@ def publish(tier: str, lines: str) -> dict:
         "total_odds": actual, "leg_count": len(revised),
         "share_code": booked["share_code"],
         "editorial_manual": True, "official_engine_record_unchanged": True,
+        "replaces_official_display": bool(replace_official_over),
     }
 
 def overlay_on_card(date: str, accumulators: dict) -> dict:
-    """Only populate genuinely empty tiers; never rewrite an automated slip."""
+    """Public display override without mutating locked engine publication."""
     merged = dict(accumulators)
     from leagues.booking import booking_lifecycle
     for tier, record in list_published(date).items():
-        if tier not in TIERS or (merged.get(tier) or {}).get("selected"):
+        if tier not in TIERS:
+            continue
+        original = merged.get(tier) or {}
+        override = tier == "over_1_5" and record.get("replaces_official_display") is True
+        if original.get("selected") and not override:
             continue
         games = record["games"]
         booking = booking_lifecycle(record["booking"], games)
@@ -331,6 +374,11 @@ def overlay_on_card(date: str, accumulators: dict) -> dict:
             "booking": booking,
             "booking_code": (booking or {}).get("share_code"),
             "risk_level": "Unscored editorial accumulator",
+            "replaces_official_display": bool(override),
+            "original_official_record_preserved": True,
+            "replaced_official_selection_count": (
+                len(original.get("games") or []) if override else 0
+            ),
         }
     return merged
 
@@ -596,8 +644,8 @@ def import_share_code(code: str, tier: str, *, board=None,
             "explicit regular market choice before live price preview. "
             "No selection has been dropped and nothing has been published."
         )
-    if tier == "over_1_5" and any(g["market"] != "over_1_5" for g in games):
-        warnings.append("Over 1.5 tier accepts only Over 1.5 markets.")
+    if tier == "over_1_5" and any(g["market"] not in MANUAL_OVER_GOALS for g in games):
+        warnings.append("Over Goals allows only standard total-goals Overs (1.5–4.5).")
     if original_odds is not None and original_odds + 1e-8 < MIN_ODDS[tier]:
         warnings.append(
             f"Original {original_odds:.2f}x odds are below "
