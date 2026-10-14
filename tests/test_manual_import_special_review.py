@@ -92,11 +92,11 @@ def test_ambiguity_is_never_silently_switched_to_winning_outcome():
 
 
 def test_user_interface_preserves_editor_and_blocks_partial_publication():
-    from growth.admin_ui import HTML
-    assert "manualImportReview=d" in HTML
-    assert "manualApplyImportReview" in HTML
-    assert "manualCancelImportReview" in HTML
-    assert "if(manualImportReview)" in HTML
-    assert "Original early payouts are NOT preserved" in HTML
-    assert "Your previous manual selections are unchanged" in HTML
-    assert "manualImportReview=null;" in HTML
+    from growth.admin_ui import ADMIN_JS
+    assert "manualImportReview=d" in ADMIN_JS
+    assert "manualApplyImportReview" in ADMIN_JS
+    assert "manualCancelImportReview" in ADMIN_JS
+    assert "if(manualImportReview)" in ADMIN_JS
+    assert "Original early payouts are NOT preserved" in ADMIN_JS
+    assert "Your previous manual selections are unchanged" in ADMIN_JS
+    assert "manualImportReview=null;" in ADMIN_JS
