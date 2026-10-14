@@ -628,7 +628,7 @@ def results(
             ]
 
         lines += [
-            "*Official slip record*",
+            "*Published slip record*",
             f"✅ Won: *{won}*",
             f"❌ Lost: *{lost}*",
             (
@@ -639,6 +639,22 @@ def results(
             "",
             "*Recent settled slips*",
         ]
+
+        # A genuine manually published empty-tier replacement is part of
+        # the day's PUBLIC card, not the ML model's accuracy/calibration.
+        manual = res.get("editorial_manual_record") or {}
+        if any(int(manual.get(k) or 0) for k in ("won", "lost", "pending", "void")):
+            engine = res.get("official_model_record") or {}
+            lines += [
+                "",
+                f"Engine: {int(engine.get('won') or 0)}W–{int(engine.get('lost') or 0)}L",
+                f"Admin-curated: {int(manual.get('won') or 0)}W–{int(manual.get('lost') or 0)}L"
+                f" · {int(manual.get('pending') or 0)} pending",
+                "_Manual replacements are included in published-slip totals,"
+                " not model accuracy._",
+            ]
+        if res.get("editorial_reporting_available") is False:
+            lines += ["", "_Admin-curated result feed unavailable; totals may be incomplete._"]
 
         for slip in res.get(
             "slips_settled",
@@ -717,7 +733,9 @@ def results(
         lines += [
             "",
             (
-                "_Every published slip counts — wins and losses._"
+                ("_Every published slip counts — wins and losses._"
+                 if res.get("editorial_reporting_available") is not False
+                 else "_Model-only result snapshot; editorial results unavailable._")
             ),
             "",
             f"[Full results]({url})",
