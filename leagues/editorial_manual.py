@@ -378,7 +378,21 @@ def _standard_market_from_special(selection: dict, feature: str) -> str | None:
     from leagues.market_registry import MARKET_TO_SPORTYBET
     name = _selection_market_label(selection).lower().replace("_", " ")
     outcome = str(selection.get("outcomeId") or "")
+    named = " ".join(str(selection.get(k) or "") for k in (
+        "outcomeName", "outcomeDesc", "outcomeLabel"
+    )).strip().casefold()
+    # If bookmaker labels are present, contradictory labels are never mapped.
+    known_labels = {
+        "home": {"1"}, "home win": {"1"}, "1": {"1"},
+        "away": {"3"}, "away win": {"3"}, "2": {"3"},
+        "draw": {"2"}, "x": {"2"},
+        "home or draw": {"9"}, "1x": {"9"},
+        "home or away": {"10"}, "12": {"10"},
+        "draw or away": {"11"}, "away or draw": {"11"}, "x2": {"11"},
+    }
     if feature in {"1UP", "2UP"}:
+        if named in known_labels and outcome not in known_labels[named]:
+            return None
         if "double chance" in name:
             candidates = {"9": "home_or_draw", "10": "home_or_away",
                           "11": "away_or_draw"}
@@ -389,7 +403,7 @@ def _standard_market_from_special(selection: dict, feature: str) -> str | None:
         key = candidates.get(outcome)
         return key if key in MARKET_TO_SPORTYBET else None
     if feature == "EarlyGoals" and ("over/under" in name or "total" in name):
-        if outcome != "12":
+        if outcome != "12" or "under" in named:
             return None
         specifier = str(selection.get("specifier") or "")
         label = " ".join(str(selection.get(k) or "") for k in
