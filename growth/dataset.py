@@ -341,12 +341,50 @@ def _recent_results(days: int = 7) -> dict:
         )
 
         # One published category/day = one public product outcome.
-        product_record = (
+        official_record = (
             product_performance_summary(
                 limit_days=days,
                 as_of=yesterday,
             )
         )
+
+        # The website fills missing daily tiers with bookmaker-verified
+        # manual selections. Results announcements must therefore include
+        # the same actual published products, once each per date/tier.
+        # Keep the model's own KPI record untouched for calibration/ROI.
+        from growth.editorial_results_report import merge_published_record
+        from leagues.editorial_settlement import editorial_result_history
+        editorial = editorial_result_history(limit=90)
+        editorial_available = editorial.get("status") == "success"
+        product_record = merge_published_record(
+            official_record, history,
+            editorial.get("results") or [],
+            as_of=yesterday, days=days,
+        )
+
+        # Include yesterday's manual losses/wins in the recent list. Labels
+        # say Admin-curated; no model confidence is attributed to these.
+        for slip in product_record.get("editorial_rows") or []:
+            if slip.get("date") != yesterday or slip.get("status") not in ("won", "lost"):
+                continue
+            games = slip.get("games") or []
+            settled_yesterday.append({
+                "category": slip["tier"],
+                "label": TIER_LABELS.get(slip["tier"], slip["tier"]) + " (Admin-curated)",
+                "editorial_manual": True,
+                "status": slip["status"],
+                "presentation": "accumulator",
+                "leg_won": sum(1 for g in games if g.get("status") == "won"),
+                "leg_lost": sum(1 for g in games if g.get("status") == "lost"),
+                "total_odds": round(float(slip.get("total_odds") or 0), 2),
+                "legs": [
+                    {"home_team": g.get("home_team"),
+                     "away_team": g.get("away_team"),
+                     "prediction": g.get("market"),
+                     "status": g.get("status") or "pending"}
+                    for g in games
+                ],
+            })
 
         try:
             from leagues.rollover_db import (
@@ -440,6 +478,15 @@ def _recent_results(days: int = 7) -> dict:
 
             "product_record":
                 product_record,
+
+            "official_model_record":
+                official_record,
+
+            "editorial_manual_record":
+                product_record["manual_editorial"],
+
+            "editorial_reporting_available":
+                editorial_available,
 
             "singles": {
                 "won":
