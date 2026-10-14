@@ -156,8 +156,9 @@ def append_day(chain_start_date: str, day: Dict[str, Any]) -> bool:
         db = SessionLocal()
         try:
             # Serialize automated and manual publication of the same WAT day.
-            db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
-                       {"k": f"rollover:{day[\"date\"]}"})
+            if db.bind.dialect.name == "postgresql":
+                db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                           {"k": f"rollover:{day['date']}"})
             existing = db.query(RolloverDay).filter(
                 RolloverDay.chain_start_date == chain_start_date,
                 RolloverDay.day_number == day["day_number"],
