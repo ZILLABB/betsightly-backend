@@ -1,7 +1,11 @@
+from datetime import datetime
 from leagues import scheduler
 
 
 def test_failed_card_never_runs_booking_alert_or_distribution(monkeypatch):
+    # This tests a post-publication failure, not the 08:00 WAT gate.
+    monkeypatch.setattr("leagues.daily_feed._wat_now",
+                        lambda: datetime.fromisoformat("2026-10-14T09:00:00+01:00"))
     steps = []
     finished = []
     monkeypatch.setattr(scheduler, "_claim", lambda *args: (True, ""))

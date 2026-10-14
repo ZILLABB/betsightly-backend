@@ -1,3 +1,4 @@
+from datetime import datetime
 """
 Idempotency and failure isolation for the daily run.
 
@@ -102,6 +103,8 @@ def test_an_unparseable_claim_time_does_not_wedge_the_day(run_date):
 
 def test_manual_start_claims_then_detaches_long_generation(monkeypatch, run_date):
     """The HTTP path returns before a seven-day pipeline is allowed to run."""
+    monkeypatch.setattr("leagues.daily_feed._wat_now",
+                        lambda: datetime.fromisoformat("2026-10-14T09:00:00+01:00"))
     monkeypatch.setattr("leagues.daily_feed._publish_date", lambda: run_date)
     calls = []
     threads = []
@@ -136,6 +139,8 @@ def test_manual_start_claims_then_detaches_long_generation(monkeypatch, run_date
 
 def test_detached_unhandled_failure_finishes_the_claim(monkeypatch, run_date):
     """A crash before normal step bookkeeping cannot leave ``running`` forever."""
+    monkeypatch.setattr("leagues.daily_feed._wat_now",
+                        lambda: datetime.fromisoformat("2026-10-14T09:00:00+01:00"))
     monkeypatch.setattr("leagues.daily_feed._publish_date", lambda: run_date)
 
     class ImmediateThread:
