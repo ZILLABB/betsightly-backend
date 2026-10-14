@@ -206,3 +206,107 @@ def test_override_replaces_display_only_and_keeps_original_archive(monkeypatch):
     assert displayed["over_1_5"]["hit_probability"] is None
     assert card["over_1_5"] == original
     assert card["over_1_5"]["booking"]["share_code"] == "ORIGINALCODE"
+
+
+def test_manual_rollover_odds_and_input_contract():
+    assert editor.parse_input("52587,home_win\\n52588,over_1_5", "rollover") == [
+        ("52587", "home_win"), ("52588", "over_1_5"),
+    ]
+    editor.check_tier_target("rollover", 2.0, 2)
+    editor.check_tier_target("rollover", 4.0, 2)
+    with pytest.raises(ValueError, match="2.00x"):
+        editor.check_tier_target("rollover", 1.99, 2)
+    with pytest.raises(ValueError, match="2.00x–4.00x"):
+        editor.check_tier_target("rollover", 4.01, 2)
+    with pytest.raises(ValueError, match="Too many"):
+        editor.check_tier_target("rollover", 3.0, 13)
+
+
+def test_manual_rollover_requires_a_free_stage_after_prior_win():
+    empty = {"rollover": {"selected": False}}
+    ready = editor.rollover_eligibility(
+        "2026-10-14", card=empty,
+        chain={"start_date": "2026-10-14", "days": []},
+    )
+    assert ready["allowed"] is True
+    assert ready["day_number"] == 1
+    pending = editor.rollover_eligibility(
+        "2026-10-14", card=empty,
+        chain={"start_date": "2026-10-13", "days": [
+            {"day_number": 1, "date": "2026-10-13", "status": "pending"},
+        ]},
+    )
+    assert pending["allowed"] is False
+    assert "awaiting_settlement" in pending["reason"]
+    next_stage = editor.rollover_eligibility(
+        "2026-10-14", card=empty,
+        chain={"start_date": "2026-10-13", "days": [
+            {"day_number": 1, "date": "2026-10-13", "status": "won"},
+        ]},
+    )
+    assert next_stage["allowed"] is True
+    assert next_stage["day_number"] == 2
+    assert next_stage["chain_start_date"] == "2026-10-13"
+    existing = editor.rollover_eligibility(
+        "2026-10-14", card={"rollover": {"selected": True}},
+        chain={"start_date": "2026-10-14", "days": []},
+    )
+    assert existing["allowed"] is False
+    assert "already published" in existing["reason"]
+
+
+def test_rollover_manual_picks_have_exact_settlement_market_but_no_model_confidence():
+    game = {"match_id": "sportybet:52588", "sportybet_event_id": "52588",
+            "home_team": "Atletico", "away_team": "Man United",
+            "league": "Football", "kickoff": "2026-10-14T16:00:00+00:00",
+            "prediction": "Over 1.5", "prediction_type": "goals",
+            "market": "over_1_5", "odds": 1.5}
+    item = editor._rollover_day_picks([game])[0]
+    assert item["market_key"] == "over_1_5"
+    assert item["source"] == "admin_curated"
+    assert item["editorial_manual"] is True
+    assert item["confidence"] is None
+    from leagues.results_checker import _evaluate_pick
+    assert _evaluate_pick(item, 1, 1) == "won"
+    assert _evaluate_pick(item, 0, 1) == "lost"
+
+
+def test_rollover_overlay_requires_proven_manual_chain(monkeypatch):
+    from leagues import booking
+    record = {
+        "games": [{"match_id": "sportybet:52588", "sportybet_event_id": "52588"}],
+        "total_odds": 2.5,
+        "booking": {"share_code": "VALID1", "status": "active",
+                    "booking_status": "FULL", "readback_validation": "PASSED"},
+    }
+    monkeypatch.setattr(editor, "list_published", lambda day: {"rollover": record})
+    monkeypatch.setattr(booking, "booking_lifecycle", lambda rec, games: rec)
+    official = {"rollover": {"selected": True, "games": [
+        {"match_id": "published:other"}], "chain": [{
+            "date": "2026-10-14", "picks": [{"match_id": "published:other"}],
+        }]}}
+    assert editor.overlay_on_card("2026-10-14", official) == official
+    manual = {"rollover": {"selected": True, "games": [], "chain": [{
+        "date": "2026-10-14", "picks": [{
+            "sportybet_event_id": "52588", "editorial_manual": True,
+        }],
+    }], "challenge_status": "active", "target_days": 3}}
+    displayed = editor.overlay_on_card("2026-10-14", manual)["rollover"]
+    assert displayed["editorial_manual"] is True
+    assert displayed["source"] == "admin_curated"
+    assert displayed["booking_code"] == "VALID1"
+    assert displayed["target_days"] == 3
+    assert len(displayed["chain"]) == 1
+    assert displayed["hit_probability"] is None
+    assert displayed["model_probability_available"] is not True
+
+
+def test_manual_rollover_never_uses_a_repeated_fixture_from_other_tiers():
+    manual = [{"sportybet_event_id": "52587", "match_id": "sportybet:52587",
+               "home_team": "Arsenal", "away_team": "Lille"}]
+    with pytest.raises(ValueError, match="already used"):
+        editor._check_exposure(
+            manual,
+            {"2_odds": {"selected": True, "games": manual}},
+            {}, {}, tier="rollover",
+        )
