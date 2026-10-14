@@ -164,6 +164,12 @@ def append_day(chain_start_date: str, day: Dict[str, Any]) -> bool:
                 RolloverDay.day_number == day["day_number"],
             ).first()
             if existing:
+                # A racing automated runner must never treat a manual stage
+                # as its own successful write and advertise different picks.
+                stored = json.loads(existing.picks or "[]")
+                if any(p.get("editorial_manual") for p in stored):
+                    logger.warning("Rollover stage is admin curated; auto append rejected")
+                    return False
                 return True
             # An alternate chain may not publish a second stage on this day.
             if db.query(RolloverDay).filter(RolloverDay.date == day["date"]).first():
