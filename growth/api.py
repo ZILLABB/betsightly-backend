@@ -65,7 +65,8 @@ def import_manual_code(body: ManualCodeImportRequest):
     from leagues.editorial_manual import import_share_code
     try:
         return import_share_code(
-            body.code, body.tier, convert_special=body.convert_special
+            body.code, body.tier, convert_special=body.convert_special,
+            allow_review=body.convert_special,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
