@@ -369,12 +369,13 @@ def publish(tier: str, lines: str, *,
         _ensure(conn)
         # Serialize all manual publication for a day, guarding cross-tier
         # reuse even when admins submit in two tabs simultaneously.
-        conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
-                     {"k": f"editorial:{day}"})
-        # Auto Rollover and the editorial writer share a date-scoped lock.
-        if tier == "rollover":
+        if conn.dialect.name == "postgresql":
             conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
-                         {"k": f"rollover:{day}"})
+                         {"k": f"editorial:{day}"})
+            # Auto Rollover and editorial writers share a date-scoped lock.
+            if tier == "rollover":
+                conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                             {"k": f"rollover:{day}"})
         existing = conn.execute(text(
             "SELECT tier, detail FROM editorial_tier_slips WHERE publish_date=:d"
         ), {"d": day}).all()
