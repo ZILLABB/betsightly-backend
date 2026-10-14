@@ -425,7 +425,8 @@ def _resolve_import_market(selection: dict, *, convert_special: bool) -> tuple[s
                 "markets to standard selections' to create a different ticket "
                 "WITHOUT this early-settlement benefit."
             )
-        standard = _standard_market_from_special(selection, feature)
+        standard = (_standard_market_from_special(selection, feature)
+                    or (matches[0] if len(matches) == 1 else None))
         if not standard:
             raise ValueError(
                 f"{feature} cannot be converted safely: the code did not provide "
