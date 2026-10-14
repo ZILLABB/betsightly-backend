@@ -132,3 +132,77 @@ def test_editorial_overlay_applies_validated_booking_lifecycle(monkeypatch):
     assert updated["banker"]["booking"]["status"] == "expired"
     assert updated["banker"]["booking_code"] is None
     assert updated["banker"]["hit_probability"] is None
+
+
+def test_over_goals_accepts_mixed_regular_totals_only():
+    assert editor.parse_input(
+        "12345,over_1_5\\n12346,Over 2.5\\n12347,o3.5\\n12348,over_4_5",
+        "over_1_5",
+    ) == [
+        ("12345", "over_1_5"), ("12346", "over_2_5"),
+        ("12347", "over_3_5"), ("12348", "over_4_5"),
+    ]
+    for market in ("under_4_5", "btts_yes", "home_over_0_5", "home_win"):
+        with pytest.raises(ValueError, match="only accepts"):
+            editor.parse_input(f"12345,{market}", "over_1_5")
+    with pytest.raises(ValueError, match="mapped SportyBet"):
+        editor.parse_input("12345,over_0_5", "over_1_5")
+
+
+def test_explicit_override_only_for_over_goals_and_never_for_other_tiers():
+    card = {"over_1_5": {"selected": True},
+            "banker": {"selected": True}}
+    assert editor._over_display_conflict(card, "over_1_5", False)
+    assert not editor._over_display_conflict(card, "over_1_5", True)
+    with pytest.raises(ValueError, match="Only Over Goals"):
+        editor._over_display_conflict(card, "banker", True)
+    assert editor._over_display_conflict(card, "banker", False)
+
+
+def test_original_official_match_cannot_be_reused_in_replacement():
+    card = {"over_1_5": {
+        "games": [{"sportybet_event_id": "52587",
+                   "match_id": "sportybet:52587"}]
+    }}
+    with pytest.raises(ValueError, match="original Over Goals"):
+        editor._avoid_original_over_games(
+            [{"sportybet_event_id": "52587", "match_id": "sportybet:52587"}],
+            card,
+        )
+    editor._avoid_original_over_games(
+        [{"sportybet_event_id": "52588", "match_id": "sportybet:52588"}],
+        card,
+    )
+
+
+def test_override_replaces_display_only_and_keeps_original_archive(monkeypatch):
+    from leagues import booking
+    original = {
+        "selected": True,
+        "games": [{"match_id": "official:locked",
+                   "sportybet_event_id": "original-event"}],
+        "presentation": "singles",
+        "booking": {"share_code": "ORIGINALCODE"},
+    }
+    manually_booked = {
+        "games": [{"match_id": "sportybet:52588", "market": "over_2_5",
+                   "sportybet_event_id": "52588"}],
+        "total_odds": 1.8,
+        "booking": {"share_code": "MANUALCODE", "status": "active",
+                    "readback_validation": "PASSED"},
+        "replaces_official_display": True,
+    }
+    monkeypatch.setattr(editor, "list_published",
+                        lambda day: {"over_1_5": manually_booked})
+    monkeypatch.setattr(booking, "booking_lifecycle",
+                        lambda code, games: {**code, "actionable": True})
+    card = {"over_1_5": original}
+    displayed = editor.overlay_on_card("2026-10-14", card)
+    assert displayed["over_1_5"]["editorial_manual"] is True
+    assert displayed["over_1_5"]["presentation"] == "accumulator"
+    assert displayed["over_1_5"]["booking_code"] == "MANUALCODE"
+    assert displayed["over_1_5"]["replaces_official_display"] is True
+    assert displayed["over_1_5"]["replaced_official_selection_count"] == 1
+    assert displayed["over_1_5"]["hit_probability"] is None
+    assert card["over_1_5"] == original
+    assert card["over_1_5"]["booking"]["share_code"] == "ORIGINALCODE"
