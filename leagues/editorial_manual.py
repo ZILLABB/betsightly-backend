@@ -441,6 +441,30 @@ def _resolve_import_market(selection: dict, *, convert_special: bool) -> tuple[s
             )
         standard = (_standard_market_from_special(selection, feature)
                     or (matches[0] if len(matches) == 1 else None))
+        # Even a matching numeric base-market ID is insufficient if the
+        # returned human-readable outcome explicitly contradicts the choice.
+        outcome_label = " ".join(
+            str(selection.get(k) or "") for k in
+            ("outcomeName", "outcomeDesc", "outcomeLabel")
+        ).strip().casefold()
+        labels = {
+            "home": "home_win", "home win": "home_win", "1": "home_win",
+            "draw": "draw", "x": "draw",
+            "away": "away_win", "away win": "away_win", "2": "away_win",
+            "home or draw": "home_or_draw", "1x": "home_or_draw",
+            "draw or away": "away_or_draw", "away or draw": "away_or_draw",
+            "x2": "away_or_draw", "home or away": "home_or_away",
+            "12": "home_or_away",
+        }
+        if standard and (
+            (outcome_label in labels and labels[outcome_label] != standard)
+            or (outcome_label.startswith("under ") and standard.startswith("over_"))
+            or (outcome_label.startswith("over ") and standard.startswith("under_"))
+        ):
+            raise ValueError(
+                f"{feature} outcome conflicts with the bookmaker label; "
+                "manual conversion was refused"
+            )
         if not standard:
             raise ValueError(
                 f"{feature} cannot be converted safely: the code did not provide "
