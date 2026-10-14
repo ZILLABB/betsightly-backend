@@ -209,7 +209,7 @@ def test_override_replaces_display_only_and_keeps_original_archive(monkeypatch):
 
 
 def test_manual_rollover_odds_and_input_contract():
-    assert editor.parse_input("52587,home_win\\n52588,over_1_5", "rollover") == [
+    assert editor.parse_input("52587,home_win\n52588,over_1_5", "rollover") == [
         ("52587", "home_win"), ("52588", "over_1_5"),
     ]
     editor.check_tier_target("rollover", 2.0, 2)
