@@ -482,14 +482,18 @@ def _resolve_import_market(selection: dict, *, convert_special: bool) -> tuple[s
 
 def import_share_code(code: str, tier: str, *, board=None,
                       convert_special: bool = False) -> dict:
-    """Resolve an existing SportyBet share code into exact canonical manual rows.
+    """Decode all share-code selections before the separate live preview.
 
-    Import is read-only. Publishing remains the existing separate verified path.
-    Never infer a selection from teams alone or silently drop unmatched legs.
+    Import itself never books or publishes. Today's tier availability, kickoff,
+    market price, duplicate exposure and live board validity are enforced by
+    the existing preview/publish functions, which are unchanged.
+    Special early-payout markets require explicit conversion consent and are
+    always disclosed as changed terms. No legs are silently discarded.
     """
+    import math
     import re
-    from leagues import sportybet
     from leagues.booking import _read_share
+
     if tier not in TIERS:
         raise ValueError("Unknown prediction tier")
     code = code.strip()
@@ -499,27 +503,35 @@ def import_share_code(code: str, tier: str, *, board=None,
         response = _read_share(code)
     except Exception as exc:
         LOG.warning("SportyBet code lookup failed: %s", type(exc).__name__)
-        raise ValueError("Could not retrieve this SportyBet code. Check the code and retry.") from None
-    if response.get("bizCode") != 10000:
+        raise ValueError(
+            "SportyBet code lookup timed out or failed. Try again; "
+            "nothing has been imported or published."
+        ) from None
+    if str(response.get("bizCode")) != "10000":
         raise ValueError("SportyBet did not recognize this code")
+
     data = response.get("data") or {}
-    selections = (data.get("ticket") or {}).get("selections") or []
-    if not selections or len(selections) > MAX_LEGS[tier]:
-        raise ValueError(f"Ticket must contain 1–{MAX_LEGS[tier]} selections for {tier}")
-    if data.get("unavailableOutcomes"):
-        raise ValueError("This booking code has unavailable selections")
-    live_board = board if board is not None else sportybet.fetch_board(force=True)
-    from leagues.sportybet import _board_entries
-    ids = {str(s.get("eventId") or "") for s in selections}
-    entries = {str(entry.get("event_id")): entry for _, entry in _board_entries(live_board)
-               if str(entry.get("event_id")) in ids}
+    ticket = data.get("ticket") or {}
+    selections = ticket.get("selections") or []
+    if not isinstance(selections, list) or not selections:
+        raise ValueError("SportyBet returned no selections in this code")
+    if len(selections) > 50:
+        raise ValueError("This code contains too many selections to import")
+
     rows = []
+    games = []
     converted = []
-    for selection in selections:
-        event = str(selection.get("eventId") or "")
-        entry = entries.get(event)
-        if not entry:
-            raise ValueError(f"Event {event} is missing from the current SportyBet board")
+    seen = set()
+    for pos, selection in enumerate(selections, 1):
+        event = str(selection.get("eventId") or "").strip()
+        if not event or len(event) > 60 or not event.isascii() or any(
+            c not in "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:-_"
+            for c in event
+        ):
+            raise ValueError(f"Selection {pos} has no recognizable SportyBet event ID")
+        if event in seen:
+            raise ValueError(f"SportyBet code includes event {event} more than once")
+        seen.add(event)
         try:
             market, feature = _resolve_import_market(
                 selection, convert_special=convert_special
@@ -529,18 +541,64 @@ def import_share_code(code: str, tier: str, *, board=None,
         if feature:
             converted.append({"event_id": event, "from": feature, "to": market})
         rows.append(f"{event},{market}")
-    lines = "\n".join(rows)
-    result = preview(tier, lines, board=live_board)
-    result["lines"] = lines
-    result["imported_share_code"] = code
-    result["import_mode"] = "sportybet_code"
-    result["conversion_requested"] = bool(convert_special)
-    result["converted_features"] = converted
-    result["original_leg_count"] = len(selections)
-    result["note"] = (
-        "This imports STANDARD 90-minute markets and generates a different "
-        "SportyBet code with current bookmaker odds. EarlyGoals, 1UP, 2UP, "
-        "Flexi, bonuses, and other betslip options are NOT preserved. "
-        "Check the original and regenerated tickets before publishing."
-    )
-    return result
+        games.append({
+            "sportybet_event_id": event,
+            "market": market,
+            # Names and current prices require a separate live board check.
+            "home_team": None, "away_team": None, "odds": None,
+            "bookable": False,
+        })
+
+    raw_odds = (ticket.get("displayTotalOdds") or ticket.get("totalOdds")
+                or data.get("displayTotalOdds") or data.get("totalOdds"))
+    try:
+        original_odds = float(raw_odds)
+        if not math.isfinite(original_odds) or original_odds <= 1:
+            original_odds = None
+    except (ValueError, TypeError):
+        original_odds = None
+
+    warnings = []
+    if data.get("unavailableOutcomes"):
+        warnings.append("Some selections are unavailable on SportyBet.")
+    if len(rows) > MAX_LEGS[tier]:
+        warnings.append(f"{tier} allows at most {MAX_LEGS[tier]} selections.")
+    if tier == "banker" and len(rows) != 1:
+        warnings.append("Banker requires exactly one selection.")
+    if tier == "over_1_5" and any(g["market"] != "over_1_5" for g in games):
+        warnings.append("Over 1.5 tier accepts only Over 1.5 markets.")
+    if original_odds is not None and original_odds + 1e-8 < MIN_ODDS[tier]:
+        warnings.append(
+            f"Original {original_odds:.2f}x odds are below "
+            f"the {tier} minimum of {MIN_ODDS[tier]:.2f}x."
+        )
+    if converted:
+        warnings.append(
+            "Special early-settlement features were explicitly converted "
+            "to ordinary 90-minute markets; early payouts are NOT preserved."
+        )
+
+    return {
+        "status": "IMPORTED_NOT_PUBLISHED",
+        "date": _today(),
+        "tier": tier,
+        "lines": "\n".join(rows),
+        "games": games,
+        "total_odds": original_odds,
+        "warnings": warnings,
+        "imported_share_code": code,
+        "import_mode": "sportybet_code",
+        "conversion_requested": bool(convert_special),
+        "converted_features": converted,
+        "original_leg_count": len(selections),
+        "booking_code_created": False,
+        "live_prices_verified": False,
+        "publish_ready": False,
+        "note": (
+            "Original code decoded. The original bookmaker odds (if shown) "
+            "are NOT current verified tier odds. EarlyGoals, 1UP, 2UP, "
+            "Flexi, bonuses and other special betslip options are NOT preserved. "
+            "Click Check prices / preview before any new verified booking "
+            "or publication."
+        ),
+    }
