@@ -310,3 +310,105 @@ def test_manual_rollover_never_uses_a_repeated_fixture_from_other_tiers():
             {"2_odds": {"selected": True, "games": manual}},
             {}, {}, tier="rollover",
         )
+
+
+def _manual_rollover_publish_db(monkeypatch, prior_status=None):
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import StaticPool
+    from leagues import sportybet, booking, picks_db
+    engine = create_engine("sqlite://", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE daily_cards (publish_date VARCHAR(10), payload TEXT)"))
+        conn.execute(text("""
+            CREATE TABLE wc_rollover_days (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, chain_start_date VARCHAR(10),
+                day_number INTEGER, date VARCHAR(10), picks TEXT, combined_odds FLOAT,
+                avg_confidence FLOAT, status VARCHAR(20), policy_version VARCHAR(40),
+                created_at DATETIME, updated_at DATETIME)
+        """))
+        if prior_status:
+            conn.execute(text("""
+                INSERT INTO wc_rollover_days
+                (chain_start_date,day_number,date,picks,combined_odds,
+                 avg_confidence,status,policy_version)
+                VALUES ('2026-10-13',1,'2026-10-13','[]',2.25,0.7,:status,'TEST')
+            """), {"status": prior_status})
+    games = [{
+        "match_id": "sportybet:52587", "sportybet_event_id": "52587",
+        "home_team": "Arsenal", "away_team": "Lille", "market": "over_1_5",
+        "prediction": "Over 1.5", "prediction_type": "goals",
+        "kickoff": "2026-10-14T19:00:00+00:00",
+        "league": "Test League", "odds": 2.4,
+    }]
+    monkeypatch.setattr(editor, "_engine", lambda: engine)
+    monkeypatch.setattr(editor, "preview", lambda *args, **kwargs: {
+        "date": "2026-10-14", "games": games,
+    })
+    monkeypatch.setattr(editor, "_current_bookable_games",
+                        lambda *args, **kwargs: games)
+    monkeypatch.setattr(editor, "list_published", lambda day: {})
+    monkeypatch.setattr(sportybet, "fetch_board", lambda **kwargs: {"test": True})
+    monkeypatch.setattr(picks_db, "load_card", lambda day: {})
+    monkeypatch.setattr(booking, "bookings_for", lambda day: {})
+    monkeypatch.setattr(booking, "create_booking", lambda *args, **kwargs: {
+        "status": "active", "booking_status": "FULL",
+        "share_code": "TESTCODE", "readback_validation": "PASSED",
+        "actual_sportybet_odds": 2.4, "final_booked_legs": games,
+    })
+    return engine
+
+
+def test_manual_rollover_publishes_one_atomic_booked_chain_stage(monkeypatch):
+    from sqlalchemy import text
+    db = _manual_rollover_publish_db(monkeypatch)
+    result = editor.publish("rollover", "52587,over_1_5")
+    assert result["status"] == "PUBLISHED"
+    assert result["share_code"] == "TESTCODE"
+    with db.connect() as conn:
+        days = conn.execute(text(
+            "SELECT chain_start_date,day_number,date,picks,status "
+            "FROM wc_rollover_days"
+        )).all()
+        manual = conn.execute(text(
+            "SELECT tier,detail FROM editorial_tier_slips"
+        )).all()
+    assert len(days) == len(manual) == 1
+    assert days[0][0:3] == ("2026-10-14", 1, "2026-10-14")
+    assert days[0][4] == "pending"
+    assert manual[0][0] == "rollover"
+    import json
+    picks = json.loads(days[0][3])
+    assert picks[0]["market_key"] == "over_1_5"
+    assert picks[0]["confidence"] is None
+    with pytest.raises(ValueError, match="already"):
+        editor.publish("rollover", "52587,over_1_5")
+
+
+def test_manual_rollover_advances_only_after_verified_previous_win(monkeypatch):
+    from sqlalchemy import text
+    db = _manual_rollover_publish_db(monkeypatch, prior_status="won")
+    result = editor.publish("rollover", "52587,over_1_5")
+    assert result["status"] == "PUBLISHED"
+    with db.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT chain_start_date,day_number,date FROM wc_rollover_days "
+            "ORDER BY day_number"
+        )).all()
+    assert rows[1] == ("2026-10-13", 2, "2026-10-14")
+
+
+def test_manual_rollover_rejects_pending_prior_without_orphan_record(monkeypatch):
+    from sqlalchemy import text
+    db = _manual_rollover_publish_db(monkeypatch, prior_status="pending")
+    with pytest.raises(ValueError, match="blocked"):
+        editor.publish("rollover", "52587,over_1_5")
+    with db.connect() as conn:
+        manual = conn.execute(text(
+            "SELECT count(*) FROM editorial_tier_slips"
+        )).scalar()
+        days = conn.execute(text(
+            "SELECT count(*) FROM wc_rollover_days"
+        )).scalar()
+    assert manual == 0
+    assert days == 1
