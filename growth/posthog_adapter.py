@@ -180,19 +180,49 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
                 "uniqIf(distinct_id,event='booking_code_copied'), uniqIf(distinct_id,event='sportybet_opened') "
                 f"FROM events WHERE {where} GROUP BY 1 "
                 "ORDER BY 2 DESC LIMIT 25")
-    def funnel_sql(events: list[str]) -> str:
-        measures = ", ".join(
-            f"countIf(event='{event}') AS h{i}, minIf(toUnixTimestamp(timestamp), event='{event}') AS t{i}"
-            for i, event in enumerate(events))
-        conditions, previous = [], None
-        for i in range(len(events)):
-            current = f"h{i}>0"
-            if previous:
-                current += f" AND t{i}>={previous}"
-            conditions.append(f"countIf({current})")
-            previous = f"t{i}"
-        return (f"SELECT {', '.join(conditions)} FROM (SELECT distinct_id, {measures} "
-                f"FROM events WHERE {where} GROUP BY distinct_id)")
+    def funnel_sql(events: list[str], area: str) -> str:
+        """Count ordered users, scoped by product (not independent event totals).
+
+        Copying and opening SportyBet are alternatives: neither is a
+        prerequisite of the other. A genuine funnel can never exceed 100%.
+        """
+        accepted_areas = {
+            "prediction": ("predictions", "fallback"),
+            "builder": ("builder",),
+            "rollover": ("rollover",),
+        }
+        areas = accepted_areas[area]
+        quoted_areas = ", ".join(f"'{value}'" for value in areas)
+        conditions = []
+        for event in events:
+            if event == "booking_action":
+                conditions.append(
+                    "(event IN ('booking_code_copied', 'sportybet_opened') "
+                    f"AND properties.product_area IN ({quoted_areas}))"
+                )
+            elif event == "booking_code_viewed":
+                conditions.append(
+                    f"(event = 'booking_code_viewed' "
+                    f"AND properties.product_area IN ({quoted_areas}))"
+                )
+            else:
+                conditions.append(f"(event = '{event}')")
+        stage_counts = ", ".join(
+            f"countIf(stage >= {index})" for index in range(1, len(events) + 1)
+        )
+        events_filter = ", ".join(
+            f"'{name}'" for name in set(
+                "booking_code_copied" if e == "booking_action" else e
+                for e in events
+            ) | ({"sportybet_opened"} if "booking_action" in events else set())
+        )
+        return (
+            f"SELECT {stage_counts} FROM ("
+            "SELECT distinct_id, windowFunnel(604800)("
+            "toDateTime(timestamp), " + ", ".join(conditions) +
+            f") AS stage FROM events WHERE {where} "
+            f"AND event IN ({events_filter}) GROUP BY distinct_id)"
+        )
     retention_sql = f"""
       SELECT
         countIf(first_day <= subtractDays(toDate('{end}'), 1)),
@@ -266,22 +296,23 @@ def summary(start: str, end: str, transport: Callable | None = None) -> dict:
                 dim_sql("properties.$pathname"), 10, "path")),
         }
         funnel_specs = {
-            "prediction": (["$pageview", "prediction_viewed", "booking_code_viewed",
-                            "booking_code_copied", "sportybet_opened"],
-                           ["Visitors", "Predictions viewed", "Valid code displayed",
-                            "Code copied", "SportyBet opened"]),
+            "prediction": (["$pageview", "prediction_viewed",
+                            "booking_code_viewed", "booking_action"],
+                           ["Visitors", "Predictions viewed",
+                            "Valid code displayed", "Copied code or opened SportyBet"]),
             "builder": (["builder_opened", "builder_target_selected",
                          "builder_generate_requested", "booking_code_viewed",
-                         "booking_code_copied", "sportybet_opened"],
-                        ["Builder opened", "Target selected", "Generation requested",
-                         "Valid code displayed", "Code copied", "SportyBet opened"]),
+                         "booking_action"],
+                        ["Builder opened", "Target selected",
+                         "Generation requested", "Valid code displayed",
+                         "Copied code or opened SportyBet"]),
             "rollover": (["rollover_viewed", "booking_code_viewed",
-                          "booking_code_copied", "sportybet_opened"],
+                          "booking_action"],
                          ["Rollover viewed", "Valid code displayed",
-                          "Code copied", "SportyBet opened"]),
+                          "Copied code or opened SportyBet"]),
         }
         data["funnels"] = {name: _funnel(
-            run(funnel_sql(events), len(labels), f"{name}_funnel"), labels)
+            run(funnel_sql(events, name), len(labels), f"{name}_funnel"), labels)
             for name, (events, labels) in funnel_specs.items()}
         rr = run(retention_sql, 10, "retention")
         values = rr[0] if rr else [0] * 10
