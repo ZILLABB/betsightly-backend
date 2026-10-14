@@ -485,6 +485,7 @@ def overlay_on_card(date: str, accumulators: dict) -> dict:
             "games": games,
             "total_odds": record["total_odds"],
             "hit_probability": None,
+            "model_probability_available": False,
             "reason": "Admin-curated selection; statistical confidence not evaluated",
             "presentation": "accumulator",
             "sportybet_ticket_type": "accumulator",
