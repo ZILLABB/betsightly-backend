@@ -27,9 +27,9 @@ def test_same_underlying_market_id_still_warns_when_1up_flagged():
               "specifier": "", "earlyPayoutType": "1UP"}
     with pytest.raises(ValueError, match="1UP"):
         manual._resolve_import_market(choice, convert_special=False)
-    # No market name: cannot prove a safe conversion (rather than guessing).
-    with pytest.raises(ValueError, match="cannot be converted safely"):
-        manual._resolve_import_market(choice, convert_special=True)
+    # Exact standard market IDs are independently verifiable.
+    assert manual._resolve_import_market(
+        choice, convert_special=True) == ("away_win", "1UP")
 
 
 def test_plain_supported_markets_import_without_loss():
