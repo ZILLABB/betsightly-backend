@@ -44,10 +44,10 @@ class ManualTierRequest(BaseModel):
 
 @router.get("/manual-tiers", dependencies=[Depends(require_admin)])
 def manual_tiers_status():
-    from leagues.editorial_manual import _today, list_published
+    from leagues.editorial_manual import _today, list_published, rollover_eligibility
     day = _today()
     return {
-        "date": day, "published": {
+        "date": day, "rollover": rollover_eligibility(day), "published": {
             k: {"tier": k, "total_odds": v.get("total_odds"),
                 "leg_count": len(v.get("games") or []),
                 "share_code": (v.get("booking") or {}).get("share_code"),

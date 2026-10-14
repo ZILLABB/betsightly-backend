@@ -159,6 +159,9 @@ def _rollover_block(cat: dict, today: str) -> dict:
          if (d.get("date") or "") == today and d.get("status") == "pending"),
         None,
     )
+    manual = bool(cat.get("editorial_manual") or (
+        today_day and any(p.get("editorial_manual") for p in today_day.get("picks", []))
+    ))
     legs = []
     if today_day:
         for p in today_day.get("picks", []):
@@ -169,7 +172,10 @@ def _rollover_block(cat: dict, today: str) -> dict:
                 "league": p.get("league"),
                 "kickoff": p.get("commence_time"),
                 "prediction": p.get("prediction"),
-                "confidence": round(float(p.get("confidence") or 0.0), 4),
+                "confidence": (None if p.get("editorial_manual") else
+                               round(float(p.get("confidence") or 0.0), 4)),
+                "editorial_manual": bool(p.get("editorial_manual")),
+                "model_probability_available": p.get("confidence") is not None and not p.get("editorial_manual"),
                 "odds": round(float(p.get("odds") or 0.0), 2),
                 "odds_are_real": bool(p.get("odds_are_real")),
                 "started": not _is_actionable(p.get("commence_time")),
@@ -197,7 +203,11 @@ def _rollover_block(cat: dict, today: str) -> dict:
         "days_won": won,
         "days_lost": lost,
         "total_odds": round(float(cat.get("total_odds") or 0.0), 2),
-        "hit_probability": round(float(cat.get("today_hit_probability") or 0.0), 4),
+        "hit_probability": (None if manual or cat.get("today_hit_probability") is None
+                            else round(float(cat.get("today_hit_probability")), 4)),
+        "editorial_manual": manual,
+        "source": "admin_curated" if manual else "engine",
+        "model_probability_available": bool(legs) and not manual and cat.get("today_hit_probability") is not None,
         "completion_probability": (
             round(float(cat.get("completion_probability")), 4)
             if cat.get("completion_probability") is not None else None

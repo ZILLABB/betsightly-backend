@@ -60,7 +60,8 @@ def _day_dict(r) -> Dict[str, Any]:
         joint *= float(c)
         have = True
 
-    hit = round(joint, 4) if have else r.avg_confidence
+    is_manual = bool(picks and all(p.get("editorial_manual") for p in picks))
+    hit = None if is_manual else (round(joint, 4) if have else r.avg_confidence)
     return {
         "archive_id": r.id,
         "day_number": r.day_number,
@@ -73,6 +74,8 @@ def _day_dict(r) -> Dict[str, Any]:
         "avg_confidence": hit,
         "status": r.status,
         "policy_version": r.policy_version,
+        "editorial_manual": is_manual,
+        "source": "admin_curated" if is_manual else "engine",
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
 
@@ -152,12 +155,26 @@ def append_day(chain_start_date: str, day: Dict[str, Any]) -> bool:
     try:
         db = SessionLocal()
         try:
+            # Serialize automated and manual publication of the same WAT day.
+            if db.bind.dialect.name == "postgresql":
+                db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                           {"k": f"rollover:{day['date']}"})
             existing = db.query(RolloverDay).filter(
                 RolloverDay.chain_start_date == chain_start_date,
                 RolloverDay.day_number == day["day_number"],
             ).first()
             if existing:
+                # A racing automated runner must never treat a manual stage
+                # as its own successful write and advertise different picks.
+                stored = json.loads(existing.picks or "[]")
+                if any(p.get("editorial_manual") for p in stored):
+                    logger.warning("Rollover stage is admin curated; auto append rejected")
+                    return False
                 return True
+            # An alternate chain may not publish a second stage on this day.
+            if db.query(RolloverDay).filter(RolloverDay.date == day["date"]).first():
+                logger.warning("Rollover date already claimed: %s", day["date"])
+                return False
             from leagues.rollover_lifecycle import allow_append_day
             previous = (
                 db.query(RolloverDay)
