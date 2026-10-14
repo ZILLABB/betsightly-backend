@@ -2100,7 +2100,7 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                 "league_slug": pk.get("league_slug"),
                 "competition_type": pk.get("competition_type"),
                 "raw_confidence": pk.get("raw_confidence"),
-                "confidence": pk.get("confidence", 0.5),
+                "confidence": None if pk.get("editorial_manual") else pk.get("confidence", 0.5),
                 "model_draw_probability": pk.get("model_draw_probability"),
                 "model_home_win_probability": pk.get("model_home_win_probability"),
                 "model_away_win_probability": pk.get("model_away_win_probability"),
@@ -2111,7 +2111,10 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
                 "real_odds": pk.get("odds") if pk.get("odds_are_real") else None,
                 "odds_are_real": pk.get("odds_are_real", False),
                 "risk_level": "low",
-                "model_type": "market_poisson",
+                "model_type": None if pk.get("editorial_manual") else "market_poisson",
+                "editorial_manual": bool(pk.get("editorial_manual")),
+                "source": "admin_curated" if pk.get("editorial_manual") else "engine",
+                "model_probability_available": not bool(pk.get("editorial_manual")),
             })
 
     today_odds = today_day.get("combined_odds", 0) if today_day else 0
@@ -2141,10 +2144,17 @@ def _build_rollover(all_picks: list, today: str, *, preview: bool = False) -> di
         "target_days": TARGET_DAYS,
         "cumulative_odds": round(cumulative, 2),
         "today_hit_probability": today_day.get("hit_probability") if today_day else None,
+        "editorial_manual": bool(today_day and today_day.get("picks") and
+                                 all(p.get("editorial_manual") for p in today_day["picks"])),
+        "source": "admin_curated" if today_day and today_day.get("picks") and
+                  all(p.get("editorial_manual") for p in today_day["picks"]) else "engine",
         "completion_probability": round(
             prod(
                 float(d.get("hit_probability") or d.get("avg_confidence") or 0)
                 for d in chain.get("days", [])
             ), 4
-        ) if len(chain.get("days", [])) == TARGET_DAYS else None,
+        ) if (len(chain.get("days", [])) == TARGET_DAYS and not
+              any(day.get("editorial_manual") or
+                  any(pick.get("editorial_manual") for pick in day.get("picks", []))
+                  for day in chain.get("days", []))) else None,
     }
