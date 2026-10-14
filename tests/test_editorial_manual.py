@@ -381,7 +381,7 @@ def test_manual_rollover_publishes_one_atomic_booked_chain_stage(monkeypatch):
     picks = json.loads(days[0][3])
     assert picks[0]["market_key"] == "over_1_5"
     assert picks[0]["confidence"] is None
-    with pytest.raises(ValueError, match="already"):
+    with pytest.raises(ValueError, match="published in another session"):
         editor.publish("rollover", "52587,over_1_5")
 
 
@@ -412,3 +412,33 @@ def test_manual_rollover_rejects_pending_prior_without_orphan_record(monkeypatch
         )).scalar()
     assert manual == 0
     assert days == 1
+
+
+def test_growth_telegram_does_not_invent_model_probabilities_for_manual_rollover():
+    from growth.dataset import _rollover_block
+    from growth.templates import rollover as format_rollover
+    today = "2026-10-14"
+    day = {
+        "day_number": 1, "date": today, "status": "pending",
+        "editorial_manual": True,
+        "picks": [{
+            "match_id": "sportybet:52587", "home_team": "Arsenal",
+            "away_team": "Lille", "league": "Football",
+            "commence_time": "2026-10-14T20:00:00+00:00",
+            "prediction": "Over 1.5", "market_key": "over_1_5",
+            "odds": 2.4, "confidence": None, "editorial_manual": True,
+        }],
+    }
+    tier = _rollover_block({
+        "chain": [day], "games": [], "total_odds": 2.4,
+        "target_days": 3, "chain_length": 1,
+        "today_hit_probability": None, "editorial_manual": True,
+    }, today)
+    assert tier["editorial_manual"] is True
+    assert tier["hit_probability"] is None
+    assert tier["legs"][0]["confidence"] is None
+    assert tier["legs"][0]["model_probability_available"] is False
+    message = format_rollover({"date": today, "rollover": tier}, "telegram")
+    assert "Admin-curated" in message["text"]
+    assert "0%" not in message["text"]
+    assert "lands about" not in message["text"]
