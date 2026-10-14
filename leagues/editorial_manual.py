@@ -360,11 +360,11 @@ def _selection_special_type(selection: dict) -> str | None:
             pieces.append(v)
     # Ignore unrelated ticket-level advertisements; only inspect this leg.
     label = " ".join(pieces).lower()
-    if re.search(r"\\b1\\s*up\\b", label):
+    if re.search(r"\b1\s*up\b", label):
         return "1UP"
-    if re.search(r"\\b2\\s*up\\b", label):
+    if re.search(r"\b2\s*up\b", label):
         return "2UP"
-    if re.search(r"early\\s*goals?", label):
+    if re.search(r"early\s*goals?", label):
         return "EarlyGoals"
     return None
 
@@ -395,7 +395,7 @@ def _standard_market_from_special(selection: dict, feature: str) -> str | None:
         label = " ".join(str(selection.get(k) or "") for k in
                          ("outcomeName", "outcomeDesc", "outcomeLabel"))
         import re
-        explicit = re.search(r"over\\s*(1\\.5|2\\.5|3\\.5|4\\.5)", label.lower())
+        explicit = re.search(r"over\s*(1\.5|2\.5|3\.5|4\.5)", label.lower())
         if explicit:
             spec = "total=" + explicit.group(1)
             if specifier and specifier != spec:
