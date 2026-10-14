@@ -133,3 +133,11 @@ def test_early_goals_under_cannot_be_incorrectly_imported_as_over():
             "outcomeId": "12", "outcomeName": "Under 1.5",
             "specifier": "total=1.5",
         }, convert_special=True)
+
+
+def test_bookmaker_text_conflict_rejected_even_if_standard_id_matches():
+    with pytest.raises(ValueError, match="conflicts"):
+        manual._resolve_import_market({
+            "marketId": "1", "marketName": "1X2 - 1UP",
+            "outcomeId": "1", "outcomeName": "Away",
+        }, convert_special=True)
