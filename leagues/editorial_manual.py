@@ -302,6 +302,17 @@ def publish(tier: str, lines: str) -> dict:
     # Clear any in-process day cache; locked reads also have a short TTL.
     from leagues import daily_feed
     daily_feed._accum_cache.update({"result": None, "ts": 0})
+
+    # The 08:00 WAT Telegram code-board may predate a manual fill.
+    # Queue a separately labelled, idempotent announcement only after the
+    # bookable manual product has committed. Telegram failure cannot roll
+    # back a genuine customer-visible booking.
+    try:
+        from growth.editorial_telegram import queue_published_manual
+        queue_published_manual(day, tier, payload)
+    except Exception as exc:
+        LOG.warning("Manual Telegram outbox unavailable: %s",
+                    type(exc).__name__)
     return {
         "status": "PUBLISHED", "date": day, "tier": tier,
         "total_odds": actual, "leg_count": len(revised),
