@@ -481,7 +481,8 @@ def _resolve_import_market(selection: dict, *, convert_special: bool) -> tuple[s
     )
 
 def import_share_code(code: str, tier: str, *, board=None,
-                      convert_special: bool = False) -> dict:
+                      convert_special: bool = False,
+                      allow_review: bool = False) -> dict:
     """Decode all share-code selections before the separate live preview.
 
     Import itself never books or publishes. Today's tier availability, kickoff,
@@ -521,6 +522,7 @@ def import_share_code(code: str, tier: str, *, board=None,
     rows = []
     games = []
     converted = []
+    unresolved = []
     seen = set()
     for pos, selection in enumerate(selections, 1):
         event = str(selection.get("eventId") or "").strip()
@@ -537,7 +539,30 @@ def import_share_code(code: str, tier: str, *, board=None,
                 selection, convert_special=convert_special
             )
         except ValueError as exc:
-            raise ValueError(f"Event {event}: {exc}") from None
+            # The readback may use a special/promo market ID without
+            # disclosing its canonical line/outcome. Preserve this fixture
+            # for EXPLICIT admin review instead of dropping it or guessing.
+            # This mode is opt-in and only available when standard-market
+            # conversion was explicitly requested.
+            if not (allow_review and convert_special):
+                raise ValueError(f"Event {event}: {exc}") from None
+            unresolved_game = {
+                "sportybet_event_id": event,
+                "market": None, "requires_review": True,
+                "original_selection_index": pos,
+                "reported_market": _selection_market_label(selection)[:160],
+                "reported_outcome": " ".join(
+                    str(selection.get(k) or "") for k in
+                    ("outcomeName", "outcomeDesc", "outcomeLabel")
+                ).strip()[:100],
+                "original_feature": _selection_special_type(selection),
+                "reason": str(exc)[:220],
+                "home_team": None, "away_team": None, "odds": None,
+                "bookable": False,
+            }
+            unresolved.append(unresolved_game)
+            games.append(unresolved_game)
+            continue
         if feature:
             converted.append({"event_id": event, "from": feature, "to": market})
         rows.append(f"{event},{market}")
@@ -561,10 +586,16 @@ def import_share_code(code: str, tier: str, *, board=None,
     warnings = []
     if data.get("unavailableOutcomes"):
         warnings.append("Some selections are unavailable on SportyBet.")
-    if len(rows) > MAX_LEGS[tier]:
+    if len(selections) > MAX_LEGS[tier]:
         warnings.append(f"{tier} allows at most {MAX_LEGS[tier]} selections.")
-    if tier == "banker" and len(rows) != 1:
+    if tier == "banker" and len(selections) != 1:
         warnings.append("Banker requires exactly one selection.")
+    if unresolved:
+        warnings.append(
+            f"{len(unresolved)} of {len(selections)} selection(s) need an "
+            "explicit regular market choice before live price preview. "
+            "No selection has been dropped and nothing has been published."
+        )
     if tier == "over_1_5" and any(g["market"] != "over_1_5" for g in games):
         warnings.append("Over 1.5 tier accepts only Over 1.5 markets.")
     if original_odds is not None and original_odds + 1e-8 < MIN_ODDS[tier]:
@@ -579,7 +610,8 @@ def import_share_code(code: str, tier: str, *, board=None,
         )
 
     return {
-        "status": "IMPORTED_NOT_PUBLISHED",
+        "status": ("NEEDS_MANUAL_REVIEW" if unresolved
+                   else "IMPORTED_NOT_PUBLISHED"),
         "date": _today(),
         "tier": tier,
         "lines": "\n".join(rows),
@@ -590,6 +622,8 @@ def import_share_code(code: str, tier: str, *, board=None,
         "import_mode": "sportybet_code",
         "conversion_requested": bool(convert_special),
         "converted_features": converted,
+        "unresolved_selections": unresolved,
+        "unresolved_count": len(unresolved),
         "original_leg_count": len(selections),
         "booking_code_created": False,
         "live_prices_verified": False,

@@ -89,11 +89,91 @@ async function saveSettings(){const ch={},auto={},sch={};Object.keys(SETTINGS.ch
 async function loadRefs(){try{const d=await api('/referrals');$('refTable').innerHTML=table(['Code','Name','Link'],d.referrals.map(r=>{const link=`https://www.betsightly.com/predictions?utm_source=referral&utm_medium=referral&utm_campaign=creator&ref=${encodeURIComponent(r.code)}`;return`<tr><td><code>${esc(r.code)}</code></td><td>${esc(r.name||'')}</td><td>${esc(link)}</td></tr>`}))}catch(e){}}
 async function addRef(){try{await api('/referrals',{method:'POST',body:JSON.stringify({code:$('refCode').value,name:$('refName').value})});$('refCode').value=$('refName').value='';loadRefs()}catch(e){$('refErr').textContent=e.message}}
 async function loadManual(){try{const d=await api('/manual-tiers');const rows=Object.values(d.published||{});$('manualPublished').innerHTML=rows.length?table(['Tier','Games','Verified odds','Share code'],rows.map(r=>`<tr><td>${esc(r.tier)}</td><td>${num(r.leg_count)}</td><td>${esc(r.total_odds)}x</td><td><code>${esc(r.share_code||'unavailable')}</code></td></tr>`)):empty('No manual tickets published today. All official records remain unchanged.')}catch(e){$('manualPublished').textContent=e.message}}
-async function manualImportCode(){const msg=$('manualErr');msg.textContent='';const code=$('manualShareCode').value.trim();if(!code){msg.textContent='Enter a SportyBet booking code.';return}const convert=$('manualConvertSpecial').checked;const button=document.querySelector('[data-act="manual-import-code"]');if(button){button.disabled=true;button.textContent='Reading code…'}$('manualPreview').textContent='Reading all selections from SportyBet. Import does not publish a ticket.';try{const d=await api('/manual-tiers/import-code',{method:'POST',body:JSON.stringify({tier:$('manualTier').value,code,convert_special:convert})});$('manualLines').value=d.lines;const converted=(d.converted_features||[]);const changes=converted.length?'<p class="note" role="alert"><strong>Changed '+num(converted.length)+' special markets:</strong> '+converted.map(x=>esc(x.event_id)+' '+esc(x.from)+' → '+esc(x.to)).join('; ')+'. Original early payouts are NOT preserved.</p>':'';const warnings=(d.warnings||[]).map(x=>'<li>'+esc(x)+'</li>').join('');$('manualPreview').innerHTML='<p><strong>Code imported: '+num(d.games.length)+' selections.</strong> Not yet checked against current fixture dates or bookmaker prices. '+(d.total_odds!=null?'Original code price: '+esc(d.total_odds)+'x. ':'')+'</p>'+changes+(warnings?'<div role="status"><strong>Review before publishing:</strong><ul>'+warnings+'</ul></div>':'')+'<p class="muted">'+esc(d.note||'Special options do not copy to standard markets.')+'</p><p>Next: click <strong>Check prices / preview</strong>. That step checks current SportyBet markets, kickoffs, tier limits and unavailable outcomes. Then Verify code &amp; publish creates a new fully validated booking.</p>'+table(['SportyBet match ID','Decoded regular market'],d.games.map(g=>`<tr><td>${esc(g.sportybet_event_id)}</td><td>${esc(g.market)}</td></tr>`))}catch(e){msg.textContent=e.message;$('manualPreview').textContent='Nothing imported or published.';$('manualLines').value=''}finally{if(button){button.disabled=false;button.textContent='Find games from code'}}}
-async function manualPreview(){const msg=$('manualErr');msg.textContent='';try{const d=await api('/manual-tiers/preview',{method:'POST',body:JSON.stringify({tier:$('manualTier').value,lines:$('manualLines').value})});$('manualPreview').innerHTML='<p><strong>Bookmaker-priced preview:</strong> '+esc(d.total_odds)+'x across '+num(d.games.length)+' legs. No code created yet.</p>'+table(['Fixture','Market','Price'],d.games.map(g=>`<tr><td>${esc(g.home_team)} v ${esc(g.away_team)}</td><td>${esc(g.market)}</td><td>${esc(g.odds)}x</td></tr>`))}catch(e){msg.textContent=e.message;$('manualPreview').textContent=''}}
-async function manualPublish(){const msg=$('manualErr');msg.textContent='';if(!window.confirm('Publish this ADMIN-CURATED ticket only if SportyBet verifies its entire share code? This cannot replace an existing official slip.'))return;try{const d=await api('/manual-tiers/publish',{method:'POST',body:JSON.stringify({tier:$('manualTier').value,lines:$('manualLines').value})});$('manualPreview').textContent='Published '+d.tier+' — '+d.leg_count+' games, '+d.total_odds+'x, verified code '+d.share_code+'. View it under the tier on Predictions.';await loadManual()}catch(e){msg.textContent=e.message}}
-async function manualFile(event){const file=event.target.files?.[0];if(!file)return;if(file.size>16000){$('manualErr').textContent='File too large (16 KB max).';return}const source=await file.text();$('manualLines').value=source.slice(0,6000);$('manualPreview').textContent='CSV loaded. Click Check prices / preview before publishing.';event.target.value=''}
-const ACTIONS={login,logout,retry,'manual-import-code':manualImportCode,'manual-preview':manualPreview,'manual-publish':manualPublish,'generate':()=>generate(false),'generate-publish':()=>generate(true),'save-settings':saveSettings,'add-ref':addRef,preview:e=>preview(Number(e.dataset.id)),approve:e=>act(Number(e.dataset.id),'approve'),publish:e=>act(Number(e.dataset.id),'publish'),'menu':()=>$('side').classList.toggle('open'),'apply-range':loadDashboard};
+let manualImportReview=null;
+const REGULAR_MANUAL_MARKETS=[
+  ['home_win','Home win'],['draw','Draw'],['away_win','Away win'],
+  ['home_or_draw','Home or draw'],['away_or_draw','Away or draw'],
+  ['dnb_home','Home draw no bet'],['dnb_away','Away draw no bet'],
+  ['over_1_5','Over 1.5'],['over_2_5','Over 2.5'],
+  ['under_2_5','Under 2.5'],['under_4_5','Under 4.5'],
+  ['btts_yes','Both teams score — Yes'],['btts_no','Both teams score — No']
+];
+async function manualImportCode(){
+ const msg=$('manualErr');msg.textContent='';
+ const code=$('manualShareCode').value.trim();
+ if(!code){msg.textContent='Enter a SportyBet booking code.';return}
+ const convert=$('manualConvertSpecial').checked;
+ const button=document.querySelector('[data-act="manual-import-code"]');
+ if(button){button.disabled=true;button.textContent='Reading code…'}
+ const existing=$('manualPreview').innerHTML;
+ $('manualPreview').textContent='Reading all selections from SportyBet. Import does not publish a ticket.';
+ manualImportReview=null;
+ try{
+  const d=await api('/manual-tiers/import-code',{
+   method:'POST',body:JSON.stringify({tier:$('manualTier').value,code,convert_special:convert})
+  });
+  const converted=d.converted_features||[];
+  const changes=converted.length
+   ?'<p class="note" role="alert"><strong>Changed '+num(converted.length)+' special markets:</strong> '+converted.map(x=>esc(x.event_id)+' '+esc(x.from)+' → '+esc(x.to)).join('; ')+'. Original early payouts are NOT preserved.</p>':'';
+  const warnings=(d.warnings||[]).map(x=>'<li>'+esc(x)+'</li>').join('');
+  const needsReview=d.status==='NEEDS_MANUAL_REVIEW'&&d.unresolved_count>0;
+  if(!needsReview)$('manualLines').value=d.lines;
+  else manualImportReview=d;
+  const marketChoices=d.tier==='over_1_5'
+   ?REGULAR_MANUAL_MARKETS.filter(pair=>pair[0]==='over_1_5')
+   :REGULAR_MANUAL_MARKETS;
+  const rows=d.games.map((g,i)=>{
+   if(!g.requires_review)return '<tr><td>'+esc(g.sportybet_event_id)+'</td><td>'+esc(g.market)+'</td><td>Decoded</td></tr>';
+   const options='<option value="">Choose regular market — required</option>'+
+    marketChoices.map(pair=>'<option value="'+pair[0]+'">'+esc(pair[1])+'</option>').join('');
+   const original=[g.reported_market,g.reported_outcome].filter(Boolean).join(' · ');
+   return '<tr><td>'+esc(g.sportybet_event_id)+'</td><td><select class="field" data-manual-review-index="'+i+'" aria-label="Regular market for event '+esc(g.sportybet_event_id)+'">'+options+'</select></td><td><strong>Admin choice required</strong><small style="display:block;color:var(--muted)">'+esc(original||'SportyBet did not provide a recognizable standard market')+'</small></td></tr>';
+  });
+  const review=needsReview
+   ?'<p class="note" role="alert"><strong>'+num(d.unresolved_count)+' market(s) need your explicit choice.</strong> SportyBet provided a non-standard outcome/market ID. Choose the regular equivalent for every unresolved match from your original betslip. BetSightly will not guess or drop a leg. Existing editor rows are preserved until you apply this review.</p>'
+    +table(['SportyBet match ID','Regular market for new ticket','Original market information'],rows)
+    +'<div class="row wrap" style="margin-top:14px"><button class="btn btn-primary" type="button" data-act="manual-apply-import-review">Apply reviewed markets</button><button class="btn" type="button" data-act="manual-cancel-import-review">Cancel import review</button></div>'
+   :'<p>Next: click <strong>Check prices / preview</strong>. This checks exact SportyBet prices, kickoffs, tier rules and availability before a fresh verified code can be published.</p>'
+    +table(['SportyBet match ID','Decoded regular market','Result'],rows);
+  $('manualPreview').innerHTML='<p><strong>Code read: '+num(d.original_leg_count)+' selections.</strong> Nothing has been published. '+(d.total_odds!=null?'Original code price: '+esc(d.total_odds)+'x (NOT a current verified price).':'')+'</p>'+changes+(warnings?'<div role="status"><strong>Review before publishing:</strong><ul>'+warnings+'</ul></div>':'')+'<p class="muted">'+esc(d.note||'Special options do not transfer to regular markets.')+'</p>'+review;
+ }catch(e){
+  msg.textContent=e.message;
+  $('manualPreview').innerHTML=existing||'Import failed. Your previous manual selections are unchanged.';
+ }finally{
+  if(button){button.disabled=false;button.textContent='Find games from code'}
+ }
+}
+function manualApplyImportReview(){
+ const d=manualImportReview;
+ if(!d)return;
+ const msg=$('manualErr');msg.textContent='';
+ if($('manualTier').value!==d.tier){msg.textContent='Select '+d.tier+' as the tier again or cancel this review.';return}
+ const rows=[];
+ for(let i=0;i<d.games.length;i++){
+  const game=d.games[i];let market=game.market;
+  if(game.requires_review){
+   market=document.querySelector('[data-manual-review-index="'+i+'"]')?.value||'';
+   if(!market){msg.textContent='Choose a regular market for event '+game.sportybet_event_id+' before continuing.';return}
+  }
+  rows.push(game.sportybet_event_id+','+market);
+ }
+ if(rows.length!==d.original_leg_count){
+  msg.textContent='The complete original ticket was not recovered. Import refused.';return;
+ }
+ if(!window.confirm('Convert all '+rows.length+' selections into a DIFFERENT standard-market ticket? 1UP, 2UP, EarlyGoals, Flexi and promotions will NOT be preserved. The new ticket must be previewed and verified.'))return;
+ $('manualLines').value=rows.join('\n');
+ manualImportReview=null;
+ $('manualPreview').textContent='All '+rows.length+' selections prepared as ordinary markets by explicit admin review. Promo features are NOT preserved. Click Check prices / preview next; the original price is not guaranteed.';
+}
+function manualCancelImportReview(){
+ manualImportReview=null;
+ $('manualErr').textContent='';
+ $('manualPreview').textContent='Import review cancelled. Previous editor selections are unchanged.';
+}
+async function manualPreview(){const msg=$('manualErr');msg.textContent='';if(manualImportReview){msg.textContent='Finish or cancel the import review first. No partial ticket can be previewed.';return}try{const d=await api('/manual-tiers/preview',{method:'POST',body:JSON.stringify({tier:$('manualTier').value,lines:$('manualLines').value})});$('manualPreview').innerHTML='<p><strong>Bookmaker-priced preview:</strong> '+esc(d.total_odds)+'x across '+num(d.games.length)+' legs. No code created yet.</p>'+table(['Fixture','Market','Price'],d.games.map(g=>`<tr><td>${esc(g.home_team)} v ${esc(g.away_team)}</td><td>${esc(g.market)}</td><td>${esc(g.odds)}x</td></tr>`))}catch(e){msg.textContent=e.message;$('manualPreview').textContent=''}}
+async function manualPublish(){const msg=$('manualErr');msg.textContent='';if(manualImportReview){msg.textContent='Finish or cancel the special-market import review before publishing.';return}if(!window.confirm('Publish this ADMIN-CURATED ticket only if SportyBet verifies its entire share code? This cannot replace an existing official slip.'))return;try{const d=await api('/manual-tiers/publish',{method:'POST',body:JSON.stringify({tier:$('manualTier').value,lines:$('manualLines').value})});$('manualPreview').textContent='Published '+d.tier+' — '+d.leg_count+' games, '+d.total_odds+'x, verified code '+d.share_code+'. View it under the tier on Predictions.';await loadManual()}catch(e){msg.textContent=e.message}}
+async function manualFile(event){const file=event.target.files?.[0];if(!file)return;if(file.size>16000){$('manualErr').textContent='File too large (16 KB max).';return}const source=await file.text();manualImportReview=null;$('manualLines').value=source.slice(0,6000);$('manualPreview').textContent='CSV loaded. Click Check prices / preview before publishing.';event.target.value=''}
+const ACTIONS={login,logout,retry,'manual-import-code':manualImportCode,'manual-apply-import-review':manualApplyImportReview,'manual-cancel-import-review':manualCancelImportReview,'manual-preview':manualPreview,'manual-publish':manualPublish,'generate':()=>generate(false),'generate-publish':()=>generate(true),'save-settings':saveSettings,'add-ref':addRef,preview:e=>preview(Number(e.dataset.id)),approve:e=>act(Number(e.dataset.id),'approve'),publish:e=>act(Number(e.dataset.id),'publish'),'menu':()=>$('side').classList.toggle('open'),'apply-range':loadDashboard};
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act],[data-page],[data-days]');if(!el)return;if(el.dataset.page){nav(el.dataset.page,el);return}if(el.dataset.days){document.querySelectorAll('.range button').forEach(b=>b.classList.remove('active'));el.classList.add('active');$('customDates').classList.toggle('hidden',el.dataset.days!=='custom');if(el.dataset.days!=='custom')loadDashboard();return}const fn=ACTIONS[el.dataset.act];if(fn){e.preventDefault();fn(el)}});
 document.addEventListener('change',e=>{if(e.target.dataset.change==='content')loadContent();if(e.target.id==='manualFile')manualFile(e)});$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
 async function boot(){$('today').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'short'});await loadDashboard();const s=SETTINGS.channel_enabled||{},sel=$('fPlatform');if(sel.options.length===1)Object.keys(s).forEach(ch=>sel.add(new Option(ch,ch)))}
