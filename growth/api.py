@@ -37,6 +37,9 @@ from pydantic import BaseModel, Field
 class ManualTierRequest(BaseModel):
     tier: str = Field(min_length=3, max_length=20)
     lines: str = Field(min_length=3, max_length=6000)
+    # Explicit consent is required to replace the existing Over Goals display.
+    # The original engine slip remains immutable and still settles normally.
+    replace_official_over: bool = False
 
 
 @router.get("/manual-tiers", dependencies=[Depends(require_admin)])
@@ -76,7 +79,10 @@ def import_manual_code(body: ManualCodeImportRequest):
 def preview_manual_tier(body: ManualTierRequest):
     from leagues.editorial_manual import preview
     try:
-        return preview(body.tier, body.lines)
+        return preview(
+            body.tier, body.lines,
+            replace_official_over=body.replace_official_over,
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 
@@ -85,7 +91,10 @@ def preview_manual_tier(body: ManualTierRequest):
 def publish_manual_tier(body: ManualTierRequest):
     from leagues.editorial_manual import publish
     try:
-        return publish(body.tier, body.lines)
+        return publish(
+            body.tier, body.lines,
+            replace_official_over=body.replace_official_over,
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 
