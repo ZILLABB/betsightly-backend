@@ -503,7 +503,12 @@ def _standard_market_from_special(selection: dict, feature: str) -> str | None:
             return None
         key = candidates.get(outcome)
         return key if key in MARKET_TO_SPORTYBET else None
-    if feature == "EarlyGoals" and ("over/under" in name or "total" in name):
+    # An explicitly named EarlyGoals market can carry the SAME goal line
+    # in its outcomeName/specifier even though marketName no longer says
+    # "Over/Under". We still require outcome 12 and a proved goal line;
+    # "1 goal by 10 min" alone is NEVER treated as Over 1.5.
+    if feature == "EarlyGoals" and any(label in name for label in
+                                       ("over/under", "total", "earlygoals", "early goals")):
         if outcome != "12" or "under" in named:
             return None
         specifier = str(selection.get("specifier") or "")
