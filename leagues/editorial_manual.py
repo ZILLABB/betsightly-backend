@@ -451,7 +451,7 @@ def _resolve_import_market(selection: dict, *, convert_special: bool) -> tuple[s
     if len(matches) == 1:
         return matches[0], None
     raise ValueError(
-        "Unsupported market/outcome; BetSightly cannot infer a safe replacement "
+        "Unsupported market/outcome cannot be mapped safely; "
         "from this code. Enter the SportyBet event ID and a regular market "
         "manually, or use a code with supported markets."
     )
