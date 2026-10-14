@@ -136,7 +136,7 @@ def test_editorial_overlay_applies_validated_booking_lifecycle(monkeypatch):
 
 def test_over_goals_accepts_mixed_regular_totals_only():
     assert editor.parse_input(
-        "12345,over_1_5\\n12346,Over 2.5\\n12347,o3.5\\n12348,over_4_5",
+        "12345,over_1_5\n12346,Over 2.5\n12347,o3.5\n12348,over_4_5",
         "over_1_5",
     ) == [
         ("12345", "over_1_5"), ("12346", "over_2_5"),
