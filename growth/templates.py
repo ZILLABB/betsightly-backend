@@ -440,7 +440,10 @@ def rollover(data: dict, platform: str, ref: str | None = None) -> dict | None:
 
     day = tier.get("day_number") or 1
     target = tier.get("target_days") or 3
-    hit = float(tier.get("hit_probability") or 0)
+    has_model_score = (not tier.get("editorial_manual") and
+                       tier.get("model_probability_available") is not False and
+                       tier.get("hit_probability") is not None)
+    hit = float(tier["hit_probability"]) if has_model_score else None
     complete = tier.get("completion_probability")
     url = build_url("rollover", channel=platform, campaign="rollover",
                     content=f"day_{day}", ref=ref)
@@ -454,8 +457,11 @@ def rollover(data: dict, platform: str, ref: str | None = None) -> dict | None:
                 f"    {leg['prediction']} @ {_odds_str(leg)} "
                 f"({_confidence_text(leg)})",
             ]
-        lines += ["", f"💵 Today’s odds: *{tier['total_odds']:.2f}x*",
-                  f"📊 Today’s slip lands about *{hit:.0%}* of the time."]
+        lines += ["", f"💵 Today’s odds: *{tier['total_odds']:.2f}x*"]
+        if has_model_score:
+            lines.append(f"📊 Today’s slip lands about *{hit:.0%}* of the time.")
+        else:
+            lines.append("📝 Admin-curated, bookmaker-verified; model confidence not evaluated.")
         if complete is not None:
             lines.append(
                 f"All {target} scheduled days land about *{float(complete):.0%}* "
@@ -470,7 +476,9 @@ def rollover(data: dict, platform: str, ref: str | None = None) -> dict | None:
             f"🔁 Rollover Day {day}/{target} — {tier['total_odds']:.2f}x\n\n"
             + "\n".join(f"• {leg['home_team']} v {leg['away_team']}: "
                          f"{leg['prediction']}" for leg in legs)
-            + f"\n\nDaily landing estimate: {hit:.0%}\n{url}"
+            + (f"\n\nDaily landing estimate: {hit:.0%}\n{url}"
+               if has_model_score else
+               f"\n\nAdmin curated · Not model scored\n{url}")
         ), "url": url}
 
     return {"heading": f"Rollover Day {day} of {target}",
