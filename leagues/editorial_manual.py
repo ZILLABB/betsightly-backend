@@ -397,10 +397,63 @@ def _selection_market_label(selection: dict) -> str:
     return " ".join(names).strip()
 
 
+def _explicitly_activated(value) -> bool:
+    """Active customer toggle only, never an advertised/eligible feature."""
+    if value is True or value == 1:
+        return True
+    if isinstance(value, str):
+        return value.strip().casefold() in {"true", "on", "yes", "enabled", "selected", "active"}
+    if isinstance(value, dict):
+        return any(_explicitly_activated(value.get(k)) for k in
+                   ("enabled", "selected", "active", "applied", "checked", "isSelected"))
+    return False
+
+
+def _ticket_selected_special_features(data: dict, ticket: dict) -> list[str]:
+    """Detect explicitly selected slip-wide 1UP, 2UP and EarlyGoals toggles.
+
+    A SportyBet share payload may encode these in ticket options rather than
+    per-leg market descriptors. Do not confuse offered promotions with applied
+    promotions; ambiguous metadata is not proof of selection.
+    """
+    names = {
+        "EarlyGoals": ("earlyGoals", "earlyGoal", "earlyGoalsEnabled",
+                       "isEarlyGoals", "earlyGoalEnabled", "useEarlyGoals",
+                       "earlyGoalsSelected", "early_goal_enabled"),
+        "1UP": ("oneUp", "oneUpEnabled", "is1Up", "use1Up", "isOneUp"),
+        "2UP": ("twoUp", "twoUpEnabled", "is2Up", "use2Up", "isTwoUp"),
+    }
+    observed: set[str] = set()
+    # A whitelist of slip option containers, never an undirected recursive
+    # scan that would misinterpret advertising or eligible promo banners.
+    for root in (ticket, data):
+        if not isinstance(root, dict):
+            continue
+        containers = [root]
+        for k in ("betOptions", "options", "selectedOptions", "betSettings",
+                  "promotions", "specialMarkets", "betFeatures"):
+            if isinstance(root.get(k), dict):
+                containers.append(root[k])
+        for part in containers:
+            for label, keys in names.items():
+                if any(k in part and _explicitly_activated(part[k]) for k in keys):
+                    observed.add(label)
+    return [name for name in ("EarlyGoals", "1UP", "2UP") if name in observed]
+
+
 def _selection_special_type(selection: dict) -> str | None:
     """Detect early-settlement variants even when their base market IDs match."""
     import re
     pieces = [_selection_market_label(selection)]
+    # Some SportyBet responses expose the toggles as booleans/dictionaries,
+    # rather than naming the promo in marketName.
+    for feature, keys in (
+        ("EarlyGoals", ("earlyGoals", "isEarlyGoals", "earlyGoalEnabled", "useEarlyGoals")),
+        ("1UP", ("oneUp", "oneUpEnabled", "is1Up")),
+        ("2UP", ("twoUp", "twoUpEnabled", "is2Up")),
+    ):
+        if any(k in selection and _explicitly_activated(selection[k]) for k in keys):
+            return feature
     for key in ("betType", "earlyPayoutType", "promotionType", "specialMarketName",
                 "marketType"):
         v = selection.get(key)
@@ -450,7 +503,12 @@ def _standard_market_from_special(selection: dict, feature: str) -> str | None:
             return None
         key = candidates.get(outcome)
         return key if key in MARKET_TO_SPORTYBET else None
-    if feature == "EarlyGoals" and ("over/under" in name or "total" in name):
+    # An explicitly named EarlyGoals market can carry the SAME goal line
+    # in its outcomeName/specifier even though marketName no longer says
+    # "Over/Under". We still require outcome 12 and a proved goal line;
+    # "1 goal by 10 min" alone is NEVER treated as Over 1.5.
+    if feature == "EarlyGoals" and any(label in name for label in
+                                       ("over/under", "total", "earlygoals", "early goals")):
         if outcome != "12" or "under" in named:
             return None
         specifier = str(selection.get("specifier") or "")
@@ -561,6 +619,16 @@ def import_share_code(code: str, tier: str, *, board=None,
 
     data = response.get("data") or {}
     ticket = data.get("ticket") or {}
+    selected_features = _ticket_selected_special_features(data, ticket)
+    if selected_features and not convert_special:
+        raise ValueError(
+            "SportyBet code has an activated " + ", ".join(selected_features) +
+            " ticket option. The regular BetSightly publisher cannot "
+            "reproduce or settle that early-payout benefit. Tick 'Convert "
+            "1UP / 2UP / EarlyGoals to regular markets' to IMPORT a DIFFERENT "
+            "standard ticket for review; the original special benefits "
+            "will not be preserved."
+        )
     selections = ticket.get("selections") or []
     if not isinstance(selections, list) or not selections:
         raise ValueError("SportyBet returned no selections in this code")
@@ -569,7 +637,11 @@ def import_share_code(code: str, tier: str, *, board=None,
 
     rows = []
     games = []
-    converted = []
+    converted = [
+        {"event_id": "TICKET", "from": feature,
+         "to": "ordinary 90-minute markets", "scope": "ticket"}
+        for feature in selected_features
+    ]
     unresolved = []
     seen = set()
     for pos, selection in enumerate(selections, 1):
@@ -654,7 +726,9 @@ def import_share_code(code: str, tier: str, *, board=None,
     if converted:
         warnings.append(
             "Special early-settlement features were explicitly converted "
-            "to ordinary 90-minute markets; early payouts are NOT preserved."
+            "to ordinary 90-minute markets; early payouts are NOT preserved. "
+            "Even if the displayed base selections match, this is a DIFFERENT "
+            "ticket from your original EarlyGoals/1UP/2UP code."
         )
 
     return {
