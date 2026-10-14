@@ -81,7 +81,7 @@ def test_telegram_results_names_editorial_separately(monkeypatch):
         }],
         "rollover_settled":[],
     }
-    result=templates.results(payload,"telegram")
+    result=templates.results({"results":payload},"telegram")
     assert result is not None
     body=result["text"]
     assert "Published slip record" in body
@@ -93,10 +93,10 @@ def test_telegram_results_names_editorial_separately(monkeypatch):
 
 
 def test_missing_editorial_readback_does_not_claim_complete_public_record():
-    report = templates.results({
+    report = templates.results({"results":{
         "window_days":7,"won":11,"lost":10,"settled":21,
         "win_rate":11/21,"pending_products":1,"slips_settled":[],
         "rollover_settled":[],"editorial_reporting_available":False,
-    },"telegram")
+    }},"telegram")
     assert "totals may be incomplete" in report["text"]
     assert "Every published slip counts" not in report["text"]
