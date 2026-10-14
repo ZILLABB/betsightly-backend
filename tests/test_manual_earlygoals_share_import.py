@@ -114,3 +114,40 @@ def test_advertised_but_not_activated_ticket_option_does_not_trigger():
     with patch("leagues.booking._read_share", return_value=payload):
         parsed = editor.import_share_code("TESTCODE", "2_odds")
     assert parsed["converted_features"] == []
+
+
+def test_branded_earlygoals_market_maps_only_proved_over_goal_line_with_consent():
+    payload = four_leg_ticket()
+    payload["data"]["ticket"]["selections"][0] = {
+        "eventId": "1001", "marketId": "SPECIAL_EARLY",
+        "marketName": "EarlyGoals",
+        "specifier": "total=1.5", "outcomeId": "12",
+        "outcomeName": "Over 1.5",
+    }
+    with patch("leagues.booking._read_share", return_value=payload):
+        with pytest.raises(ValueError, match="EarlyGoals"):
+            editor.import_share_code("TESTCODE", "2_odds")
+        report = editor.import_share_code(
+            "TESTCODE", "2_odds", convert_special=True,
+        )
+    assert report["status"] == "IMPORTED_NOT_PUBLISHED"
+    assert report["lines"].splitlines()[0] == "1001,over_1_5"
+    assert report["converted_features"][0] == {
+        "event_id": "1001", "from": "EarlyGoals", "to": "over_1_5",
+    }
+    assert len(report["lines"].splitlines()) == 4
+
+
+def test_branded_earlygoals_conflicting_specifier_never_guessed():
+    payload = four_leg_ticket()
+    payload["data"]["ticket"]["selections"][0] = {
+        "eventId": "1001", "marketId": "SPECIAL_EARLY",
+        "marketName": "EarlyGoals",
+        "specifier": "total=2.5", "outcomeId": "12",
+        "outcomeName": "Over 1.5",
+    }
+    with patch("leagues.booking._read_share", return_value=payload):
+        with pytest.raises(ValueError, match="cannot be converted safely"):
+            editor.import_share_code(
+                "TESTCODE", "2_odds", convert_special=True
+            )
