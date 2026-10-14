@@ -17,14 +17,64 @@ from sqlalchemy import text
 
 LOG = logging.getLogger(__name__)
 WAT = timezone(timedelta(hours=1))
-TIERS = {"banker", "2_odds", "5_odds", "10_odds", "over_1_5"}
+TIERS = {"banker", "2_odds", "5_odds", "10_odds", "over_1_5", "rollover"}
 MAX_LEGS = {"banker": 1, "2_odds": 12, "5_odds": 20,
-            "10_odds": 20, "over_1_5": 10}
+            "10_odds": 20, "over_1_5": 10, "rollover": 12}
 MIN_ODDS = {"banker": 1.01, "2_odds": 2.0, "5_odds": 5.0,
-            "10_odds": 10.0, "over_1_5": 1.01}
+            "10_odds": 10.0, "over_1_5": 1.01, "rollover": 2.0}
 
 # Keep the old database tier key for settlement and historical results.
 MANUAL_OVER_GOALS = frozenset({"over_1_5", "over_2_5", "over_3_5", "over_4_5"})
+
+def rollover_eligibility(day: str | None = None, *, card=None, chain=None) -> dict:
+    """Rollover may be filled manually only for the next eligible, empty stage."""
+    from leagues.rollover_db import load_chain
+    from leagues.rollover_lifecycle import chain_state
+    from leagues.picks_db import load_card
+
+    day = day or _today()
+    if card is None:
+        card = load_card(day) or {}
+    if chain is None:
+        chain = load_chain(day)
+    prior = chain.get("days") or []
+    decision = chain_state(prior, day)
+    has_official = bool((card.get("rollover") or {}).get("selected"))
+    # Never put a second rollover stage on the same WAT day, even across chains.
+    has_slot = any(str(slot.get("date")) == day for slot in prior)
+    allowed = bool(decision.get("can_generate") and not has_official and not has_slot)
+    return {
+        "allowed": allowed,
+        "date": day,
+        "day_number": decision.get("day_number"),
+        "chain_start_date": day if decision.get("new_chain") else chain.get("start_date", day),
+        "reason": (
+            "An engine Rollover stage is already published today." if has_official
+            else "A Rollover stage already exists for today." if has_slot
+            else f"Rollover is not eligible: {decision['status']}." if not decision.get("can_generate")
+            else None
+        ),
+        "challenge_status": decision.get("status"),
+    }
+
+
+def _rollover_day_picks(games: list[dict]) -> list[dict]:
+    """Preserve canonical markets and booking identity for the chain settler."""
+    return [{
+        "match_id": g["match_id"],
+        "sportybet_event_id": g["sportybet_event_id"],
+        "home_team": g["home_team"], "away_team": g["away_team"],
+        "match": f"{g['home_team']} vs {g['away_team']}",
+        "league": g.get("league"), "commence_time": g["kickoff"],
+        "prediction": g["prediction"],
+        "market": g.get("prediction_type", "editorial"),
+        "market_key": g["market"],
+        "bookable": True, "odds_are_real": True,
+        "odds": g["odds"], "status": "pending",
+        "editorial_manual": True, "source": "admin_curated",
+        "model_probability_available": False, "confidence": None,
+    } for g in games]
+
 
 def _over_display_conflict(card: dict, tier: str, replace: bool) -> bool:
     if replace and tier != "over_1_5":
@@ -175,6 +225,8 @@ def _current_bookable_games(requested: list[tuple[str, str]], board: dict,
 def check_tier_target(tier: str, total_odds: float, count: int) -> None:
     if count > MAX_LEGS[tier]:
         raise ValueError("Too many selections for this tier")
+    if tier == "rollover" and total_odds > 4.0 + 1e-8:
+        raise ValueError("Rollover must stay within 2.00x–4.00x verified odds")
     if total_odds + 1e-8 < MIN_ODDS[tier]:
         raise ValueError(
             f"{tier} must reach {MIN_ODDS[tier]:.2f}x verified odds, "
@@ -241,6 +293,10 @@ def preview(tier: str, lines: str, *, board=None, now=None,
     day = at.astimezone(WAT).date().isoformat()
     requested = parse_input(lines, tier)
     card = load_card(day) or {}
+    if tier == "rollover":
+        eligibility = rollover_eligibility(day, card=card)
+        if not eligibility["allowed"]:
+            raise ValueError(eligibility["reason"])
     if _over_display_conflict(card, tier, replace_official_over):
         raise ValueError(f"{tier} already has an immutable official slip today. "
                          "Choose explicit Over Goals display replacement; "
@@ -315,6 +371,10 @@ def publish(tier: str, lines: str, *,
         # reuse even when admins submit in two tabs simultaneously.
         conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
                      {"k": f"editorial:{day}"})
+        # Auto Rollover and the editorial writer share a date-scoped lock.
+        if tier == "rollover":
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                         {"k": f"rollover:{day}"})
         existing = conn.execute(text(
             "SELECT tier, detail FROM editorial_tier_slips WHERE publish_date=:d"
         ), {"d": day}).all()
@@ -331,6 +391,49 @@ def publish(tier: str, lines: str, *,
             _avoid_original_over_games(revised, card)
         # Every originally verified booking keeps its fixture reservation.
         _check_exposure(revised, card, bookings_for(day), manual, tier=tier)
+        if tier == "rollover":
+            # Enforce the chain progression invariant inside the SAME SQL
+            # transaction as the manual publication. No orphaned stages.
+            from leagues.rollover_lifecycle import chain_state, allow_append_day
+            from leagues.policy_version import PUBLISHED_SELECTION_POLICY_VERSION
+            all_days = conn.execute(text(
+                "SELECT chain_start_date, day_number, date, status FROM "
+                "wc_rollover_days ORDER BY chain_start_date DESC, day_number"
+            )).all()
+            if any(str(row[2]) == day for row in all_days):
+                raise ValueError("Rollover already has a stage on this date")
+            start = str(all_days[0][0]) if all_days else day
+            previous = [
+                {"day_number": row[1], "date": row[2], "status": row[3]}
+                for row in all_days if str(row[0]) == start
+            ]
+            decision = chain_state(previous, day)
+            if not decision["can_generate"]:
+                raise ValueError(f"Rollover chain blocked: {decision['status']}")
+            if decision["new_chain"]:
+                start, previous = day, []
+            slot = {
+                "day_number": decision["day_number"], "date": day, "status": "pending",
+                "picks": _rollover_day_picks(revised),
+                "combined_odds": actual, "hit_probability": None,
+            }
+            if not allow_append_day(previous, slot, start):
+                raise ValueError("Rollover stage violates the chain order")
+            conn.execute(text(
+                "INSERT INTO wc_rollover_days "
+                "(chain_start_date, day_number, date, picks, combined_odds, "
+                "avg_confidence, status, policy_version, created_at, updated_at) "
+                "VALUES (:chain, :num, :date, :picks, :odds, :confidence, "
+                ":status, :policy, :created, :created)"
+            ), {
+                "chain": start, "num": slot["day_number"], "date": day,
+                "picks": json.dumps(slot["picks"]), "odds": actual,
+                "confidence": 0.0, "status": "pending",
+                "policy": PUBLISHED_SELECTION_POLICY_VERSION,
+                "created": _now().replace(tzinfo=None),
+            })
+            payload["rollover_chain_start_date"] = start
+            payload["rollover_day_number"] = slot["day_number"]
         conn.execute(text(
             "INSERT INTO editorial_tier_slips"
             " (publish_date,tier,created_at,detail)"
@@ -357,11 +460,27 @@ def overlay_on_card(date: str, accumulators: dict) -> dict:
             continue
         original = merged.get(tier) or {}
         override = tier == "over_1_5" and record.get("replaces_official_display") is True
-        if original.get("selected") and not override:
+        # Manual rollover creates the authoritative chain slot first. Only
+        # attach its verified ticket if that SAME stage is in the chain.
+        chain_slot = next((
+            slot for slot in original.get("chain", [])
+            if slot.get("date") == date and
+            any(p.get("editorial_manual") for p in slot.get("picks", []))
+        ), None) if tier == "rollover" else None
+        manual_chain = bool(chain_slot and original.get("selected"))
+        if original.get("selected") and not (override or manual_chain):
+            continue
+        if tier == "rollover" and not manual_chain:
             continue
         games = record["games"]
+        if manual_chain:
+            chain_ids = {str(p.get("sportybet_event_id")) for p in chain_slot["picks"]}
+            manual_ids = {str(g.get("sportybet_event_id")) for g in games}
+            if not chain_ids or chain_ids != manual_ids:
+                continue
         booking = booking_lifecycle(record["booking"], games)
         merged[tier] = {
+            **(original if manual_chain else {}),
             "selected": True,
             "games": games,
             "total_odds": record["total_odds"],
