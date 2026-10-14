@@ -335,7 +335,153 @@ def overlay_on_card(date: str, accumulators: dict) -> dict:
     return merged
 
 
-def import_share_code(code: str, tier: str, *, board=None) -> dict:
+
+def _selection_market_label(selection: dict) -> str:
+    """Use the bookmaker's market *name*, never a guessed market ID."""
+    names = []
+    for key in ("marketName", "marketDesc", "marketLabel", "marketDisplayName",
+                "betTypeName", "market"):
+        value = selection.get(key)
+        if isinstance(value, dict):
+            value = value.get("name") or value.get("description")
+        if isinstance(value, str):
+            names.append(value)
+    return " ".join(names).strip()
+
+
+def _selection_special_type(selection: dict) -> str | None:
+    """Detect early-settlement variants even when their base market IDs match."""
+    import re
+    pieces = [_selection_market_label(selection)]
+    for key in ("betType", "earlyPayoutType", "promotionType", "specialMarketName",
+                "marketType"):
+        v = selection.get(key)
+        if isinstance(v, str):
+            pieces.append(v)
+    # Ignore unrelated ticket-level advertisements; only inspect this leg.
+    label = " ".join(pieces).lower()
+    if re.search(r"\b1\s*up\b", label):
+        return "1UP"
+    if re.search(r"\b2\s*up\b", label):
+        return "2UP"
+    if re.search(r"early\s*goals?", label):
+        return "EarlyGoals"
+    return None
+
+
+def _standard_market_from_special(selection: dict, feature: str) -> str | None:
+    """Only convert when the original named market AND outcome both agree.
+
+    We have no verified source of SportyBet's special market IDs, so avoid
+    fabricating one. The normal equivalent is separately re-priced/booked.
+    """
+    from leagues.market_registry import MARKET_TO_SPORTYBET
+    name = _selection_market_label(selection).lower().replace("_", " ")
+    outcome = str(selection.get("outcomeId") or "")
+    named = " ".join(str(selection.get(k) or "") for k in (
+        "outcomeName", "outcomeDesc", "outcomeLabel"
+    )).strip().casefold()
+    # If bookmaker labels are present, contradictory labels are never mapped.
+    known_labels = {
+        "home": {"1"}, "home win": {"1"}, "1": {"1"},
+        "away": {"3"}, "away win": {"3"}, "2": {"3"},
+        "draw": {"2"}, "x": {"2"},
+        "home or draw": {"9"}, "1x": {"9"},
+        "home or away": {"10"}, "12": {"10"},
+        "draw or away": {"11"}, "away or draw": {"11"}, "x2": {"11"},
+    }
+    if feature in {"1UP", "2UP"}:
+        if named in known_labels and outcome not in known_labels[named]:
+            return None
+        if "double chance" in name:
+            candidates = {"9": "home_or_draw", "10": "home_or_away",
+                          "11": "away_or_draw"}
+        elif "1x2" in name or "match result" in name:
+            candidates = {"1": "home_win", "2": "draw", "3": "away_win"}
+        else:
+            return None
+        key = candidates.get(outcome)
+        return key if key in MARKET_TO_SPORTYBET else None
+    if feature == "EarlyGoals" and ("over/under" in name or "total" in name):
+        if outcome != "12" or "under" in named:
+            return None
+        specifier = str(selection.get("specifier") or "")
+        label = " ".join(str(selection.get(k) or "") for k in
+                         ("outcomeName", "outcomeDesc", "outcomeLabel"))
+        import re
+        explicit = re.search(r"over\s*(1\.5|2\.5|3\.5|4\.5)", label.lower())
+        if explicit:
+            spec = "total=" + explicit.group(1)
+            if specifier and specifier != spec:
+                return None
+        elif specifier in {"total=1.5", "total=2.5", "total=3.5", "total=4.5"}:
+            spec = specifier
+        else:
+            return None
+        key = "over_" + spec.split("=")[1].replace(".", "_")
+        return key if key in MARKET_TO_SPORTYBET else None
+    return None
+
+
+def _resolve_import_market(selection: dict, *, convert_special: bool) -> tuple[str, str | None]:
+    """Return standard selection and optional name of lost early-pay benefit."""
+    from leagues.market_registry import MARKET_TO_SPORTYBET
+    exact = (str(selection.get("marketId")),
+             str(selection.get("specifier") or ""),
+             str(selection.get("outcomeId")))
+    matches = [key for key, mapping in MARKET_TO_SPORTYBET.items()
+               if tuple(str(part or "") for part in mapping) == exact]
+    feature = _selection_special_type(selection)
+    if feature:
+        if not convert_special:
+            raise ValueError(
+                f"{feature} is an early-settlement variant. Tick 'Convert special "
+                "markets to standard selections' to create a different ticket "
+                "WITHOUT this early-settlement benefit."
+            )
+        standard = (_standard_market_from_special(selection, feature)
+                    or (matches[0] if len(matches) == 1 else None))
+        # Even a matching numeric base-market ID is insufficient if the
+        # returned human-readable outcome explicitly contradicts the choice.
+        outcome_label = " ".join(
+            str(selection.get(k) or "") for k in
+            ("outcomeName", "outcomeDesc", "outcomeLabel")
+        ).strip().casefold()
+        labels = {
+            "home": "home_win", "home win": "home_win", "1": "home_win",
+            "draw": "draw", "x": "draw",
+            "away": "away_win", "away win": "away_win", "2": "away_win",
+            "home or draw": "home_or_draw", "1x": "home_or_draw",
+            "draw or away": "away_or_draw", "away or draw": "away_or_draw",
+            "x2": "away_or_draw", "home or away": "home_or_away",
+            "12": "home_or_away",
+        }
+        if standard and (
+            (outcome_label in labels and labels[outcome_label] != standard)
+            or (outcome_label.startswith("under ") and standard.startswith("over_"))
+            or (outcome_label.startswith("over ") and standard.startswith("under_"))
+        ):
+            raise ValueError(
+                f"{feature} outcome conflicts with the bookmaker label; "
+                "manual conversion was refused"
+            )
+        if not standard:
+            raise ValueError(
+                f"{feature} cannot be converted safely: the code did not provide "
+                "an unambiguous standard market, line and outcome. Enter this "
+                "SportyBet event ID and the desired regular market manually."
+            )
+        return standard, feature
+    if len(matches) == 1:
+        return matches[0], None
+    raise ValueError(
+        "Unsupported market/outcome cannot be mapped safely; "
+        "from this code. Enter the SportyBet event ID and a regular market "
+        "manually, or use a code with supported markets."
+    )
+
+def import_share_code(code: str, tier: str, *, board=None,
+                      convert_special: bool = False) -> dict:
     """Resolve an existing SportyBet share code into exact canonical manual rows.
 
     Import is read-only. Publishing remains the existing separate verified path.
@@ -363,28 +509,38 @@ def import_share_code(code: str, tier: str, *, board=None) -> dict:
     if data.get("unavailableOutcomes"):
         raise ValueError("This booking code has unavailable selections")
     live_board = board if board is not None else sportybet.fetch_board(force=True)
-    from leagues.sportybet import MARKET_TO_SPORTYBET, _board_entries
+    from leagues.sportybet import _board_entries
     ids = {str(s.get("eventId") or "") for s in selections}
     entries = {str(entry.get("event_id")): entry for _, entry in _board_entries(live_board)
                if str(entry.get("event_id")) in ids}
     rows = []
+    converted = []
     for selection in selections:
         event = str(selection.get("eventId") or "")
         entry = entries.get(event)
         if not entry:
             raise ValueError(f"Event {event} is missing from the current SportyBet board")
-        actual = (str(selection.get("marketId")), str(selection.get("specifier") or ""),
-                  str(selection.get("outcomeId")))
-        matches = [market for market, (market_id, specifier, outcome_id)
-                   in MARKET_TO_SPORTYBET.items()
-                   if (str(market_id), str(specifier or ""), str(outcome_id)) == actual]
-        if len(matches) != 1:
-            raise ValueError(f"Event {event}: market or outcome cannot be mapped safely")
-        rows.append(f"{event},{matches[0]}")
+        try:
+            market, feature = _resolve_import_market(
+                selection, convert_special=convert_special
+            )
+        except ValueError as exc:
+            raise ValueError(f"Event {event}: {exc}") from None
+        if feature:
+            converted.append({"event_id": event, "from": feature, "to": market})
+        rows.append(f"{event},{market}")
     lines = "\n".join(rows)
     result = preview(tier, lines, board=live_board)
     result["lines"] = lines
     result["imported_share_code"] = code
     result["import_mode"] = "sportybet_code"
-    result["note"] = "Import preview only. Publishing creates and verifies a fresh matching code."
+    result["conversion_requested"] = bool(convert_special)
+    result["converted_features"] = converted
+    result["original_leg_count"] = len(selections)
+    result["note"] = (
+        "This imports STANDARD 90-minute markets and generates a different "
+        "SportyBet code with current bookmaker odds. EarlyGoals, 1UP, 2UP, "
+        "Flexi, bonuses, and other betslip options are NOT preserved. "
+        "Check the original and regenerated tickets before publishing."
+    )
     return result
