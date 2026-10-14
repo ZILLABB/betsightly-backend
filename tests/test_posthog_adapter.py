@@ -35,8 +35,8 @@ def test_posthog_adapter_queries_once_then_uses_cache(monkeypatch):
         if "arrayExists" in query:
             return FakeResponse([[8, 4, 8, 3, 7, 2, 5, 1, 2, 1]])
         if "FROM (SELECT distinct_id" in query:
-            width = (6 if "builder_target_selected" in query else
-                     4 if "rollover_viewed" in query else 5)
+            width = (5 if "builder_target_selected" in query else
+                     3 if "rollover_viewed" in query else 4)
             return FakeResponse([[10 - i for i in range(width)]])
         if "properties.$is_first_day" in query:
             return FakeResponse([[10, 20, 30, 4]])
@@ -98,3 +98,39 @@ def test_posthog_adapter_rejects_malformed_provider_rows(monkeypatch):
     assert result["data"] == {}
     assert result["meta"]["status"] == "unavailable"
     assert result["meta"]["reason"] == "query_failed:ValueError"
+
+
+def test_funnel_is_ordered_and_scoped_to_product(monkeypatch):
+    db = create_engine("sqlite://", poolclass=StaticPool,
+                       connect_args={"check_same_thread": False})
+    monkeypatch.setattr(adapter, "engine", db)
+    monkeypatch.setenv("POSTHOG_PROJECT_ID", "42")
+    monkeypatch.setenv("POSTHOG_PERSONAL_API_KEY", "secret")
+    adapter._memory.clear()
+    queries = []
+    def transport(url, **kwargs):
+        query = kwargs["json"]["query"]["query"]
+        queries.append(query)
+        if "GROUP BY toDate" in query:
+            return FakeResponse([])
+        if "GROUP BY 1" in query:
+            return FakeResponse([])
+        if "windowFunnel" in query:
+            width = 5 if "builder_target_selected" in query else (3 if "rollover_viewed" in query else 4)
+            return FakeResponse([[4, 3, 2, 1, 0][:width]])
+        if "countIf(yesterday>0)" in query:
+            return FakeResponse([[0, 0]])
+        if "arrayExists" in query:
+            return FakeResponse([[0] * 10])
+        if "properties.$is_first_day" in query:
+            return FakeResponse([[0] * 4])
+        return FakeResponse([[0] * 12])
+    result = adapter.summary("2026-10-11", "2026-10-11", transport)
+    assert result["meta"]["status"] == "fresh"
+    funnels = [q for q in queries if "windowFunnel" in q]
+    assert len(funnels) == 3
+    assert all("toDateTime(timestamp)" in q and "stage >=" in q for q in funnels)
+    assert all("properties.product_area" in q for q in funnels)
+    assert "Copied code or opened SportyBet" in [x["label"] for x in result["data"]["funnels"]["prediction"]]
+    for values in result["data"]["funnels"].values():
+        assert all(step["conversion"] is None or 0 <= step["conversion"] <= 1 for step in values)
