@@ -104,7 +104,9 @@ const REGULAR_MANUAL_MARKETS=[
   ['home_or_draw','Home or draw'],['away_or_draw','Away or draw'],
   ['dnb_home','Home draw no bet'],['dnb_away','Away draw no bet'],
   ['over_0_5','Over 0.5 (either team scores)'],
-  ['home_over_0_5','Home team to score'],['away_over_0_5','Away team to score'],
+  ['home_over_0_5','Home team Over 0.5'],['away_over_0_5','Away team Over 0.5'],
+  ['home_over_1_5','Home team Over 1.5 (2+ goals)'],
+  ['away_over_1_5','Away team Over 1.5 (2+ goals)'],
   ['over_1_5','Over 1.5'],['over_2_5','Over 2.5'],
   ['over_3_5','Over 3.5'],['over_4_5','Over 4.5'],
   ['under_2_5','Under 2.5'],['under_4_5','Under 4.5'],
@@ -132,7 +134,10 @@ async function manualImportCode(){
   if(!needsReview)$('manualLines').value=d.lines;
   else manualImportReview=d;
   const marketChoices=d.tier==='over_1_5'
-   ?REGULAR_MANUAL_MARKETS.filter(pair=>/^over_[0-4]_5$/.test(pair[0]))
+   ?REGULAR_MANUAL_MARKETS.filter(pair=>
+     /^over_[0-4]_5$/.test(pair[0]) ||
+     /^(home|away)_over_(0|1)_5$/.test(pair[0]) ||
+     pair[0]==='btts_yes')
    :REGULAR_MANUAL_MARKETS;
   const rows=d.games.map((g,i)=>{
    if(!g.requires_review)return '<tr><td>'+esc(g.sportybet_event_id)+'</td><td>'+esc(g.market)+'</td><td>Decoded</td></tr>';

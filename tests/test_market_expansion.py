@@ -54,6 +54,15 @@ def test_team_totals_are_tracked_apart_from_match_totals():
     """Folding them together would average two accuracies into one correction."""
     assert CALIBRATION_GROUP["home_over_0_5"] == "team_goals_home"
     assert CALIBRATION_GROUP["away_over_0_5"] == "team_goals_away"
+    assert CALIBRATION_GROUP["home_over_1_5"] == "team_goals_home_over_1_5"
+    assert CALIBRATION_GROUP["away_over_1_5"] == "team_goals_away_over_1_5"
+    assert len({
+        CALIBRATION_GROUP["home_over_0_5"],
+        CALIBRATION_GROUP["home_over_1_5"],
+        CALIBRATION_GROUP["away_over_0_5"],
+        CALIBRATION_GROUP["away_over_1_5"],
+    }) == 4
+
     assert CALIBRATION_GROUP["over_0_5"] == "goals_over_0_5"
     assert CALIBRATION_GROUP["over_1_5"] == "goals_over_1_5"
     assert len({CALIBRATION_GROUP["home_over_0_5"],
@@ -76,7 +85,8 @@ def test_each_goal_line_is_calibrated_on_its_own_record():
 
 def test_new_groups_start_no_looser_than_the_blanket_floor():
     """They have no record yet, so they may not start below the default."""
-    for group in ("team_goals_home", "team_goals_away", "dnb"):
+    for group in ("team_goals_home", "team_goals_away",
+                  "team_goals_home_over_1_5", "team_goals_away_over_1_5", "dnb"):
         assert MIN_CONFIDENCE_BY_GROUP[group] >= 0.65, group
 
 

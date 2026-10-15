@@ -35,6 +35,17 @@ def test_registry_is_the_mapping_and_policy_source():
     assert MARKETS["over_0_5"].sportybet == ("18", "total=0.5", "12")
     assert MARKETS["under_0_5"].activation == "SHADOW"
     assert MARKETS["btts_yes"].public_policy == "RESTRICTED"
+    for team in ("home", "away"):
+        spec = MARKETS[f"{team}_over_1_5"]
+        assert spec.activation == "ACTIVE"
+        assert spec.public_policy == "DEVELOPING"
+        assert spec.calibration_group == f"team_goals_{team}_over_1_5"
+        assert spec.sportybet == (
+            "19" if team == "home" else "20", "total=1.5", "12"
+        )
+        assert spec.booking and spec.builder and not spec.safe_tier
+    assert MARKETS["btts_yes"].activation != "ACTIVE"
+
 
 
 

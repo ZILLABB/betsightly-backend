@@ -144,6 +144,10 @@ MIN_CONFIDENCE_BY_GROUP = {
     # down once 25 of their own legs have settled.
     "team_goals_home": 0.70,
     "team_goals_away": 0.70,
+    # Scoring twice is riskier than merely scoring once. Never borrow the
+    # Over 0.5 market's confidence correction for either team Over 1.5.
+    "team_goals_home_over_1_5": 0.72,
+    "team_goals_away_over_1_5": 0.72,
     "dnb": 0.72,
 }
 

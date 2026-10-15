@@ -142,7 +142,7 @@ def test_over_goals_accepts_mixed_regular_totals_only():
         ("12345", "over_1_5"), ("12346", "over_2_5"),
         ("12347", "over_3_5"), ("12348", "over_4_5"),
     ]
-    for market in ("under_4_5", "btts_yes", "home_over_0_5", "home_win"):
+    for market in ("under_4_5", "btts_no", "home_win"):
         with pytest.raises(ValueError, match="only accepts"):
             editor.parse_input(f"12345,{market}", "over_1_5")
     assert editor.parse_input("12345,over_0_5", "over_1_5") == [
@@ -156,6 +156,22 @@ def test_over_goals_accepts_mixed_regular_totals_only():
     ]
     assert editor.parse_input("12345,btts_yes", "5_odds") == [
         ("12345", "btts_yes")
+    ]
+
+    # Same Over Goals tier, no replacement tier or forced market conversion.
+    assert editor.parse_input(
+        "12345,home_over_1_5\n12346,away_over_1_5\n12347,btts_yes",
+        "over_1_5",
+    ) == [
+        ("12345", "home_over_1_5"),
+        ("12346", "away_over_1_5"),
+        ("12347", "btts_yes"),
+    ]
+    assert editor.parse_input("12345,home_over_0_5", "over_1_5") == [
+        ("12345", "home_over_0_5")
+    ]
+    assert editor.parse_input("12345,away_over_1_5", "rollover") == [
+        ("12345", "away_over_1_5")
     ]
 
 
