@@ -70,6 +70,32 @@ def test_close_quality_secondary_can_survive_but_rank_three_cannot():
     assert ranked[0]["selector_version"] == "canonical-recommendations-v1.2"
 
 
+@pytest.mark.parametrize("market,xg_arg", [
+    ("home_over_1_5", "home_xg"), ("away_over_1_5", "away_xg"),
+])
+def test_team_over_15_requires_two_goal_evidence(market, xg_arg):
+    base = {"home_xg": 1.25, "away_xg": 1.25}
+    # Expected goals sufficient to score once must not authorize twice.
+    assert canonical_fixture_recommendations([
+        _pick(market, .78, 1.42, **base)
+    ]) == []
+    base[xg_arg] = 1.85
+    ranked = canonical_fixture_recommendations([
+        _pick(market, .78, 1.42, **base)
+    ])
+    assert ranked and ranked[0]["market"] == market
+    assert ranked[0]["market_trust_state"] == "DEVELOPING"
+    assert canonical_fixture_recommendations([
+        _pick(market, .70, 1.42, **base)
+    ]) == []
+    assert canonical_fixture_recommendations([
+        _pick(market, .78, 1.42, real=False, **base)
+    ]) == []
+    assert canonical_fixture_recommendations([
+        _pick(market, .78, 1.42, state="SHADOW", **base)
+    ]) == []
+
+
 def test_team_to_score_requires_real_odds_xg_and_confidence_support():
     assert canonical_fixture_recommendations([
         _pick("away_over_0_5", .74, 1.4, real=False, away_xg=.8),
