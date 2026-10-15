@@ -1,7 +1,11 @@
+from datetime import datetime, timezone
+
 from leagues import scheduler
 
 
 def test_failed_card_never_runs_booking_alert_or_distribution(monkeypatch):
+    monkeypatch.setattr("leagues.daily_feed._wat_now",
+                        lambda: datetime(2026, 10, 15, 10, tzinfo=timezone.utc))
     steps = []
     finished = []
     monkeypatch.setattr(scheduler, "_claim", lambda *args: (True, ""))
