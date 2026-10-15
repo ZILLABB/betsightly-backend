@@ -1,0 +1,118 @@
+name: One-off 15 Oct six destination bookmaker check
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  book-and-verify:
+    if: github.head_ref == 'ops/oct15-six-tier-matched-code-verification'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimal dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Mint, read back and verify exact researched bookmaker codes against intended publication destination
+        env:
+          DATABASE_URL: sqlite:///./oct15_six_tier_codes.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from math import prod
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest, generate_curated_booking
+          from leagues.booking import validate_code_details, selections_for
+          E,C="UEFA Europa League","UEFA Conference League"
+          def leg(h,a,l,k,m):
+              return dict(home_team=h,away_team=a,league=l,
+                          kickoff=f"2026-10-15T{k}:00+01:00",market=m)
+          tickets={
+            "BANKER":[
+              leg("Benfica","Celtic",E,"20:00","home_win")],
+            "TWO_ODDS":[
+              leg("Sparta Prague","Lillestroem SK",E,"17:45","home_win"),
+              leg("Alkmaar","Hapoel Be`er Sheva FC",E,"17:45","home_win"),
+              leg("Panathinaikos","FK Borac Banja Luka",C,"17:45","over_1_5")],
+            "FIVE_ODDS":[
+              leg("Atalanta","Pafos FC",C,"20:00","over_1_5"),
+              leg("Bournemouth","Sturm Graz",E,"20:00","over_1_5"),
+              leg("Rennes","OFI Crete",E,"20:00","over_1_5"),
+              leg("Jagiellonia Bialystok","FC Ararat-Armenia",E,"20:00","over_1_5"),
+              leg("FC Twente Enschede","FC Thun",C,"20:00","over_2_5"),
+              leg("Mjallby AIF","Inter Club de Escaldes",C,"17:45","over_1_5"),
+              leg("St. Truidense VV","FC Iberia 1999",C,"20:00","over_1_5"),
+              leg("SK Brann","Lincoln Red Imps",C,"20:00","over_2_5"),
+              leg("Copenhagen","Braga",C,"20:00","over_1_5")],
+            "TEN_ODDS":[
+              leg("KKS Lech Poznan","Bayer Leverkusen",E,"17:45","away_or_draw"),
+              leg("NK Celje","AC Omonia Nicosia",E,"17:45","over_1_5"),
+              leg("SCU Torreense","Sunderland AFC",E,"17:45","away_or_draw"),
+              leg("Ferencvarosi Budapest","Viktoria Plzen",E,"20:00","home_or_draw"),
+              leg("GNK Dinamo Zagreb","RSC Anderlecht",E,"20:00","home_or_draw"),
+              leg("Celta","Juventus",E,"20:00","away_or_draw"),
+              leg("KF Egnatia Rrogozhine","FC Midtjylland",C,"17:45","away_or_draw"),
+              leg("Kuopion Palloseura","Trabzonspor",C,"17:45","away_or_draw"),
+              leg("PFC CSKA Sofia","Monaco",C,"17:45","away_or_draw"),
+              leg("Riga FC","FC Kairat Almaty",C,"17:45","home_or_draw"),
+              leg("CS Universitatea Craiova","Getafe",C,"17:45","home_or_draw")],
+            "MIXED_OVER_GOALS":[
+              leg("Salzburg","AC Milan",E,"17:45","over_1_5"),
+              leg("Lyon","Crystal Palace",E,"17:45","over_2_5"),
+              leg("Union Gilloise","Real Sociedad",E,"17:45","over_1_5"),
+              leg("Hoffenheim","Besiktas Istanbul",E,"20:00","over_2_5"),
+              leg("Lugano","Crvena Zvezda",C,"17:45","over_1_5"),
+              leg("HNK Hajduk Split","Ajax",C,"17:45","over_1_5"),
+              leg("Heart of Midlothian FC","Nordsjaelland",C,"20:00","over_1_5")],
+            "ROLLOVER":[
+              leg("Gent","AGF Aarhus",C,"17:45","home_or_draw"),
+              leg("Freiburg","FK Jablonec",C,"20:00","over_2_5"),
+              leg("Brighton","FK Kauno Zalgiris",C,"20:00","over_2_5")],
+          }
+          # Cross-tier repeats are not allowed, and simulated SRL fixtures never qualify.
+          signatures=[(l["home_team"].lower(),l["away_team"].lower()) for legs in tickets.values() for l in legs]
+          assert len(signatures)==len(set(signatures)), "cross-tier duplicate fixture"
+          thresholds={"BANKER":1.01,"TWO_ODDS":2.0,"FIVE_ODDS":5.0,
+                      "TEN_ODDS":10.0,"MIXED_OVER_GOALS":1.01,"ROLLOVER":2.0}
+          board={}
+          for attempt in range(1,4):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("BOOKMAKER_BOARD_ATTEMPT="+str(attempt)+" "+json.dumps(meta))
+              if meta.get("is_complete") is True: break
+          if meta.get("is_complete") is not True:
+              print("STOP_BOOKMAKER_BOARD_INCOMPLETE_NO_CODES")
+              raise SystemExit(0)
+          sportybet.fetch_board=lambda force=False,**kwargs:board
+          for name,legs in tickets.items():
+              try:
+                  data=generate_curated_booking(CuratedBookingRequest(legs=legs))
+                  if data.get("status")!="success":
+                      print(name+"_NOT_BOOKABLE="+json.dumps({k:data.get(k) for k in ("reason","requested_legs","failures")},ensure_ascii=False))
+                      continue
+                  odds=data.get("actual_sportybet_odds")
+                  if odds is None:
+                      prices=[p.get("sportybet_odds") for p in data["selections"]]
+                      odds=prod(float(p) for p in prices) if all(prices) else None
+                  if odds is None or odds < thresholds[name] or (name=="ROLLOVER" and odds>4.0):
+                      print(name+"_BELOW_POLICY_ODDS="+str(odds))
+                      continue
+                  print(name+"_COMPLETE_CODE="+str(data["share_code"]))
+                  print(name+"_ODDS="+str(odds))
+                  print(name+"_READBACK="+str(data["readback_validation"]))
+                  print(name+"_SELECTIONS="+json.dumps(data["selections"],ensure_ascii=False))
+                  print(name+"_EXPIRES="+str(data.get("expires_at")))
+                  if name=="ROLLOVER":
+                      expected, missing=selections_for(legs,board)
+                      ok,reason,read_odds=validate_code_details("R2FZEW",expected)
+                      print("PREVIOUS_ROLLOVER_CODE_VALID="+str(ok))
+              except Exception as exc:
+                  print(name+"_ERROR="+type(exc).__name__+": "+str(exc)[:200])
+          PY
