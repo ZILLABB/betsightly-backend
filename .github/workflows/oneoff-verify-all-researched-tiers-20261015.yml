@@ -79,6 +79,26 @@ jobs:
           if meta.get("is_complete") is not True:
               print("STOP_ALL=Incomplete bookmaker board; no codes issued")
               raise SystemExit(0)
+          # Different feeds use "Sint-Truiden"/"Sint-Truidense" and
+          # "Iberia Tbilisi"/"Iberia 1999". Never guess bookmaker IDs;
+          # only adopt the EXACT names from a UNIQUE live board fixture.
+          candidates = [
+              event for _, event in sportybet._board_entries(board)
+              if "truid" in str(event.get("home_team","")).lower()
+              and "iberia" in str(event.get("away_team","")).lower()
+          ]
+          print("SINT_IBERIA_BOOKMAKER_CANDIDATES=" +
+                json.dumps([{
+                    "home_team": c.get("home_team"),
+                    "away_team": c.get("away_team"),
+                    "league": c.get("competition"),
+                    "kickoff_ms": c.get("kickoff_ms"),
+                    "event_id": c.get("event_id")
+                } for c in candidates], ensure_ascii=False))
+          if len(candidates) == 1:
+              candidate = candidates[0]
+              tickets["TEN_ODDS"][5]["home_team"] = candidate["home_team"]
+              tickets["TEN_ODDS"][5]["away_team"] = candidate["away_team"]
           sportybet.fetch_board = lambda force=False, **kwargs: board
           
           for name, legs in tickets.items():
