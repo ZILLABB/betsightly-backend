@@ -63,7 +63,7 @@ def settle_markets(home: int, away: int) -> dict[str, int | None]:
         "home_or_away": int(home != away), "away_or_draw": int(away >= home),
         "dnb_home": None if home == away else int(home > away),
         "dnb_away": None if home == away else int(away > home),
-        "over_1_5": int(total >= 2), "over_2_5": int(total >= 3),
+        "over_0_5": int(total >= 1), "under_0_5": int(total == 0),\n        "over_1_5": int(total >= 2), "over_2_5": int(total >= 3),
         "over_3_5": int(total >= 4), "under_1_5": int(total <= 1),
         "under_2_5": int(total <= 2), "under_3_5": int(total <= 3),
         "under_4_5": int(total <= 4), "over_4_5": int(total >= 5),
