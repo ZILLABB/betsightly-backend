@@ -73,11 +73,18 @@ jobs:
                   leg("Brighton","Kauno Zalgiris",C,20,0,"over_2_5"),
               ],
           }
-          board = sportybet.fetch_board(force=True)
-          meta = sportybet.board_metadata(board)
-          print("LIVE_BOARD_METADATA=" + json.dumps(meta, ensure_ascii=False, default=str))
+          # The upcoming-board total can shift between pages. Retry a
+          # bounded number of times, but NEVER book against an incomplete snapshot.
+          board, meta = None, {}
+          for attempt in range(1,4):
+              board = sportybet.fetch_board(force=True)
+              meta = sportybet.board_metadata(board)
+              print("LIVE_BOARD_ATTEMPT_" + str(attempt) + "=" +
+                    json.dumps(meta, ensure_ascii=False, default=str))
+              if meta.get("is_complete") is True:
+                  break
           if meta.get("is_complete") is not True:
-              print("STOP_ALL=Incomplete bookmaker board; no codes issued")
+              print("STOP_ALL=Incomplete bookmaker board across three attempts; no codes issued")
               raise SystemExit(0)
           # Different feeds use "Sint-Truiden"/"Sint-Truidense" and
           # "Iberia Tbilisi"/"Iberia 1999". Never guess bookmaker IDs;
