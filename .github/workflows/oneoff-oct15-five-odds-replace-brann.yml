@@ -1,0 +1,81 @@
+name: One-off Oct15 5x replace Brann with KuPS X2
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  verify-replacement:
+    if: github.head_ref == 'ops/oct15-5x-replace-brann-kups-20261015'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimal booking dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Create replacement 5x slip and verify every leg with SportyBet
+        env:
+          DATABASE_URL: sqlite:///./replacement_5x_20261015.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from math import prod
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest, generate_curated_booking
+          E, C = "UEFA Europa League", "UEFA Conference League"
+          def l(home, away, league, kickoff, market):
+              return dict(home_team=home, away_team=away, league=league,
+                          kickoff="2026-10-15T"+kickoff+":00+01:00", market=market)
+          legs=[
+              l("Atalanta","Pafos FC",C,"20:00","over_1_5"),
+              l("Bournemouth","Sturm Graz",E,"20:00","over_1_5"),
+              l("Rennes","OFI Crete",E,"20:00","over_1_5"),
+              l("Jagiellonia Bialystok","FC Ararat-Armenia",E,"20:00","over_1_5"),
+              l("FC Twente Enschede","FC Thun",C,"20:00","over_2_5"),
+              l("Mjallby AIF","Inter Club de Escaldes",C,"17:45","over_1_5"),
+              l("St. Truidense VV","FC Iberia 1999",C,"20:00","over_1_5"),
+              l("Kuopion Palloseura","Trabzonspor",C,"17:45","away_or_draw"),
+              l("NEC Nijmegen","PFC Levski Sofia",E,"20:00","over_1_5"),
+              l("Copenhagen","Braga",C,"20:00","over_1_5"),
+          ]
+          assert len(legs)==10 and not any("brann" in (x["home_team"]+x["away_team"]).lower() for x in legs)
+          assert len({(x["home_team"],x["away_team"]) for x in legs})==10
+          for attempt in range(1,4):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("BOARD_ATTEMPT="+str(attempt)+" "+json.dumps(meta))
+              if meta.get("is_complete") is True:break
+          if meta.get("is_complete") is not True:
+              print("REPLACEMENT_WITHHELD=incomplete_live_bookmaker_board")
+              raise SystemExit(0)
+          sportybet.fetch_board=lambda force=False, **kwargs:board
+          try:
+              result=generate_curated_booking(CuratedBookingRequest(legs=legs))
+              if result.get("status")!="success":
+                  print("REPLACEMENT_WITHHELD="+json.dumps({k:result.get(k) for k in ("reason","requested_legs","failures")},ensure_ascii=False))
+              elif result.get("legs")!=10 or result.get("readback_validation")!="PASSED":
+                  print("REPLACEMENT_WITHHELD=incomplete_or_readback_failed")
+              else:
+                  odds=result.get("actual_sportybet_odds")
+                  if odds is None:
+                      values=[x.get("sportybet_odds") for x in result["selections"]]
+                      odds=prod(map(float,values)) if len(values)==10 and all(values) else None
+                  if odds is None or float(odds)<5:
+                      print("REPLACEMENT_WITHHELD=odds_below_5: "+str(odds))
+                  else:
+                      print("REPLACEMENT_VERIFIED_CODE="+str(result["share_code"]))
+                      print("REPLACEMENT_VERIFIED_URL="+str(result.get("share_url")))
+                      print("REPLACEMENT_VERIFIED_ODDS="+str(odds))
+                      print("REPLACEMENT_ODDS_SOURCE="+str(result.get("odds_source")))
+                      print("REPLACEMENT_VERIFIED_LEGS="+str(result["legs"]))
+                      print("REPLACEMENT_READBACK="+str(result["readback_validation"]))
+                      print("REPLACEMENT_SELECTIONS="+json.dumps(result["selections"],ensure_ascii=False))
+          except Exception as exc:
+              print("REPLACEMENT_ERROR="+type(exc).__name__+": "+str(exc)[:200])
+          PY
