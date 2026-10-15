@@ -54,6 +54,7 @@ def test_team_totals_are_tracked_apart_from_match_totals():
     """Folding them together would average two accuracies into one correction."""
     assert CALIBRATION_GROUP["home_over_0_5"] == "team_goals_home"
     assert CALIBRATION_GROUP["away_over_0_5"] == "team_goals_away"
+    assert CALIBRATION_GROUP["over_0_5"] == "goals_over_0_5"
     assert CALIBRATION_GROUP["over_1_5"] == "goals_over_1_5"
     assert len({CALIBRATION_GROUP["home_over_0_5"],
                 CALIBRATION_GROUP["away_over_0_5"],
@@ -67,7 +68,7 @@ def test_each_goal_line_is_calibrated_on_its_own_record():
     4.5 sits near 85%. Sharing one logit correction between them corrects
     neither.
     """
-    lines = ["over_1_5", "over_2_5", "over_3_5",
+    lines = ["over_0_5", "under_0_5", "over_1_5", "over_2_5", "over_3_5",
              "under_1_5", "under_2_5", "under_3_5", "under_4_5"]
     cells = {CALIBRATION_GROUP[m] for m in lines}
     assert len(cells) == len(lines), f"goal lines sharing a cell: {cells}"
@@ -111,7 +112,7 @@ def _base():
 def test_predictor_emits_the_new_markets():
     out = predict(_fixture(), _base(), None)
     probs = out["probabilities"]
-    for market in ("home_over_0_5", "away_over_0_5", "home_over_1_5",
+    for market in ("over_0_5", "home_over_0_5", "away_over_0_5", "home_over_1_5",
                    "away_over_1_5", "under_1_5", "under_4_5",
                    "dnb_home", "dnb_away"):
         assert market in probs, market
@@ -124,7 +125,7 @@ def test_probabilities_stay_coherent():
     assert probs["home_over_0_5"] >= probs["home_over_1_5"]
     assert probs["away_over_0_5"] >= probs["away_over_1_5"]
     # More goals is never more likely than fewer.
-    assert probs["over_1_5"] >= probs["over_2_5"] >= probs["over_3_5"]
+    assert probs["over_0_5"] >= probs["over_1_5"] >= probs["over_2_5"] >= probs["over_3_5"]
     # Draw no bet splits a decisive result between the two sides.
     assert probs["dnb_home"] + probs["dnb_away"] == pytest.approx(1.0, abs=0.02)
     # Complements.

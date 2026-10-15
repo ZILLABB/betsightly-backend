@@ -78,6 +78,19 @@ _ROWS = (
     _spec("dnb_away", "{away} (Draw No Bet)", "dnb", "dnb", ("11", "", "5"),
           public="TRUSTED", evidence="PROMOTED", activation="ACTIVE", safe=True,
           can_void=True),
+    # 0.5 total: one goal from EITHER team. Distinct from BTTS Yes,
+    # which requires a goal from BOTH. Never assume that a match board offers
+    # this short price: availability/readback must verify the exact specifier.
+    # The new line keeps a separate calibration cell and earns automatic
+    # selection through the existing evidence + bookmaker gates, not by fiat.
+    _spec("over_0_5", "Over 0.5 Goals", "goals", "goals_over_0_5",
+          ("18", "total=0.5", "12"),
+          public="DEVELOPING", evidence="PROMOTED", activation="ACTIVE"),
+    # Keep the paired under outcome mapped for SportyBet's complete market
+    # vocabulary. Under 0.5 is NOT promoted to public predictions.
+    _spec("under_0_5", "Under 0.5 Goals", "goals", "goals_under_0_5",
+          ("18", "total=0.5", "13"),
+          activation="SHADOW", candidate_generation=False),
     _spec("over_1_5", "Over 1.5 Goals", "goals", "goals_over_1_5", ("18", "total=1.5", "12"),
           public="TRUSTED", evidence="PROMOTED", activation="ACTIVE", safe=True,
           ml_target="over_1_5", ml="DIRECT"),

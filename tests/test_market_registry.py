@@ -8,12 +8,12 @@ from leagues.predictor import _p_over, predict
 from leagues.results_checker import _evaluate_pick
 
 
-SHADOW_MAPPED = {"over_4_5", "home_under_0_5", "home_under_1_5",
+SHADOW_MAPPED = {"under_0_5", "over_4_5", "home_under_0_5", "home_under_1_5",
                  "away_under_0_5", "away_under_1_5"}
 
 
 def test_registry_is_the_mapping_and_policy_source():
-    assert len(MARKETS) == len(set(MARKETS)) == 26
+    assert len(MARKETS) == len(set(MARKETS)) == 28
     assert picks.MARKET_LABELS == {k: s.label for k, s in MARKETS.items()
                                     if s.model_sources}
     assert picks.MARKET_GROUP == {k: s.group for k, s in MARKETS.items()
@@ -30,6 +30,12 @@ def test_registry_is_the_mapping_and_policy_source():
                                                if s.replay}
     assert MARKETS["under_3_5"].activation == "SHADOW"
     assert "under_3_5" not in fixture_ranker.TRUSTED_MARKETS
+    assert MARKETS["over_0_5"].activation == "ACTIVE"
+    assert MARKETS["over_0_5"].calibration_group == "goals_over_0_5"
+    assert MARKETS["over_0_5"].sportybet == ("18", "total=0.5", "12")
+    assert MARKETS["under_0_5"].activation == "SHADOW"
+    assert MARKETS["btts_yes"].public_policy == "RESTRICTED"
+
 
 
 def test_active_market_has_all_required_capabilities():
@@ -81,6 +87,14 @@ def test_shadow_probabilities_are_coherent_and_absent_from_public_candidates():
 
 
 @pytest.mark.parametrize("market,score,expected", [
+    ("over_0_5", (0, 0), "lost"),
+    ("over_0_5", (1, 0), "won"),
+    ("over_0_5", (0, 1), "won"),
+    ("over_0_5", (1, 1), "won"),
+    ("under_0_5", (0, 0), "won"),
+    ("under_0_5", (1, 0), "lost"),
+    ("btts_yes", (1, 0), "lost"),
+    ("btts_yes", (1, 1), "won"),
     ("over_4_5", (3, 2), "won"),
     ("over_4_5", (2, 2), "lost"),
     ("home_under_0_5", (0, 2), "won"),

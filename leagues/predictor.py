@@ -183,6 +183,7 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
 
     # ── Derived markets ────────────────────────────────────
     total_lam = home_lam + away_lam
+    p_o05 = _p_over(0.5, total_lam)
     p_o15 = _p_over(1.5, total_lam)
 
     # `implied_over` belongs to whatever total line the provider supplied.
@@ -253,6 +254,7 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
         "home_or_away": min(cap, p_ha),
         "dnb_home":   min(cap, p_dnb_h),
         "dnb_away":   min(cap, p_dnb_a),
+        "over_0_5":   min(cap, p_o05),
         "over_1_5":   min(cap, p_o15),
         "over_2_5":   min(cap, p_o25),
         "over_3_5":   min(cap, p_o35),
@@ -272,6 +274,7 @@ def predict(fixture: dict, base: dict, elo_probs: dict | None = None) -> dict:
     # Keep these uncapped mathematical probabilities separate from publishable
     # probabilities so they can be replayed without entering any product pool.
     shadow_markets = {
+        "under_0_5": 1.0 - p_o05,
         "over_4_5": p_o45,
         "home_under_0_5": 1.0 - p_h05,
         "home_under_1_5": 1.0 - p_h15,
