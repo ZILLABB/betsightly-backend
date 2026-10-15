@@ -62,8 +62,12 @@ def _team_score_supported(pick: dict, evidence: dict) -> bool:
     if pick.get("market") not in TEAM_TO_SCORE:
         return True
     goals = (pick.get("_model") or {}).get("expected_goals") or {}
-    key = "home" if pick["market"] == "home_over_0_5" else "away"
-    return (float(goals.get(key) or 0) >= 1.20
+    market = str(pick["market"])
+    key = "home" if market.startswith("home_") else "away"
+    # Expected goals of 1.2 may support scoring ONCE, but not TWO goals.
+    # Use the same verified-price and evidence gates for both outcomes.
+    min_xg = 1.75 if market.endswith("_over_1_5") else 1.20
+    return (float(goals.get(key) or 0) >= min_xg
             and float(pick.get("confidence") or 0) >= .72
             and bool(pick.get("odds_are_real"))
             and evidence.get("state") in {"SUPPORTED", "PROVEN"})
