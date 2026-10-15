@@ -2567,3 +2567,21 @@ async def debug_rollover():
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
+
+
+# Admin-only curated booking: a separate, validated SportyBet share code for
+# manually researched legs. Published daily cards remain unchanged.
+from leagues.curated_booking import (
+    CuratedBookingRequest,
+    generate_curated_booking,
+    require_curated_booking_key,
+)
+
+
+@router.post("/admin/curated-booking",
+             dependencies=[Depends(require_curated_booking_key)])
+async def admin_curated_booking(request: CuratedBookingRequest):
+    """Resolve bookmaker IDs and mint an EXACT readback-validated share code."""
+    import asyncio
+
+    return await asyncio.to_thread(generate_curated_booking, request)
