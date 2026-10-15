@@ -569,6 +569,12 @@ def _collect_scores_for_picks(
             elif not prior:
                 finished[key] = payload
 
+    # Curated incident recovery is restricted to exact persisted SportyBet
+    # event IDs + team names + fixture date, with independent official FT
+    # reports. Treat disagreeing provider finals as ambiguous, never override.
+    from services.verified_incident_finals import incident_finals
+    merge(_index_free_finals(incident_finals(picks)), "official-fixture-report")
+
     # Explicit German domestic-league results can supplement an unavailable
     # ESPN final. All OpenLigaDB matches must independently prove FT (90 min).
     # Never infer the league from names alone or modify published slips.
@@ -770,6 +776,7 @@ def _settlement_detail(pick: dict, match: dict | None,
         "away_score": match["away_score"],
         "score_90": match.get("score_90"),
         "match_status": match.get("match_status"),
+        "evidence_url": match.get("evidence_url"),
         "observed_at": current.isoformat(),
     }}
 
