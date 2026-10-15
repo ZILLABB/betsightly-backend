@@ -145,8 +145,18 @@ def test_over_goals_accepts_mixed_regular_totals_only():
     for market in ("under_4_5", "btts_yes", "home_over_0_5", "home_win"):
         with pytest.raises(ValueError, match="only accepts"):
             editor.parse_input(f"12345,{market}", "over_1_5")
-    with pytest.raises(ValueError, match="mapped SportyBet"):
-        editor.parse_input("12345,over_0_5", "over_1_5")
+    assert editor.parse_input("12345,over_0_5", "over_1_5") == [
+        ("12345", "over_0_5")
+    ]
+    assert editor.parse_input("12345,o0.5", "rollover") == [
+        ("12345", "over_0_5")
+    ]
+    assert editor.parse_input("12345,0.5", "2_odds") == [
+        ("12345", "over_0_5")
+    ]
+    assert editor.parse_input("12345,btts_yes", "5_odds") == [
+        ("12345", "btts_yes")
+    ]
 
 
 def test_explicit_override_only_for_over_goals_and_never_for_other_tiers():
