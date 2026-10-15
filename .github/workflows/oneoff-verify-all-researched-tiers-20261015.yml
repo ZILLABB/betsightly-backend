@@ -1,0 +1,118 @@
+name: One-off Oct 15 researched tickets SportyBet verification
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  verify-researched-tickets:
+    if: github.head_ref == 'ops/verify-5x-10x-rollover-20261015'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the required booking engine dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Independently mint/read back researched SportyBet slips from a complete fresh board
+        env:
+          DATABASE_URL: sqlite:///./oneoff_readback_20261015.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest, generate_curated_booking
+          from leagues.booking import validate_code_details, selections_for
+          
+          E = "UEFA Europa League"
+          C = "UEFA Conference League"
+          def leg(h, a, league, hour, minute, market):
+              return dict(home_team=h, away_team=a, league=league,
+                          kickoff=f"2026-10-15T{hour:02d}:{minute:02d}:00+01:00",
+                          market=market)
+          
+          tickets = {
+              "FIVE_ODDS": [
+                  leg("Atalanta","Pafos",C,20,0,"over_1_5"),
+                  leg("Benfica","Celtic",E,20,0,"home_win"),
+                  leg("Jagiellonia","Ararat-Armenia",E,20,0,"over_1_5"),
+                  leg("Bournemouth","Sturm Graz",E,20,0,"over_2_5"),
+                  leg("Rennes","OFI Crete",E,20,0,"over_1_5"),
+                  leg("Brann","Lincoln Red Imps",C,20,0,"over_1_5"),
+              ],
+              "TEN_ODDS": [
+                  leg("CSKA Sofia","Monaco",C,17,45,"over_1_5"),
+                  leg("Lech Poznan","Leverkusen",E,17,45,"away_or_draw"),
+                  leg("Hajduk Split","Ajax",C,17,45,"over_1_5"),
+                  leg("Egnatia","Midtjylland",C,17,45,"over_1_5"),
+                  leg("NEC","Levski Sofia",E,20,0,"home_or_draw"),
+                  leg("Sint-Truiden","Iberia Tbilisi",C,20,0,"over_1_5"),
+                  leg("Twente","Thun",C,20,0,"over_1_5"),
+                  leg("Torreense","Sunderland",E,17,45,"away_or_draw"),
+              ],
+              "TEN_OVER_1_5": [
+                  leg("Salzburg","AC Milan",E,17,45,"over_1_5"),
+                  leg("Lyon","Crystal Palace",E,17,45,"over_1_5"),
+                  leg("Lugano","Crvena Zvezda",C,17,45,"over_1_5"),
+                  leg("Celje","Omonia",E,17,45,"over_1_5"),
+                  leg("Mjallby","Inter Escaldes",C,17,45,"over_1_5"),
+                  leg("Union SG","Real Sociedad",E,17,45,"over_1_5"),
+                  leg("Dinamo Zagreb","Anderlecht",E,20,0,"over_1_5"),
+                  leg("Hoffenheim","Besiktas",E,20,0,"over_1_5"),
+                  leg("Hearts","Nordsjaelland",C,20,0,"over_1_5"),
+                  leg("Ferencvaros","Viktoria Plzen",E,20,0,"over_1_5"),
+              ],
+              "ROLLOVER": [
+                  leg("Gent","Aarhus",C,17,45,"home_or_draw"),
+                  leg("Freiburg","Jablonec",C,20,0,"over_2_5"),
+                  leg("Brighton","Kauno Zalgiris",C,20,0,"over_2_5"),
+              ],
+          }
+          board = sportybet.fetch_board(force=True)
+          meta = sportybet.board_metadata(board)
+          print("LIVE_BOARD_METADATA=" + json.dumps(meta, ensure_ascii=False, default=str))
+          if meta.get("is_complete") is not True:
+              print("STOP_ALL=Incomplete bookmaker board; no codes issued")
+              raise SystemExit(0)
+          sportybet.fetch_board = lambda force=False, **kwargs: board
+          
+          for name, legs in tickets.items():
+              try:
+                  response = generate_curated_booking(CuratedBookingRequest(legs=legs))
+                  if response.get("status") != "success":
+                      print(name + "_UNAVAILABLE=" + json.dumps({
+                          k:response.get(k) for k in
+                          ("reason","requested_legs","failures","board_snapshot_id")
+                      }, ensure_ascii=False))
+                      continue
+                  if response.get("readback_validation") != "PASSED" or response.get("legs") != len(legs):
+                      print(name + "_WITHHELD=Exact live readback or leg count did not pass")
+                      continue
+                  print(name + "_VERIFIED_CODE=" + str(response["share_code"]))
+                  print(name + "_VERIFIED_URL=" + str(response.get("share_url")))
+                  print(name + "_VERIFIED_ODDS=" + str(response.get("actual_sportybet_odds")))
+                  print(name + "_VERIFIED_ODDS_SOURCE=" + str(response.get("odds_source")))
+                  print(name + "_VERIFIED_LEGS=" + str(response.get("legs")))
+                  print(name + "_VERIFIED_SELECTIONS=" + json.dumps(response["selections"], ensure_ascii=False))
+                  if name == "FIVE_ODDS" and (response.get("actual_sportybet_odds") is None or float(response["actual_sportybet_odds"]) < 5.0):
+                      print("FIVE_ODDS_WARNING=BELOW_5X_TARGET_RESEARCH_ONLY")
+                  if name == "TEN_ODDS" and (response.get("actual_sportybet_odds") is None or float(response["actual_sportybet_odds"]) < 10.0):
+                      print("TEN_ODDS_WARNING=BELOW_10X_TARGET_RESEARCH_ONLY")
+                  if name == "ROLLOVER":
+                      expected, missing = selections_for([{
+                          "home_team": l["home_team"], "away_team": l["away_team"],
+                          "league": l["league"], "kickoff": l["kickoff"], "market": l["market"]
+                      } for l in legs], board)
+                      if not missing and len(expected) == 3:
+                          ok,why,p = validate_code_details("R2FZEW",expected)
+                          print("PREVIOUS_ROLLOVER_R2FZEW_VALID=" + str(ok))
+                          print("PREVIOUS_ROLLOVER_R2FZEW_READBACK_REASON=" + str(why))
+                          print("PREVIOUS_ROLLOVER_R2FZEW_ODDS=" + str(p))
+              except Exception as exc:
+                  print(name + "_ERROR=" + type(exc).__name__ + ": " + str(exc)[:300])
+          PY
