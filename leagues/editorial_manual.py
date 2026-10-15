@@ -141,7 +141,7 @@ def parse_input(lines: str, tier: str) -> list[tuple[str, str]]:
         if market not in MARKET_TO_SPORTYBET:
             raise ValueError(f"Row {n}: {market!r} is not a mapped SportyBet market")
         if tier == "over_1_5" and market not in MANUAL_OVER_GOALS:
-            raise ValueError("Over Goals accepts only total-goals Over 0.5, 1.5, "
+            raise ValueError("Over Goals only accepts total-goals Over 0.5, 1.5, "
                              "2.5, 3.5 or 4.5 when available at SportyBet")
         if (event, market) in results or any(e == event for e, _ in results):
             raise ValueError(f"Row {n}: fixture repeated in the same ticket")
