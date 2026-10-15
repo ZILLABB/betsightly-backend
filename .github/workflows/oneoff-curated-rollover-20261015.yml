@@ -1,0 +1,68 @@
+name: One-off verified SportyBet rollover check (15 Oct 2026)
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  verify-curated-slip:
+    if: github.head_ref == 'ops/curated-rollover-readback-20261015'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install only the dependencies needed by the verified booking engine
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Check rollover selections against fresh public SportyBet board and verify share code readback
+        env:
+          DATABASE_URL: sqlite:///./curated_readback_20261015.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from math import prod
+          from leagues.curated_booking import CuratedBookingRequest, generate_curated_booking
+
+          legs = [
+              dict(home_team="Gent", away_team="Aarhus",
+                   league="UEFA Conference League",
+                   kickoff="2026-10-15T17:45:00+01:00", market="home_or_draw"),
+              dict(home_team="Freiburg", away_team="Jablonec",
+                   league="UEFA Conference League",
+                   kickoff="2026-10-15T20:00:00+01:00", market="over_2_5"),
+              dict(home_team="Brighton", away_team="Kauno Žalgiris",
+                   league="UEFA Conference League",
+                   kickoff="2026-10-15T20:00:00+01:00", market="over_2_5"),
+          ]
+          try:
+              response = generate_curated_booking(CuratedBookingRequest(legs=legs))
+              status = response.get("status")
+              if status != "success":
+                  print("CURATED_VERIFICATION_UNAVAILABLE=" + json.dumps({
+                      k: response.get(k) for k in
+                      ("status", "reason", "requested_legs", "failures",
+                       "board_snapshot_id")
+                  }, ensure_ascii=False))
+              elif response.get("readback_validation") != "PASSED" or response.get("legs") != len(legs):
+                  print("CURATED_VERIFICATION_FAILED=readback or leg count")
+              else:
+                  p = response.get("actual_sportybet_odds")
+                  if p is None:
+                      odds = [x.get("sportybet_odds") for x in response.get("selections") or []]
+                      p = prod(float(x) for x in odds) if len(odds) == 3 and all(odds) else None
+                  if p is not None and 2 <= float(p) <= 4:
+                      print("VERIFIED_CODE=" + str(response["share_code"]))
+                      print("VERIFIED_ODDS=" + str(p))
+                      print("VERIFIED_URL=" + str(response.get("share_url")))
+                      print("VERIFIED_SELECTIONS=" + json.dumps(response["selections"], ensure_ascii=False))
+                      print("VERIFIED_EXPIRY=" + str(response.get("expires_at")))
+                  else:
+                      print("CURATED_CODE_WITHHELD_OUT_OF_TARGET_ODDS=" + str(p))
+          except Exception as exc:
+              print("CURATED_VERIFICATION_ERROR=" + type(exc).__name__ + ": " + str(exc)[:250])
+          PY
