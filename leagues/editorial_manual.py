@@ -24,7 +24,13 @@ MIN_ODDS = {"banker": 1.01, "2_odds": 2.0, "5_odds": 5.0,
             "10_odds": 10.0, "over_1_5": 1.01, "rollover": 2.0}
 
 # Keep the old database tier key for settlement and historical results.
-MANUAL_OVER_GOALS = frozenset({"over_0_5", "over_1_5", "over_2_5", "over_3_5", "over_4_5"})
+# Same existing Over Goals tier; home/away totals are 90-minute team goals,
+# while BTTS Yes requires one from EACH side. Do not accept unders or BTTS No.
+MANUAL_OVER_GOALS = frozenset({
+    "over_0_5", "over_1_5", "over_2_5", "over_3_5", "over_4_5",
+    "home_over_0_5", "away_over_0_5",
+    "home_over_1_5", "away_over_1_5", "btts_yes",
+})
 
 def rollover_eligibility(day: str | None = None, *, card=None, chain=None) -> dict:
     """Rollover may be filled manually only for the next eligible, empty stage."""
@@ -141,8 +147,8 @@ def parse_input(lines: str, tier: str) -> list[tuple[str, str]]:
         if market not in MARKET_TO_SPORTYBET:
             raise ValueError(f"Row {n}: {market!r} is not a mapped SportyBet market")
         if tier == "over_1_5" and market not in MANUAL_OVER_GOALS:
-            raise ValueError("Over Goals only accepts total-goals Over 0.5, 1.5, "
-                             "2.5, 3.5 or 4.5 when available at SportyBet")
+            raise ValueError("Over Goals only accepts match-total Overs, individual-team "
+                             "Over 0.5/1.5 or BTTS Yes when available at SportyBet")
         if (event, market) in results or any(e == event for e, _ in results):
             raise ValueError(f"Row {n}: fixture repeated in the same ticket")
         results.append((event, market))
@@ -838,7 +844,8 @@ def import_share_code(code: str, tier: str, *, board=None,
             "No selection has been dropped and nothing has been published."
         )
     if tier == "over_1_5" and any(g["market"] not in MANUAL_OVER_GOALS for g in games):
-        warnings.append("Over Goals accepts only standard total-goals Overs (0.5–4.5).")
+        warnings.append("Over Goals only accepts match-total Overs (0.5–4.5), "
+                        "team Overs (0.5/1.5) or BTTS Yes.")
     if original_odds is not None and original_odds + 1e-8 < MIN_ODDS[tier]:
         warnings.append(
             f"Original {original_odds:.2f}x odds are below "
