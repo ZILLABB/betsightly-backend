@@ -1,0 +1,59 @@
+name: Oct 15 UEFA full-board odds review (no betting)
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  scan:
+    if: github.head_ref == 'ops/oct15-evidence-priceboard-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimal dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Print current exact live-board prices for all UEFA European fixtures
+        env:
+          DATABASE_URL: sqlite:///./uefa_price_audit_20261015.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from leagues import sportybet
+          board={}
+          for attempt in range(3):
+              board = sportybet.fetch_board(force=True)
+              meta = sportybet.board_metadata(board)
+              print("BOARD_META="+json.dumps(meta,ensure_ascii=False))
+              if meta.get("is_complete") is True: break
+          if meta.get("is_complete") is not True:
+              print("STOP_INCOMPLETE")
+              raise SystemExit(0)
+          events = []
+          for key,event in sportybet._board_entries(board):
+              comp = str(event.get("competition") or "")
+              kick = event.get("kickoff_ms")
+              if not kick: continue
+              try: date=datetime.fromtimestamp(int(kick)/1000, timezone.utc)
+              except Exception: continue
+              if date.date().isoformat()!="2026-10-15": continue
+              if not ("UEFA Europa League" in comp or "UEFA Conference League" in comp): continue
+              selected = {}
+              for market in ("home_win","away_win","home_or_draw","away_or_draw","over_1_5","over_2_5","over_3_5","btts_yes","dnb_home","dnb_away"):
+                  p=event.get("prices",{}).get(market)
+                  if p is not None: selected[market]=p
+              events.append(dict(home=event.get("home_team"),away=event.get("away_team"),
+                                 competition=comp,kickoff_utc=date.isoformat(),event_id=event.get("event_id"),
+                                 prices=selected))
+          events.sort(key=lambda e:(e["kickoff_utc"],e["competition"],e["home"]))
+          print("EVENT_COUNT="+str(len(events)))
+          for event in events:
+              print("UEFA_FIXTURE="+json.dumps(event,ensure_ascii=False))
+          PY
