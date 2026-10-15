@@ -844,7 +844,7 @@ def import_share_code(code: str, tier: str, *, board=None,
             "No selection has been dropped and nothing has been published."
         )
     if tier == "over_1_5" and any(g["market"] not in MANUAL_OVER_GOALS for g in games):
-        warnings.append("Over Goals only accepts match-total Overs (0.5–4.5), "
+        warnings.append("Over Goals accepts only match-total Overs (0.5–4.5), "
                         "team Overs (0.5/1.5) or BTTS Yes.")
     if original_odds is not None and original_odds + 1e-8 < MIN_ODDS[tier]:
         warnings.append(
