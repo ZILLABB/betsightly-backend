@@ -577,7 +577,9 @@ def results(
 ) -> dict | None:
     res = data.get("results") or {}
 
-    if not res.get("settled"):
+    manual_record = res.get("manual_record") or {}
+    manual_yesterday = res.get("manual_yesterday") or []
+    if not res.get("settled") and not manual_record.get("settled") and not manual_yesterday:
         return None
 
     url = build_url(
@@ -720,6 +722,41 @@ def results(
                 f"("
                 f"{float(day.get('combined_odds') or 0):.2f}x"
                 f")"
+            )
+
+        # Publish manual results in the SAME Telegram results message, with
+        # distinct labels. These are bookmaker-verified editorial slips, not
+        # model-scored slips; never add them to official hit rate/calibration.
+        if manual_record.get("settled") or manual_yesterday:
+            lines += [
+                "",
+                "*Manual picks · admin curated*",
+                f"✅ Won: *{int(manual_record.get('won') or 0)}*",
+                f"❌ Lost: *{int(manual_record.get('lost') or 0)}*",
+            ]
+            if manual_record.get("pending"):
+                lines.append(
+                    f"⏳ Pending: *{int(manual_record['pending'])}*"
+                )
+            if manual_yesterday:
+                lines += ["", "*Yesterday's manual tickets*"]
+                for slip in manual_yesterday:
+                    mark = {
+                        "won": "✅", "lost": "❌",
+                        "void": "↩️", "pending": "⏳",
+                    }.get(slip.get("status"), "⏳")
+                    label = {
+                        "banker": "Banker", "2_odds": "2 Odds",
+                        "5_odds": "5 Odds", "10_odds": "10 Odds",
+                        "over_1_5": "Mixed Overs", "rollover": "Rollover",
+                    }.get(str(slip.get("tier") or ""), "Manual slip")
+                    odds = float(slip.get("total_odds") or 0)
+                    lines.append(
+                        f"{mark} {label} ({odds:.2f}x)"
+                    )
+            lines.append(
+                "_Manual outcomes are tracked, but never train or "
+                "calibrate BetSightly's prediction engine._"
             )
 
         lines += [
