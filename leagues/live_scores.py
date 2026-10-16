@@ -253,6 +253,53 @@ def overlay_sportybet_live(verified_scores: dict, games: list[dict],
     return merged, accepted
 
 
+def infer_published_competition_slugs(games: list[dict]) -> tuple[set[str], int]:
+    """Resolve safe ESPN slugs for manually imported bookmaker selections.
+
+    Manually published matches carry a league label, but not always the ESPN
+    slug. The previous live reader requested only the slugs already on picks:
+    no slug meant no competition was fetched, even for a supported league.
+
+    Only exact unique normalized competition names are mapped. Guessing by
+    country alone would attach fixtures from the wrong division/cup.
+    """
+    from leagues.espn_source import ESPN_CLUB_LEAGUES
+    from leagues.results_checker import _normalize_name
+
+    by_name: dict[str, set[str]] = {}
+    for slug, display in ESPN_CLUB_LEAGUES.items():
+        key = _normalize_name(display)
+        if key:
+            by_name.setdefault(key, set()).add(slug)
+    # Common bookmaker spelling variations map to exactly one verified slug.
+    by_name.update({
+        "english premier league": {"eng.1"},
+        "england premier league": {"eng.1"},
+        "english championship": {"eng.2"},
+        "spanish la liga": {"esp.1"},
+        "italian serie a": {"ita.1"},
+        "uefa champions league": {"uefa.champions"},
+        "uefa europa league": {"uefa.europa"},
+        "uefa conference league": {"uefa.europa.conf"},
+        "caf champions league": {"caf.champions"},
+    })
+    known = set(ESPN_CLUB_LEAGUES)
+    slugs: set[str] = set()
+    unresolved = 0
+    for game in games:
+        slug = str(game.get("league_slug") or "")
+        if slug in known:
+            slugs.add(slug)
+            continue
+        league = _normalize_name(game.get("league") or "")
+        candidates = by_name.get(league, set())
+        if len(candidates) == 1:
+            slugs.update(candidates)
+        else:
+            unresolved += 1
+    return slugs, unresolved
+
+
 def _uncached_scores_for_card() -> dict:
     """Scores for every fixture on today's card.
 
@@ -289,13 +336,13 @@ def _uncached_scores_for_card() -> dict:
                 games.extend(day.get("picks") or [])
             for g in games:
                 card_games.append(g)
-                if g.get("league_slug"):
-                    slugs.add(g["league_slug"])
                 if g.get("match_id"):
                     ids.add(g["match_id"])
                 kickoff = g.get("kickoff") or g.get("commence_time") or ""
                 if len(kickoff) >= 10:
                     dates.add(kickoff[:10])
+
+        slugs, competitions_unmapped = infer_published_competition_slugs(card_games)
 
         # A late kick-off can land in ESPN's next local day, so each fixture
         # date is asked for alongside the day after it.
@@ -305,6 +352,7 @@ def _uncached_scores_for_card() -> dict:
                 day = datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             except Exception:
                 continue
+            wanted.add((day - timedelta(days=1)).strftime("%Y%m%d"))
             wanted.add(day.strftime("%Y%m%d"))
             wanted.add((day + timedelta(days=1)).strftime("%Y%m%d"))
 
@@ -331,9 +379,38 @@ def _uncached_scores_for_card() -> dict:
             logger.warning("Optional SportyBet live overlay failed: %s",
                            type(exc).__name__)
 
+        # Licensed LiveScore date/live feeds can cover manually published
+        # leagues absent from ESPN. Fully gated until commercial rights are
+        # confirmed. In all cases these rows are display-only observations.
+        livescore_status = "disabled"
+        livescore_attached = 0
+        try:
+            from leagues.authorized_livescore import snapshot as livescore_snapshot
+            from leagues.authorized_livescore import overlay as livescore_overlay
+            ls = livescore_snapshot(sorted(dates))
+            livescore_status = ls.get("status", "unavailable")
+            found, livescore_attached = livescore_overlay(
+                found, card_games, ls.get("matches") or [],
+            )
+        except Exception as exc:
+            logger.warning("Optional LiveScore scoreboard unavailable: %s",
+                           type(exc).__name__)
+
+        resolved = len(ids.intersection(found))
+        logger.info(
+            "Matchday coverage tracked=%s matched=%s espn_reconciled=%s "
+            "sporty=%s livescore=%s unidentified_competitions=%s",
+            len(ids), resolved, espn_aligned, sporty_matched,
+            livescore_attached, competitions_unmapped,
+        )
         return {
             "published_match_ids": sorted(ids),
             "espn_identity_matched": espn_aligned,
+            "unmapped_league_games": competitions_unmapped,
+            "livescore_source": livescore_status,
+            "livescore_live_matched": livescore_attached,
+            "matched_fixtures": resolved,
+            "missing_score_fixtures": max(0, len(ids) - resolved),
             "sportybet_source": sporty_status,
             "sportybet_live_matched": sporty_matched,
             "tracked_fixtures": len(ids),
