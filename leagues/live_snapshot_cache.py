@@ -26,8 +26,18 @@ TTL_SECONDS = 25
 MAX_SAVED_AGE_SECONDS = 18 * 3600
 
 
-def _wat_day() -> str:
-    return (datetime.now(timezone.utc) + timedelta(hours=1)).date().isoformat()
+def _wat_day(at: datetime | None = None) -> str:
+    """Cache by the displayed *publication* date, not midnight WAT.
+
+    BetSightly publishes its next card at 08:00 WAT. Between midnight and
+    07:59 WAT the previous card is still live, so a midnight cache turnover
+    could discard scores before their final settlement is visible.
+    """
+    now = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    wall = now + timedelta(hours=1)
+    if wall.hour < 8:
+        wall -= timedelta(days=1)
+    return wall.date().isoformat()
 
 
 def _date_file(day: str, cache_root: Path) -> Path:

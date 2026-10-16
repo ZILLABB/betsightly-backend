@@ -86,6 +86,8 @@ def _parse(event: dict) -> dict | None:
 
     return {
         "match_id": _match_id(home_name, away_name, commence),
+        "kickoff_utc": _normalise_commence(commence),
+        "source": "espn",
         "home_team": home_name,
         "away_team": away_name,
         "home_score": score(home),
@@ -119,6 +121,73 @@ def scores_for(slugs: list[str], date_str: str | None = None) -> dict:
                 if parsed:
                     out[parsed["match_id"]] = parsed
     return out
+
+
+def align_espn_scores_to_card(
+    scoreboard: dict, games: list[dict],
+    *, kickoff_tolerance_seconds: int = 20 * 60,
+) -> tuple[dict, int]:
+    """Conservatively map ESPN's score identity to an immutable published ID.
+
+    A model/curated pick can carry a different fixture ID when provider name
+    or kick-off formatting changed. An exact match is always preferred. For
+    missing IDs require BOTH normalized team names and a UTC kick-off within
+    20 minutes. Ambiguous scores or competing published games never match.
+    This only adds DISPLAY scores. It is not used for official settlement.
+    """
+    from leagues.results_checker import _normalize_name
+
+    def kickoff(raw):
+        try:
+            parsed = datetime.fromisoformat(str(raw or "").replace("Z", "+00:00"))
+            return parsed.astimezone(timezone.utc) if parsed.tzinfo else None
+        except (ValueError, TypeError, OverflowError):
+            return None
+
+    unique_games = {}
+    for g in games:
+        if isinstance(g, dict) and g.get("match_id"):
+            unique_games.setdefault(str(g["match_id"]), g)
+    result = dict(scoreboard)
+    potential: dict[str, list[str]] = {}
+    for mid, game in unique_games.items():
+        if mid in result:
+            continue
+        gh = _normalize_name(game.get("home_team", ""))
+        ga = _normalize_name(game.get("away_team", ""))
+        gt = kickoff(game.get("kickoff") or game.get("commence_time") or game.get("date"))
+        if not (gh and ga and gt):
+            continue
+        candidates = []
+        for score_id, observation in scoreboard.items():
+            if not isinstance(observation, dict):
+                continue
+            if (_normalize_name(observation.get("home_team", "")) != gh
+                    or _normalize_name(observation.get("away_team", "")) != ga):
+                continue
+            ft = kickoff(observation.get("kickoff_utc"))
+            if ft is None:
+                continue
+            if abs((ft - gt).total_seconds()) <= kickoff_tolerance_seconds:
+                candidates.append(score_id)
+        if len(candidates) == 1:
+            potential[mid] = candidates
+
+    # One provider observation cannot be arbitrarily assigned to multiple
+    # published fixture IDs. This catches repeated youth/rematch duplicates.
+    claims: dict[str, int] = {}
+    for candidate in potential.values():
+        claims[candidate[0]] = claims.get(candidate[0], 0) + 1
+    matched = 0
+    for mid, ids in potential.items():
+        source_id = ids[0]
+        if claims[source_id] != 1:
+            continue
+        result[mid] = dict(scoreboard[source_id], match_id=mid,
+                           identity_match="teams_and_kickoff",
+                           provisional=True)
+        matched += 1
+    return result, matched
 
 
 def overlay_sportybet_live(verified_scores: dict, games: list[dict],
@@ -243,6 +312,10 @@ def _uncached_scores_for_card() -> dict:
         for date_str in sorted(wanted):
             found.update(scores_for(sorted(slugs), date_str))
 
+        # Reconcile ESPN's feed ID to the actual locked card without changing
+        # the card. Exact IDs win; unmatched IDs require teams and kickoff.
+        found, espn_aligned = align_espn_scores_to_card(found, card_games)
+
         # Optional SportyBet live source extends coverage for games missing
         # from ESPN's live feed. Never use it for official final settlement.
         sporty_status = "disabled"
@@ -260,6 +333,7 @@ def _uncached_scores_for_card() -> dict:
 
         return {
             "published_match_ids": sorted(ids),
+            "espn_identity_matched": espn_aligned,
             "sportybet_source": sporty_status,
             "sportybet_live_matched": sporty_matched,
             "tracked_fixtures": len(ids),
