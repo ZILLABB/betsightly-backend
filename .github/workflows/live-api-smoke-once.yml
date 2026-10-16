@@ -1,0 +1,55 @@
+name: Public live scoreboard smoke (one-off; do not merge)
+on:
+  pull_request:
+    branches: [devil]
+    paths: ['.github/workflows/live-api-smoke-once.yml']
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Compare public published-card and live-score APIs once
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import urllib.request
+          import urllib.error
+          from datetime import datetime,timezone
+          base="https://betsightly-api.onrender.com/api/leagues"
+          for name,path in [
+            ("LIVE", "/live-scores"),
+            ("CARD", "/daily-accumulators"),
+          ]:
+            try:
+              request=urllib.request.Request(base+path,headers={"Accept":"application/json"})
+              with urllib.request.urlopen(request,timeout=38) as resp:
+                data=json.load(resp)
+                status=resp.status
+              if not isinstance(data,dict):
+                print(name,"http",status,"unexpected_payload",flush=True);continue
+              print(name,"http",status,"status",data.get("status"),flush=True)
+              if name=="LIVE":
+                scores=data.get("scores") or {}
+                print("LIVE_META","scores",len(scores),"tracked",data.get("tracked_fixtures"),
+                      "stale",data.get("stale"),"refreshing",data.get("refreshing"),
+                      "fetched_at",data.get("fetched_at"),
+                      "espn_aligned",data.get("espn_identity_matched"),
+                      "sporty_status",data.get("sportybet_source"),
+                      "sporty_matched",data.get("sportybet_live_matched"),flush=True)
+              else:
+                counts={}
+                ids=set()
+                for name,tier in (data.get("accumulators") or {}).items():
+                  if isinstance(tier,dict):
+                    matches=tier.get("games") or []
+                    counts[name]=len(matches)
+                    ids.update(str(g.get("match_id")) for g in matches if isinstance(g,dict) and g.get("match_id"))
+                print("CARD_META","date",data.get("date"),"tiers",counts,"unique_match_ids",len(ids),flush=True)
+            except urllib.error.HTTPError as exc:
+              print(name,"http",exc.code,"reason",exc.reason,flush=True)
+            except Exception as exc:
+              print(name,"error",type(exc).__name__,flush=True)
+          PY
