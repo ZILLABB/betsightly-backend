@@ -121,6 +121,69 @@ def scores_for(slugs: list[str], date_str: str | None = None) -> dict:
     return out
 
 
+def overlay_sportybet_live(verified_scores: dict, games: list[dict],
+                         observations: list[dict]) -> tuple[dict, int]:
+    """Fill ESPN coverage gaps with *provisional in-play* SportyBet scores.
+
+    The official settlement map is never passed here. Do not replace ESPN
+    finished or in-progress scores and never treat SportyBet as a final result.
+    Event ID, both teams and the UTC kickoff date must all match.
+    """
+    from leagues.results_checker import _normalize_name
+
+    merged = dict(verified_scores)
+    by_event: dict[str, list[dict]] = {}
+    for ev in observations:
+        event_id = ev.get("event_id")
+        if isinstance(event_id, str):
+            by_event.setdefault(event_id, []).append(ev)
+
+    accepted = 0
+    for game in games:
+        mid = game.get("match_id")
+        eid = str(game.get("sportybet_event_id") or
+                  (game.get("sportybet_availability") or {}).get("event_id") or "")
+        if not mid or not eid or len(by_event.get(eid, [])) != 1:
+            continue
+        existing = merged.get(mid)
+        if existing and (existing.get("finished") or existing.get("live")):
+            continue
+
+        item = by_event[eid][0]
+        if not item.get("live") or item.get("finished") or not item.get("provisional"):
+            continue
+        if (_normalize_name(item.get("home_team", "")) != _normalize_name(game.get("home_team", ""))
+                or _normalize_name(item.get("away_team", "")) != _normalize_name(game.get("away_team", ""))):
+            continue
+        kickoff = game.get("kickoff") or game.get("commence_time") or game.get("date") or ""
+        try:
+            parsed = datetime.fromisoformat(str(kickoff).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                continue
+            match_day = parsed.astimezone(timezone.utc).date().isoformat()
+        except ValueError:
+            continue
+        if item.get("date") != match_day:
+            continue
+        # The snapshot is display-only. No official wins/losses/calibration.
+        merged[mid] = {
+            "match_id": mid,
+            "home_team": game.get("home_team", ""),
+            "away_team": game.get("away_team", ""),
+            "home_score": item["home_score"],
+            "away_score": item["away_score"],
+            "state": "in", "state_label": "live",
+            "detail": item.get("match_status"),
+            "clock": (f'{item["match_minute"]}\u2032'
+                      if item.get("match_minute") is not None else None),
+            "period": item.get("match_status"),
+            "finished": False, "live": True,
+            "provisional": True, "source": "sportybet-via-parse",
+        }
+        accepted += 1
+    return merged, accepted
+
+
 def scores_for_card() -> dict:
     """Scores for every fixture on today's card.
 
@@ -145,6 +208,7 @@ def scores_for_card() -> dict:
 
         slugs: set[str] = set()
         ids: set[str] = set()
+        card_games: list[dict] = []
         dates: set[str] = set()
         for cat in (card.get("accumulators") or {}).values():
             if not isinstance(cat, dict):
@@ -153,6 +217,7 @@ def scores_for_card() -> dict:
             for day in cat.get("chain") or []:
                 games.extend(day.get("picks") or [])
             for g in games:
+                card_games.append(g)
                 if g.get("league_slug"):
                     slugs.add(g["league_slug"])
                 if g.get("match_id"):
@@ -176,7 +241,25 @@ def scores_for_card() -> dict:
         for date_str in sorted(wanted):
             found.update(scores_for(sorted(slugs), date_str))
 
+        # Optional SportyBet live source extends coverage for games missing
+        # from ESPN's live feed. Never use it for official final settlement.
+        sporty_status = "disabled"
+        sporty_matched = 0
+        try:
+            from leagues.sportybet_live_feed import snapshot
+            observed = snapshot()
+            sporty_status = observed.get("status", "unavailable")
+            found, sporty_matched = overlay_sportybet_live(
+                found, card_games, observed.get("matches") or [],
+            )
+        except Exception as exc:
+            logger.warning("Optional SportyBet live overlay failed: %s",
+                           type(exc).__name__)
+
         return {
+            "sportybet_source": sporty_status,
+            "sportybet_live_matched": sporty_matched,
+            "tracked_fixtures": len(ids),
             "scores": {k: v for k, v in found.items() if k in ids},
             "leagues": sorted(slugs),
             "dates": sorted(dates),
