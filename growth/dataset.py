@@ -344,6 +344,32 @@ def _recent_results(days: int = 7) -> dict:
                 ],
             })
 
+        # Admin-curated bookmaker slips are settled in their own table.
+        # Report them alongside the day's real results, but NEVER import
+        # them into the engine's published-slip/calibration/ROI denominators.
+        from leagues.editorial_settlement import editorial_result_history
+        manual = editorial_result_history(limit=90).get("results") or []
+        window_start = (wat_now - timedelta(days=days)).strftime("%Y-%m-%d")
+        manual_window = [
+            slip for slip in manual
+            if window_start <= str(slip.get("date") or "") <= yesterday
+        ]
+        manual_yesterday = [
+            slip for slip in manual_window
+            if slip.get("date") == yesterday
+        ]
+        manual_record = {
+            "won": sum(slip.get("status") == "won" for slip in manual_window),
+            "lost": sum(slip.get("status") == "lost" for slip in manual_window),
+            "void": sum(slip.get("status") == "void" for slip in manual_window),
+            "pending": sum(slip.get("status") == "pending" for slip in manual_window),
+        }
+        manual_record["settled"] = manual_record["won"] + manual_record["lost"]
+        manual_record["win_rate"] = (
+            round(manual_record["won"] / manual_record["settled"], 4)
+            if manual_record["settled"] else None
+        )
+
         # Pick-level performance remains separate.
         summary = performance_summary(
             limit_days=days,
@@ -371,11 +397,12 @@ def _recent_results(days: int = 7) -> dict:
                 )
                 if (
                     row.get("date") == yesterday
-                    and row.get("status")
-                    in (
-                        "won",
-                        "lost",
-                        "void",
+                    and row.get("status") in ("won", "lost", "void")
+                    # Manual rollover is already in manual_yesterday; don't
+                    # mislabel or duplicate it in the official results list.
+                    and not any(
+                        pick.get("editorial_manual")
+                        for pick in (row.get("picks") or [])
                     )
                 )
             ]
@@ -477,6 +504,8 @@ def _recent_results(days: int = 7) -> dict:
 
             "rollover_settled":
                 rollover_settled,
+            "manual_yesterday": manual_yesterday,
+            "manual_record": manual_record,
 
             "by_category":
                 summary,
@@ -506,6 +535,11 @@ def _recent_results(days: int = 7) -> dict:
             },
             "slips_settled": [],
             "rollover_settled": [],
+            "manual_yesterday": [],
+            "manual_record": {
+                "won": 0, "lost": 0, "void": 0, "pending": 0,
+                "settled": 0, "win_rate": None,
+            },
             "by_category": {},
         }
 
