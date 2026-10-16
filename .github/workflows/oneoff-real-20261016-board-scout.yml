@@ -1,0 +1,59 @@
+name: Oct 16 real football SportyBet board inspection
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  scan:
+    if: github.head_ref == 'ops/oct16-friday-sportybet-board-research'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimum dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Scan real Friday fixtures and full supported market prices (read-only)
+        env:
+          DATABASE_URL: sqlite:///./oct16_scout.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone, timedelta
+          from leagues import sportybet
+          board=None
+          for i in range(3):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("BOARD_ATTEMPT="+json.dumps(meta,ensure_ascii=False,default=str))
+              if meta.get("is_complete") is True:break
+          if meta.get("is_complete") is not True:
+              print("INCOMPLETE_BOARD_DO_NOT_BOOK")
+              raise SystemExit(0)
+          local_tz=timezone(timedelta(hours=1))
+          today=[];comps={}
+          for _,e in sportybet._board_entries(board):
+              raw=e.get("kickoff_ms")
+              if raw is None:continue
+              try:local=datetime.fromtimestamp(int(raw)/1000,timezone.utc).astimezone(local_tz)
+              except:continue
+              if local.date().isoformat()!="2026-10-16":continue
+              c=str(e.get("competition") or "")
+              name=str(e.get("home_team") or "")+" "+str(e.get("away_team") or "")
+              if any(s in (c+" "+name).lower() for s in (" srl","simulated","esoccer","e-soccer","virtual","cyber","esport"," efootball","u19","u20","u21","u23","women","ladies"," reserve")):continue
+              pr=e.get("prices") or {}
+              p={k:pr[k] for k in ("home_win","away_win","home_or_draw","away_or_draw","over_1_5","over_2_5","over_3_5","btts_yes","dnb_home","dnb_away") if k in pr}
+              if not p:continue
+              obj=dict(h=e.get("home_team"),a=e.get("away_team"),comp=c,k=local.strftime("%H:%M"),event=e.get("event_id"),p=p)
+              today.append(obj);comps[c]=comps.get(c,0)+1
+          print("REAL_FRIDAY_COUNTS="+json.dumps(dict(total=len(today),competitions=comps),ensure_ascii=False))
+          today.sort(key=lambda r:(r["k"],r["comp"],r["h"]))
+          for x in today:
+              print("REAL_FRIDAY_GAME="+json.dumps(x,ensure_ascii=False))
+          PY
