@@ -19,6 +19,7 @@ jobs:
           import urllib.error
           from datetime import datetime,timezone
           base="https://betsightly-api.onrender.com/api/leagues"
+          score_ids=set()
           for name,path in [
             ("LIVE", "/live-scores"),
             ("CARD", "/daily-accumulators"),
@@ -33,6 +34,7 @@ jobs:
               print(name,"http",status,"status",data.get("status"),flush=True)
               if name=="LIVE":
                 scores=data.get("scores") or {}
+                score_ids=set(scores)
                 print("LIVE_META","scores",len(scores),"tracked",data.get("tracked_fixtures"),
                       "stale",data.get("stale"),"refreshing",data.get("refreshing"),
                       "fetched_at",data.get("fetched_at"),
@@ -48,6 +50,32 @@ jobs:
                     counts[name]=len(matches)
                     ids.update(str(g.get("match_id")) for g in matches if isinstance(g,dict) and g.get("match_id"))
                 print("CARD_META","date",data.get("date"),"tiers",counts,"unique_match_ids",len(ids),flush=True)
+                games={}
+                for tier in (data.get("accumulators") or {}).values():
+                  if not isinstance(tier,dict): continue
+                  for g in tier.get("games") or []:
+                    if isinstance(g,dict) and g.get("match_id"):
+                      games.setdefault(str(g["match_id"]),g)
+                now=datetime.now(timezone.utc)
+                started=set()
+                future=set()
+                unknown=set()
+                for match_id,g in games.items():
+                  raw=g.get("kickoff") or g.get("commence_time") or g.get("date")
+                  try:
+                    kick=datetime.fromisoformat(str(raw).replace("Z","+00:00"))
+                    if kick.tzinfo is None:
+                      unknown.add(match_id)
+                    elif kick.astimezone(timezone.utc)<=now:
+                      started.add(match_id)
+                    else:
+                      future.add(match_id)
+                  except (ValueError,TypeError):
+                    unknown.add(match_id)
+                print("CARD_TIMING","started",len(started),
+                      "started_with_score",len(started&score_ids),
+                      "future",len(future),"future_with_score",len(future&score_ids),
+                      "unknown_start",len(unknown),flush=True)
             except urllib.error.HTTPError as exc:
               print(name,"http",exc.code,"reason",exc.reason,flush=True)
             except Exception as exc:
