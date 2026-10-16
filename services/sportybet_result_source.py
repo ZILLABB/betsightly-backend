@@ -205,7 +205,7 @@ def observe(picks: list[dict], verified: dict) -> dict:
         return health()
     now = time.monotonic()
     with _LOCK:
-        if now - _LAST_FETCH < _INTERVAL:
+        if _LAST_FETCH and now - _LAST_FETCH < _INTERVAL:
             return dict(_HEALTH)
         _LAST_FETCH = now
     dates = sorted({str(p.get("commence_time") or p.get("kickoff") or
