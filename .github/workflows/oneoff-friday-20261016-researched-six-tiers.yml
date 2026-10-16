@@ -1,0 +1,120 @@
+name: One-off Oct16 six category exact bookmaker readback
+on:
+  pull_request:
+    branches: [devil]
+    types: [synchronize, opened]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.head_ref == 'ops/oct16-friday-sportybet-board-research'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimal dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Verify non-overlapping researched fixtures against fresh SportyBet board
+        env:
+          DATABASE_URL: sqlite:///./oct16_curated_codes.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from math import prod
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest, generate_curated_booking
+          def leg(home,away,league,kickoff,market):
+              return dict(home_team=home,away_team=away,league=league,
+                          kickoff="2026-10-16T"+kickoff+":00+01:00",market=market)
+          picks={
+              "BANKER":[
+                  leg("IF Brommapojkarna","Djurgardens IF","Allsvenskan","18:00","away_or_draw")],
+              "TWO_ODDS":[
+                  leg("Al Qadsiah","Abha Club","Saudi Pro League","14:15","home_win"),
+                  leg("Eintracht Frankfurt","Cologne","Bundesliga","19:30","over_1_5"),
+                  leg("SC Heerenveen","Excelsior Rotterdam","Eredivisie","19:00","over_1_5"),
+                  leg("Frosinone","Sassuolo","Serie A","19:45","over_1_5"),
+                  leg("Leganes","Cordoba CF","LaLiga 2","19:30","over_1_5"),
+                  leg("Energie Cottbus","1 FC Nuremberg","2. Bundesliga","17:30","over_1_5")],
+              "FIVE_ODDS":[
+                  leg("Le Mans FC","Toulouse","Ligue 1","19:45","over_1_5"),
+                  leg("Burnley","Wolves","Championship","20:00","over_1_5"),
+                  leg("Hellas Verona","US Catanzaro","Serie B","19:30","over_1_5"),
+                  leg("FC Den Bosch","TOP Oss","Eerste Divisie","19:00","over_1_5"),
+                  leg("FC Eindhoven","Vitesse Arnhem","Eerste Divisie","19:00","over_1_5"),
+                  leg("Aarhus Fremad","Esbjerg FB","1. Division","18:00","over_1_5"),
+                  leg("HB Koege","AB Gladsaxe","1. Division","18:00","over_1_5"),
+                  leg("Kolding IF","Vendsyssel FF","1. Division","18:00","over_1_5"),
+                  leg("Al Ahli Doha SC","AL Wakrah SC","Stars League","15:30","over_1_5"),
+                  leg("FC Dinamo Bucuresti 1948","FC Botosani","Superliga","19:00","over_1_5")],
+              "TEN_ODDS":[
+                  leg("SK Rapid","TSV Hartberg","Bundesliga","18:30","over_1_5"),
+                  leg("Reims","Dijon","Ligue 2","19:00","over_1_5"),
+                  leg("EA Guingamp","Pau FC","Ligue 2","19:00","over_1_5"),
+                  leg("Helmond Sport","NAC Breda","Eerste Divisie","19:00","away_or_draw"),
+                  leg("SKN St Polten","Rapid Wien II","2. Liga","17:30","over_1_5"),
+                  leg("Al Shahaniya","Al Arabi Doha SC","Stars League","17:45","over_1_5"),
+                  leg("Ayr United FC","Partick Thistle FC","Championship","19:30","over_1_5"),
+                  leg("GD Chaves","Os Marialvas","Taca de Portugal","20:00","over_1_5"),
+                  leg("Sporting Club Delhi","Mohun Bagan Super Giant","Indian Super League","15:00","away_or_draw"),
+                  leg("Tanjong Pagar United FC","Hougang United FC","Premier League","12:30","over_1_5"),
+                  leg("Corum FK","Caykur Rizespor","Super Lig","18:00","over_1_5"),
+                  leg("FC Rapperswil-Jona","FC St. Gallen 1879","Schweizer Cup","19:00","away_or_draw"),
+                  leg("FC Stade Nyonnais","Basel","Schweizer Cup","19:15","away_win"),
+                  leg("Stade Lavallois MFC","Clermont Foot","Ligue 2","19:00","over_1_5"),
+                  leg("Holstein Kiel","Hertha","2. Bundesliga","17:30","over_1_5")],
+              "MIXED_OVER_GOALS":[
+                  leg("Sydney FC","Western Sydney Wanderers","A-League","10:00","over_1_5"),
+                  leg("VVV Venlo","Jong AZ Alkmaar","Eerste Divisie","19:00","over_2_5"),
+                  leg("Baniyas Club","Al Wasl FC","Arabian Gulf League","16:45","over_2_5"),
+                  leg("Al Ittifaq BHR","Manama Club","Premier League","17:00","over_1_5"),
+                  leg("IBV Vestmannaeyjar","FH Hafnarfjordur","Besta deild","18:00","over_2_5")],
+              "ROLLOVER_PROVISIONAL_NOT_PUBLISH":[
+                  leg("NK Rudes Zagreb","HNK Rijeka","HNL","17:00","away_win"),
+                  leg("AC Horsens","Randers FC","Superliga","18:00","over_1_5"),
+                  leg("Stade Lausanne Ouchy","Etoile Carouge FC","Schweizer Cup","18:00","over_1_5"),
+                  leg("IFK Stocksund","Enkopings SK","Ettan","18:30","over_1_5")],
+          }
+          all_legs=[(x["home_team"].casefold(),x["away_team"].casefold()) for v in picks.values() for x in v]
+          assert len(all_legs)==len(set(all_legs)),"one fixture reused across tiers"
+          assert len(picks["TEN_ODDS"])<=20
+          floors={"BANKER":1.01,"TWO_ODDS":2.0,"FIVE_ODDS":5.0,"TEN_ODDS":10.0,
+                  "MIXED_OVER_GOALS":1.01,"ROLLOVER_PROVISIONAL_NOT_PUBLISH":2.0}
+          for attempt in range(1,4):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("BOARD_ATTEMPT_"+str(attempt)+"="+json.dumps(meta,ensure_ascii=False))
+              if meta.get("is_complete") is True:break
+          if meta.get("is_complete") is not True:
+              print("STOP_NO_COMPLETE_BOOKMAKER_BOARD")
+              raise SystemExit(0)
+          sportybet.fetch_board=lambda force=False,**kwargs:board
+          for name,legs in picks.items():
+              try:
+                  result=generate_curated_booking(CuratedBookingRequest(legs=legs))
+                  if result.get("status")!="success":
+                      print(name+"_UNAVAILABLE="+json.dumps({
+                          k:result.get(k) for k in ("reason","requested_legs","failures")
+                      },ensure_ascii=False));continue
+                  odds=result.get("actual_sportybet_odds")
+                  if odds is None:
+                      prices=[s.get("sportybet_odds") for s in result["selections"]]
+                      odds=prod(float(p) for p in prices) if len(prices)==len(legs) and all(prices) else None
+                  if (odds is None or float(odds)<floors[name]
+                      or (name=="ROLLOVER_PROVISIONAL_NOT_PUBLISH" and float(odds)>4)):
+                      print(name+"_WITHHELD_TARGET_OR_PRICE="+str(odds));continue
+                  if result.get("readback_validation")!="PASSED" or result.get("legs")!=len(legs):
+                      print(name+"_WITHHELD_READBACK_OR_MISSING_LEGS");continue
+                  print(name+"_VERIFIED_CODE="+str(result["share_code"]))
+                  print(name+"_VERIFIED_ODDS="+str(odds))
+                  print(name+"_PRICE_SOURCE="+str(result.get("odds_source")))
+                  print(name+"_VERIFIED_SELECTIONS="+json.dumps(result["selections"],ensure_ascii=False))
+                  print(name+"_VERIFIED_EXPIRES="+str(result.get("expires_at")))
+              except Exception as exc:
+                  print(name+"_ERROR="+type(exc).__name__+": "+str(exc)[:300])
+          PY
