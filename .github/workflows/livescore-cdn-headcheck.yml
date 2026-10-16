@@ -50,3 +50,42 @@ jobs:
               print(label, "dns="+dns, "http="+str(status),
                     "content_type="+content_type[:80],flush=True)
           PY
+      - name: Inspect JSON shape only once and discard all match data
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error
+          paths = {
+              "new-v1-live": "https://prod-cdn-mev-api.livescore.com/v1/api/app/live/soccer/1?countryCode=NG&locale=en",
+              "new-v2-date": "https://prod-cdn-mev-api.lsmedia1.com/api/v2/date/soccer/20261016/0?direction=up&locale=en&paging=false",
+              "old-v1-date": "https://prod-cdn-public-api.livescore.com/v1/api/app/date/soccer/20261016/0",
+          }
+          # One-time schema smoke test. No retries, no crawling, no match
+          # values or team names printed/persisted, no settlement actions.
+          for label,url in paths.items():
+              try:
+                  with urllib.request.urlopen(url, timeout=12) as response:
+                      http=response.status
+                      raw=response.read(6_000_001)
+                      if len(raw)>6_000_000: raise ValueError("over_6mb")
+                      body=json.loads(raw)
+                  stages=body.get("Stages") if isinstance(body,dict) else None
+                  sections=body.get("Sctns") if isinstance(body,dict) else None
+                  print(label, "http="+str(http),
+                        "top_keys="+repr(sorted(body.keys())[:16]) if isinstance(body,dict) else "unexpected_top",
+                        "stages="+str(len(stages) if isinstance(stages,list) else "missing"),
+                        "sections="+str(len(sections) if isinstance(sections,list) else "missing"),
+                        flush=True)
+                  if isinstance(stages,list) and stages:
+                      group=stages[0] if isinstance(stages[0],dict) else {}
+                      events=group.get("Events")
+                      print(label,"stage_keys="+repr(sorted(group.keys())[:35]),
+                            "events_in_first_stage="+str(len(events) if isinstance(events,list) else "missing"),
+                            "event_keys="+repr(sorted(events[0].keys())[:35]) if isinstance(events,list) and events and isinstance(events[0],dict) else "empty",flush=True)
+                  if isinstance(sections,list) and sections:
+                      first=sections[0] if isinstance(sections[0],dict) else {}
+                      print(label,"section_keys="+repr(sorted(first.keys())[:35]),flush=True)
+              except Exception as exc:
+                  print(label, "result="+type(exc).__name__,
+                        "http="+str(getattr(exc,"code","unknown")),flush=True)
+          PY
