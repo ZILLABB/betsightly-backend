@@ -5,16 +5,15 @@ must be supported by a federation or club match report, not by a prediction or
 a bookmaker's live odds. Keep the source URL in each persisted settlement.
 Do not apply these records to an event merely because its teams look similar.
 
-This recovery covers 14 October 2026; it is not a substitute for adding wider
-first-party score-provider coverage.
+This recovery covers verified fixtures on 14 and 15 October 2026; it is not
+a substitute for adding wider first-party score-provider coverage.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-# Exact SportyBet IDs are from the immutable 2026-10-14 Rollover Day 1 receipt.
-# Sources independently confirm the 90-minute full-time scores:
-# AFC for the two Asian matches, and Bohemians' own match report.
+# Exact SportyBet IDs are from the immutable 14/15 October Rollover receipts.
+# Each source independently confirms the 90-minute full-time score.
 _VERIFIED_FINALS = (
     {
         "sportybet_event_id": "sr:match:73835212",
@@ -33,6 +32,27 @@ _VERIFIED_FINALS = (
         "home": "AL Faisaly (Jor)", "away": "Al Nahda",
         "date": "2026-10-14", "home_score": 2, "away_score": 0,
         "evidence_url": "https://www.the-afc.com/en/club/afc_champions_league_two.html/news/group-c-al-faisaly-jor-x-x-al-nahda-oma-1",
+    },
+    # Official club match reports for UEFA Conference League round 1,
+    # Thursday 15 October 2026. SportyBet IDs and kickoff dates are taken
+    # from the *already published* Rollover Day 1 record.
+    {
+        "sportybet_event_id": "sr:match:74173148",
+        "home": "Gent", "away": "AGF Aarhus",
+        "date": "2026-10-15", "home_score": 1, "away_score": 0,
+        "evidence_url": "https://www.kaagent.be/nl/nieuws/15-10-2026/te-lang-gewacht-om-onszelf-te-belonen",
+    },
+    {
+        "sportybet_event_id": "sr:match:74173204",
+        "home": "Freiburg", "away": "FK Jablonec",
+        "date": "2026-10-15", "home_score": 3, "away_score": 2,
+        "evidence_url": "https://www.scfreiburg.com/en/latest/first-team/match-reports/2026-27/sc-make-winning-start-to-league-phase/",
+    },
+    {
+        "sportybet_event_id": "sr:match:74173182",
+        "home": "Brighton", "away": "FK Kauno Zalgiris",
+        "date": "2026-10-15", "home_score": 4, "away_score": 0,
+        "evidence_url": "https://www.uefa.com/uefaconferenceleague/clubs/2605907/matches/",
     },
 )
 
