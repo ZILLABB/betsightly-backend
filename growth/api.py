@@ -99,6 +99,40 @@ def publish_manual_tier(body: ManualTierRequest):
         raise HTTPException(422, str(exc))
 
 
+@public_router.get("/homepage-campaign")
+def homepage_campaign_public():
+    """One approved, currently dated website-hero message, or null."""
+    from growth.home_campaign import current_campaign
+    from growth.models import get_setting
+    return {"status": "success",
+            "campaign": current_campaign(get_setting("home_campaign"))}
+
+
+@router.get("/homepage-campaign", dependencies=[Depends(require_admin)])
+def homepage_campaign_admin():
+    from growth.models import get_setting
+    from growth.home_campaign import validate_campaign, DEFAULT_CAMPAIGN
+    stored = get_setting("home_campaign")
+    try:
+        campaign = validate_campaign(stored)
+    except ValueError:
+        campaign = DEFAULT_CAMPAIGN
+    return {"status": "success", "campaign": campaign}
+
+
+@router.post("/homepage-campaign", dependencies=[Depends(require_admin)])
+def save_homepage_campaign(payload: dict = Body(...)):
+    from growth.home_campaign import validate_campaign
+    from growth.models import set_setting
+    try:
+        campaign = validate_campaign(payload)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if not set_setting("home_campaign", campaign):
+        raise HTTPException(503, "Unable to save campaign configuration.")
+    return {"status": "success", "campaign": campaign}
+
+
 @public_router.get("/editorial-results")
 def public_editorial_results(limit: int = Query(30, ge=1, le=90)):
     """Separate manual slip results, never official engine analytics."""
@@ -427,6 +461,8 @@ async def growth_set_settings(admin: str = Depends(require_admin),
     if unknown:
         raise HTTPException(400, f"Unknown setting(s): {', '.join(unknown)}")
 
+    if "home_campaign" in payload:
+        raise HTTPException(400, "Use the dedicated homepage-campaign editor.")
     for key, value in payload.items():
         set_setting(key, value)
     return {"status": "success", "settings": all_settings()}
