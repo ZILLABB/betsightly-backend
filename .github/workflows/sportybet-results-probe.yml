@@ -1,0 +1,27 @@
+name: SportyBet results source smoke (read-only)
+
+on:
+  pull_request:
+    branches: [devil]
+    paths:
+      - 'services/sportybet_result_source.py'
+      - 'scripts/probe_sportybet_results.py'
+      - '.github/workflows/sportybet-results-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimal HTTP client
+        run: pip install requests
+      - name: Probe SportyBet public football results once (not settlement)
+        run: python scripts/probe_sportybet_results.py
