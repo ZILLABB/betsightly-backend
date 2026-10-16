@@ -25,7 +25,7 @@ jobs:
       - name: Install test-only requirements
         run: pip install requests pytest
       - name: Verify shadow-only matching and fail-closed cases
-        run: python -m pytest -q tests/test_sportybet_result_source.py
+        run: python -m pytest --noconftest -q tests/test_sportybet_result_source.py
       - name: Manual-only public endpoint probe (never automatic)
         if: github.event_name == 'workflow_dispatch'
         run: python scripts/probe_sportybet_results.py
