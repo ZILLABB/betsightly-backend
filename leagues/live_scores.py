@@ -184,7 +184,7 @@ def overlay_sportybet_live(verified_scores: dict, games: list[dict],
     return merged, accepted
 
 
-def scores_for_card() -> dict:
+def _uncached_scores_for_card() -> dict:
     """Scores for every fixture on today's card.
 
     Dates come from the card's own fixtures, not from the clock. Fetching
@@ -257,6 +257,7 @@ def scores_for_card() -> dict:
                            type(exc).__name__)
 
         return {
+            "published_match_ids": sorted(ids),
             "sportybet_source": sporty_status,
             "sportybet_live_matched": sporty_matched,
             "tracked_fixtures": len(ids),
@@ -268,3 +269,15 @@ def scores_for_card() -> dict:
     except Exception as e:
         logger.warning(f"live scores unavailable: {e}")
         return {"scores": {}, "leagues": [], "dates": [], "error": str(e)}
+
+
+# Memory + best-effort disk snapshot anchored at the repository root.
+# The UI can remain populated when an upstream score service is unavailable.
+from leagues.live_snapshot_cache import LiveScoreSnapshot
+
+_LIVE_SCORE_CACHE = LiveScoreSnapshot(ttl_seconds=25)
+
+
+def scores_for_card() -> dict:
+    """Stale-safe public scoreboard; not a source of official settlement."""
+    return _LIVE_SCORE_CACHE.get(_uncached_scores_for_card)
