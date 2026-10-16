@@ -1,0 +1,79 @@
+name: One-off October 16 exactly ten goal markets share-code validation
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  verify-ten-overs:
+    if: github.head_ref == 'ops/oct16-expanded-market-review-ten-overs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimal booking dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Complete exact bookmaker readback on a full ten-goals ticket
+        env:
+          DATABASE_URL: sqlite:///./oct16_exact_ten_goal_ticket.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from math import prod
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest,generate_curated_booking
+          def leg(h,a,league,t,market):
+              return dict(home_team=h,away_team=a,league=league,
+                  kickoff="2026-10-16T"+t+":00+01:00",market=market)
+          legs=[
+              leg("Sydney FC","Western Sydney Wanderers","A-League","10:00","over_1_5"),
+              leg("VVV Venlo","Jong AZ Alkmaar","Eerste Divisie","19:00","over_2_5"),
+              leg("Baniyas Club","Al Wasl FC","Arabian Gulf League","16:45","over_1_5"),
+              leg("Al Ittifaq BHR","Manama Club","Premier League","17:00","over_1_5"),
+              leg("IBV Vestmannaeyjar","FH Hafnarfjordur","Besta deild","18:00","over_1_5"),
+              leg("Malut United","Bali United FC","Super League","13:00","over_1_5"),
+              leg("FC Vlasim","SK Hanacka Slavia Kromeriz","FNL","16:00","over_1_5"),
+              leg("FC Banik Ostrava B","SK Slavia Prague B","FNL","14:00","over_1_5"),
+              leg("IFK Stocksund","Enkopings SK","Ettan","18:30","over_1_5"),
+              leg("NK Rudes Zagreb","HNK Rijeka","HNL","17:00","over_1_5"),
+          ]
+          assert len(legs)==10 and len(set((x["home_team"],x["away_team"]) for x in legs))==10
+          assert all(x["market"].startswith("over_") for x in legs)
+          board=None
+          for attempt in range(1,4):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("BOARD_ATTEMPT_"+str(attempt)+"="+json.dumps(meta,ensure_ascii=False))
+              if meta.get("is_complete"):break
+          if not meta.get("is_complete"):
+              print("WITHHELD_BOARD_INCOMPLETE")
+              raise SystemExit(0)
+          sportybet.fetch_board=lambda force=False, **kwargs:board
+          try:
+              result=generate_curated_booking(CuratedBookingRequest(legs=legs))
+              if result.get("status")!="success":
+                  print("WITHHELD_CANNOT_BOOK="+json.dumps({k:result.get(k) for k in
+                         ("reason","requested_legs","failures")},ensure_ascii=False))
+                  raise SystemExit(0)
+              if result.get("readback_validation")!="PASSED" or result.get("legs")!=10:
+                  print("WITHHELD_INCOMPLETE_READBACK")
+                  raise SystemExit(0)
+              prices=[p.get("sportybet_odds") for p in result["selections"]]
+              odds=prod(float(x) for x in prices) if len(prices)==10 and all(prices) else None
+              if odds is None: 
+                  print("WITHHELD_UNPRICED")
+                  raise SystemExit(0)
+              print("EXACT_TEN_CODE="+str(result["share_code"]))
+              print("EXACT_TEN_LIVE_BOARD_ODDS="+str(round(odds,4)))
+              print("EXACT_TEN_READBACK="+str(result["readback_validation"]))
+              print("EXACT_TEN_SELECTIONS="+json.dumps(result["selections"],ensure_ascii=False))
+              print("EXACT_TEN_SNAPSHOT="+str(result.get("board_snapshot_id")))
+          except Exception as exc:
+              print("VERIFICATION_ERROR="+type(exc).__name__+": "+str(exc)[:200])
+          PY
