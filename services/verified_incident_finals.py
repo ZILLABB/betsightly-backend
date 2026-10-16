@@ -5,16 +5,15 @@ must be supported by a federation or club match report, not by a prediction or
 a bookmaker's live odds. Keep the source URL in each persisted settlement.
 Do not apply these records to an event merely because its teams look similar.
 
-This recovery covers 14 October 2026; it is not a substitute for adding wider
-first-party score-provider coverage.
+This recovery covers verified fixtures on 14 and 15 October 2026; it is not
+a substitute for adding wider first-party score-provider coverage.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-# Exact SportyBet IDs are from the immutable 2026-10-14 Rollover Day 1 receipt.
-# Sources independently confirm the 90-minute full-time scores:
-# AFC for the two Asian matches, and Bohemians' own match report.
+# Exact SportyBet IDs are from the immutable 14/15 October Rollover receipts.
+# Each source independently confirms the 90-minute full-time score.
 _VERIFIED_FINALS = (
     {
         "sportybet_event_id": "sr:match:73835212",
