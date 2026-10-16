@@ -1,0 +1,52 @@
+name: One-off LiveScore CDN connectivity (headers only)
+
+on:
+  pull_request:
+    branches: [devil]
+    paths:
+      - '.github/workflows/livescore-cdn-headcheck.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Test four documented LiveScore CDN paths using HEAD only
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.error
+          import urllib.request
+          import socket
+          paths = {
+              "new-v1-live": "https://prod-cdn-mev-api.livescore.com/v1/api/app/live/soccer/1?countryCode=NG&locale=en",
+              "new-v2-date": "https://prod-cdn-mev-api.lsmedia1.com/api/v2/date/soccer/20261016/0?direction=up&locale=en&paging=false",
+              "old-v1-date": "https://prod-cdn-public-api.livescore.com/v1/api/app/date/soccer/20261016/0",
+              "legacy-react-live": "https://prod-public-api.livescore.com/v1/api/react/live/soccer/0.00?MD=1",
+          }
+          # Connectivity and status-only. No GET, no fixture data or body
+          # downloads, no cookies, proxies, spoofed headers, auth or retries.
+          for label,url in paths.items():
+              hostname=urllib.request.urlparse(url).hostname
+              try:
+                  address=socket.getaddrinfo(hostname,443)[0][4][0]
+                  dns="ok"
+              except Exception as exc:
+                  dns=type(exc).__name__
+              try:
+                  request=urllib.request.Request(url,method="HEAD")
+                  with urllib.request.urlopen(request,timeout=8) as response:
+                      status=response.status
+                      content_type=response.headers.get("Content-Type","")
+              except urllib.error.HTTPError as exc:
+                  status=exc.code
+                  content_type=exc.headers.get("Content-Type","") if exc.headers else ""
+              except Exception as exc:
+                  status=type(exc).__name__
+                  content_type=""
+              print(label, "dns="+dns, "http="+str(status),
+                    "content_type="+content_type[:80],flush=True)
+          PY
