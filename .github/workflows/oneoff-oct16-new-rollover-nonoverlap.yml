@@ -1,0 +1,94 @@
+name: One-off 16 Oct replacement rollover with entirely new fixtures
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.head_ref == 'ops/oct16-disjoint-rollover-rebook-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Fresh SportyBet board, no overlapping games, all-or-nothing code readback
+        env:
+          DATABASE_URL: sqlite:///./oct16_rollover_replacement_v2.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from math import prod
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest,generate_curated_booking
+          def leg(home,away,league,time,market):
+              return dict(home_team=home,away_team=away,league=league,
+                kickoff="2026-10-16T"+time+":00+01:00",market=market)
+          legs=[
+              leg("MFK Karvina","Dukla Prague","FNL","16:30","over_1_5"),
+              leg("SFC Opava","FC Vysocina Jihlava","FNL","17:00","over_1_5"),
+              leg("FC Cartagena","CE Europa","Primera Federacion","18:00","over_1_5"),
+              leg("Widzew Lodz","Wisla Krakow","Ekstraklasa","19:30","over_1_5"),
+          ]
+          # All 2026-10-16 Banker, Two, Five, Ten, Mixed Over, and former
+          # provisional Rollover fixture names. The replacement must have
+          # zero cross-tier fixture overlap.
+          occupied=[
+              "IF Brommapojkarna","Al Qadsiah","Eintracht Frankfurt",
+              "SC Heerenveen","Frosinone","Leganes","Energie Cottbus",
+              "Le Mans FC","Burnley","Hellas Verona","FC Den Bosch",
+              "FC Eindhoven","Aarhus Fremad","HB Koege","Kolding IF",
+              "Al Ahli Doha SC","FC Dinamo Bucuresti 1948",
+              "SK Rapid","Reims","EA Guingamp","Helmond Sport",
+              "SKN St Polten","Al Shahaniya","Ayr United FC","GD Chaves",
+              "Sporting Club Delhi","Tanjong Pagar United FC","Corum FK",
+              "FC Rapperswil-Jona","FC Stade Nyonnais",
+              "Stade Lavallois MFC","Holstein Kiel","Sydney FC",
+              "VVV Venlo","Baniyas Club","Al Ittifaq BHR",
+              "IBV Vestmannaeyjar","Malut United","FC Vlasim",
+              "FC Banik Ostrava B","IFK Stocksund","NK Rudes Zagreb",
+              "AC Horsens","Stade Lausanne Ouchy",
+          ]
+          assert len(legs)==4 and len({(l["home_team"],l["away_team"]) for l in legs})==4
+          assert not set(l["home_team"].lower() for l in legs)&set(x.lower() for x in occupied)
+          for attempt in range(1,4):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("FULL_BOARD_ATTEMPT_"+str(attempt)+"="+json.dumps(meta,ensure_ascii=False))
+              if meta.get("is_complete") is True:break
+          if meta.get("is_complete") is not True:
+              print("REPLACEMENT_WITHHELD_INCOMPLETE_BOARD")
+              raise SystemExit(0)
+          sportybet.fetch_board=lambda force=False,**kwargs:board
+          try:
+              result=generate_curated_booking(CuratedBookingRequest(legs=legs))
+              if result.get("status")!="success":
+                  print("REPLACEMENT_UNAVAILABLE="+json.dumps({
+                    k:result.get(k) for k in ("reason","requested_legs","failures")
+                  },ensure_ascii=False))
+                  raise SystemExit(0)
+              if result.get("legs")!=len(legs) or result.get("readback_validation")!="PASSED":
+                  print("REPLACEMENT_WITHHELD_READBACK");raise SystemExit(0)
+              prices=[x.get("sportybet_odds") for x in result["selections"]]
+              odds=result.get("actual_sportybet_odds")
+              if odds is None and len(prices)==4 and all(prices):
+                  odds=prod(float(x) for x in prices)
+              if odds is None or not 2.0 <= float(odds) <= 4.0:
+                  print("REPLACEMENT_WITHHELD_OUT_OF_RANGE_ODDS="+str(odds))
+                  raise SystemExit(0)
+              print("ROLLOVER_REBOOK_VERIFIED_CODE="+str(result["share_code"]))
+              print("ROLLOVER_REBOOK_VERIFIED_ODDS="+str(odds))
+              print("ROLLOVER_REBOOK_PRICE_SOURCE="+str(result.get("odds_source")))
+              print("ROLLOVER_REBOOK_READBACK="+str(result["readback_validation"]))
+              print("ROLLOVER_REBOOK_SELECTIONS="+json.dumps(result["selections"],ensure_ascii=False))
+              print("ROLLOVER_REBOOK_SNAPSHOT="+str(result.get("board_snapshot_id")))
+          except Exception as exc:
+              print("ROLLOVER_REBOOK_ERROR="+type(exc).__name__+": "+str(exc)[:250])
+          PY
