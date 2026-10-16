@@ -299,6 +299,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "rollover": "07:35",
         "results": "21:00",
     },
+    # Admin-curated website spotlight. Separate from automated social content,
+    # publication and model performance records.
+    "home_campaign": {
+        "enabled": False, "reviewed": False, "eyebrow": "",
+        "headline": "", "description": "", "cta_text": "View predictions",
+        "cta_path": "/predictions", "starts_on": "", "ends_on": "",
+        "source_url": "",
+    },
     "default_landing": "predictions",
     "max_retries": 3,
     "retry_base_seconds": 60,
