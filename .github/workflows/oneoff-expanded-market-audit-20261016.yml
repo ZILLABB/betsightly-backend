@@ -1,0 +1,69 @@
+name: One-off expanded goals market audit October 16
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  market-scan:
+    if: github.head_ref == 'ops/oct16-expanded-market-review-ten-overs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Inspect live prices and supported alternative outcomes for target fixtures
+        env:
+          DATABASE_URL: sqlite:///./oct16_market_scan.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime,timezone,timedelta
+          from leagues import sportybet
+          from leagues.market_registry import MARKETS
+          targets=[
+              "Sydney FC", "VVV Venlo", "Baniyas Club", "Al Ittifaq BHR",
+              "IBV Vestmannaeyjar", "Eintracht Frankfurt","SC Heerenveen",
+              "Energie Cottbus","Holstein Kiel","FC Den Bosch","FC Eindhoven",
+              "Al Ahli Doha", "Malut United","Frosinone","Al Qadsiah",
+              "Tanjong Pagar","SK Rapid", "Al Shahaniya", "FC Twente",
+              "FC Vlasim", "FC Banik Ostrava B", "SKN St Polten",
+              "FC Dinamo Bucuresti 1948","Le Mans FC","Bournemouth",
+              "IF Brommapojkarna","Burnley","Lyon"
+          ]
+          for attempt in range(3):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("BOOKMAKER_BOARD_ATTEMPT="+str(attempt+1)+" "+json.dumps(meta))
+              if meta.get("is_complete"):break
+          if not meta.get("is_complete"):
+              print("NO_VALID_BOARD");raise SystemExit(0)
+          local=timezone(timedelta(hours=1))
+          scan=[]
+          for _,e in sportybet._board_entries(board):
+              name=e.get("home_team") or ""
+              if not any(name.lower()==x.lower() for x in targets): continue
+              t=datetime.fromtimestamp(int(e.get("kickoff_ms") or 0)/1000,timezone.utc).astimezone(local)
+              if str(t.date())!="2026-10-16":continue
+              if "srl" in (name+" "+str(e.get("away_team"))).lower():continue
+              prices=e.get("prices") or {}
+              nonunder={k:v for k,v in prices.items() if not k.startswith("under") and "_under_" not in k
+                 and k in ("home_win","away_win","home_or_draw","away_or_draw","home_or_away",
+                      "dnb_home","dnb_away","over_0_5","over_1_5","over_2_5","over_3_5",
+                      "home_over_0_5","home_over_1_5","away_over_0_5","away_over_1_5","btts_yes")}
+              scan.append(dict(home=name,away=e.get("away_team"),league=e.get("competition"),
+                           kickoff_wat=t.strftime("%H:%M"),event_id=e.get("event_id"),markets=nonunder))
+          for e in sorted(scan,key=lambda r:r["home"]):
+              print("CANDIDATE_MARKETS="+json.dumps(e,ensure_ascii=False))
+          print("MARKET_ACTIVATION="+json.dumps({
+              k:dict(active=v.activation,booking=v.booking,public=v.public_policy,market_id=v.sportybet)
+              for k,v in MARKETS.items() if k in ["over_0_5","home_over_0_5","home_over_1_5",
+                  "away_over_0_5","away_over_1_5","btts_yes","home_or_away","over_3_5","over_2_5"]}))
+          PY
