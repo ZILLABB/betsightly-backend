@@ -204,7 +204,9 @@ def _uncached_scores_for_card() -> dict:
             allow_generation=False
         )
         if not card:
-            return {"scores": {}, "leagues": [], "dates": []}
+            return {"scores": {}, "leagues": [], "dates": [],
+                    "published_match_ids": [],
+                    "fetched_at": datetime.now(timezone.utc).isoformat()}
 
         slugs: set[str] = set()
         ids: set[str] = set()
@@ -280,4 +282,11 @@ _LIVE_SCORE_CACHE = LiveScoreSnapshot(ttl_seconds=25)
 
 def scores_for_card() -> dict:
     """Stale-safe public scoreboard; not a source of official settlement."""
-    return _LIVE_SCORE_CACHE.get(_uncached_scores_for_card)
+    response = _LIVE_SCORE_CACHE.get(_uncached_scores_for_card)
+    if (not response.get("scores") and not response.get("dates")
+            and not response.get("leagues") and not response.get("tracked_fixtures")):
+        # Preserve the original public shape for a legitimately empty card.
+        # The internal cache still stores an explicit empty daily snapshot,
+        # clearing previous observations without starting any generation.
+        return {"scores": {}, "leagues": [], "dates": []}
+    return response
