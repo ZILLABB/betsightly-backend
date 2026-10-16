@@ -617,6 +617,16 @@ def _collect_scores_for_picks(
     ):
         merge(_collect_oddsapi_scores(odds_keys), "odds-api")
 
+    # Experimental read-only SportyBet observation. The bookmaker's live
+    # tracker is NOT official settlement evidence, so do not merge these
+    # observations into finished; all outcomes/calibration remain unchanged.
+    if os.getenv("SPORTYBET_RESULTS_SHADOW_ENABLED", "").lower() in ("1", "true", "yes"):
+        try:
+            from services.sportybet_result_source import observe
+            observe(picks, finished)
+        except Exception as exc:
+            logger.warning("SportyBet shadow observation unavailable: %s", type(exc).__name__)
+
     logger.info("Score collection picks=%s resolved=%s sources=%s fallback_leagues=%s",
                 len(picks), len(picks) - len(missing()), ",".join(sources) or "none",
                 len(odds_keys))
@@ -1848,6 +1858,15 @@ def backfill_leg_status(limit_days: int = 30, *, dry_run: bool = True,
 
 # ?? Run 2 operational settlement status ????????????????????
 
+def _sportybet_shadow_health() -> dict:
+    """Read-only diagnostics; no requests or writes in health response."""
+    try:
+        from services.sportybet_result_source import health
+        return health()
+    except Exception:
+        return {"enabled": False, "status": "unavailable", "mode": "shadow_only"}
+
+
 def settlement_status() -> dict:
     """Read-only status for health/admin monitoring."""
     with _settlement_status_lock:
@@ -1883,4 +1902,5 @@ def settlement_status() -> dict:
 
             "last_successful_check":
                 _last_successful_check,
+            "sportybet_observation": _sportybet_shadow_health(),
         }

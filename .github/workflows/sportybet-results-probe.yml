@@ -1,0 +1,31 @@
+name: SportyBet result observer checks
+
+on:
+  pull_request:
+    branches: [devil]
+    paths:
+      - 'services/sportybet_result_source.py'
+      - 'tests/test_sportybet_result_source.py'
+      - 'scripts/probe_sportybet_results.py'
+      - '.github/workflows/sportybet-results-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observer-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test-only requirements
+        run: pip install requests pytest
+      - name: Verify shadow-only matching and fail-closed cases
+        run: python -m pytest --noconftest -q tests/test_sportybet_result_source.py
+      - name: Manual-only public endpoint probe (never automatic)
+        if: github.event_name == 'workflow_dispatch'
+        run: python scripts/probe_sportybet_results.py
