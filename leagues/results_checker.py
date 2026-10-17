@@ -1404,6 +1404,20 @@ def run_loop():
                 f"settlement failed: {e}"
             )
 
+        # A previously pending rollover can resolve after the 08:00 WAT
+        # publication. Retry new Day 1 hourly from the already evaluated
+        # board rather than requiring a manual workaround. This never
+        # bypasses a pending day or modifies the immutable morning card.
+        if iteration % 4 == 1:
+            try:
+                from leagues.rollover_late_recovery import recover_once
+                recovered = recover_once()
+                if recovered.get("status") == "PUBLISHED":
+                    logger.info("Rollover late recovery: %s", recovered)
+            except Exception as exc:
+                logger.warning("Rollover late recovery unavailable: %s",
+                               type(exc).__name__)
+
         if iteration % cleanup_every == 0:
             try:
                 from leagues.rollover_db import (
