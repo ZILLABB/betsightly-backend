@@ -94,15 +94,18 @@ def test_manual_preview_cannot_override_selected_automated_tier(monkeypatch):
                        board=fake_board())
 
 
-def test_manual_rejects_games_already_booked_into_rollover():
+def test_manual_reuse_of_auto_rollover_is_warned_not_blocked():
     selected = [{"sportybet_event_id": "52587", "match_id": "sportybet:52587",
                  "home_team": "Arsenal", "away_team": "Lille"}]
-    with pytest.raises(ValueError, match="already used"):
-        editor._check_exposure(
-            selected, {},
-            {"rollover": {"final_booked_legs": [{"sportybet_event_id": "52587"}]}},
-            {}, tier="banker",
-        )
+    warnings = editor._check_exposure(
+        selected, {},
+        {"rollover": {"final_booked_legs": [{"sportybet_event_id": "52587"}]}},
+        {}, tier="banker",
+    )
+    assert len(warnings) == 1
+    assert warnings[0]["also_in_tiers"] == ["rollover"]
+    assert "correlated" in warnings[0]["message"]
+
 
 
 def test_editorial_overlay_does_not_overwrite_automated_tier(monkeypatch):
@@ -185,20 +188,14 @@ def test_explicit_override_only_for_over_goals_and_never_for_other_tiers():
     assert editor._over_display_conflict(card, "banker", False)
 
 
-def test_original_official_match_cannot_be_reused_in_replacement():
-    card = {"over_1_5": {
-        "games": [{"sportybet_event_id": "52587",
-                   "match_id": "sportybet:52587"}]
-    }}
-    with pytest.raises(ValueError, match="original Over Goals"):
-        editor._avoid_original_over_games(
-            [{"sportybet_event_id": "52587", "match_id": "sportybet:52587"}],
-            card,
-        )
-    editor._avoid_original_over_games(
-        [{"sportybet_event_id": "52588", "match_id": "sportybet:52588"}],
-        card,
-    )
+def test_original_over_goals_match_can_be_reused_in_own_replacement():
+    same = {"sportybet_event_id": "52587", "match_id": "sportybet:52587",
+            "home_team": "Arsenal", "away_team": "Lille"}
+    card = {"over_1_5": {"selected": True, "games": [same]}}
+    assert editor._check_exposure(
+        [same], card, {}, {}, tier="over_1_5",
+    ) == []  # original model ticket stays independently archived
+
 
 
 def test_override_replaces_display_only_and_keeps_original_archive(monkeypatch):
@@ -561,15 +558,72 @@ def test_display_override_is_explicit_separate_from_original_model(monkeypatch, 
     assert original["games"] == [{"match_id":"model-original"}]
 
 
-def test_original_tier_fixture_is_allowed_in_explicit_replacement_but_cross_tier_is_not():
+def test_original_tier_and_other_tier_reuse_are_allowed_with_provenance():
     same = {"sportybet_event_id": "52588", "match_id": "sportybet:52588",
             "home_team": "Atletico", "away_team": "Man United"}
-    editor._check_exposure(
+    assert editor._check_exposure(
         [same], {"2_odds":{"selected":True,"games":[same]}}, {},
         {}, tier="2_odds",
+    ) == []  # original selected ticket will settle separately
+    found = editor._check_exposure(
+        [same], {"5_odds":{"selected":True,"games":[same]}}, {},
+        {}, tier="2_odds",
     )
-    with pytest.raises(ValueError, match="already used"):
-        editor._check_exposure(
-            [same], {"5_odds":{"selected":True,"games":[same]}}, {},
-            {}, tier="2_odds",
-        )
+    assert len(found) == 1 and found[0]["also_in_tiers"] == ["5_odds"]
+    assert found[0]["sportybet_event_id"] == "52588"
+
+
+def test_manual_accepts_imported_2_odds_feyenoord_fixture_also_on_model_10_odds():
+    """Regression for Saturday's V4SUNZ import: no false invalid-game error."""
+    imported = [
+        {"sportybet_event_id": "sr:match:72041178",
+         "match_id": "sportybet:sr:match:72041178",
+         "home_team": "SC Telstar", "away_team": "Feyenoord"},
+        {"sportybet_event_id": "sr:match:72341280",
+         "match_id": "sportybet:sr:match:72341280",
+         "home_team": "Stockport", "away_team": "Bromley"},
+        {"sportybet_event_id": "sr:match:72041182",
+         "match_id": "sportybet:sr:match:72041182",
+         "home_team": "ADO Den Haag", "away_team": "PSV Eindhoven"},
+    ]
+    model = {"10_odds": {"selected": True, "games": [{
+        "match_id": "sportybet:sr:match:72041178",
+    }]}}
+    warnings = editor._check_exposure(imported, model, {}, {}, tier="2_odds")
+    assert len(warnings) == 1
+    assert warnings[0]["fixture"] == "SC Telstar vs Feyenoord"
+    assert warnings[0]["also_in_tiers"] == ["10_odds"]
+
+
+def test_manual_reuse_across_multiple_manually_published_tiers():
+    same = {"sportybet_event_id": "sr:match:72041178",
+            "match_id": "sportybet:sr:match:72041178",
+            "home_team": "SC Telstar", "away_team": "Feyenoord"}
+    manual = {
+        "5_odds": {"games": [same]},
+        "10_odds": {"games": [same]},
+    }
+    warnings = editor._check_exposure([same], {}, {}, manual, tier="2_odds")
+    assert len(warnings) == 1
+    assert warnings[0]["also_in_tiers"] == ["10_odds", "5_odds"]
+
+
+def test_manual_always_rejects_duplicate_match_within_one_ticket():
+    same = {"sportybet_event_id": "12345", "match_id": "sportybet:12345",
+            "home_team": "Test", "away_team": "Test 2"}
+    with pytest.raises(ValueError, match="Fixture repeated"):
+        editor._check_exposure([same, same], {}, {}, {}, tier="2_odds")
+    with pytest.raises(ValueError, match="fixture repeated"):
+        editor.parse_input("12345,home_win\n12345,away_win", "2_odds")
+
+
+def test_identifier_aliases_match_bookmaker_event_keys_only():
+    game = {"sportybet_event_id": "sr:match:3",
+            "match_id": "sportybet:sr:match:3",
+            "home_team": "Home", "away_team": "Away"}
+    other = {"match_id": "sportybet:sr:match:3"}
+    assert editor._check_exposure(
+        [game], {"10_odds":{"selected":True,"games":[other]}}, {},
+        {}, tier="2_odds",
+    )[0]["also_in_tiers"] == ["10_odds"]
+

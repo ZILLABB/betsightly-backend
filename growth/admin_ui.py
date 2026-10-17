@@ -253,7 +253,10 @@ function manualRenderSuccess(d, originalCode){
  $('manualPreview').textContent='Published '+d.tier+' — '+d.leg_count+' games, '+d.total_odds+
   'x, verified SportyBet code '+d.share_code+
   (changed?' (new verified code; original input '+originalCode+' is not the displayed ticket)':'')+
-  '. The original model record is still available in Results.';
+  '. The original model record is still available in Results.'+
+  ((d.cross_tier_warnings||[]).length?
+   ' Shared fixtures with other tiers: '+d.cross_tier_warnings.map(w=>w.fixture).join('; ')+
+   '. Outcomes across tickets can be correlated.':'');
  $('manualErr').textContent='';
 }
 async function manualPreview(){
@@ -265,8 +268,13 @@ async function manualPreview(){
  if(!request.lines.trim()){msg.textContent='First click Find games from code to load every selection, or enter event ID,market rows manually. Nothing was published.';return}
  try{
   const d=await api('/manual-tiers/preview',{method:'POST',body:JSON.stringify(request)});
+  const repeats=d.cross_tier_warnings||[];
+  const warningHtml=repeats.length?
+   '<div class="note" role="status"><strong>Shared fixtures (allowed for manual tickets):</strong><ul>'+
+   repeats.map(w=>'<li>'+esc(w.fixture)+' — '+esc(w.message)+'</li>').join('')+
+   '</ul><small>These tickets can win or lose together. The original automatic tickets and their results remain unchanged.</small></div>':'';
   $('manualPreview').innerHTML='<p><strong>Bookmaker-priced preview:</strong> '+esc(d.total_odds)+'x across '+num(d.games.length)+' legs. No code created yet.</p>'+
-   table(['Fixture','Market','Price'],d.games.map(g=>`<tr><td>${esc(g.home_team)} v ${esc(g.away_team)}</td><td>${esc(g.market)}</td><td>${esc(g.odds)}x</td></tr>`));
+   warningHtml+table(['Fixture','Market','Price'],d.games.map(g=>`<tr><td>${esc(g.home_team)} v ${esc(g.away_team)}</td><td>${esc(g.market)}</td><td>${esc(g.odds)}x</td></tr>`));
   manualPreviewConfirmed={...request};
   if(manualImportedCode && manualImportedCode.tier===request.tier && manualImportedCode.lines===request.lines &&
      manualImportedCode.code===$('manualShareCode').value.trim() && !$('manualConvertSpecial').checked)
