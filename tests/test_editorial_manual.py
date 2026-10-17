@@ -498,3 +498,78 @@ def test_manual_chain_stage_rehydrates_public_card_with_market_key(monkeypatch):
     assert card["games"][0]["market"] == "over_1_5"
     assert card["games"][0]["confidence"] is None
     assert card["games"][0]["editorial_manual"] is True
+
+
+
+def test_explicit_2_5_10_replacement_requires_opt_in_and_preserves_original(monkeypatch):
+    from leagues import sportybet, picks_db, booking
+    now = datetime(2026, 10, 17, 9, tzinfo=timezone.utc)
+    board = fake_board(now)
+    original = {"2_odds": {"selected": True, "games": [
+        {"match_id": "official-original", "sportybet_event_id": "9876"},
+    ]}}
+    monkeypatch.setattr(picks_db, "load_card", lambda day: original)
+    monkeypatch.setattr(booking, "bookings_for", lambda day: {})
+    monkeypatch.setattr(editor, "list_published", lambda day: {})
+    monkeypatch.setattr(sportybet, "availability_for",
+                        lambda board, home, away, kickoff, league, market, event_id=None:
+                        {"sportybet_available": True,
+                         "sportybet_odds": 2.4, "event_id": event_id})
+    with pytest.raises(ValueError, match="immutable official"):
+        editor.preview("2_odds", "52588,home_win", board=board, now=now)
+    checked = editor.preview(
+        "2_odds", "52588,home_win", board=board, now=now,
+        replace_official_display=True,
+    )
+    assert checked["replaces_official_display"] is True
+    assert checked["original_official_record_preserved"] is True
+    assert original["2_odds"]["games"][0]["match_id"] == "official-original"
+
+
+@pytest.mark.parametrize("tier", ["banker", "rollover"])
+def test_nonreplaceable_tiers_fail_closed(tier):
+    with pytest.raises(ValueError, match="Only 2, 5, 10"):
+        editor._official_display_replacement(tier, explicit=True)
+
+
+@pytest.mark.parametrize("tier", ["2_odds", "5_odds", "10_odds"])
+def test_display_override_is_explicit_separate_from_original_model(monkeypatch, tier):
+    from leagues import booking
+    original = {
+        "selected": True,
+        "games": [{"match_id": "model-original"}],
+        "booking": {"share_code": "OLDMODEL"},
+        "confidence": .85,
+    }
+    new = {
+        "games": [{"match_id": "sportybet:52588",
+                   "sportybet_event_id": "52588"}],
+        "total_odds": 11.846,
+        "booking": {"status": "active", "booking_status": "FULL",
+                    "share_code": "NEWCODE", "readback_validation": "PASSED"},
+        "replaces_official_display": True,
+        "model_probability_available": False,
+    }
+    monkeypatch.setattr(editor, "list_published", lambda day: {tier:new})
+    monkeypatch.setattr(booking, "booking_lifecycle",
+                        lambda b, games: {**b,"actionable":True})
+    display = editor.overlay_on_card("2026-10-17", {tier:original})[tier]
+    assert display["booking_code"] == "NEWCODE"
+    assert display["original_official_booking_code"] == "OLDMODEL"
+    assert display["replaces_official_display"] is True
+    assert display["model_probability_available"] is False
+    assert original["games"] == [{"match_id":"model-original"}]
+
+
+def test_original_tier_fixture_is_allowed_in_explicit_replacement_but_cross_tier_is_not():
+    same = {"sportybet_event_id": "52588", "match_id": "sportybet:52588",
+            "home_team": "Atletico", "away_team": "Man United"}
+    editor._check_exposure(
+        [same], {"2_odds":{"selected":True,"games":[same]}}, {},
+        {}, tier="2_odds",
+    )
+    with pytest.raises(ValueError, match="already used"):
+        editor._check_exposure(
+            [same], {"5_odds":{"selected":True,"games":[same]}}, {},
+            {}, tier="2_odds",
+        )
