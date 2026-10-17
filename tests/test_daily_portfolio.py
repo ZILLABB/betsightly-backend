@@ -313,9 +313,9 @@ def test_rollover_fixture_cannot_reappear_under_different_market(monkeypatch):
         "match_id": shared["match_id"],
         "home_team": shared["_fixture"]["home"]["name"],
         "away_team": shared["_fixture"]["away"]["name"],
-        "market": "under_4_5",
-        "market_key": "under_4_5",
-        "prediction": "Under 4.5 Goals",
+        "market": "home_or_draw",
+        "market_key": "home_or_draw",
+        "prediction": "Home or Draw",
         # This regression tests fixture exposure for a PUBLISHED Rollover.
         "odds": 2.10,
         "confidence": .80,
