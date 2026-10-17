@@ -87,15 +87,6 @@ def _over_display_conflict(card: dict, tier: str, replace: bool) -> bool:
         raise ValueError("Only Over Goals can replace a current tier's display")
     return bool((card.get(tier) or {}).get("selected")) and not replace
 
-def _avoid_original_over_games(games: list, card: dict) -> None:
-    original = (card.get("over_1_5") or {}).get("games") or []
-    ids = {str(g.get("sportybet_event_id")) for g in original if g.get("sportybet_event_id")}
-    ids |= {str(g.get("match_id")) for g in original if g.get("match_id")}
-    if any(str(g.get("sportybet_event_id")) in ids or
-           str(g.get("match_id")) in ids for g in games):
-        raise ValueError("This match is on today's original Over Goals slip. "
-                         "Choose a different fixture; the original remains in Results.")
-
 def _now():
     return datetime.now(timezone.utc)
 
@@ -239,42 +230,69 @@ def check_tier_target(tier: str, total_odds: float, count: int) -> None:
             f"current total is {total_odds:.2f}x"
         )
 
-def _claimed_identifiers(card: dict, booking_rows: dict, manual_rows: dict,
-                         *, exclude: str = "") -> set[str]:
-    ids = set()
-    for tier, data in (card or {}).items():
-        if tier == exclude or not isinstance(data, dict) or not data.get("selected"):
-            continue
-        for g in data.get("games") or []:
-            if g.get("sportybet_event_id"):
-                ids.add(str(g["sportybet_event_id"]))
-            if g.get("match_id"):
-                ids.add(str(g["match_id"]))
-    for tier, booking in (booking_rows or {}).items():
-        if tier == exclude:
-            continue
-        for g in booking.get("final_booked_legs") or []:
-            if g.get("sportybet_event_id"):
-                ids.add(str(g["sportybet_event_id"]))
-            if g.get("match_id"):
-                ids.add(str(g["match_id"]))
-    for tier, data in (manual_rows or {}).items():
-        if tier == exclude:
-            continue
-        for g in data.get("games") or []:
-            if g.get("sportybet_event_id"):
-                ids.add(str(g["sportybet_event_id"]))
-    return ids
+def _fixture_identifiers(game: dict) -> set[str]:
+    """Canonical aliases for one exact SportyBet event, not team-name guesses."""
+    if not isinstance(game, dict):
+        return set()
+    identifiers = set()
+    for field in ("sportybet_event_id", "match_id"):
+        value = str(game.get(field) or "").strip()
+        if value:
+            identifiers.add(value)
+            if value.startswith("sportybet:"):
+                identifiers.add(value[len("sportybet:"):])
+    return identifiers
 
-def _check_exposure(games, card, booking_rows, manual_rows, *, tier):
-    ids = _claimed_identifiers(card, booking_rows, manual_rows, exclude=tier)
+
+def _check_exposure(games, card, booking_rows, manual_rows, *, tier) -> list[dict]:
+    """Report cross-product reuse without blocking deliberate admin tickets.
+
+    The automatic engine has its own diversification constraints. A manual
+    editor may publish the SAME real event across Banker/2/5/10/Rollover or
+    against a locked model ticket; the event is not thereby invalid.
+    Never collapse or alter original engine tickets or settlement records.
+    Inside a SINGLE manually imported ticket duplicates remain forbidden.
+    """
+    known = []
+    for source in (card or {}, booking_rows or {}, manual_rows or {}):
+        for existing_tier, item in source.items():
+            if existing_tier == tier or not isinstance(item, dict):
+                continue
+            if source is card and not item.get("selected"):
+                continue
+            if source is booking_rows:
+                rows = item.get("final_booked_legs") or []
+            else:
+                rows = item.get("games") or []
+            for leg in rows:
+                identifiers = _fixture_identifiers(leg)
+                if identifiers:
+                    known.append((str(existing_tier), identifiers))
+    warnings = []
+    incoming_ids = set()
     for game in games:
-        if (str(game["sportybet_event_id"]) in ids
-                or str(game["match_id"]) in ids):
-            raise ValueError(
-                f"{game['home_team']} vs {game['away_team']} is already used "
-                "in a published BetSightly product"
-            )
+        identifiers = _fixture_identifiers(game)
+        if not identifiers:
+            raise ValueError("A manual selection is missing its SportyBet event identity")
+        if identifiers.intersection(incoming_ids):
+            raise ValueError("Fixture repeated within this manual ticket")
+        incoming_ids.update(identifiers)
+        reused = sorted({
+            previous for previous, other in known
+            if identifiers.intersection(other)
+        })
+        if reused:
+            warnings.append({
+                "sportybet_event_id": game.get("sportybet_event_id"),
+                "match_id": game.get("match_id"),
+                "fixture": f"{game.get('home_team', 'Home')} vs {game.get('away_team', 'Away')}",
+                "also_in_tiers": reused,
+                "message": (
+                    "Also used in " + ", ".join(reused) +
+                    "; bets across tiers are correlated, not independent."
+                ),
+            })
+    return warnings
 
 def list_published(date: str | None = None) -> dict[str, dict]:
     """No table creation in customer-facing read requests."""
@@ -335,9 +353,9 @@ def preview(tier: str, lines: str, *, board=None, now=None,
         raise ValueError(f"{tier} already has a published manual slip")
     live_board = board if board is not None else sportybet.fetch_board(force=True)
     games = _current_bookable_games(requested, live_board, now=at, date=day)
-    _check_exposure(games, card, bookings_for(day), manual, tier=tier)
-    if replacement and tier == "over_1_5":
-        _avoid_original_over_games(games, card)
+    cross_tier_warnings = _check_exposure(
+        games, card, bookings_for(day), manual, tier=tier,
+    )
     total = round(prod(g["odds"] for g in games), 3)
     check_tier_target(tier, total, len(games))
     return {
@@ -347,6 +365,7 @@ def preview(tier: str, lines: str, *, board=None, now=None,
         "editorial_manual": True,
         "replaces_official_display": bool(replacement),
         "original_official_record_preserved": True,
+        "cross_tier_warnings": cross_tier_warnings,
     }
 
 def publish(tier: str, lines: str, *,
@@ -370,10 +389,9 @@ def publish(tier: str, lines: str, *,
     # Fresh booking-time repricing and kickoff validation.
     revised = _current_bookable_games(parse_input(lines, tier), board, date=day)
     original_card = load_card(day) or {}
-    _check_exposure(revised, original_card, bookings_for(day),
-                    list_published(day), tier=tier)
-    if replacement and tier == "over_1_5":
-        _avoid_original_over_games(revised, original_card)
+    cross_tier_warnings = _check_exposure(
+        revised, original_card, bookings_for(day), list_published(day), tier=tier,
+    )
     odds = round(prod(g["odds"] for g in revised), 3)
     check_tier_target(tier, odds, len(revised))
     booked = create_booking(
@@ -401,11 +419,12 @@ def publish(tier: str, lines: str, *,
         "settlement_track": "editorial_separate",
         "replaces_official_display": bool(replacement),
         "original_official_record_preserved": True,
+        "cross_tier_warnings": cross_tier_warnings,
     }
     with _engine().begin() as conn:
         _ensure(conn)
-        # Serialize all manual publication for a day, guarding cross-tier
-        # reuse even when admins submit in two tabs simultaneously.
+        # Serialize all manual publication for a day, guarding duplicate
+        # same-tier publication even when admins submit in two tabs.
         if conn.dialect.name == "postgresql":
             conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
                          {"k": f"editorial:{day}"})
@@ -425,10 +444,12 @@ def publish(tier: str, lines: str, *,
         card = json.loads(locked) if locked else {}
         if _official_display_conflict(card, tier, replacement):
             raise ValueError("This tier already has an immutable engine slip")
-        if replacement and tier == "over_1_5":
-            _avoid_original_over_games(revised, card)
-        # Every originally verified booking keeps its fixture reservation.
-        _check_exposure(revised, card, bookings_for(day), manual, tier=tier)
+        # Recalculate warnings under the publication lock, including any
+        # other editorial tiers that appeared after the preview. Reuse is
+        # permitted; duplicated legs in this ticket are still rejected.
+        payload["cross_tier_warnings"] = _check_exposure(
+            revised, card, bookings_for(day), manual, tier=tier,
+        )
         if tier == "rollover":
             # Enforce the chain progression invariant inside the SAME SQL
             # transaction as the manual publication. No orphaned stages.
@@ -487,6 +508,7 @@ def publish(tier: str, lines: str, *,
         "share_code": booked["share_code"],
         "editorial_manual": True, "official_engine_record_unchanged": True,
         "replaces_official_display": bool(replacement),
+        "cross_tier_warnings": payload["cross_tier_warnings"],
     }
 
 def overlay_on_card(date: str, accumulators: dict) -> dict:
@@ -535,6 +557,7 @@ def overlay_on_card(date: str, accumulators: dict) -> dict:
             "risk_level": "Unscored editorial accumulator",
             "replaces_official_display": bool(override),
             "original_official_record_preserved": True,
+            "cross_tier_warnings": record.get("cross_tier_warnings") or [],
             # Display-level provenance lets a reader distinguish the original
             # model ticket from the new admin pick; do not hide the old code.
             "original_official_booking_code": (
@@ -758,8 +781,9 @@ def import_share_code(code: str, tier: str, *, board=None,
     """Decode all share-code selections before the separate live preview.
 
     Import itself never books or publishes. Today's tier availability, kickoff,
-    market price, duplicate exposure and live board validity are enforced by
-    the existing preview/publish functions, which are unchanged.
+    market price, same-ticket distinct-fixture and live board validity are
+    enforced by preview/publish. Cross-tier fixture reuse is permitted and
+    displayed as a correlation warning; original model history is immutable.
     Special early-payout markets require explicit conversion consent and are
     always disclosed as changed terms. No legs are silently discarded.
     """

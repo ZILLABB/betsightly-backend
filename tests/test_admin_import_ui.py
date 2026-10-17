@@ -31,3 +31,10 @@ def test_admin_displays_http_or_validation_error_instead_of_generic_failed():
 def test_editorial_history_remains_intact_in_admin_language():
     assert "original model tickets and codes are preserved" in ADMIN_HTML.lower()
     assert "original model selection, code and Results remain unchanged" in ADMIN_JS
+
+
+
+def test_manual_ui_displays_nonblocking_cross_tier_exposure():
+    assert 'd.cross_tier_warnings||[]' in ADMIN_JS
+    assert 'Shared fixtures (allowed for manual tickets)' in ADMIN_JS
+    assert 'Outcomes across tickets can be correlated.' in ADMIN_JS
