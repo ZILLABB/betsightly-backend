@@ -288,13 +288,36 @@ def list_published(date: str | None = None) -> dict[str, dict]:
     except Exception:
         return {}
 
+# Official auto cards are immutable, but editors may publish a NEW, verified
+# alternative display for the same category. Only the display overlay changes:
+# model publication, booking code, results and calibration remain auditable.
+_REPLACEABLE_OFFICIAL_TIERS = frozenset({"2_odds", "5_odds", "10_odds", "over_1_5"})
+
+
+def _official_display_replacement(tier: str, *, over: bool = False,
+                                  explicit: bool = False) -> bool:
+    if over and tier != "over_1_5":
+        raise ValueError("Only Over Goals can use the legacy replacement flag")
+    if explicit and tier not in _REPLACEABLE_OFFICIAL_TIERS:
+        raise ValueError("Only 2, 5, 10 Odds or Over Goals can replace an official display")
+    return over or explicit
+
+
+def _official_display_conflict(card: dict, tier: str, replacement: bool) -> bool:
+    return bool((card.get(tier) or {}).get("selected")) and not replacement
+
+
 def preview(tier: str, lines: str, *, board=None, now=None,
-            replace_official_over: bool = False) -> dict:
+            replace_official_over: bool = False,
+            replace_official_display: bool = False) -> dict:
     """Admin-only price preview. Never writes a card or creates a booking."""
     from leagues import sportybet
     from leagues.picks_db import load_card
     from leagues.booking import bookings_for
 
+    replacement = _official_display_replacement(
+        tier, over=replace_official_over, explicit=replace_official_display,
+    )
     at = now or _now()
     day = at.astimezone(WAT).date().isoformat()
     requested = parse_input(lines, tier)
@@ -303,9 +326,9 @@ def preview(tier: str, lines: str, *, board=None, now=None,
         eligibility = rollover_eligibility(day, card=card)
         if not eligibility["allowed"]:
             raise ValueError(eligibility["reason"])
-    if _over_display_conflict(card, tier, replace_official_over):
+    if _official_display_conflict(card, tier, replacement):
         raise ValueError(f"{tier} already has an immutable official slip today. "
-                         "Choose explicit Over Goals display replacement; "
+                         "Choose explicit replacement for this tier; "
                          "the original stays in official results.")
     manual = list_published(day)
     if tier in manual:
@@ -313,7 +336,7 @@ def preview(tier: str, lines: str, *, board=None, now=None,
     live_board = board if board is not None else sportybet.fetch_board(force=True)
     games = _current_bookable_games(requested, live_board, now=at, date=day)
     _check_exposure(games, card, bookings_for(day), manual, tier=tier)
-    if replace_official_over:
+    if replacement and tier == "over_1_5":
         _avoid_original_over_games(games, card)
     total = round(prod(g["odds"] for g in games), 3)
     check_tier_target(tier, total, len(games))
@@ -322,18 +345,26 @@ def preview(tier: str, lines: str, *, board=None, now=None,
         "games": games, "total_odds": total,
         "booking_code_created": False, "research_only": False,
         "editorial_manual": True,
-        "replaces_official_display": bool(replace_official_over),
+        "replaces_official_display": bool(replacement),
         "original_official_record_preserved": True,
     }
 
 def publish(tier: str, lines: str, *,
-            replace_official_over: bool = False) -> dict:
+            replace_official_over: bool = False,
+            replace_official_display: bool = False) -> dict:
     """Full bookmaker readback first, then atomic one-way publication."""
     from leagues import sportybet
     from leagues.booking import create_booking, bookings_for
     from leagues.picks_db import load_card
 
-    inspected = preview(tier, lines, replace_official_over=replace_official_over)
+    replacement = _official_display_replacement(
+        tier, over=replace_official_over, explicit=replace_official_display,
+    )
+    inspected = preview(
+        tier, lines,
+        replace_official_over=replace_official_over,
+        replace_official_display=replace_official_display,
+    )
     day, games = inspected["date"], inspected["games"]
     board = sportybet.fetch_board(force=True)
     # Fresh booking-time repricing and kickoff validation.
@@ -341,7 +372,7 @@ def publish(tier: str, lines: str, *,
     original_card = load_card(day) or {}
     _check_exposure(revised, original_card, bookings_for(day),
                     list_published(day), tier=tier)
-    if replace_official_over:
+    if replacement and tier == "over_1_5":
         _avoid_original_over_games(revised, original_card)
     odds = round(prod(g["odds"] for g in revised), 3)
     check_tier_target(tier, odds, len(revised))
@@ -368,7 +399,7 @@ def publish(tier: str, lines: str, *,
         "booking": booked, "published_at": _now().isoformat(),
         "model_probability_available": False,
         "settlement_track": "editorial_separate",
-        "replaces_official_display": bool(replace_official_over),
+        "replaces_official_display": bool(replacement),
         "original_official_record_preserved": True,
     }
     with _engine().begin() as conn:
@@ -392,9 +423,9 @@ def publish(tier: str, lines: str, *,
             "SELECT payload FROM daily_cards WHERE publish_date=:d"
         ), {"d": day}).scalar()
         card = json.loads(locked) if locked else {}
-        if _over_display_conflict(card, tier, replace_official_over):
+        if _official_display_conflict(card, tier, replacement):
             raise ValueError("This tier already has an immutable engine slip")
-        if replace_official_over:
+        if replacement and tier == "over_1_5":
             _avoid_original_over_games(revised, card)
         # Every originally verified booking keeps its fixture reservation.
         _check_exposure(revised, card, bookings_for(day), manual, tier=tier)
@@ -455,7 +486,7 @@ def publish(tier: str, lines: str, *,
         "total_odds": actual, "leg_count": len(revised),
         "share_code": booked["share_code"],
         "editorial_manual": True, "official_engine_record_unchanged": True,
-        "replaces_official_display": bool(replace_official_over),
+        "replaces_official_display": bool(replacement),
     }
 
 def overlay_on_card(date: str, accumulators: dict) -> dict:
@@ -466,7 +497,8 @@ def overlay_on_card(date: str, accumulators: dict) -> dict:
         if tier not in TIERS:
             continue
         original = merged.get(tier) or {}
-        override = tier == "over_1_5" and record.get("replaces_official_display") is True
+        override = (tier in _REPLACEABLE_OFFICIAL_TIERS
+                    and record.get("replaces_official_display") is True)
         # Manual rollover creates the authoritative chain slot first. Only
         # attach its verified ticket if that SAME stage is in the chain.
         chain_slot = next((
@@ -503,6 +535,13 @@ def overlay_on_card(date: str, accumulators: dict) -> dict:
             "risk_level": "Unscored editorial accumulator",
             "replaces_official_display": bool(override),
             "original_official_record_preserved": True,
+            # Display-level provenance lets a reader distinguish the original
+            # model ticket from the new admin pick; do not hide the old code.
+            "original_official_booking_code": (
+                (original.get("booking") or {}).get("share_code")
+                or original.get("booking_code")
+                if override else None
+            ),
             "replaced_official_selection_count": (
                 len(original.get("games") or []) if override else 0
             ),

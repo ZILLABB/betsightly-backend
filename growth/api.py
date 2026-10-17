@@ -37,9 +37,11 @@ from pydantic import BaseModel, Field
 class ManualTierRequest(BaseModel):
     tier: str = Field(min_length=3, max_length=20)
     lines: str = Field(min_length=3, max_length=6000)
-    # Explicit consent is required to replace the existing Over Goals display.
-    # The original engine slip remains immutable and still settles normally.
+    # Legacy Over Goals flag; retained for existing admin clients.
     replace_official_over: bool = False
+    # Explicit replacement for a selected 2/5/10 Odds or Over Goals tier.
+    # No Rollover or Banker override. Model records remain immutable.
+    replace_official_display: bool = False
 
 
 @router.get("/manual-tiers", dependencies=[Depends(require_admin)])
@@ -82,6 +84,7 @@ def preview_manual_tier(body: ManualTierRequest):
         return preview(
             body.tier, body.lines,
             replace_official_over=body.replace_official_over,
+            replace_official_display=body.replace_official_display,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
@@ -94,7 +97,45 @@ def publish_manual_tier(body: ManualTierRequest):
         return publish(
             body.tier, body.lines,
             replace_official_over=body.replace_official_over,
+            replace_official_display=body.replace_official_display,
         )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+class ManualExistingCodePublishRequest(BaseModel):
+    tier: str = Field(min_length=3, max_length=20)
+    code: str = Field(min_length=4, max_length=32)
+    replace_official_display: bool = False
+
+
+@router.post("/manual-tiers/publish-imported", dependencies=[Depends(require_admin)])
+def publish_imported_manual_code(body: ManualExistingCodePublishRequest):
+    """Admin-only: resolve exact incoming code, reprice and publish a new verified code.
+
+    The original code is an *input*, never asserted to be the newly generated
+    code: SportyBet may regenerate a different share reference/price. Reject
+    specials and unmapped selections; no silent leg drops or calibration edits.
+    """
+    from leagues.editorial_manual import import_share_code, publish
+    try:
+        imported = import_share_code(body.code, body.tier, convert_special=False)
+        if imported.get("status") != "IMPORTED_NOT_PUBLISHED" or (
+            imported.get("unresolved_count") or imported.get("converted_features")
+        ):
+            raise ValueError("Original code needs explicit review; nothing published")
+        if (imported.get("original_leg_count")
+                != len((imported.get("lines") or "").splitlines())):
+            raise ValueError("Original booking code contains unmapped legs")
+        result = publish(
+            body.tier, imported["lines"],
+            replace_official_display=body.replace_official_display,
+        )
+        return {
+            **result, "imported_share_code": body.code,
+            "share_code_rebooked": result.get("share_code") != body.code,
+            "original_booking_code_unchanged": True,
+        }
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 
