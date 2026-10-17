@@ -37,7 +37,9 @@ def test_dnb_draw_refund_uses_push_aware_return():
 
 
 def test_board_premium_and_safe_flags_cannot_ignore_negative_price(monkeypatch):
-    pick = candidate(.91, 1.07)
+    # This regression is about price integrity, not the newly restricted
+    # Under 4.5 public market. Use an eligible goals market instead.
+    pick = candidate(.91, 1.07, market="over_1_5")
     monkeypatch.setattr(board, "kickoff_wat_date", lambda _: "2026-09-20")
     monkeypatch.setattr(board, "canonical_fixture_recommendations",
                         lambda picks, **kwargs: picks)
@@ -49,4 +51,4 @@ def test_board_premium_and_safe_flags_cannot_ignore_negative_price(monkeypatch):
     assert row["classification"] == "LEAN"
     assert row["premium_eligible"] is False
     assert row["safe_tier_eligible"] is False
-    assert row["best_pick"]["market"] == "under_4_5"  # Never rewrite published bet.
+    assert row["best_pick"]["market"] == "over_1_5"

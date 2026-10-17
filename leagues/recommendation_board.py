@@ -81,8 +81,16 @@ def build_recommendation_board(
         if kickoff_wat_date(fixture.get("commence_time")) == target_date
     ]
     fixture_ids = {str(fixture.get("match_id")) for fixture in target_fixtures}
-    target_picks = [
+    raw_target_picks = [
         pick for pick in all_picks if str(pick.get("match_id")) in fixture_ids
+    ]
+    # Public discovery should obey the same market policy as automatically
+    # published official tickets. Under-goals remain in research, interactive
+    # Builder and historical settlement, but must not become STRONG/SAFE
+    # public recommendations merely from their high base occurrence rate.
+    target_picks = [
+        pick for pick in raw_target_picks
+        if not str(pick.get("market_key") or pick.get("market") or "").startswith("under_")
     ]
 
     ranked = canonical_fixture_recommendations(
@@ -94,7 +102,7 @@ def build_recommendation_board(
     for values in by_fixture.values():
         values.sort(key=lambda pick: int(pick.get("public_rank") or 999))
 
-    raw_counts = Counter(str(pick.get("match_id")) for pick in target_picks)
+    raw_counts = Counter(str(pick.get("match_id")) for pick in raw_target_picks)
     recommendations = []
     no_prediction = []
     classification_counts = Counter()
@@ -145,7 +153,8 @@ def build_recommendation_board(
         "timezone": "WAT",
         "summary": {
             "fixtures_analysed": analysed,
-            "raw_market_candidates": len(target_picks),
+            "raw_market_candidates": len(raw_target_picks),
+            "market_policy_withheld": len(raw_target_picks) - len(target_picks),
             "recommendations": recommended,
             "strong": classification_counts["STRONG"],
             "supported": classification_counts["SUPPORTED"],
