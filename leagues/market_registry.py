@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 
-REGISTRY_VERSION = "market-registry-v1"
+REGISTRY_VERSION = "market-registry-v1.1"
 
 
 @dataclass(frozen=True)
@@ -108,8 +108,13 @@ _ROWS = (
     _spec("over_4_5", "Over 4.5 Goals", "goals", "goals_over_4_5", ("18", "total=4.5", "12"),
           activation="SHADOW",
           candidate_generation=False),
+    # Live portfolio audit 2026-10-17: this line made up 10/14 official
+    # accumulator legs (71%). Its 34 settled calibration observations and
+    # provisional replay evidence do not justify "TRUSTED" safe-tier status.
+    # Keep modeling, SportyBet mapping, replay and historical settlement intact.
+    # New public predictions must use independently qualified non-under markets.
     _spec("under_4_5", "Under 4.5 Goals", "goals", "goals_under_4_5", ("18", "total=4.5", "13"),
-          public="TRUSTED", evidence="PROMOTED", activation="ACTIVE", safe=True),
+          public="RESTRICTED", evidence="RESTRICTED", activation="SHADOW", safe=False),
     _spec("home_over_0_5", "{home} to Score", "team_goals_home", "team_goals_home", ("19", "total=0.5", "12"),
           public="DEVELOPING", evidence="PROMOTED", activation="ACTIVE"),
     _spec("home_under_0_5", "{home} Under 0.5 Goals", "team_goals_home", "team_goals_home_under_0_5", ("19", "total=0.5", "13"),

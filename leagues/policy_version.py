@@ -5,7 +5,7 @@ from __future__ import annotations
 
 # This version identifies the complete public decision policy, not a deploy.
 # Change it only when selection/calibration policy changes materially.
-PUBLISHED_SELECTION_POLICY_VERSION = "selection-policy-v1.1"
+PUBLISHED_SELECTION_POLICY_VERSION = "selection-policy-v1.2"
 
 # Current-policy evidence is blended with the historical cohort rather than
 # switched on at an arbitrary sample threshold. Thirty observations gives the

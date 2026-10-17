@@ -15,7 +15,7 @@ from math import prod
 from leagues.selection_quality import risk_adjusted_return, selection_probability
 from leagues.rollover_odds_policy import rollover_odds_in_range
 
-POLICY_VERSION = "official_publication_v1"
+POLICY_VERSION = "official_publication_v1.1"
 MIN_LEG_MODEL_RETURN = 1.0
 MIN_SLIP_MODEL_RETURN = 1.0
 MIN_OFFICIAL_PROBABILITY = 0.65
@@ -69,6 +69,12 @@ def evaluate_leg(pick: dict, product: str) -> dict:
     trust = pick.get("trust") or {}
     trust_grade = trust.get("trust_grade") or pick.get("trust_grade")
     trust_state = pick.get("market_trust_state")
+    market_key = str(pick.get("market_key") or pick.get("market") or "")
+    # Defence in depth: copied/historical candidate payloads may still claim
+    # TRUSTED; neither new official tickets nor booking replacements may
+    # promote under-goals until a versioned evidence review reverses policy.
+    if market_key.startswith("under_"):
+        reasons.append("UNDER_GOALS_PUBLICATION_RESTRICTED")
 
     if not pick.get("market_floor_eligible", True):
         reasons.append("BELOW_MARKET_PUBLICATION_FLOOR")
