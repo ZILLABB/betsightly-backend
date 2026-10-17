@@ -1,0 +1,70 @@
+name: Oct 17 real SportyBet market audit - read only
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  scout:
+    if: github.head_ref == 'ops/oct17-live-board-six-tiers-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Audit full Saturday football board and exact supported market alternatives
+        env:
+          DATABASE_URL: sqlite:///./oct17_bookmaker_scout.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime,timezone,timedelta
+          from leagues import sportybet
+          from leagues.curated_booking import ALLOWED_MARKETS
+          board,meta=None,{}
+          for attempt in range(1,4):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("BOARD_ATTEMPT="+str(attempt)+" "+json.dumps(meta,ensure_ascii=False))
+              if meta.get("is_complete") is True:break
+          if meta.get("is_complete") is not True:
+              print("STOP_INCOMPLETE_BOARD");raise SystemExit(0)
+          tz=timezone(timedelta(hours=1))
+          priority={"Premier League","Championship","Bundesliga","LaLiga","Serie A","Ligue 1","Eredivisie","Primeira Liga","Super Lig","2. Bundesliga","Serie B","LaLiga 2","Premiership","Championship","League One","League Two","Allsvenskan","Eliteserien","Ekstraklasa","Jupiler Pro League","Superliga","Scottish Premiership","Liga Portugal","Super League","1. Bundesliga"}
+          other=[]
+          matches=[]
+          for _,e in sportybet._board_entries(board):
+              ms=e.get("kickoff_ms")
+              if not ms:continue
+              try:kick=datetime.fromtimestamp(int(ms)/1000,timezone.utc).astimezone(tz)
+              except:continue
+              if str(kick.date())!="2026-10-17" or kick.hour<10:continue
+              name=str(e.get("home_team") or "")+" "+str(e.get("away_team") or "")
+              comp=str(e.get("competition") or "")
+              if any(s in (name+" "+comp).lower() for s in ("srl","simulated","virtual","esoccer","e-soccer","cyber","u19","u20","u21","u23","women","ladies","youth")):continue
+              prices=e.get("prices") or {}
+              safe={k:v for k,v in prices.items() if k in (
+                    "home_win","away_win","home_or_draw","away_or_draw",
+                    "over_0_5","over_1_5","over_2_5","over_3_5",
+                    "home_over_0_5","home_over_1_5","away_over_0_5",
+                    "away_over_1_5","btts_yes","dnb_home","dnb_away")}
+              if not safe:continue
+              x=dict(h=e.get("home_team"),a=e.get("away_team"),c=comp,
+                  t=kick.strftime("%H:%M"),id=e.get("event_id"),p=safe)
+              if comp in priority: matches.append(x)
+              else:other.append(x)
+          print("SATURDAY_COUNTS="+json.dumps(dict(priority_count=len(matches),other_count=len(other),allowed_curated_markets=sorted(ALLOWED_MARKETS)),ensure_ascii=False))
+          matches.sort(key=lambda r:(r["t"],r["c"],r["h"]))
+          for m in matches:print("RESEARCH_FIXTURE="+json.dumps(m,ensure_ascii=False))
+          for m in other:
+              if any(s in (str(m["h"])+" "+str(m["a"])).lower() for s in
+                      ("bayern","barcelona","paris saint","galatasaray","benfica","porto","feyenoord","psv","ajax","celtic","rangers","atalanta","inter milan","milan","roma","napoli","dortmund","psg","villarreal")):
+                  print("OTHER_NOTABLE="+json.dumps(m,ensure_ascii=False))
+          PY
