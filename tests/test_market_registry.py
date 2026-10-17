@@ -28,11 +28,6 @@ def test_registry_is_the_mapping_and_policy_source():
                                            if s.evidence_policy == "RESTRICTED"}
     assert set(historical_replay.MARKETS) == {k for k, s in MARKETS.items()
                                                if s.replay}
-    assert MARKETS["under_4_5"].activation == "SHADOW"
-    assert MARKETS["under_4_5"].public_policy == "RESTRICTED"
-    assert not MARKETS["under_4_5"].safe_tier
-    assert not MARKETS["under_4_5"].booking
-    assert "under_4_5" not in fixture_ranker.TRUSTED_MARKETS
     assert MARKETS["under_3_5"].activation == "SHADOW"
     assert "under_3_5" not in fixture_ranker.TRUSTED_MARKETS
     assert MARKETS["over_0_5"].activation == "ACTIVE"

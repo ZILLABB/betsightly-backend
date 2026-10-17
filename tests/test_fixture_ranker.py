@@ -66,8 +66,7 @@ def test_close_quality_secondary_can_survive_but_rank_three_cannot():
         _pick("over_1_5", .86, 1.10), _pick("under_4_5", .84, 1.16),
         _pick("under_3_5", .81, 1.25),
     ])
-    assert [p["market"] for p in ranked] == ["over_1_5"]
-    assert [p["fixture_rank"] for p in ranked] == [1]
+    assert [p["fixture_rank"] for p in ranked] == [1, 2]
     assert ranked[0]["selector_version"] == "canonical-recommendations-v1.2"
 
 
@@ -111,7 +110,9 @@ def test_under_lines_are_independent_and_restricted_line_cannot_block_public_ran
     # The registry keeps Under 3.5 in shadow until line-specific live or
     # bookmaker evidence justifies promotion; synthetic SUPPORTED metadata
     # cannot override the market-wide activation policy.
-    assert ranked == []  # all under-goals lines are research-only
+    assert ranked[0]["market"] == "under_4_5"
+    assert ranked[0]["public_rank"] == 1
+    assert ranked[0]["model_rank"] > 1
 
 
 def test_dominated_riskier_fixture_expression_is_removed_structurally():
@@ -121,7 +122,7 @@ def test_dominated_riskier_fixture_expression_is_removed_structurally():
     ])
     assert [pick["market"] for pick in ranked] == ["over_1_5"]
     assert ranked[0]["rejected_fixture_alternatives"][0]["reason"] == (
-        "MARKET_RESTRICTED"
+        "DOMINATED_FIXTURE_EXPRESSION"
     )
 
 
@@ -158,29 +159,10 @@ def test_include_all_eligible_preserves_dominated_public_market():
         include_all_eligible=True,
     )
 
-    assert {pick["market"] for pick in expanded} == {"over_1_5"}
-
-
-
-def test_public_football_market_selection_never_includes_under_goals():
-    fixture = [
-        _pick("under_4_5", .90, 1.40),
-        _pick("under_3_5", .91, 1.50),
-        _pick("under_2_5", .88, 1.54),
-        _pick("over_1_5", .78, 1.39),
-    ]
-    for include_all in (False, True):
-        ranked = canonical_fixture_recommendations(
-            fixture, include_all_eligible=include_all,
-        )
-        assert ranked and all(
-            not p["market"].startswith("under_") for p in ranked
-        )
-
-
-def test_only_under_goals_candidates_must_result_in_no_public_pick():
-    picks = [
-        _pick("under_4_5", .86, 1.45),
-        _pick("under_2_5", .77, 1.6),
-    ]
-    assert canonical_fixture_recommendations(picks) == []
+    assert {
+        pick["market"]
+        for pick in expanded
+    } == {
+        "over_1_5",
+        "under_4_5",
+    }

@@ -7,7 +7,7 @@ from leagues.market_registry import MARKETS
 
 RANKING_POLICY_VERSION = "fixture-ranked-v1.2"
 SELECTOR_VERSION = "canonical-recommendations-v1.2"
-MARKET_POLICY_VERSION = "market-trust-v1.2"
+MARKET_POLICY_VERSION = "market-trust-v1.1"
 
 TRUSTED_MARKETS = {key for key, spec in MARKETS.items()
                    if spec.public_policy == "TRUSTED"}
@@ -74,12 +74,7 @@ def _team_score_supported(pick: dict, evidence: dict) -> bool:
 
 
 def _policy_state(pick: dict, evidence: dict) -> str:
-    market = str(pick.get("market") or "")
-    # Public selection never borrows the high base rate of an under-goals
-    # market as proof of predictive skill. The model can still observe it,
-    # and already-published slips are still settled against actual finals.
-    if market.startswith("under_"):
-        return "RESTRICTED"
+    market = pick.get("market")
     if market in DISABLED_PUBLIC_MARKETS:
         return "DISABLED"
     if market in RESTRICTED_MARKETS or evidence.get("state") in {"SHADOW", "REJECTED"}:
