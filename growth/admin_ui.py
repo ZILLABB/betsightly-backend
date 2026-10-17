@@ -279,7 +279,44 @@ async function manualPreview(){
   if(manualImportedCode && manualImportedCode.tier===request.tier && manualImportedCode.lines===request.lines &&
      manualImportedCode.code===$('manualShareCode').value.trim() && !$('manualConvertSpecial').checked)
      $('manualCodePublish').disabled=false;
- }catch(e){msg.textContent=e.message;$('manualPreview').textContent=''}
+ }catch(e){
+  msg.textContent=e.message+
+   (/HTTP (?:502|503|504)|Network request failed/i.test(e.message)?
+    '. Preview is read-only; no new ticket was published by this preview. Retry after the server recovers.':'');
+  $('manualPreview').textContent='';
+ }
+}
+async function reconcileManualPublishAfterError(tier, failure){
+ // A proxy 502 may arrive AFTER a committed bookmaker-verified publication.
+ // GET is read-only. Never automatically send the POST again on an unclear
+ // result, or assume a 502 means that the database transaction was rolled back.
+ const transient=/HTTP (?:502|503|504)|Network request failed/i.test(failure.message||'');
+ if(!transient)return false;
+ $('manualErr').textContent='Server connection interrupted. Checking whether the ticket was saved before retrying…';
+ const delays=[0,1300,2700,4200];
+ for(const delay of delays){
+  if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+  try{
+   const result=await api('/manual-tiers');
+   const existing=(result.published||{})[tier];
+   if(existing && existing.share_code){
+    $('manualErr').textContent='The server interrupted your response, but a '+tier+
+     ' manual ticket exists in the database: '+existing.leg_count+' legs, verified code '+
+     existing.share_code+' ('+existing.total_odds+'x). Review it in Today’s editorial tickets. Do NOT publish this tier again.';
+    await loadManual();
+    return true;
+   }
+   $('manualErr').textContent='The server is reachable but no manual '+tier+
+    ' ticket is recorded. You may re-import and preview the code before another publication attempt.';
+   return false;
+  }catch(e){
+   // During a restart the read-only status request can also fail. Try again
+   // instead of telling the user that no ticket exists.
+  }
+ }
+ $('manualErr').textContent='The server could not confirm whether '+tier+
+  ' was published. Refresh Today’s editorial tickets when the server recovers. Do NOT submit the same code twice until you verify the existing record.';
+ return false;
 }
 async function manualPublishImported(){
  const msg=$('manualErr');msg.textContent='';
@@ -304,7 +341,10 @@ async function manualPublishImported(){
   manualRenderSuccess(d,imported.code);
   manualImportedCode=null;manualPreviewConfirmed=null;
   await loadManual();
- }catch(e){msg.textContent=e.message}
+ }catch(e){
+  const handled=await reconcileManualPublishAfterError(request.tier,e);
+  if(!handled && !msg.textContent)msg.textContent=e.message;
+ }
  finally{button.textContent='Publish verified imported code'}
 }
 async function manualPublish(){
@@ -325,7 +365,10 @@ async function manualPublish(){
   manualRenderSuccess(d,'');manualImportedCode=null;manualPreviewConfirmed=null;
   $('manualCodePublish').disabled=true;
   await loadManual();
- }catch(e){msg.textContent=e.message}
+ }catch(e){
+  const handled=await reconcileManualPublishAfterError(request.tier,e);
+  if(!handled && !msg.textContent)msg.textContent=e.message;
+ }
 }
 async function manualFile(event){const file=event.target.files?.[0];if(!file)return;if(file.size>16000){$('manualErr').textContent='File too large (16 KB max).';return}const source=await file.text();manualImportReview=null;$('manualLines').value=source.slice(0,6000);$('manualPreview').textContent='CSV loaded. Click Check prices / preview before publishing.';event.target.value=''}
 const ACTIONS={login,logout,retry,'manual-import-code':manualImportCode,'manual-publish-imported':manualPublishImported,'manual-apply-import-review':manualApplyImportReview,'manual-cancel-import-review':manualCancelImportReview,'manual-preview':manualPreview,'manual-publish':manualPublish,'generate':()=>generate(false),'generate-publish':()=>generate(true),'save-settings':saveSettings,'save-home-campaign':saveHomeCampaign,'add-ref':addRef,preview:e=>preview(Number(e.dataset.id)),approve:e=>act(Number(e.dataset.id),'approve'),publish:e=>act(Number(e.dataset.id),'publish'),'menu':()=>$('side').classList.toggle('open'),'apply-range':loadDashboard};

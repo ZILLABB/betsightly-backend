@@ -627,3 +627,24 @@ def test_identifier_aliases_match_bookmaker_event_keys_only():
         {}, tier="2_odds",
     )[0]["also_in_tiers"] == ["10_odds"]
 
+
+
+
+def test_manual_booker_uses_single_fresh_board_for_preview_and_repricing(monkeypatch):
+    from leagues import sportybet
+    calls = []
+    board = {"__meta__": {"ready": True}}
+    def fetch_board(*, force=False):
+        assert force is True
+        calls.append(force)
+        return board
+    monkeypatch.setattr(sportybet, "fetch_board", fetch_board)
+    def preview(tier, lines, **kwargs):
+        assert tier == "2_odds"
+        assert kwargs["board"] is board
+        raise RuntimeError("stopped after initial validation")
+    monkeypatch.setattr(editor, "preview", preview)
+    with pytest.raises(RuntimeError, match="stopped after initial validation"):
+        editor.publish("2_odds", "52588,home_win",
+                       replace_official_display=True)
+    assert len(calls) == 1
