@@ -324,15 +324,15 @@ def test_rollover_overlay_requires_proven_manual_chain(monkeypatch):
     assert displayed["model_probability_available"] is not True
 
 
-def test_manual_rollover_never_uses_a_repeated_fixture_from_other_tiers():
+def test_manual_rollover_reports_repeat_without_a_hard_failure():
     manual = [{"sportybet_event_id": "52587", "match_id": "sportybet:52587",
                "home_team": "Arsenal", "away_team": "Lille"}]
-    with pytest.raises(ValueError, match="already used"):
-        editor._check_exposure(
-            manual,
-            {"2_odds": {"selected": True, "games": manual}},
-            {}, {}, tier="rollover",
-        )
+    warnings = editor._check_exposure(
+        manual, {"2_odds": {"selected": True, "games": manual}},
+        {}, {}, tier="rollover",
+    )
+    assert len(warnings) == 1
+    assert warnings[0]["also_in_tiers"] == ["2_odds"]
 
 
 def _manual_rollover_publish_db(monkeypatch, prior_status=None):
