@@ -55,8 +55,9 @@ def test_board_returns_one_best_pick_and_ranked_alternatives_per_fixture():
     recommendation = result["recommendations"][0]
     assert recommendation["best_pick"]["public_rank"] == 1
     assert recommendation["best_pick"]["match_id"] == "f1"
-    assert len(recommendation["alternatives"]) == 1
-    assert recommendation["alternatives"][0]["public_rank"] == 2
+    assert recommendation["best_pick"]["market"] == "over_1_5"
+    assert recommendation["alternatives"] == []
+    assert result["summary"]["market_policy_withheld"] == 1
 
 
 def test_supported_and_lean_recommendations_exist_without_becoming_premium():
@@ -118,3 +119,28 @@ def test_board_groups_by_wat_calendar_date():
         [_pick(fixture=fixture)], [fixture], date="2026-09-10"
     )
     assert result["summary"]["fixtures_analysed"] == 1
+
+
+
+def test_under_goals_only_fixture_is_withheld_from_public_recommendations():
+    fixture = _fixture("under-only")
+    board = build_recommendation_board([
+        _pick("under_4_5", .95, fixture=fixture, odds=1.50),
+        _pick("under_3_5", .90, fixture=fixture, odds=1.50),
+    ], [fixture], date="2026-09-10")
+    assert board["recommendations"] == []
+    assert board["summary"]["raw_market_candidates"] == 2
+    assert board["summary"]["market_policy_withheld"] == 2
+    assert board["summary"]["no_prediction"] == 1
+    assert board["no_prediction"][0]["reason"] == "NO_CREDIBLE_PUBLIC_MARKET"
+
+
+def test_under_market_cannot_appear_as_alt_or_best_even_if_higher_quality():
+    fixture = _fixture("mixed")
+    board = build_recommendation_board([
+        _pick("under_4_5", .99, fixture=fixture, odds=1.90),
+        _pick("over_1_5", .72, fixture=fixture, odds=1.50),
+    ], [fixture], date="2026-09-10")
+    rec = board["recommendations"][0]
+    assert rec["best_pick"]["market"] == "over_1_5"
+    assert not any(x.get("market", "").startswith("under_") for x in rec["alternatives"])
