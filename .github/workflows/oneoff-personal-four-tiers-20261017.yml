@@ -1,0 +1,109 @@
+name: Oct 17 independently researched exact four-tier verification
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.head_ref == 'ops/oct17-live-board-six-tiers-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimal dependency subset
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Generate and read back four non-overlapping, evidence-researched SportyBet slips
+        env:
+          DATABASE_URL: sqlite:///./oct17_personal_slips.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from math import prod
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest, generate_curated_booking
+          def leg(home,away,league,time,market):
+              return dict(home_team=home,away_team=away,league=league,
+                  kickoff="2026-10-17T"+time+":00+01:00",market=market)
+          slips={
+              "TWO_ODDS":[
+                  leg("ADO Den Haag","PSV Eindhoven","Eredivisie","15:30","away_win"),
+                  leg("Stockport County FC","Bromley FC","League One","15:00","home_win"),
+                  leg("SC Telstar","Feyenoord","Eredivisie","19:00","away_win"),
+              ],
+              "FIVE_ODDS":[
+                  leg("Genclerbirligi SK","Galatasaray Istanbul","Super Lig","14:00","away_or_draw"),
+                  leg("HamKam","Bodoe/Glimt","Eliteserien","13:00","away_win"),
+                  leg("Salford City","Crawley Town","League Two","15:00","home_win"),
+                  leg("Middlesbrough FC","Cardiff City","Championship","12:30","home_win"),
+                  leg("Southampton","Bolton Wanderers","Championship","15:00","over_1_5"),
+                  leg("Shakhtar D","Kolos Kovalivka","Premier League","16:00","home_win"),
+                  leg("Werder Bremen","Paderborn","Bundesliga","14:30","home_or_draw"),
+              ],
+              "TEN_ODDS":[
+                  leg("Bayern Munich","RB Leipzig","Bundesliga","17:30","over_2_5"),
+                  leg("Dundee FC","Rangers","Premiership","20:00","away_win"),
+                  leg("Viking FK","Fredrikstad FK","Eliteserien","17:00","home_win"),
+                  leg("Union Berlin","Borussia Dortmund","Bundesliga","14:30","away_or_draw"),
+                  leg("Schalke","Mainz","Bundesliga","14:30","over_1_5"),
+                  leg("Strasbourg","PSG","Ligue 1","16:15","over_1_5"),
+                  leg("Brentford","Liverpool","Premier League","15:00","over_1_5"),
+                  leg("Lille","Brest","Ligue 1","19:45","over_1_5"),
+                  leg("Hamburger SV","Stuttgart","Bundesliga","14:30","away_or_draw"),
+                  leg("Venezia FC","Napoli","Serie A","14:00","away_or_draw"),
+                  leg("Troyes","Lens","Ligue 1","19:45","away_or_draw"),
+                  leg("Swansea City","West Ham","Championship","15:00","over_1_5"),
+              ],
+              "ROLLOVER_DAY_ONE":[
+                  leg("Villarreal","Elche CF","LaLiga","15:15","home_win"),
+                  leg("Bologna","Inter","Serie A","17:00","away_or_draw"),
+                  leg("Betis","Barcelona","LaLiga","17:30","away_or_draw"),
+                  leg("Fenerbahce Istanbul","Alanyaspor","Super Lig","17:00","over_1_5"),
+              ]
+          }
+          assert len(slips["TEN_ODDS"])<=20
+          all_events=[(x["home_team"].lower(),x["away_team"].lower()) for legs in slips.values() for x in legs]
+          assert len(all_events)==len(set(all_events)), "fixture repeated across tiers"
+          for name,legs in slips.items():
+              assert not any(x["market"].startswith("under_") for x in legs)
+              print("RESEARCHED_LEGS_"+name+"="+str(len(legs)))
+          floors={"TWO_ODDS":2,"FIVE_ODDS":5,"TEN_ODDS":10,"ROLLOVER_DAY_ONE":2}
+          board=None;meta={}
+          for attempt in range(1,4):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("BOARD_ATTEMPT_"+str(attempt)+"="+json.dumps(meta))
+              if meta.get("is_complete") is True:break
+          if meta.get("is_complete") is not True:
+              print("STOP_INCOMPLETE_BOARD_NO_CODES")
+              raise SystemExit(0)
+          sportybet.fetch_board=lambda force=False,**kwargs:board
+          for name,legs in slips.items():
+              try:
+                  res=generate_curated_booking(CuratedBookingRequest(legs=legs))
+                  if res.get("status")!="success":
+                      print(name+"_UNAVAILABLE="+json.dumps({k:res.get(k) for k in
+                          ("status","reason","requested_legs","failures")},ensure_ascii=False))
+                      continue
+                  if res.get("readback_validation")!="PASSED" or res.get("legs")!=len(legs):
+                      print(name+"_WITHHELD_READBACK_OR_LEG_COUNT");continue
+                  prices=[x.get("sportybet_odds") for x in res.get("selections") or []]
+                  odds=res.get("actual_sportybet_odds")
+                  if odds is None and len(prices)==len(legs) and all(prices):
+                      odds=prod(float(p) for p in prices)
+                  if odds is None or float(odds)<floors[name] or (name=="ROLLOVER_DAY_ONE" and float(odds)>4):
+                      print(name+"_WITHHELD_ODDS_OUT_OF_TIER="+str(odds));continue
+                  print(name+"_EXACT_VERIFIED_CODE="+str(res["share_code"]))
+                  print(name+"_EXACT_VERIFIED_ODDS="+str(round(float(odds),4)))
+                  print(name+"_EXACT_VERIFIED_READBACK="+str(res.get("readback_validation")))
+                  print(name+"_EXACT_VERIFIED_SELECTIONS="+json.dumps(res.get("selections"),ensure_ascii=False))
+                  print(name+"_EXACT_BOARD_ID="+str(res.get("board_snapshot_id")))
+              except Exception as exc:
+                  print(name+"_ERROR="+type(exc).__name__+": "+str(exc)[:300])
+          PY
