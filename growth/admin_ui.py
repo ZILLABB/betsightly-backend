@@ -51,7 +51,20 @@ const pct=v=>v==null?'—':(Number(v)*100).toFixed(Number(v)<.1?1:0)+'%';
 const num=v=>Number(v||0).toLocaleString();
 const maybeNum=v=>v==null?'—':num(v);
 const when=v=>{if(!v)return'Awaiting today’s run';const d=new Date(v);return Number.isNaN(d.valueOf())?String(v):d.toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})};
-async function api(path,opts={}){const r=await fetch(API+path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});if(r.status===401){show('login');throw Error('Session expired');}const b=await r.json().catch(()=>({}));if(!r.ok)throw Error(b.detail||b.message||'Request failed');return b}
+async function api(path,opts={}){
+ let r;
+ try{r=await fetch(API+path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts})}
+ catch(e){throw Error('Network request failed. Check your connection. Publication was not confirmed.')}
+ if(r.status===401){show('login');throw Error('Session expired. Sign in again.')}
+ const b=await r.json().catch(()=>({}));
+ if(!r.ok){
+  const detail=b.detail||b.message;
+  const why=Array.isArray(detail)?detail.map(x=>x.msg||x.message||'Invalid input').join('; '):
+   typeof detail==='string'?detail:detail?JSON.stringify(detail):'HTTP '+r.status;
+  throw Error(why||'HTTP '+r.status);
+ }
+ return b;
+}
 function show(which){$('login').classList.toggle('hidden',which!=='login');$('app').classList.toggle('hidden',which==='login')}
 function nav(name,button){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(button)button.classList.add('active');$('side').classList.remove('open');if(name==='content'){loadContent();loadHomeCampaign()}if(name==='publishing')loadPubs();if(name==='settings')loadSettings();if(name==='referrals')loadRefs();if(name==='manual'){syncManualTier();loadManual()}}
 async function login(){try{await api('/admin/login',{method:'POST',body:JSON.stringify({password:$('pw').value})});$('pw').value='';show('app');boot()}catch(e){$('loginErr').textContent=e.message}}
@@ -123,13 +136,20 @@ async function loadManual(){try{const d=await api('/manual-tiers');const r=d.rol
  ? 'Rollover Day '+num(r.day_number)+' is eligible for '+esc(r.date)+'. Choose 2.00x–4.00x from verified, unused fixtures.'
  : (r.reason||'Rollover status unavailable; publishing is blocked.');const rows=Object.values(d.published||{});$('manualPublished').innerHTML=rows.length?table(['Tier','Games','Verified odds','Share code'],rows.map(r=>`<tr><td>${esc(r.tier)}</td><td>${num(r.leg_count)}</td><td>${esc(r.total_odds)}x</td><td><code>${esc(r.share_code||'unavailable')}</code></td></tr>`)):empty('No manual tickets published today. All official records remain unchanged.')}catch(e){$('manualPublished').textContent=e.message}}
 function syncManualTier(){
- const rollover=$('manualTier').value==='rollover';
- const replace=$('manualReplaceOfficialOver');
- if(rollover)replace.checked=false;
- replace.closest('label').classList.toggle('hidden',rollover);
- $('manualRolloverStatus').classList.toggle('hidden',!rollover);
+ const tier=$('manualTier').value;
+ const replacementEligible=['2_odds','5_odds','10_odds','over_1_5'].includes(tier);
+ const replace=$('manualReplaceOfficialDisplay');
+ if(!replacementEligible)replace.checked=false;
+ replace.closest('label').classList.toggle('hidden',!replacementEligible);
+ $('manualRolloverStatus').classList.toggle('hidden',tier!=='rollover');
+ manualImportReview=null;
+ manualImportedCode=null;
+ manualPreviewConfirmed=null;
+ $('manualCodePublish').disabled=true;
 }
 let manualImportReview=null;
+let manualImportedCode=null;
+let manualPreviewConfirmed=null;
 const REGULAR_MANUAL_MARKETS=[
   ['home_win','Home win'],['draw','Draw'],['away_win','Away win'],
   ['home_or_draw','Home or draw'],['away_or_draw','Away or draw'],
@@ -145,6 +165,8 @@ const REGULAR_MANUAL_MARKETS=[
 ];
 async function manualImportCode(){
  const msg=$('manualErr');msg.textContent='';
+ manualImportedCode=null;manualPreviewConfirmed=null;
+ $('manualCodePublish').disabled=true;
  const code=$('manualShareCode').value.trim();
  if(!code){msg.textContent='Enter a SportyBet booking code.';return}
  const convert=$('manualConvertSpecial').checked;
@@ -164,6 +186,8 @@ async function manualImportCode(){
   const needsReview=d.status==='NEEDS_MANUAL_REVIEW'&&d.unresolved_count>0;
   if(!needsReview)$('manualLines').value=d.lines;
   else manualImportReview=d;
+  if(!needsReview && !converted.length && d.status==='IMPORTED_NOT_PUBLISHED')
+   manualImportedCode={code,tier:d.tier,lines:d.lines,legs:d.original_leg_count};
   const marketChoices=d.tier==='over_1_5'
    ?REGULAR_MANUAL_MARKETS.filter(pair=>
      /^over_[0-4]_5$/.test(pair[0]) ||
@@ -211,6 +235,8 @@ function manualApplyImportReview(){
  if(!window.confirm('Convert all '+rows.length+' selections into a DIFFERENT standard-market ticket? 1UP, 2UP, EarlyGoals, Flexi and promotions will NOT be preserved. The new ticket must be previewed and verified.'))return;
  $('manualLines').value=rows.join('\n');
  manualImportReview=null;
+ manualImportedCode=null;manualPreviewConfirmed=null;
+ $('manualCodePublish').disabled=true;
  $('manualPreview').textContent='All '+rows.length+' selections prepared as ordinary markets by explicit admin review. Promo features are NOT preserved. Click Check prices / preview next; the original price is not guaranteed.';
 }
 function manualCancelImportReview(){
@@ -218,12 +244,93 @@ function manualCancelImportReview(){
  $('manualErr').textContent='';
  $('manualPreview').textContent='Import review cancelled. Previous editor selections are unchanged.';
 }
-async function manualPreview(){const msg=$('manualErr');msg.textContent='';if(manualImportReview){msg.textContent='Finish or cancel the import review first. No partial ticket can be previewed.';return}try{const d=await api('/manual-tiers/preview',{method:'POST',body:JSON.stringify({tier:$('manualTier').value,lines:$('manualLines').value,replace_official_over:$('manualReplaceOfficialOver').checked})});$('manualPreview').innerHTML='<p><strong>Bookmaker-priced preview:</strong> '+esc(d.total_odds)+'x across '+num(d.games.length)+' legs. No code created yet.</p>'+table(['Fixture','Market','Price'],d.games.map(g=>`<tr><td>${esc(g.home_team)} v ${esc(g.away_team)}</td><td>${esc(g.market)}</td><td>${esc(g.odds)}x</td></tr>`))}catch(e){msg.textContent=e.message;$('manualPreview').textContent=''}}
-async function manualPublish(){const msg=$('manualErr');msg.textContent='';if(manualImportReview){msg.textContent='Finish or cancel the special-market import review before publishing.';return}const replacing=$('manualReplaceOfficialOver').checked;if(!window.confirm(replacing?'Replace the PUBLIC Over Goals display with this ADMIN-CURATED ticket after full SportyBet verification? The original engine slip stays immutable and will still settle in Results.':'Publish this ADMIN-CURATED ticket only if SportyBet verifies its entire share code? Existing official slips cannot be overwritten.'))return;try{const d=await api('/manual-tiers/publish',{method:'POST',body:JSON.stringify({tier:$('manualTier').value,lines:$('manualLines').value,replace_official_over:replacing})});$('manualPreview').textContent='Published '+d.tier+' — '+d.leg_count+' games, '+d.total_odds+'x, verified code '+d.share_code+'. View it under the tier on Predictions.';await loadManual()}catch(e){msg.textContent=e.message}}
+function manualRequest(){
+ return {tier:$('manualTier').value,lines:$('manualLines').value,
+         replace_official_display:$('manualReplaceOfficialDisplay').checked};
+}
+function manualRenderSuccess(d, originalCode){
+ const changed=originalCode && d.share_code!==originalCode;
+ $('manualPreview').textContent='Published '+d.tier+' — '+d.leg_count+' games, '+d.total_odds+
+  'x, verified SportyBet code '+d.share_code+
+  (changed?' (new verified code; original input '+originalCode+' is not the displayed ticket)':'')+
+  '. The original model record is still available in Results.';
+ $('manualErr').textContent='';
+}
+async function manualPreview(){
+ const msg=$('manualErr');msg.textContent='';
+ manualPreviewConfirmed=null;
+ $('manualCodePublish').disabled=true;
+ if(manualImportReview){msg.textContent='Finish or cancel the import review first. No partial ticket can be previewed.';return}
+ const request=manualRequest();
+ if(!request.lines.trim()){msg.textContent='First click Find games from code to load every selection, or enter event ID,market rows manually. Nothing was published.';return}
+ try{
+  const d=await api('/manual-tiers/preview',{method:'POST',body:JSON.stringify(request)});
+  $('manualPreview').innerHTML='<p><strong>Bookmaker-priced preview:</strong> '+esc(d.total_odds)+'x across '+num(d.games.length)+' legs. No code created yet.</p>'+
+   table(['Fixture','Market','Price'],d.games.map(g=>`<tr><td>${esc(g.home_team)} v ${esc(g.away_team)}</td><td>${esc(g.market)}</td><td>${esc(g.odds)}x</td></tr>`));
+  manualPreviewConfirmed={...request};
+  if(manualImportedCode && manualImportedCode.tier===request.tier && manualImportedCode.lines===request.lines &&
+     manualImportedCode.code===$('manualShareCode').value.trim() && !$('manualConvertSpecial').checked)
+     $('manualCodePublish').disabled=false;
+ }catch(e){msg.textContent=e.message;$('manualPreview').textContent=''}
+}
+async function manualPublishImported(){
+ const msg=$('manualErr');msg.textContent='';
+ const request=manualRequest();
+ const imported=manualImportedCode;
+ if(!imported || !manualPreviewConfirmed || imported.tier!==request.tier ||
+    imported.lines!==request.lines || imported.code!==$('manualShareCode').value.trim() ||
+    manualPreviewConfirmed.lines!==request.lines ||
+    manualPreviewConfirmed.replace_official_display!==request.replace_official_display ||
+    $('manualConvertSpecial').checked){
+  msg.textContent='First import the exact SportyBet code and run Check prices / preview successfully. Review special markets separately.';
+  return;
+ }
+ if(!window.confirm('Publish ALL '+imported.legs+' verified selections for '+request.tier+
+  (request.replace_official_display?' as a NEW displayed editorial ticket, preserving original model results?':' as a new editorial ticket?')+
+  ' A different bookmaker share code or current odds may be returned.'))return;
+ const button=$('manualCodePublish');button.disabled=true;button.textContent='Verifying full code…';
+ try{
+  const d=await api('/manual-tiers/publish-imported',{method:'POST',body:JSON.stringify({
+   tier:request.tier,code:imported.code,replace_official_display:request.replace_official_display
+  })});
+  manualRenderSuccess(d,imported.code);
+  manualImportedCode=null;manualPreviewConfirmed=null;
+  await loadManual();
+ }catch(e){msg.textContent=e.message}
+ finally{button.textContent='Publish verified imported code'}
+}
+async function manualPublish(){
+ const msg=$('manualErr');msg.textContent='';
+ if(manualImportReview){msg.textContent='Finish or cancel the special-market import review before publishing.';return}
+ const request=manualRequest();
+ if(!request.lines.trim()){msg.textContent='Nothing to publish. Click Find games from code, then Check prices / preview first.';return}
+ if(!manualPreviewConfirmed || manualPreviewConfirmed.tier!==request.tier ||
+    manualPreviewConfirmed.lines!==request.lines ||
+    manualPreviewConfirmed.replace_official_display!==request.replace_official_display){
+  msg.textContent='Please check current SportyBet prices with Check prices / preview before publishing.';return;
+ }
+ if(!window.confirm(request.replace_official_display?
+  'Replace the PUBLIC '+request.tier+' display with this NEW admin-curated ticket? The original model selection, code and Results remain unchanged.':
+  'Publish this reviewed admin-curated ticket only if full SportyBet readback succeeds?'))return;
+ try{
+  const d=await api('/manual-tiers/publish',{method:'POST',body:JSON.stringify(request)});
+  manualRenderSuccess(d,'');manualImportedCode=null;manualPreviewConfirmed=null;
+  $('manualCodePublish').disabled=true;
+  await loadManual();
+ }catch(e){msg.textContent=e.message}
+}
 async function manualFile(event){const file=event.target.files?.[0];if(!file)return;if(file.size>16000){$('manualErr').textContent='File too large (16 KB max).';return}const source=await file.text();manualImportReview=null;$('manualLines').value=source.slice(0,6000);$('manualPreview').textContent='CSV loaded. Click Check prices / preview before publishing.';event.target.value=''}
-const ACTIONS={login,logout,retry,'manual-import-code':manualImportCode,'manual-apply-import-review':manualApplyImportReview,'manual-cancel-import-review':manualCancelImportReview,'manual-preview':manualPreview,'manual-publish':manualPublish,'generate':()=>generate(false),'generate-publish':()=>generate(true),'save-settings':saveSettings,'save-home-campaign':saveHomeCampaign,'add-ref':addRef,preview:e=>preview(Number(e.dataset.id)),approve:e=>act(Number(e.dataset.id),'approve'),publish:e=>act(Number(e.dataset.id),'publish'),'menu':()=>$('side').classList.toggle('open'),'apply-range':loadDashboard};
+const ACTIONS={login,logout,retry,'manual-import-code':manualImportCode,'manual-publish-imported':manualPublishImported,'manual-apply-import-review':manualApplyImportReview,'manual-cancel-import-review':manualCancelImportReview,'manual-preview':manualPreview,'manual-publish':manualPublish,'generate':()=>generate(false),'generate-publish':()=>generate(true),'save-settings':saveSettings,'save-home-campaign':saveHomeCampaign,'add-ref':addRef,preview:e=>preview(Number(e.dataset.id)),approve:e=>act(Number(e.dataset.id),'approve'),publish:e=>act(Number(e.dataset.id),'publish'),'menu':()=>$('side').classList.toggle('open'),'apply-range':loadDashboard};
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act],[data-page],[data-days]');if(!el)return;if(el.dataset.page){nav(el.dataset.page,el);return}if(el.dataset.days){document.querySelectorAll('.range button').forEach(b=>b.classList.remove('active'));el.classList.add('active');$('customDates').classList.toggle('hidden',el.dataset.days!=='custom');if(el.dataset.days!=='custom')loadDashboard();return}const fn=ACTIONS[el.dataset.act];if(fn){e.preventDefault();fn(el)}});
-document.addEventListener('change',e=>{if(e.target.dataset.change==='content')loadContent();if(e.target.id==='manualFile')manualFile(e);if(e.target.id==='manualTier')syncManualTier()});$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
+document.addEventListener('change',e=>{if(e.target.dataset.change==='content')loadContent();if(e.target.id==='manualFile')manualFile(e);if(e.target.id==='manualTier')syncManualTier()});
+document.addEventListener('input',e=>{
+ if(e.target.id==='manualShareCode'){
+  manualImportedCode=null;manualPreviewConfirmed=null;
+  $('manualCodePublish').disabled=true;
+ } else if(e.target.id==='manualLines'){
+  manualPreviewConfirmed=null;$('manualCodePublish').disabled=true;
+ }
+});$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
 async function boot(){$('today').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'short'});await loadDashboard();const s=SETTINGS.channel_enabled||{},sel=$('fPlatform');if(sel.options.length===1)Object.keys(s).forEach(ch=>sel.add(new Option(ch,ch)))}
 (async()=>{try{const c=await(await fetch(API+'/admin/config')).json();if(!c.configured)$('cfgNote').textContent='Admin login is not configured on this server.'}catch(e){}try{await api('/admin/me');show('app');boot()}catch(e){show('login')}})();
 """
@@ -270,10 +377,10 @@ ADMIN_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8"><met
 <div class="card section">
 <div class="row wrap" style="margin-bottom:12px"><label for="manualTier">Destination tier</label><select id="manualTier" class="field"><option value="banker">Banker</option><option value="2_odds">2 Odds (at least 2.00x)</option><option value="5_odds">5 Odds (at least 5.00x)</option><option value="10_odds">10 Odds (at least 10.00x, max 20 legs)</option><option value="over_1_5">Over Goals · mixed overs accumulator</option><option value="rollover">Rollover · 2.00x–4.00x (next eligible day)</option></select></div>
 <div id="manualRolloverStatus" class="note hidden" role="status" style="margin-bottom:12px">Rollover eligibility loads with this page. An earlier unsettled day cannot be bypassed.</div>
-<label style="display:flex;gap:10px;align-items:flex-start;margin:12px 0"><input type="checkbox" id="manualReplaceOfficialOver" style="margin-top:4px"><span><strong>Replace today's Over Goals display with my verified manual ticket</strong><small style="display:block;color:var(--muted)">Only works for Over Goals. The original published game and booking remain preserved in historical Results and settle normally; visitors see your new manual accumulator instead. No other tiers are overwritten.</small></span></label>
+<label style="display:flex;gap:10px;align-items:flex-start;margin:12px 0" class="hidden"><input type="checkbox" id="manualReplaceOfficialDisplay" style="margin-top:4px"><span><strong>Replace today's displayed official tier with my verified manual ticket</strong><small style="display:block;color:var(--muted)">Available for 2 Odds, 5 Odds, 10 Odds and Over Goals. Original model tickets and codes are preserved for Results and calibration; the new editorial ticket is recorded separately. Cannot overwrite Banker or Rollover.</small></span></label>
 <label for="manualShareCode">Import SportyBet booking code</label><div class="row wrap" style="margin:8px 0 14px"><input id="manualShareCode" class="field" placeholder="Paste booking code" autocomplete="off"><button class="btn btn-primary" data-act="manual-import-code">Find games from code</button></div><p class="muted">A fresh standard-market booking code is generated and verified before publication. Features in the original code are not automatically preserved.</p><label for="manualConvertSpecial" class="row wrap" style="gap:10px;margin:8px 0 14px"><input type="checkbox" id="manualConvertSpecial" style="width:19px;height:19px;flex:none"><span><strong>Convert 1UP / 2UP / EarlyGoals to regular markets</strong><small style="display:block;color:var(--muted)">Optional and changes the wager: early-win benefits, Flexi, bonuses and other betslip options are NOT copied. Exact original market odds may change. You must review the new code.</small></span></label><label for="manualLines">SportyBet event ID,market (one per line)</label>
 <textarea id="manualLines" class="field" rows="10" style="display:block;width:100%;font-family:var(--mono);resize:vertical;margin:8px 0 10px" placeholder="52587,home_win&#10;17187,over_1_5"></textarea>
-<div class="row wrap"><label class="btn">Import CSV <input id="manualFile" type="file" accept=".csv,.txt,text/csv,text/plain" style="display:none"></label><button class="btn" data-act="manual-preview">Check prices / preview</button><button class="btn btn-primary" data-act="manual-publish">Verify code & publish</button></div>
+<div class="row wrap"><label class="btn">Import CSV <input id="manualFile" type="file" accept=".csv,.txt,text/csv,text/plain" style="display:none"></label><button class="btn" data-act="manual-preview">Check prices / preview</button><button class="btn btn-primary" data-act="manual-publish-imported" id="manualCodePublish" disabled>Publish verified imported code</button><button class="btn" data-act="manual-publish">Publish reviewed rows</button></div><p class="muted">For an existing SportyBet code: choose the tier, enter the code, click <strong>Find games from code</strong>, review every market, then <strong>Check prices / preview</strong>. Only then can you publish. A verified new booking code may differ from your original code.</p>
 <p id="manualErr" class="error" role="alert"></p><div id="manualPreview" class="section"></div></div>
 <div class="section"><div class="section-head"><h2>Today's editorial tickets</h2><p>Bookmaker-validated tickets only; kept separate from automated model history.</p></div><div id="manualPublished" class="card card-flush"></div></div>
 </section>
