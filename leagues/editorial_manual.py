@@ -379,13 +379,18 @@ def publish(tier: str, lines: str, *,
     replacement = _official_display_replacement(
         tier, over=replace_official_over, explicit=replace_official_display,
     )
+    # One forced, fresh SportyBet board for BOTH the validation preview and
+    # booking-time repricing. Previously the publish path fetched all ~23
+    # SportyBet pages twice before readback; under load this blocked the
+    # single web worker long enough to risk proxy 502/health-check timeout.
+    # The independent create_booking full-leg bookmaker readback still runs.
+    board = sportybet.fetch_board(force=True)
     inspected = preview(
-        tier, lines,
+        tier, lines, board=board,
         replace_official_over=replace_official_over,
         replace_official_display=replace_official_display,
     )
     day, games = inspected["date"], inspected["games"]
-    board = sportybet.fetch_board(force=True)
     # Fresh booking-time repricing and kickoff validation.
     revised = _current_bookable_games(parse_input(lines, tier), board, date=day)
     original_card = load_card(day) or {}

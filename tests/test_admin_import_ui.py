@@ -38,3 +38,21 @@ def test_manual_ui_displays_nonblocking_cross_tier_exposure():
     assert 'd.cross_tier_warnings||[]' in ADMIN_JS
     assert 'Shared fixtures (allowed for manual tickets)' in ADMIN_JS
     assert 'Outcomes across tickets can be correlated.' in ADMIN_JS
+
+
+
+def test_admin_reconciles_ambiguous_proxy_failure_without_reposting():
+    assert "async function reconcileManualPublishAfterError(" in ADMIN_JS
+    assert "const result=await api('/manual-tiers')" in ADMIN_JS
+    assert "Do NOT publish this tier again." in ADMIN_JS
+    assert "could not confirm whether" in ADMIN_JS
+    assert "Do NOT submit the same code twice" in ADMIN_JS
+    assert "await reconcileManualPublishAfterError(request.tier,e)" in ADMIN_JS
+    assert "Preview is read-only" in ADMIN_JS
+
+
+def test_imported_publish_does_not_auto_retry_mutating_post():
+    assert "const delays=[0,1300,2700,4200]" in ADMIN_JS
+    assert "async function manualPublishImported()" in ADMIN_JS
+    assert "if(!transient)return false" in ADMIN_JS
+    assert "const existing=(result.published||{})[tier]" in ADMIN_JS
