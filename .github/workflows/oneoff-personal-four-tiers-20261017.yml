@@ -45,6 +45,7 @@ jobs:
                   leg("Southampton","Bolton Wanderers","Championship","15:00","over_1_5"),
                   leg("Shakhtar D","Kolos Kovalivka","Premier League","16:00","home_win"),
                   leg("Werder Bremen","Paderborn","Bundesliga","14:30","home_or_draw"),
+                  leg("Norwich","Portsmouth FC","Championship","15:00","over_1_5"),
               ],
               "TEN_ODDS":[
                   leg("Bayern Munich","RB Leipzig","Bundesliga","17:30","over_2_5"),
