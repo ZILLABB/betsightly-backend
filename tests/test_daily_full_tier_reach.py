@@ -22,6 +22,8 @@ def _valid_leg(i, odds=1.45):
         # model shrinkage obscure the integer target test.
         risk_adjusted_return=1.025,
         market_trust_state="TRUSTED",
+        market="over_1_5",  # synthetic tier reach must use a publishable line
+        prediction="Over 1.5 Goals",
     )
     return leg
 

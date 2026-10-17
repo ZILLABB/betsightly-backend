@@ -146,3 +146,29 @@ def test_repriced_slip_is_fail_closed_even_with_stale_cached_return():
     leg = pick(confidence=.75, odds=1.15)
     leg["risk_adjusted_return"] = 1.4
     assert not evaluate_slip([leg], "2_odds")["allowed"]
+
+
+
+def test_all_under_goals_markets_are_denied_even_if_payload_claims_trust():
+    for product in ("banker", "2_odds", "5_odds", "10_odds", "rollover"):
+        for market in ("under_2_5", "under_3_5", "under_4_5"):
+            decision = evaluate_leg(
+                pick(market=market, confidence=.95, odds=1.4), product
+            )
+            assert not decision["allowed"]
+            assert "UNDER_GOALS_PUBLICATION_RESTRICTED" in decision["reasons"]
+
+
+def test_alternative_over_or_double_chance_still_needs_original_quality_floor():
+    valid_over = pick(market="over_1_5", confidence=.77, odds=1.40)
+    assert evaluate_leg(valid_over, "5_odds")["allowed"]
+    rejected_replacement = pick(market="over_1_5", confidence=.60, odds=1.80)
+    decision = evaluate_leg(rejected_replacement, "5_odds")
+    assert not decision["allowed"]
+    assert "BELOW_PRODUCT_PROBABILITY_FLOOR" in decision["reasons"]
+
+
+def test_published_under_match_result_remains_settleable():
+    from leagues.results_checker import _evaluate_pick
+    assert _evaluate_pick({"market_key":"under_4_5"}, 3, 1) == "won"
+    assert _evaluate_pick({"market_key":"under_4_5"}, 4, 1) == "lost"
