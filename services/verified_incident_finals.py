@@ -5,14 +5,14 @@ must be supported by a federation or club match report, not by a prediction or
 a bookmaker's live odds. Keep the source URL in each persisted settlement.
 Do not apply these records to an event merely because its teams look similar.
 
-This recovery covers verified fixtures on 14 and 15 October 2026; it is not
+This recovery covers verified fixtures on 14–16 October 2026; it is not
 a substitute for adding wider first-party score-provider coverage.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-# Exact SportyBet IDs are from the immutable 14/15 October Rollover receipts.
+# Exact SportyBet IDs are from the immutable 14–16 October Rollover receipts.
 # Each source independently confirms the 90-minute full-time score.
 _VERIFIED_FINALS = (
     {
@@ -53,6 +53,34 @@ _VERIFIED_FINALS = (
         "home": "Brighton", "away": "FK Kauno Zalgiris",
         "date": "2026-10-15", "home_score": 4, "away_score": 0,
         "evidence_url": "https://www.uefa.com/uefaconferenceleague/clubs/2605907/matches/",
+    },
+    # Friday 16 October 2026 — four already published manual Rollover
+    # Day 2 legs. All reports below are official clubs/competition, reviewed
+    # against the immutable SportyBet event IDs in wc_rollover_days id 935.
+    # One leg finished 0-0 and is an actual loss (Over 1.5); never erase it.
+    {
+        "sportybet_event_id": "sr:match:72587358",
+        "home": "MFK Karvina", "away": "Dukla Prague",
+        "date": "2026-10-16", "home_score": 3, "away_score": 0,
+        "evidence_url": "https://fkdukla.cz/match/9795",
+    },
+    {
+        "sportybet_event_id": "sr:match:72300830",
+        "home": "SFC Opava", "away": "FC Vysocina Jihlava",
+        "date": "2026-10-16", "home_score": 1, "away_score": 3,
+        "evidence_url": "https://www.fcvysocina.cz/match/8835-Vysocina-v-Opave-otocila-skore-cistym-hattrickem-Tyrese-Omotoyeho",
+    },
+    {
+        "sportybet_event_id": "sr:match:73068120",
+        "home": "FC Cartagena", "away": "CE Europa",
+        "date": "2026-10-16", "home_score": 3, "away_score": 0,
+        "evidence_url": "https://www.fccartagena.es/noticias/el-cartagena-vence-por-3-0-al-europa-en-el-fortin-albinegro",
+    },
+    {
+        "sportybet_event_id": "sr:match:72043206",
+        "home": "Widzew Lodz", "away": "Wisla Krakow",
+        "date": "2026-10-16", "home_score": 0, "away_score": 0,
+        "evidence_url": "https://ekstraklasa.org/en/schedule/2026-2027/round-11/",
     },
 )
 
