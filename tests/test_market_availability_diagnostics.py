@@ -46,7 +46,8 @@ def test_over_half_can_be_active_and_still_have_no_approved_games():
 def test_over_half_reports_stage_at_which_eligibility_fails():
     assert _availability("over_0_5", raw=7)["primary_reason"] == "TRUST_OR_MARKET_POLICY_REJECTED"
     assert _availability("over_0_5", raw=7, after_trust=3)["primary_reason"] == "BELOW_FINAL_BUILDER_GATES"
-    assert _availability("over_0_5", raw=7, after_trust=3, approved=2)["primary_reason"] == "INSUFFICIENT_APPROVED_SELECTIONS"
+    assert _availability("over_0_5", raw=7, after_trust=3, approved=2, selected=0)["primary_reason"] == "FIXTURE_OR_TEAM_DIVERSITY"
+    assert _availability("over_0_5", raw=7, after_trust=3, approved=2, selected=2)["primary_reason"] == "INSUFFICIENT_APPROVED_SELECTIONS"
 
 
 def test_unsupported_market_not_misreported_as_no_games():
