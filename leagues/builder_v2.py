@@ -963,7 +963,12 @@ def _market_availability(
 
     out: dict[str, dict] = {}
 
+    # The market registry is the contract for live model/policy/bookability.
+    # Report inactive markets distinctly from a genuinely empty priced slate.
+    from leagues.market_registry import MARKETS
+
     for market in market_balance.get("requested_markets") or []:
+        spec = MARKETS.get(str(market))
         target = int(targets.get(market, 0) or 0)
         raw = int(raw_counts.get(market, 0) or 0)
         after_trust = int(trusted_counts.get(market, 0) or 0)
@@ -971,7 +976,11 @@ def _market_availability(
         selected = int(delivered.get(market, 0) or 0)
         shortfall = max(0, target - selected)
 
-        if shortfall == 0:
+        if spec is None:
+            reason = "UNKNOWN_MARKET"
+        elif spec.activation != "ACTIVE" or not spec.builder:
+            reason = "MARKET_NOT_ACTIVE"
+        elif shortfall == 0:
             reason = "TARGET_SHARE_FILLED"
         elif raw == 0:
             reason = "NO_RAW_CANDIDATES"
@@ -992,6 +1001,9 @@ def _market_availability(
             "selected": selected,
             "shortfall": shortfall,
             "primary_reason": reason,
+            "registry_activation": spec.activation if spec else "UNKNOWN",
+            "automatic_builder_eligible": bool(spec and spec.builder),
+            "exact_bookmaker_market_mapped": bool(spec and spec.sportybet),
         }
 
     return out
