@@ -1,0 +1,120 @@
+name: One-off October 19 three distinct exact SportyBet code verification
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.head_ref == 'ops/oct19-exclusive-five-ten-rollover-research'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimal dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Verify 5x, 10x, Rollover from independent fixtures, with exact readback
+        env:
+          DATABASE_URL: sqlite:///./oct19_readback.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime,timezone,timedelta
+          from math import prod
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest,generate_curated_booking
+          raw={
+           "FIVE_ODDS":[
+            ("Kuwait SC","Al Salibikhaet","home_win"),
+            ("FC Universitatea Cluj","ACS Champions FC Arges","home_win"),
+            ("Beitar Jerusalem","Maccabi Tel Aviv","over_1_5"),
+            ("Viborg FF","FC Midtjylland","over_1_5"),
+            ("Tottenham","Coventry City","over_1_5"),
+            ("Bursaspor","Pendikspor","home_or_draw"),
+            ("Trabzonspor","Besiktas","over_1_5"),
+            ("Braga","Gil Vicente","home_or_draw"),
+            ("Al-Shabab FC (SA)","Al-Faisaly FC","over_1_5")],
+           "TEN_ODDS":[
+            ("Pafos","APOEL","home_or_draw"),
+            ("Derry City","Saint Patrick","away_or_draw"),
+            ("Monza","Cagliari","btts_yes"),
+            ("Parma","Torino","away_or_draw"),
+            ("Fatih Karagumruk","Keciorengucu","over_1_5"),
+            ("Waterford FC","Galway United","over_1_5"),
+            ("Rodina Moscow","Orenburg","over_1_5"),
+            ("Getafe","Rayo Vallecano","away_or_draw"),
+            ("Al Hilal","Al-Hazm","over_1_5")],
+           "ROLLOVER_DAY_ONE":[
+            ("Al-Fayha","Al Ahli Saudi","away_win"),
+            ("Omonia Nicosia","Olympiakos","home_win"),
+            ("Wisla Plock","Radomiak","home_or_draw")]
+          }
+          names={f'{a.casefold()}|{b.casefold()}' for ls in raw.values() for a,b,_ in ls}
+          assert len(names)==sum(map(len,raw.values())),"Overlapping fixture inputs"
+          for i in range(1,4):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("BOOKMAKER_BOARD_"+str(i)+"="+json.dumps(meta,ensure_ascii=False))
+              if meta.get("is_complete") is True:break
+          if meta.get("is_complete") is not True:
+              print("WITHHELD_ALL_BOOKMAKER_BOARD_INCOMPLETE");raise SystemExit(0)
+          wt=timezone(timedelta(hours=1))
+          available=[]
+          for _,entry in sportybet._board_entries(board):
+              ms=entry.get("kickoff_ms")
+              if not ms:continue
+              try:t=datetime.fromtimestamp(int(ms)/1000,timezone.utc).astimezone(wt)
+              except:continue
+              if str(t.date())!="2026-10-19":continue
+              available.append((entry,t))
+          sportybet.fetch_board=lambda force=False,**kwargs:board
+          resolved={}
+          for tier,choices in raw.items():
+              legs=[]
+              for a,b,market in choices:
+                  matches=[(e,t) for e,t in available if a.lower() in str(e.get("home_team") or "").lower()
+                    and b.lower() in str(e.get("away_team") or "").lower()]
+                  if len(matches)!=1:
+                      print(tier+"_UNRESOLVED="+str((a,b,market))+" count="+str(len(matches)))
+                      if matches:print(tier+"_MATCHES="+json.dumps([(e.get("home_team"),e.get("away_team"),e.get("competition")) for e,t in matches]))
+                      break
+                  e,t=matches[0]
+                  c=e.get("competition")
+                  if not c:
+                      print(tier+"_MISSING_COMPETITION="+str((a,b)));break
+                  legs.append(dict(home_team=e["home_team"],away_team=e["away_team"],
+                                   league=c,kickoff=t.isoformat(),market=market))
+              if len(legs)!=len(choices):
+                  print(tier+"_WITHHELD_MISSING_CANDIDATE_LEGS");continue
+              resolved[tier]=legs
+          all_legs=[(l["home_team"].casefold(),l["away_team"].casefold()) for legs in resolved.values() for l in legs]
+          assert len(all_legs)==len(set(all_legs)),"Overlapping resolved fixtures"
+          floors={"FIVE_ODDS":5.0,"TEN_ODDS":10.0,"ROLLOVER_DAY_ONE":2.0}
+          for tier,legs in resolved.items():
+              try:
+                  ret=generate_curated_booking(CuratedBookingRequest(legs=legs))
+                  if ret.get("status")!="success":
+                      print(tier+"_WITHHELD_UNAVAILABLE="+json.dumps({k:ret.get(k) for k in
+                        ("reason","requested_legs","failures")},ensure_ascii=False));continue
+                  if ret.get("readback_validation")!="PASSED" or ret.get("legs")!=len(legs):
+                      print(tier+"_WITHHELD_INCOMPLETE_READBACK");continue
+                  odds=ret.get("actual_sportybet_odds")
+                  if odds is None:
+                      prices=[g.get("sportybet_odds") for g in ret.get("selections") or []]
+                      odds=prod(map(float,prices)) if len(prices)==len(legs) and all(prices) else None
+                  if odds is None or float(odds)<floors[tier] or (tier=="ROLLOVER_DAY_ONE" and float(odds)>4):
+                      print(tier+"_WITHHELD_OUT_OF_TIER="+str(odds));continue
+                  print(tier+"_VALIDATED_CODE="+str(ret.get("share_code")))
+                  print(tier+"_VALIDATED_ODDS="+str(odds))
+                  print(tier+"_VALIDATED_READBACK="+str(ret.get("readback_validation")))
+                  print(tier+"_VALIDATED_SELECTIONS="+json.dumps(ret.get("selections"),ensure_ascii=False))
+                  print(tier+"_BOARD_ID="+str(ret.get("board_snapshot_id")))
+              except Exception as ex:
+                  print(tier+"_ERROR="+type(ex).__name__+": "+str(ex)[:250])
+          PY
