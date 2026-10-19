@@ -66,7 +66,7 @@ def test_started_manual_leg_is_pruned_and_new_code_matches_only_survivors(monkey
 
 def test_near_kickoff_is_also_removed_and_too_few_survivors_never_book(monkeypatch):
     seen = _mock_live_booking(monkeypatch)
-    record = _verified_record([_leg(1, -1), _leg(2, .2), _leg(3, 2)])
+    record = _verified_record([_leg(1, -1), _leg(2, .15), _leg(3, 2)])
     output = M.eligible_manual_remainder(record, "10_odds", {}, now=NOW)
     assert output["selected"] is False
     assert output["remaining_leg_count"] == 1
@@ -139,3 +139,61 @@ def test_latest_unavailable_booking_falls_back_to_verified_edition(monkeypatch):
     assert output["available"]
     assert output["tiers"]["5_odds"]["removed_leg_count"] == 1
     assert seen == [["fixture-2", "fixture-3"]]
+
+
+def test_ten_minute_rule_keeps_fifteen_minute_manual_match_and_excludes_nine(monkeypatch):
+    """Between 10 and 20 minutes is eligible for MANUAL rebooking only."""
+    from leagues.availability import game_kickoff_lifecycle
+    seen = []
+    monkeypatch.setattr(B, "_revalidate_games", lambda games, board: (games, []))
+
+    def booked(games, board, **kwargs):
+        seen.append((list(g["match_id"] for g in games), kwargs["kickoff_buffer"]))
+        return {
+            "status": "active", "share_code": "NEW10MIN",
+            "booking_status": "FULL", "readback_validation": "PASSED",
+            "booked_leg_count": len(games), "partial": False,
+            "actual_sportybet_odds": 2.06,
+        }
+
+    monkeypatch.setattr(B, "create_or_reuse_generated_booking", booked)
+    manual = _verified_record([
+        _leg(1, .15),       # 9 minutes: remove
+        _leg(2, .25),       # 15 minutes: retain
+        _leg(3, 2),         # 120 minutes: retain
+    ])
+    result = M.eligible_manual_remainder(manual, "5_odds", {}, now=NOW)
+    assert result["selected"] is True
+    assert result["remaining_leg_count"] == 2
+    assert result["removed_leg_count"] == 1
+    assert seen == [(["fixture-2", "fixture-3"], timedelta(minutes=10))]
+    assert result["booking"]["share_code"] == "NEW10MIN"
+    assert game_kickoff_lifecycle(_leg(2, .25), NOW) == "kickoff_buffer"
+    assert game_kickoff_lifecycle(
+        _leg(2, .25), NOW, booking_buffer=M.MANUAL_BOOKING_BUFFER,
+    ) == "actionable"
+
+
+def test_manual_cutoff_exactly_ten_minutes_still_removes_fixture(monkeypatch):
+    seen = _mock_live_booking(monkeypatch)
+    result = M.eligible_manual_remainder(
+        _verified_record([_leg(1, 10 / 60), _leg(2, 2), _leg(3, 3)]),
+        "10_odds", {}, now=NOW,
+    )
+    assert result["selected"] is True
+    assert result["removed_leg_count"] == 1
+    assert seen == [["fixture-2", "fixture-3"]]
+
+
+def test_global_booking_still_has_twenty_minute_cutoff():
+    from leagues.availability import BOOKING_BUFFER, game_kickoff_lifecycle
+    assert BOOKING_BUFFER == timedelta(minutes=20)
+    fifteen = _leg(1, .25)
+    assert game_kickoff_lifecycle(fifteen, NOW) == "kickoff_buffer"
+    assert game_kickoff_lifecycle(
+        fifteen, NOW, booking_buffer=timedelta(minutes=10),
+    ) == "actionable"
+    # The shared create_booking path defaults to 20 minutes.
+    standard = B.create_booking([fifteen], {}, now=NOW)
+    assert standard["status"] == "kickoff_buffer"
+    assert "20 minutes" in standard["reason"]
