@@ -1,0 +1,70 @@
+name: One-off Oct 19 live SportyBet fixture & market scouting
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  scout:
+    if: github.head_ref == 'ops/oct19-exclusive-five-ten-rollover-research'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimum booking dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Full fresh Monday bookmaker board, real fixtures and all candidate markets
+        env:
+          DATABASE_URL: sqlite:///./oct19_scout.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone, timedelta
+          from leagues import sportybet
+          board=None
+          for i in range(1,4):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("FULL_BOARD_ATTEMPT="+str(i)+" "+json.dumps(meta,ensure_ascii=False))
+              if meta.get("is_complete") is True: break
+          if not meta.get("is_complete"):
+              print("WITHHELD_BOARD_INCOMPLETE");raise SystemExit(0)
+          local=timezone(timedelta(hours=1))
+          results=[]; comps={}
+          for _,e in sportybet._board_entries(board):
+              ms=e.get("kickoff_ms")
+              if not ms:continue
+              try:t=datetime.fromtimestamp(int(ms)/1000,timezone.utc).astimezone(local)
+              except:continue
+              if str(t.date())!="2026-10-19" or t.hour<8:continue
+              home=str(e.get("home_team") or "");away=str(e.get("away_team") or "")
+              c=str(e.get("competition") or "")
+              if any(s in (home+" "+away+" "+c).lower() for s in
+                  (" srl","simulated","virtual","esoccer","e-soccer","cyber","u19","u20","u21","u23","women","ladies","youth","reserve","friendly")):continue
+              p=e.get("prices") or {}
+              p={k:v for k,v in p.items() if k in (
+                  "home_win","away_win","home_or_draw","away_or_draw","dnb_home","dnb_away",
+                  "over_0_5","over_1_5","over_2_5","over_3_5",
+                  "btts_yes","home_over_0_5","home_over_1_5","away_over_0_5","away_over_1_5")}
+              if not p:continue
+              comps[c]=comps.get(c,0)+1
+              results.append(dict(h=home,a=away,c=c,t=t.strftime("%H:%M"),p=p))
+          print("COMPETITION_COUNTS="+json.dumps(dict(sorted(comps.items(),key=lambda kv:-kv[1])[:65]),ensure_ascii=False))
+          priority={"Premier League","Serie A","LaLiga","Ligue 1","Ligue 2","Bundesliga",
+                    "2. Bundesliga","Eredivisie","LaLiga 2","Serie B","Super Lig","1. Lig",
+                    "Superliga","Ekstraklasa","Allsvenskan","Eliteserien","Primeira Liga",
+                    "Liga Portugal","Stars League","Saudi Pro League","Championship",
+                    "Super League","Indian Super League","First Division A","Jupiler Pro League",
+                    "1. Division","Cyprus 1. Division","Premier Division","Liga 1","Prva Liga",
+                    "FNL","Premier Liga","Premier League 2"}
+          output=[e for e in results if e["c"] in priority]
+          output.sort(key=lambda e:(e["t"],e["c"]))
+          print("TOTAL="+str(len(results))+" PRIORITY="+str(len(output)))
+          for e in output:print("FIXTURE_PRICE="+json.dumps(e,ensure_ascii=False))
+          PY
