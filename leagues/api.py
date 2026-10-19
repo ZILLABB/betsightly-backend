@@ -641,6 +641,22 @@ def get_bookable_now():
         raise HTTPException(500, str(e))
 
 
+@router.get("/manual-bookable-now")
+def get_manual_bookable_now():
+    """Opt-in new codes for remaining admin-curated picks, not official results.
+
+    The original manual publication and stored code never change. The newly
+    booked subset requires an entirely new full SportyBet share code after
+    checking current kickoff times, mapping, prices and exact readback.
+    """
+    try:
+        from leagues.manual_remaining import build_manual_remainders
+        return {"status": "success", **build_manual_remainders()}
+    except Exception as exc:
+        logger.error("Manual remainder lookup failed: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(503, "Current manual rebooking cannot be verified")
+
+
 @router.post("/check-results", dependencies=[Depends(require_api_key)])
 async def trigger_results_check():
     """Manually trigger a results check (also runs hourly in the background)."""
