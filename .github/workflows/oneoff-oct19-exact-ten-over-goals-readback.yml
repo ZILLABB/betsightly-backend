@@ -28,7 +28,7 @@ jobs:
         from leagues.curated_booking import CuratedBookingRequest,generate_curated_booking
         wanted=[
           ("Lee Man FC","Kitchee","over_2_5"),
-          ("FC RFS","FK Tukums 2000","over_1_5"),
+          ("FC RFS","FK Tukums 2000/TSS","over_1_5"),
           ("Jong Ajax Amsterdam","De Graafschap","over_1_5"),
           ("Jong PSV Eindhoven","FC Dordrecht","over_1_5"),
           ("Jong FC Utrecht","Roda JC Kerkrade","over_1_5"),
