@@ -1,0 +1,57 @@
+name: One-off exact ten over-goals Oct 19 candidate discovery
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  scout:
+    if: github.head_ref == 'ops/oct19-exact-ten-goals-no-tiers-overlap'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - run: python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+    - name: Check full bookmaker board, distinct unused upcoming over-goals candidates
+      env:
+        DATABASE_URL: sqlite:///./oct19_ten_goals_candidates.db
+      run: |
+        python - <<'PY'
+        import json
+        from datetime import datetime,timezone,timedelta
+        from leagues import sportybet
+        occupied={
+         "Kuwait SC","FC Universitatea Cluj","Beitar Jerusalem FC","Viborg FF",
+         "Tottenham","Bursaspor","Trabzonspor","Braga","Al-Shabab FC (SA)",
+         "Pafos FC","Derry City FC","Monza","Parma Calcio","Fatih Karagumruk Istanbul",
+         "Waterford FC","Rodina Moscow","Getafe","Al Hilal SFC",
+         "Al-Fayha FC","AC Omonia Nicosia","Wisla Plock"
+        }
+        for n in range(1,4):
+          board=sportybet.fetch_board(force=True)
+          meta=sportybet.board_metadata(board)
+          print("BOARD="+json.dumps(meta))
+          if meta.get("is_complete"):break
+        if not meta.get("is_complete"):raise SystemExit(0)
+        rows=[]
+        for _,e in sportybet._board_entries(board):
+          raw=e.get("kickoff_ms")
+          if not raw:continue
+          try:k=datetime.fromtimestamp(int(raw)/1000,timezone.utc).astimezone(timezone(timedelta(hours=1)))
+          except:continue
+          if str(k.date())!="2026-10-19" or k.hour<9:continue
+          home=str(e.get("home_team") or "")
+          c=str(e.get("competition") or "")
+          if home.casefold() in {x.casefold() for x in occupied}:continue
+          if any(z in (home+" "+str(e.get("away_team") or "")+" "+c).lower() for z in ("srl","youth","u19","u20","u21","u23","women","ladies","simulated","virtual","cyber","friendly")):continue
+          p=e.get("prices") or {}
+          if "over_1_5" not in p:continue
+          rows.append(dict(h=home,a=e.get("away_team"),c=c,k=k.strftime("%H:%M"),o15=p.get("over_1_5"),o25=p.get("over_2_5"),o35=p.get("over_3_5")))
+        print("RESEARCHABLE_COUNT="+str(len(rows)))
+        for x in sorted(rows,key=lambda r:(r["k"],r["c"])):
+          print("RESEARCHABLE_MATCH="+json.dumps(x,ensure_ascii=False))
+        PY
