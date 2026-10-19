@@ -1,0 +1,114 @@
+name: One-off 19 Oct three researched 12-match 1X2 jackpot code verification
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.head_ref == 'ops/oct19-custom-12-jackpot-three-lines'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimal bookmaker dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Verify exact 12 real 1X2 fixtures, and 3 separately bookable jackpot codes
+        env:
+          DATABASE_URL: sqlite:///./oct19_jackpot_12_researched.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime,timezone,timedelta
+          from math import prod
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest,generate_curated_booking
+          fixtures=[
+            ("Kuwait SC","Al Salibikhaet"),
+            ("Al Hilal SFC","Al-Hazm"),
+            ("Al-Fayha FC","Al Ahli Saudi FC"),
+            ("Al Jahra","Kazma SC"),
+            ("AC Omonia Nicosia","Olympiakos Nicosia"),
+            ("Bursaspor","Pendikspor"),
+            ("Braga","Gil Vicente Barcelos"),
+            ("Monza","Cagliari"),
+            ("Tottenham","Coventry City"),
+            ("Getafe","Rayo Vallecano"),
+            ("Pafos FC","APOEL Nikosia"),
+            ("Wisla Plock","RKS Radomiak Radom"),
+          ]
+          tickets={
+           "A_MAIN": ["home_win","home_win","away_win","away_win","home_win","home_win","home_win","away_win","draw","draw","home_win","home_win"],
+           "B_DRAW_HEDGE": ["home_win","home_win","away_win","away_win","home_win","home_win","home_win","draw","home_win","away_win","home_win","draw"],
+           "C_UPSET_HEDGE": ["home_win","home_win","away_win","away_win","home_win","home_win","draw","away_win","away_win","home_win","draw","home_win"],
+          }
+          assert len(fixtures)==12 and len(set(fixtures))==12
+          assert len(tickets)==3 and all(len(v)==12 and all(m in ("home_win","draw","away_win") for m in v) for v in tickets.values())
+          for attempt in range(1,4):
+            board=sportybet.fetch_board(force=True)
+            meta=sportybet.board_metadata(board)
+            print("BOARD_ATTEMPT_"+str(attempt)+"="+json.dumps(meta,ensure_ascii=False))
+            if meta.get("is_complete") is True: break
+          if not meta.get("is_complete"):
+            print("STOP_BOARD_NOT_COMPLETE")
+            raise SystemExit(0)
+          zone=timezone(timedelta(hours=1))
+          now=datetime(2026,10,19,11,35,tzinfo=zone)
+          available=[]
+          for _,event in sportybet._board_entries(board):
+            ms=event.get("kickoff_ms")
+            if not ms:continue
+            try:k=datetime.fromtimestamp(int(ms)/1000,timezone.utc).astimezone(zone)
+            except:continue
+            if k.date().isoformat()!="2026-10-19" or k<=now:continue
+            label=" ".join(str(event.get(key) or "") for key in ("home_team","away_team","competition")).lower()
+            if any(bad in label for bad in ("srl","u19","u20","u21","u23","youth","reserve","women","ladies","simulated","virtual","cyber")):continue
+            available.append((event,k))
+          resolved=[]
+          missing=False
+          for home,away in fixtures:
+            x=[(e,k) for e,k in available if home.casefold()==str(e.get("home_team") or "").casefold() and away.casefold()==str(e.get("away_team") or "").casefold()]
+            if len(x)!=1:
+              print("MISSING_OR_AMBIGUOUS="+json.dumps(dict(home=home,away=away,matches=len(x)),ensure_ascii=False))
+              missing=True
+              continue
+            e,k=x[0]
+            prices=e.get("prices") or {}
+            print("JACKPOT_MARKET="+json.dumps(dict(home=home,away=away,league=e.get("competition"),kickoff_wat=k.strftime("%H:%M"),markets={m:prices.get(m) for m in ("home_win","draw","away_win")}),ensure_ascii=False))
+            if any(m not in prices for m in ("home_win","draw","away_win")):
+              print("MISSING_1X2_PRICE="+home+" vs "+away)
+              missing=True
+            resolved.append(dict(home_team=e["home_team"],away_team=e["away_team"],
+                league=e["competition"],kickoff=k.isoformat()))
+          if missing or len(resolved)!=12:
+            print("STOP_WITHHOLD_ALL_CODES_INCOMPLETE_JACKPOT")
+            raise SystemExit(0)
+          sportybet.fetch_board=lambda force=False,**kwargs:board
+          for ticket_name,markets in tickets.items():
+            legs=[{**f,"market":m} for f,m in zip(resolved,markets)]
+            try:
+              res=generate_curated_booking(CuratedBookingRequest(legs=legs))
+              if res.get("status")!="success":
+                print(ticket_name+"_NO_CODE="+json.dumps({k:res.get(k) for k in ("reason","failures","requested_legs")},ensure_ascii=False))
+                continue
+              if res.get("readback_validation")!="PASSED" or res.get("legs")!=12 or len(res.get("selections") or [])!=12:
+                print(ticket_name+"_WITHHELD_READBACK="+json.dumps({k:res.get(k) for k in ("readback_validation","legs")}))
+                continue
+              prices=[x.get("sportybet_odds") for x in res["selections"]]
+              if len(prices)!=12 or not all(prices):
+                print(ticket_name+"_WITHHELD_PRICES");continue
+              calculated=prod(float(x) for x in prices)
+              print(ticket_name+"_VERIFIED_CODE="+str(res["share_code"]))
+              print(ticket_name+"_VERIFIED_ODDS="+str(res.get("actual_sportybet_odds") or round(calculated,4)))
+              print(ticket_name+"_VERIFIED_MARKETS="+json.dumps([x["market"] for x in res["selections"]]))
+              print(ticket_name+"_VERIFIED_SELECTIONS="+json.dumps(res["selections"],ensure_ascii=False))
+              print(ticket_name+"_VERIFIED_READBACK="+str(res["readback_validation"]))
+            except Exception as ex:
+              print(ticket_name+"_ERROR="+type(ex).__name__+": "+str(ex)[:250])
+          PY
