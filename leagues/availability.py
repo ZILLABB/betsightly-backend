@@ -22,7 +22,8 @@ def parse_kickoff(value) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def kickoff_lifecycle(value, now: datetime | None = None) -> str:
+def kickoff_lifecycle(value, now: datetime | None = None, *,
+                      booking_buffer: timedelta | None = None) -> str:
     """Return actionable, kickoff_buffer, started, or invalid."""
     kickoff = parse_kickoff(value)
     if kickoff is None:
@@ -33,15 +34,16 @@ def kickoff_lifecycle(value, now: datetime | None = None) -> str:
     current = current.astimezone(timezone.utc)
     if kickoff <= current:
         return "started"
-    if kickoff <= current + BOOKING_BUFFER:
+    if kickoff <= current + (booking_buffer if booking_buffer is not None else BOOKING_BUFFER):
         return "kickoff_buffer"
     return "actionable"
 
 
-def game_kickoff_lifecycle(game: dict, now: datetime | None = None) -> str:
+def game_kickoff_lifecycle(game: dict, now: datetime | None = None, *,
+                           booking_buffer: timedelta | None = None) -> str:
     return kickoff_lifecycle(
         game.get("kickoff") or game.get("date") or game.get("commence_time"),
-        now,
+        now, booking_buffer=booking_buffer,
     )
 
 
