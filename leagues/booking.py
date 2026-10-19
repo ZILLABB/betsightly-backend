@@ -34,7 +34,7 @@ import logging
 import threading
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from leagues.availability import game_kickoff_lifecycle
 from leagues.sportybet import MARKET_TO_SPORTYBET
@@ -477,7 +477,8 @@ def _verified_partial_singles(record: dict, games: list) -> bool:
 
 def booking_lifecycle(record: dict | None, games: list,
                       now: datetime | None = None, *,
-                      allow_partial_singles: bool = False) -> dict | None:
+                      allow_partial_singles: bool = False,
+                      kickoff_buffer: timedelta | None = None) -> dict | None:
     """Apply local, deterministic safety checks before a code is exposed.
 
     This never contacts SportyBet. Network readback happens when the code is
@@ -550,7 +551,8 @@ def booking_lifecycle(record: dict | None, games: list,
     actionable_games = (record.get("final_booked_legs") or games
                         if partial_singles or booking_status == "REBUILT_FULL"
                         else games)
-    states = [game_kickoff_lifecycle(game, current) for game in actionable_games]
+    states = [game_kickoff_lifecycle(game, current, booking_buffer=kickoff_buffer)
+              for game in actionable_games]
     if "invalid" in states:
         return invalid("stale", "KICKOFF_MISMATCH",
                        "A displayed fixture has no valid kickoff time.")
@@ -559,7 +561,7 @@ def booking_lifecycle(record: dict | None, games: list,
                        "At least one fixture in this code has started.")
     if "kickoff_buffer" in states:
         return invalid("kickoff_buffer", "KICKOFF_BUFFER",
-                       "A fixture starts within the 20-minute booking buffer.")
+                       f"A fixture starts within the {int((kickoff_buffer or timedelta(minutes=20)).total_seconds() / 60)}-minute booking buffer.")
 
     checked.update({"lifecycle_status": "active", "actionable": True,
                     "failure_category": None})
@@ -782,7 +784,8 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
                    replacements: list | None = None,
                    predicted_odds: float | None = None,
                    ticket_type: str = "accumulator",
-                   now: datetime | None = None) -> dict:
+                   now: datetime | None = None,
+                   kickoff_buffer: timedelta | None = None) -> dict:
     """Book one tier. Returns a record describing what happened, always.
 
     Failure is a first-class outcome here rather than an exception: a tier
@@ -804,7 +807,8 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
     priced_at = current.isoformat()
     original_games = original_games or games
     replacements = replacements or []
-    kickoff_states = [game_kickoff_lifecycle(game, current) for game in games]
+    kickoff_states = [game_kickoff_lifecycle(game, current, booking_buffer=kickoff_buffer)
+                      for game in games]
     if "invalid" in kickoff_states:
         return finished({"status": "stale", "booking_status": "UNAVAILABLE",
                          "share_code": None, "share_url": None,
@@ -822,7 +826,7 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
                          "booking_status": "UNAVAILABLE",
                          "share_code": None, "share_url": None,
                          "failure_category": "KICKOFF_BUFFER",
-                         "reason": "a fixture starts within 20 minutes",
+                         "reason": f"a fixture starts within {int((kickoff_buffer or timedelta(minutes=20)).total_seconds() / 60)} minutes",
                          "priced_at": priced_at})
     stage_started = time.perf_counter()
     selections, unmapped = selections_for(games, board)
@@ -994,7 +998,8 @@ def create_booking(games: list, board: dict, allow_partial: bool = False,
 
 def create_or_reuse_generated_booking(games: list, board: dict,
                                       predicted_odds: float | None = None,
-                                      force: bool = False) -> dict:
+                                      force: bool = False,
+                                      kickoff_buffer: timedelta | None = None) -> dict:
     """Serialize identical selection sets so concurrent requests reuse one code."""
     selections, _ = selections_for(games, board)
     fingerprint = (selection_fingerprint(selections) if selections
@@ -1004,12 +1009,14 @@ def create_or_reuse_generated_booking(games: list, board: dict,
     with lock:
         return _create_or_reuse_generated_booking(
             games, board, predicted_odds=predicted_odds, force=force,
+            kickoff_buffer=kickoff_buffer,
         )
 
 
 def _create_or_reuse_generated_booking(games: list, board: dict,
                                        predicted_odds: float | None = None,
-                                       force: bool = False) -> dict:
+                                       force: bool = False,
+                                       kickoff_buffer: timedelta | None = None) -> dict:
     """Return one validated code per exact generated leg set.
 
     The in-memory API cache is only an optimisation. This persisted fingerprint
@@ -1031,7 +1038,7 @@ def _create_or_reuse_generated_booking(games: list, board: dict,
         prior = generated_booking_for(fingerprint)
         persistence_ms = round((time.perf_counter() - stage_started) * 1000)
         code = (prior or {}).get("share_code")
-        prior_checked = booking_lifecycle(prior, games)
+        prior_checked = booking_lifecycle(prior, games, kickoff_buffer=kickoff_buffer)
         if prior_checked and prior_checked.get("actionable") and code:
             stage_started = time.perf_counter()
             ok, _, actual_odds = validate_code_details(code, selections)
@@ -1055,7 +1062,8 @@ def _create_or_reuse_generated_booking(games: list, board: dict,
                 return reused
 
     record = create_booking(
-        games, board, booking_status="FULL", predicted_odds=predicted_odds)
+        games, board, booking_status="FULL", predicted_odds=predicted_odds,
+        kickoff_buffer=kickoff_buffer)
     record["code_reused"] = False
     record["sportybet_selection_fingerprint"] = fingerprint
     create_timings = record.get("timing_ms") or {}
