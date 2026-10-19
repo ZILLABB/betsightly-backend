@@ -197,3 +197,22 @@ def test_global_booking_still_has_twenty_minute_cutoff():
     standard = B.create_booking([fifteen], {}, now=NOW)
     assert standard["status"] == "kickoff_buffer"
     assert "20 minutes" in standard["reason"]
+
+
+def test_create_booking_accepts_explicit_ten_minute_override(monkeypatch):
+    """Allow reaching live mapping at 15m; never loosen the default buffer."""
+    monkeypatch.setattr(B, "selections_for", lambda games, board: ([], []))
+    fifteen = [_leg(1, .25)]
+    result = B.create_booking(
+        fifteen, {}, now=NOW,
+        kickoff_buffer=timedelta(minutes=10),
+    )
+    assert result["status"] == "unavailable"
+    assert result["booking_status"] == "UNAVAILABLE"
+    # At exactly ten minutes, even the manually overridden path must stop.
+    ten = B.create_booking(
+        [_leg(1, 10 / 60)], {}, now=NOW,
+        kickoff_buffer=timedelta(minutes=10),
+    )
+    assert ten["status"] == "kickoff_buffer"
+    assert "10 minutes" in ten["reason"]
