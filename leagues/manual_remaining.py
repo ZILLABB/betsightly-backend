@@ -22,7 +22,11 @@ def _wat_day(now: datetime) -> str:
 
 def _manual_original_legs(record: dict) -> list[dict]:
     """Only trust an original manually curated ticket with verified readback."""
-    if record.get("status") != "active" or record.get("readback_validation") != "PASSED":
+    if record.get("status") not in (None, "active"):
+        return []
+    # Editions use "code" while the current booking uses "share_code".
+    if (record.get("readback_validation") != "PASSED" or
+            not (record.get("share_code") or record.get("code"))):
         return []
     legs = record.get("original_legs") or []
     if not isinstance(legs, list) or not legs:
@@ -134,7 +138,7 @@ def build_manual_remainders(
     Optional inputs are injectable in tests. No bookmaker call or board fetch
     occurs when today's store contains no independently verified manual legs.
     """
-    from leagues.booking import bookings_for
+    from leagues.booking import bookings_for, booking_editions_for
     from leagues import sportybet
 
     current = now or datetime.now(timezone.utc)
@@ -143,12 +147,23 @@ def build_manual_remainders(
     current = current.astimezone(timezone.utc)
     date = _wat_day(current)
     source = records if records is not None else bookings_for(date)
-    candidates = {
-        tier: record
-        for tier in _MANUAL_TIERS
-        if isinstance((record := (source or {}).get(tier)), dict)
-        and _manual_original_legs(record)
-    }
+    candidates: dict[str, dict] = {}
+    for tier in _MANUAL_TIERS:
+        current_record = (source or {}).get(tier)
+        if isinstance(current_record, dict) and _manual_original_legs(current_record):
+            candidates[tier] = current_record
+            continue
+        if records is not None:
+            # Explicit fixture-injection tests must not touch the live DB.
+            continue
+        # A tier's current booking can be marked unavailable as soon as its
+        # FIRST leg starts, while a later manual leg is still actionable.
+        # The append-only validated booking edition retains the original
+        # manual selections. Never trust an edition without its passed readback.
+        for edition in reversed(booking_editions_for(date, tier)):
+            if isinstance(edition, dict) and _manual_original_legs(edition):
+                candidates[tier] = edition
+                break
     if not candidates:
         return {"available": False, "tiers": {}, "date": date,
                 "official_publication_unchanged": True}
