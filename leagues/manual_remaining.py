@@ -14,6 +14,9 @@ from leagues.availability import game_kickoff_lifecycle
 
 _MANUAL_TIERS = ("banker", "2_odds", "5_odds", "10_odds", "over_1_5")
 _WAT = timezone(timedelta(hours=1))
+# Only this opt-in rebooking feature uses 10 minutes. Official publishing,
+# Rollover and ordinary Builder retain their default 20-minute safety rule.
+MANUAL_BOOKING_BUFFER = timedelta(minutes=10)
 
 
 def _wat_day(now: datetime) -> str:
@@ -57,7 +60,8 @@ def eligible_manual_remainder(
         return {"selected": False, "reason": "No verified manual publication for this tier."}
 
     min_remaining = 1 if tier == "banker" else 2
-    timed = [g for g in original if game_kickoff_lifecycle(g, now) == "actionable"]
+    timed = [g for g in original if game_kickoff_lifecycle(
+        g, now, booking_buffer=MANUAL_BOOKING_BUFFER) == "actionable"]
     rejected_at_kickoff = len(original) - len(timed)
     if len(timed) < min_remaining:
         return {
@@ -83,7 +87,8 @@ def eligible_manual_remainder(
 
     # Only after pruning exactly to verified legs do we create/reuse a booking.
     # The booking utility enforces precise selection mapping and live readback.
-    new_booking = create_or_reuse_generated_booking(verified, board)
+    new_booking = create_or_reuse_generated_booking(
+        verified, board, kickoff_buffer=MANUAL_BOOKING_BUFFER)
     valid = (
         new_booking.get("status") == "active"
         and new_booking.get("booking_status") in {"FULL", "REBUILT_FULL"}
