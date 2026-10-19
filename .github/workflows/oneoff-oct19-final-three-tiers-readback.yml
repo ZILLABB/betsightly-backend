@@ -79,7 +79,8 @@ jobs:
               legs=[]
               for a,b,market in choices:
                   matches=[(e,t) for e,t in available if a.lower() in str(e.get("home_team") or "").lower()
-                    and b.lower() in str(e.get("away_team") or "").lower()]
+                    and b.lower() in str(e.get("away_team") or "").lower()
+                    and "srl" not in (str(e.get("home_team") or "")+" "+str(e.get("away_team") or "")+" "+str(e.get("competition") or "")).lower()]
                   if len(matches)!=1:
                       print(tier+"_UNRESOLVED="+str((a,b,market))+" count="+str(len(matches)))
                       if matches:print(tier+"_MATCHES="+json.dumps([(e.get("home_team"),e.get("away_team"),e.get("competition")) for e,t in matches]))
