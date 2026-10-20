@@ -370,7 +370,9 @@ def preview(tier: str, lines: str, *, board=None, now=None,
 
 def publish(tier: str, lines: str, *,
             replace_official_over: bool = False,
-            replace_official_display: bool = False) -> dict:
+            replace_official_display: bool = False,
+            strict_no_overlap: bool = False,
+            min_publish_odds: float | None = None) -> dict:
     """Full bookmaker readback first, then atomic one-way publication."""
     from leagues import sportybet
     from leagues.booking import create_booking, bookings_for
@@ -397,6 +399,8 @@ def publish(tier: str, lines: str, *,
     cross_tier_warnings = _check_exposure(
         revised, original_card, bookings_for(day), list_published(day), tier=tier,
     )
+    if strict_no_overlap and cross_tier_warnings:
+        raise ValueError("Fixture already published in another tier; nothing published")
     odds = round(prod(g["odds"] for g in revised), 3)
     check_tier_target(tier, odds, len(revised))
     booked = create_booking(
@@ -415,6 +419,8 @@ def publish(tier: str, lines: str, *,
         )
     actual = float(booked.get("actual_sportybet_odds") or 0)
     check_tier_target(tier, actual, len(revised))
+    if min_publish_odds is not None and actual < float(min_publish_odds):
+        raise ValueError("Bookmaker odds fell below the approved preview; nothing published")
     payload = {
         "date": day, "tier": tier,
         "editorial_manual": True, "source": "admin_curated",
@@ -455,6 +461,8 @@ def publish(tier: str, lines: str, *,
         payload["cross_tier_warnings"] = _check_exposure(
             revised, card, bookings_for(day), manual, tier=tier,
         )
+        if strict_no_overlap and payload["cross_tier_warnings"]:
+            raise ValueError("Newly detected cross-tier match reuse; nothing published")
         if tier == "rollover":
             # Enforce the chain progression invariant inside the SAME SQL
             # transaction as the manual publication. No orphaned stages.
