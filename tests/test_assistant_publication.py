@@ -56,7 +56,7 @@ def test_preview_is_non_mutating_and_publish_needs_correct_signed_token(monkeypa
     assert report["status"] == "PREVIEW_ONLY"
     assert report["frontend_changed"] is False
     assert report["leg_count"] == 2
-    assert report["preview_approved"] if "preview_approved" in report else True
+    assert report["publish_confirmed"] is False
     assert agent._decode_token(report["preview_token"])["code"] == "ABCD12"
     with pytest.raises(HTTPException, match="preview token"):
         agent._decode_token(report["preview_token"][:-4] + "AAAA")
@@ -101,10 +101,10 @@ def test_confirmed_publish_uses_locked_no_overlap_path_and_new_code(monkeypatch)
         confirmation=agent.CONFIRMATION,
     ))
     assert params["strict_no_overlap"] is True
-    assert params["min_publish_odds"] == 5.177
+    assert params["min_publish_odds"] == round(5.45 * 0.95, 3)
     assert published["source"] == "assistant_verified_import"
     assert published["share_code_rebooked"] is True
-    assert published["official_engine_record_unchanged"] if "official_engine_record_unchanged" in published else True
+    assert published["calibration_unchanged"] is True
 
 
 def test_expired_token_is_refused(monkeypatch):
