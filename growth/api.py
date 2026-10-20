@@ -140,6 +140,33 @@ def publish_imported_manual_code(body: ManualExistingCodePublishRequest):
         raise HTTPException(422, str(exc))
 
 
+# Assistant publication is intentionally separate from browser-admin sessions:
+# callers need a dedicated Render secret and an explicit, expiring preview.
+# Existing admin preview/publish endpoints and their cookie protections remain.
+from leagues.assistant_publication import (
+    AssistantTicket, AssistantPublish, require_assistant_key,
+    preview_assistant_ticket, publish_assistant_ticket,
+)
+
+
+@router.post("/manual-tiers/assistant/preview",
+             dependencies=[Depends(require_assistant_key)])
+def preview_assistant_manual_ticket(body: AssistantTicket):
+    try:
+        return preview_assistant_ticket(body)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/manual-tiers/assistant/publish",
+             dependencies=[Depends(require_assistant_key)])
+def publish_assistant_manual_ticket(body: AssistantPublish):
+    try:
+        return publish_assistant_ticket(body)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 @public_router.get("/homepage-campaign")
 def homepage_campaign_public():
     """One approved, currently dated website-hero message, or null."""
