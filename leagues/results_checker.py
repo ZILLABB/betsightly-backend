@@ -1384,8 +1384,12 @@ def run_loop():
         # every leg against verified finals using the same scoring evaluator.
         try:
             from leagues.editorial_settlement import settle_pending_manual
+            # Manual picks often include cup and lower-league fixtures absent
+            # from ESPN. Check independent, quota-guarded sources on EVERY
+            # settlement tick, not just the hourly fallback cycle. The
+            # provider adapters enforce their own cache/rate-limit cooldowns.
             manual_summary = settle_pending_manual(
-                allow_fallback=allow_fallback
+                allow_fallback=True
             )
             _record_settlement_component("editorial_manual", manual_summary)
         except Exception as exc:
