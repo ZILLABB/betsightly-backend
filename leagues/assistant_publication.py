@@ -8,6 +8,7 @@ remains the only writer; model outcomes and calibration are unaffected.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -53,13 +54,16 @@ def require_assistant_key(request: Request) -> None:
 def _encode_token(data: dict) -> str:
     blob = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
     signature = hmac.new(_secret(), blob, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(blob + b"." + signature).decode("ascii")
+    message = base64.urlsafe_b64encode(blob).decode("ascii")
+    mac = base64.urlsafe_b64encode(signature).decode("ascii")
+    return message + "." + mac
 
 
 def _decode_token(token: str) -> dict:
     try:
-        packed = base64.b64decode(token, altchars=b"-_", validate=True)
-        blob, signature = packed.rsplit(b".", 1)
+        message, mac = token.split(".")
+        blob = base64.b64decode(message, altchars=b"-_", validate=True)
+        signature = base64.b64decode(mac, altchars=b"-_", validate=True)
         expected = hmac.new(_secret(), blob, hashlib.sha256).digest()
         if not hmac.compare_digest(signature, expected):
             raise ValueError("signature")
@@ -67,7 +71,7 @@ def _decode_token(token: str) -> dict:
         if not isinstance(payload, dict) or int(payload["exp"]) < int(time.time()):
             raise ValueError("expired")
         return payload
-    except (ValueError, TypeError, KeyError, OverflowError, UnicodeError):
+    except (ValueError, TypeError, KeyError, OverflowError, UnicodeError, binascii.Error):
         raise HTTPException(422, "Missing, expired or modified preview token") from None
 
 
