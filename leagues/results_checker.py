@@ -812,6 +812,30 @@ TEAM_ALIASES = {
 }
 
 
+# Verified provider-label differences, not approximate/fuzzy team matching.
+# Each entry maps a complete normalized team name to the same club's label in
+# the ESPN results feed. Exact-name matching retains youth/women/reserve markers
+# and the fixture DATE guard in _lookup_score; never use substrings to settle.
+#
+# These entries cover the SportyBet editorial cards of 20 October 2026. Keep
+# this mapping conservative; audit new variants against a provider fixture.
+_SETTLEMENT_TEAM_ALIASES = {
+    "man city": "manchester city",
+    "roma": "as roma",
+    "wolves": "wolverhampton wanderers",
+    "huddersfield": "huddersfield town",
+    "luton": "luton town",
+    "leicester": "leicester city",
+    "sabah masazir": "sabah fk",
+    "fenerbahce istanbul": "fenerbahce",
+    "psg": "paris saint germain",
+    "stuttgart": "vfb stuttgart",
+    "bodoe glimt": "bodo glimt",
+    "al nassr club": "al nassr",
+    "al ittihad club": "al ittihad",
+}
+
+
 def _normalize_name(name: str) -> str:
     if not name:
         return ""
@@ -824,7 +848,8 @@ def _normalize_name(name: str) -> str:
     tokens = value.split()
     # Club designators are inconsistent across score feeds. Do not remove
     # youth, women's or reserve markers: those identify different teams.
-    return " ".join(token for token in tokens if token not in {"fc", "cf"})
+    normalized = " ".join(token for token in tokens if token not in {"fc", "cf"})
+    return _SETTLEMENT_TEAM_ALIASES.get(normalized, normalized)
 
 
 def _lookup_score(scores: Dict[str, Dict[str, Any]], home: str, away: str,
