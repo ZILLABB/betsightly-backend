@@ -1,13 +1,12 @@
 name: One-off Oct20 mixed-market 5x exact bookmaker verification
 on:
-  pull_request:
-    branches: [devil]
-    types: [opened, synchronize]
+  push:
+    branches: [ops/oct20-mixed-five-odds-research-verified]
 permissions:
   contents: read
 jobs:
   verify:
-    if: github.head_ref == 'ops/oct20-mixed-five-odds-research-verified'
+    if: github.ref_name == 'ops/oct20-mixed-five-odds-research-verified'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
