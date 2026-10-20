@@ -89,3 +89,47 @@ def test_completed_manual_outcome_is_immutable_when_later_scores_disagree():
     assert settled["result_status"] == "lost"
     assert later == settled
     assert later["games"][0]["settlement_evidence"]["home_score"] == 0
+
+
+def test_oct19_official_id_scoped_braga_settles_manual_5x_loss():
+    """Public official league final settles only the matching editorial leg."""
+    from leagues.results_checker import _index_free_finals
+    from services.verified_incident_finals import incident_finals
+    now = datetime(2026, 10, 20, 7, tzinfo=timezone.utc)
+    losing = leg("sr:match:75243922", "Braga", "Gil Vicente Barcelos", "home_or_draw")
+    losing["kickoff"] = "2026-10-19T19:15:00+00:00"
+    other = leg("sr:match:other", "Kuwait SC", "Al Salibikhaet", "home_win")
+    other["kickoff"] = "2026-10-19T14:40:00+00:00"
+    record = {**slip(losing, other), "date": "2026-10-19", "tier": "5_odds"}
+    reviewed = incident_finals([losing, other])
+    assert len(reviewed) == 1
+    assert reviewed[0]["provider_event_id"] == "sr:match:75243922"
+    graded = grade_manual_slip(record, _index_free_finals(reviewed), now=now)
+    assert graded["result_status"] == "lost"
+    assert [game["status"] for game in graded["games"]] == ["lost", "pending"]
+    assert graded["games"][0]["settlement_evidence"]["score_90"] == {"home": 1, "away": 2}
+    assert graded["games"][0]["settlement_evidence"]["evidence_url"].startswith(
+        "https://www.ligaportugal.pt/"
+    )
+    assert graded["booking"] == record["booking"]
+
+
+def test_oct19_official_id_scoped_jong_psv_settles_ten_goal_ticket_loss():
+    """Never mark goals won at 0-1; pending siblings are left pending."""
+    from leagues.results_checker import _index_free_finals
+    from services.verified_incident_finals import incident_finals
+    now = datetime(2026, 10, 20, 7, tzinfo=timezone.utc)
+    losing = leg("sr:match:72044748", "Jong PSV Eindhoven", "FC Dordrecht", "over_1_5")
+    losing["kickoff"] = "2026-10-19T18:00:00+00:00"
+    record = {**slip(losing), "date": "2026-10-19", "tier": "over_1_5"}
+    finals = _index_free_finals(incident_finals([losing]))
+    result = grade_manual_slip(record, finals, now=now)
+    assert result["result_status"] == "lost"
+    assert result["games"][0]["status"] == "lost"
+    assert result["games"][0]["settlement_evidence"]["home_score"] == 0
+    assert result["games"][0]["settlement_evidence"]["away_score"] == 1
+    # Event-ID/date/team mismatches must never backfill the wrong fixture.
+    wrong_id = {**losing, "sportybet_event_id": "sr:match:different"}
+    wrong_day = {**losing, "kickoff": "2026-10-18T18:00:00+00:00"}
+    wrong_club = {**losing, "away_team": "Roda JC Kerkrade"}
+    assert incident_finals([wrong_id, wrong_day, wrong_club]) == []

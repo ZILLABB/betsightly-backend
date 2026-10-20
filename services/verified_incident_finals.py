@@ -5,7 +5,7 @@ must be supported by a federation or club match report, not by a prediction or
 a bookmaker's live odds. Keep the source URL in each persisted settlement.
 Do not apply these records to an event merely because its teams look similar.
 
-This recovery covers verified fixtures on 14–16 October 2026; it is not
+This recovery covers individually verified fixtures from October 2026; it is not
 a substitute for adding wider first-party score-provider coverage.
 """
 from __future__ import annotations
@@ -81,6 +81,23 @@ _VERIFIED_FINALS = (
         "home": "Widzew Lodz", "away": "Wisla Krakow",
         "date": "2026-10-16", "home_score": 0, "away_score": 0,
         "evidence_url": "https://ekstraklasa.org/en/schedule/2026-2027/round-11/",
+    },
+    # Monday 19 October 2026 — existing admin-curated fixtures.
+    # Exact immutable SportyBet IDs from editorial_tier_slips in production.
+    # Independent league/club match reports confirm FT regulation scores.
+    # Both losing legs resolve the corresponding parent manual accumulator
+    # while any other unavailable score must stay PENDING.
+    {
+        "sportybet_event_id": "sr:match:75243922",
+        "home": "Braga", "away": "Gil Vicente Barcelos",
+        "date": "2026-10-19", "home_score": 1, "away_score": 2,
+        "evidence_url": "https://www.ligaportugal.pt/match/20262027/ligaportugalbetclic/2/4?tab=match_formations",
+    },
+    {
+        "sportybet_event_id": "sr:match:72044748",
+        "home": "Jong PSV Eindhoven", "away": "FC Dordrecht",
+        "date": "2026-10-19", "home_score": 0, "away_score": 1,
+        "evidence_url": "https://www.psv.nl/match-center/wedstrijd/jong-psv-fc-dordrecht-19-10-2026",
     },
 )
 
