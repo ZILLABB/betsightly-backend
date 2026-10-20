@@ -1,0 +1,106 @@
+name: One-off Oct 20 personal 12-leg 1X2 evening bookmaker verification
+on:
+  push:
+    branches: [ops/oct20-personal-jackpot12-evening]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.ref_name == 'ops/oct20-personal-jackpot12-evening'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimum repository dependencies
+        run: python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Create strictly 90-minute 1X2 personal jackpot codes (non-public and non-betting)
+        env:
+          DATABASE_URL: sqlite:///./personal_jackpot_evening_oct20.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime,timezone,timedelta
+          from math import prod
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest,generate_curated_booking
+          zone=timezone(timedelta(hours=1))
+          picks=[
+              ("Man City","AEK Athens","home_win"),
+              ("Roma","Slovan Bratislava","home_win"),
+              ("Al Nassr Club","Neom SC","home_win"),
+              ("Ramsgate FC","Stanway Rovers","home_win"),
+              ("Hashtag United","Tilbury","home_win"),
+              ("Carrick Rangers","Newry City AFC","home_win"),
+              ("Barnet FC","Swindon Town","home_win"),
+              ("Huddersfield","Peterborough United","home_win"),
+              ("Ebbsfleet United FC","Horsham FC","home_win"),
+              ("Luton","Barnsley FC","home_win"),
+              ("Porto","PSV Eindhoven","home_win"),
+              ("Bromley FC","Leicester","away_win"),
+          ]
+          assert len(picks)==12 and len(set((h.casefold(),a.casefold()) for h,a,_ in picks))==12
+          for try_no in range(1,4):
+            board=sportybet.fetch_board(force=True)
+            meta=sportybet.board_metadata(board)
+            print("BOARD_META="+json.dumps(meta))
+            if meta.get("is_complete") is True:break
+          if meta.get("is_complete") is not True:
+            print("WITHHELD_ALL_BOARD_NOT_COMPLETE");raise SystemExit(0)
+          all_events=[]
+          for _,e in sportybet._board_entries(board):
+            try: k=datetime.fromtimestamp(int(e["kickoff_ms"])/1000,timezone.utc).astimezone(zone)
+            except (KeyError,TypeError,ValueError):continue
+            if k.date().isoformat()!="2026-10-20":continue
+            label=" ".join(str(e.get(x) or "") for x in ("home_team","away_team","competition")).lower()
+            if any(x in label for x in (" srl","simulated","virtual","u17","u19","u20","u21","u23","youth","women","cyber")):continue
+            all_events.append((e,k))
+          print("TOTAL_DAY_FIXTURES="+str(len(all_events)))
+          legs=[]
+          now=datetime.now(zone)
+          for home,away,market in picks:
+            found=[(e,k) for e,k in all_events if str(e.get("home_team") or "").casefold()==home.casefold() and str(e.get("away_team") or "").casefold()==away.casefold()]
+            if len(found)!=1:
+              print("WITHHELD_AMBIGUOUS_OR_MISSING="+json.dumps(dict(home=home,away=away,count=len(found))))
+              raise SystemExit(0)
+            e,k=found[0]
+            if k <= now + timedelta(minutes=20):
+              print("WITHHELD_STARTED_OR_CUTOFF="+str((home,k.isoformat(),now.isoformat())));raise SystemExit(0)
+            prices=e.get("prices") or {}
+            if not all(p in prices for p in ("home_win","draw","away_win")):
+              print("WITHHELD_1X2_NOT_COMPLETE="+str((home,away,prices)));raise SystemExit(0)
+            print("FIXTURE="+json.dumps({"home":home,"away":away,"league":e.get("competition"),
+              "start_wat":k.strftime("%H:%M"),"price_1":prices["home_win"],
+              "price_x":prices["draw"],"price_2":prices["away_win"],
+              "main_pick":market},ensure_ascii=False))
+            legs.append(dict(home_team=e["home_team"],away_team=e["away_team"],league=e["competition"],
+                            kickoff=k.isoformat(),market=market))
+          variants={
+              "A_MAIN":{},
+              "B_DRAW_HEDGE":{"Bromley FC":"draw","Luton":"draw"},
+              "C_DRAW_HEDGE":{"Porto":"draw","Carrick Rangers":"draw"},
+          }
+          sportybet.fetch_board=lambda force=False,**kwargs:board
+          for name,overrides in variants.items():
+            selected=[dict(g,market=overrides.get(g["home_team"],g["market"])) for g in legs]
+            try:
+              result=generate_curated_booking(CuratedBookingRequest(legs=selected))
+              if result.get("status")!="success":
+                print(name+"_WITHHELD="+json.dumps({k:result.get(k) for k in ("status","reason","failures")},ensure_ascii=False));continue
+              readback=result.get("selections") or []
+              if (result.get("readback_validation")!="PASSED" or len(readback)!=12 or result.get("legs")!=12 or
+                  [r.get("market") for r in readback]!=[g["market"] for g in selected] or not result.get("share_code")):
+                print(name+"_WITHHELD_READBACK="+str((result.get("readback_validation"),len(readback),result.get("legs"))));continue
+              odds=float(result.get("actual_sportybet_odds") or prod(float(r["sportybet_odds"]) for r in readback))
+              print(name+"_VERIFIED_CODE="+result["share_code"])
+              print(name+"_VERIFIED_ODDS="+str(odds))
+              print(name+"_VERIFIED_MARKETS="+json.dumps([r["market"] for r in readback]))
+              print(name+"_VERIFIED_SELECTIONS="+json.dumps(readback,ensure_ascii=False))
+              print(name+"_VERIFIED_READBACK="+str(result["readback_validation"]))
+              print(name+"_BOARD_SNAPSHOT="+str(meta.get("snapshot_id")))
+            except Exception as exc:
+              print(name+"_WITHHELD_EXCEPTION="+type(exc).__name__+" "+str(exc)[:320])
+          PY
