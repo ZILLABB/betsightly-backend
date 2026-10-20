@@ -1,0 +1,56 @@
+name: One-off Oct 20 nonrepeating tier full-board scout
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  scout:
+    if: github.head_ref == 'ops/oct20-unpublished-tier-exact-scout'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Scan real Oct 20 full-board candidate prices without published overlap
+        env:
+          DATABASE_URL: sqlite:///./oct20_scout.db
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime,timezone,timedelta
+          from leagues import sportybet
+          exclude={"gillingham","exeter city","londrina","liverpool","deportivo pereira"}
+          zone=timezone(timedelta(hours=1))
+          for n in range(1,4):
+              board=sportybet.fetch_board(force=True)
+              meta=sportybet.board_metadata(board)
+              print("BOARD_META="+json.dumps(meta))
+              if meta.get("is_complete") is True:break
+          if meta.get("is_complete") is not True:
+              print("STOP_INCOMPLETE_BOARD");raise SystemExit(0)
+          rows=[]; leagues={}
+          for _,e in sportybet._board_entries(board):
+              try:k=datetime.fromtimestamp(int(e["kickoff_ms"])/1000,timezone.utc).astimezone(zone)
+              except:continue
+              if str(k.date())!="2026-10-20" or k.hour<9:continue
+              h=str(e.get("home_team") or "");a=str(e.get("away_team") or "")
+              c=str(e.get("competition") or "")
+              if h.strip().casefold() in exclude:continue
+              allword=(h+" "+a+" "+c).lower()
+              if any(s in allword for s in (" srl","simulation","virtual","cyber","e-soccer","u17","u19","u20","u21","u23","women","ladies","friendly","reserve","esports")):continue
+              p={k:v for k,v in (e.get("prices") or {}).items() if k in (
+                  "home_win","away_win","home_or_draw","away_or_draw","over_1_5","over_2_5","over_3_5",
+                  "btts_yes","dnb_home","dnb_away","home_over_1_5","away_over_1_5")}
+              if not p:continue
+              leagues[c]=leagues.get(c,0)+1
+              rows.append(dict(h=h,a=a,c=c,t=k.strftime("%H:%M"),p=p))
+          print("COUNTS="+json.dumps(dict(total=len(rows),by_league=sorted(leagues.items(),key=lambda x:-x[1])[:80]),ensure_ascii=False))
+          for row in sorted(rows,key=lambda r:(r["t"],r["c"])):
+              print("MATCH_PRICES="+json.dumps(row,ensure_ascii=False))
+          PY
