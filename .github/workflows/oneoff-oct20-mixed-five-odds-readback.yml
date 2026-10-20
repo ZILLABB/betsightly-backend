@@ -1,0 +1,99 @@
+name: One-off Oct20 mixed-market 5x exact bookmaker verification
+on:
+  pull_request:
+    branches: [devil]
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.head_ref == 'ops/oct20-mixed-five-odds-research-verified'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Minimal dependencies
+        run: python -m pip install --disable-pip-version-check 'fastapi==0.104.1' 'pydantic==2.5.0' 'pydantic-settings==2.1.0' 'SQLAlchemy==2.0.23' 'python-dotenv==1.0.0'
+      - name: Eight mixed-market legs with no repeats and exact SportyBet readback
+        env:
+          DATABASE_URL: sqlite:///./verify_mixed_5x_oct20.db
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime,timezone,timedelta
+          from math import prod
+          from leagues import sportybet
+          from leagues.curated_booking import CuratedBookingRequest,generate_curated_booking
+          choices=[
+            ("Roma","Slovan Bratislava","home_win"),
+            ("Man City","AEK Athens","home_win"),
+            ("Al Nassr Club","Neom SC","home_win"),
+            ("Al-Taawoun FC","Al Qadsiah","away_win"),
+            ("Sabah Masazir","Borussia Dortmund","over_1_5"),
+            ("Fenerbahce Istanbul","Slavia Prague","over_1_5"),
+            ("Asyut Petroleum","Zamalek SC","away_win"),
+            ("Ramsgate FC","Stanway Rovers","home_or_draw"),
+          ]
+          assert len(choices)==8 and len({(x[0].lower(),x[1].lower()) for x in choices})==8
+          protected={
+            # Published BetSightly Banker + 2x + Rollover, 2026-10-20
+            "Gillingham FC","Exeter City","Londrina EC PR","Liverpool","Deportivo Pereira FC SA",
+            # Already published BetSightly mixed-over 10-game ticket
+            "Blackpool FC","AFC Wimbledon","Cambridge United","Chesterfield FC",
+            "York City FC","Yeovil Town","Forest Green Rovers","Al-Ettifaq FC","Dewa United","Luton",
+            # Earlier research-only 10x ticket; keep non-overlap anyway
+            "Porto","Napoli","Stuttgart","PSG","Wolves","Bromley FC",
+            "Barnet FC","Doncaster Rovers","IFK Norrkoping FK","Huddersfield",
+          }
+          assert not set(h for h,a,m in choices) & protected
+          for attempt in range(1,4):
+            board=sportybet.fetch_board(force=True)
+            meta=sportybet.board_metadata(board)
+            print("BOARD="+json.dumps(meta,ensure_ascii=False))
+            if meta.get("is_complete") is True:break
+          if meta.get("is_complete") is not True:
+            print("NO_CODE_INCOMPLETE_BOARD");raise SystemExit(0)
+          tz=timezone(timedelta(hours=1))
+          matches=[]
+          for _,e in sportybet._board_entries(board):
+            try:k=datetime.fromtimestamp(int(e["kickoff_ms"])/1000,timezone.utc).astimezone(tz)
+            except:continue
+            if k.date().isoformat()!="2026-10-20":continue
+            descriptors=" ".join(str(e.get(x) or "") for x in ("home_team","away_team","competition")).lower()
+            if any(s in descriptors for s in ("srl","simulated","virtual","u19","u20","u21","u23","youth","women")):continue
+            matches.append((e,k))
+          legs=[]
+          for home,away,market in choices:
+            identified=[(e,k) for e,k in matches if str(e.get("home_team") or "").casefold()==home.casefold() and str(e.get("away_team") or "").casefold()==away.casefold()]
+            if len(identified)!=1:
+              print("MISSING_MATCH="+json.dumps({"h":home,"a":away,"matched":len(identified)}));raise SystemExit(0)
+            e,k=identified[0]
+            if market not in (e.get("prices") or {}):
+              print("MISSING_MARKET="+str((home,away,market)));raise SystemExit(0)
+            print("RESEARCH_SELECTION="+json.dumps(dict(h=home,a=away,c=e.get("competition"),t=k.isoformat(),m=market,price=e["prices"][market]),ensure_ascii=False))
+            legs.append(dict(home_team=e["home_team"],away_team=e["away_team"],league=e["competition"],kickoff=k.isoformat(),market=market))
+          sportybet.fetch_board=lambda force=False,**kwargs:board
+          try:
+            result=generate_curated_booking(CuratedBookingRequest(legs=legs))
+            if result.get("status")!="success":
+              print("NO_CODE_BOOKMAKER_REFUSED="+json.dumps({k:result.get(k) for k in ("reason","failures","requested_legs")},ensure_ascii=False));raise SystemExit(0)
+            selections=result.get("selections") or []
+            if result.get("readback_validation")!="PASSED" or result.get("legs")!=8 or len(selections)!=8:
+              print("NO_CODE_READBACK_FAILED="+str((result.get("readback_validation"),result.get("legs"),len(selections))));raise SystemExit(0)
+            actual=result.get("actual_sportybet_odds")
+            if not actual:
+              actual=prod(float(s["sportybet_odds"]) for s in selections)
+            if float(actual)<5:
+              print("NO_CODE_BELOW_FIVE_ODDS="+str(actual));raise SystemExit(0)
+            if not result.get("share_code"):
+              print("NO_CODE_EMPTY_SHARE_CODE");raise SystemExit(0)
+            print("FINAL_VERIFIED_CODE="+result["share_code"])
+            print("FINAL_VERIFIED_ODDS="+str(actual))
+            print("FINAL_VERIFIED_READBACK="+result["readback_validation"])
+            print("FINAL_VERIFIED_LEGS="+json.dumps(selections,ensure_ascii=False))
+            print("FINAL_BOARD_SNAPSHOT="+str(result.get("board_snapshot_id")))
+          except Exception as exc:
+            print("NO_CODE_EXCEPTION="+type(exc).__name__+" "+str(exc)[:280])
+          PY
