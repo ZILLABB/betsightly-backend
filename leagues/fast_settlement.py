@@ -41,7 +41,10 @@ def _fetch_confirmed_events(slug: str, day: str) -> list[dict]:
             return cached[1]
     try:
         resp = requests.get(
-            _SCOREBOARD.format(slug=slug),
+            # ESPN serves the Saudi Pro League at ksa.1, while the older
+            # internal registry still calls it sau.1. Never send the latter
+            # to the scoreboard: it consistently returns HTTP 400.
+            _SCOREBOARD.format(slug=("ksa.1" if slug == "sau.1" else slug)),
             params={"dates": day.replace("-", ""), "limit": 200},
             timeout=9,
         )
