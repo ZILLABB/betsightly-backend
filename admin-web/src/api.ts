@@ -25,7 +25,7 @@ export async function api<T = any>(path: string, body?: unknown, method: 'GET'|'
     throw new ApiError(error instanceof Error && error.name === 'AbortError' ? 'Request timed out. For publishing, check saved tickets before another attempt.' : 'Connection interrupted. If publishing, do not repeat before checking saved tickets.');
   } finally {window.clearTimeout(timeout);}
 }
-export const isAmbiguous = (error: unknown) => !(error instanceof ApiError) || error.status === 0 || [502,503,504].includes(error.status);
+export const isAmbiguous = (error: unknown) => !(error instanceof ApiError) || error.status === 0 || error.status >= 500;
 export const tiers = [
   ['banker','Banker'], ['2_odds','2 Odds'], ['5_odds','5 Odds'], ['10_odds','10 Odds'],
   ['over_1_5','Over Goals'], ['rollover','Rollover']
