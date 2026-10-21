@@ -75,3 +75,42 @@ test('reports an interrupted POST as unknown without retrying',async()=>{
     assert.match(r.body.detail,/check saved tickets/i);
   }finally{globalThis.fetch=originalFetch}
 });
+
+test('forwards login session cookie from backend without surfacing it in JSON',async()=>{
+ let seen;let calls=0;
+ globalThis.fetch=async(url,opts)=>{
+  calls++;seen={url:String(url),opts};
+  return new Response(JSON.stringify({ok:true,expires_in:3600}),{
+   status:200,headers:{'content-type':'application/json','set-cookie':'bs_admin=signed-session; Secure; HttpOnly; SameSite=Strict; Path=/'}
+  });
+ };
+ try{
+  const r=response();
+  await handler(req('admin/login','POST',{password:'fake-test-only-secret'},'https://'+HOST),r);
+  assert.equal(r.code,200);
+  assert.equal(calls,1);
+  assert.equal(seen.url,BACKEND+'/api/growth/admin/login');
+  assert.deepEqual(JSON.parse(seen.opts.body),{password:'fake-test-only-secret'});
+  assert.match(r.headers['set-cookie'],/HttpOnly/);
+  assert.match(r.headers['set-cookie'],/SameSite=Strict/);
+  assert.doesNotMatch(r.body,/fake-test-only-secret|signed-session/);
+ }finally{globalThis.fetch=originalFetch}
+});
+test('a failed admin authentication is forwarded as 401, never transformed into success',async()=>{
+ let calls=0;
+ globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({detail:'Not signed in.'}),{status:401,headers:{'content-type':'application/json'}})};
+ try{
+  const r=response();await handler(req('manual-tiers'),r);
+  assert.equal(r.code,401);assert.equal(calls,1);
+  assert.equal(JSON.parse(r.body).detail,'Not signed in.');
+ }finally{globalThis.fetch=originalFetch}
+});
+test('misconfigured upstream fails closed before contacting external domains',async()=>{
+ const previous=process.env.ADMIN_BACKEND_ORIGIN;let calls=0;
+ process.env.ADMIN_BACKEND_ORIGIN='https://evil.example.com';
+ globalThis.fetch=async()=>{calls++;throw Error('no outbound call allowed')};
+ try{
+  const r=response();await handler(req('admin/config'),r);
+  assert.equal(r.code,503);assert.equal(calls,0);
+ }finally{process.env.ADMIN_BACKEND_ORIGIN=previous;globalThis.fetch=originalFetch}
+});
