@@ -14,6 +14,7 @@ export async function api<T = any>(path: string, body?: unknown, method: 'GET'|'
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
+      if (r.status === 401 && path !== 'admin/me' && path !== 'admin/login') window.dispatchEvent(new Event('betsightly:session-expired'));
       const raw = data.detail ?? data.error ?? data.message;
       const message = Array.isArray(raw) ? raw.map((item: any) => item.msg ?? item.message).join('; ') : (typeof raw === 'string' ? raw : 'The request could not be completed');
       throw new ApiError(message + ' (HTTP ' + r.status + ')', r.status);
