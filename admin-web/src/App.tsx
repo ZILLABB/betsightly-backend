@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
 import {
  Activity, BarChart3, CheckCircle2, ChevronRight, Clock3, Database, FileCheck2,
@@ -72,6 +72,7 @@ function ManualStudio() {
  const [stage,setStage]=useState(0),[busy,setBusy]=useState(''),[note,setNote]=useState<{kind:'error'|'success'|'info';text:string}|null>(null);
  const [uncertain,setUncertain]=useState(!!sessionStorage.getItem('bs_admin_uncertain'));
  const [review,setReview]=useState<Record<number,string>>({});
+ const operationLatch=useRef(false);
  const current=useQuery({queryKey:['manual-tiers'],queryFn:()=>api<any>('manual-tiers'),refetchOnMount:'always'});
  const saved=current.data?.published||{};
  const normalized=lines.trim().replace(/\r\n/g,'\n');
@@ -80,7 +81,7 @@ function ManualStudio() {
  const importedExact=!!imported && imported.code===code.trim() && imported.tier===tier && imported.lines.trim()===normalized && !convert && !imported.unresolved_count && !imported.converted_features?.length && imported.status==='IMPORTED_NOT_PUBLISHED';
  const active=!!busy;
  const edit=()=>{setPreview(null);setNote(null);setStage(0);};
- const run=async(name:string,fn:()=>Promise<void>)=>{if(busy)return;setBusy(name);try{await fn()}catch(e){setNote({kind:'error',text:errText(e)});}finally{setBusy('')}};
+ const run=async(name:string,fn:()=>Promise<void>)=>{if(operationLatch.current)return;operationLatch.current=true;setBusy(name);try{await fn()}catch(e){setNote({kind:'error',text:errText(e)});}finally{operationLatch.current=false;setBusy('')}};
  const refresh=async()=>{const r=await current.refetch();if(!r.isError && r.data && uncertain){
    const pendingRaw=sessionStorage.getItem('bs_admin_uncertain')||'';
    let pending:{tier:string;previousCode:string}={tier:pendingRaw||tier,previousCode:''};
@@ -333,7 +334,7 @@ function App() {
  useEffect(()=>{if(session==='checking'&&!me.isPending)setSession(me.isError?'guest':'ready')},[session,me.isPending,me.isError]);
  useEffect(()=>{const expired=()=>{qc.clear();setSession('guest');setLoginError('Session expired. Please sign in again.');};window.addEventListener('betsightly:session-expired',expired);return()=>window.removeEventListener('betsightly:session-expired',expired);},[qc]);
  const signIn=async(e:React.FormEvent)=>{e.preventDefault();setSigning(true);setLoginError('');try{await api('admin/login',{password},'POST');setPassword('');await qc.invalidateQueries({queryKey:['me']});const res=await api<any>('admin/me');if(!res.ok)throw Error('Session not confirmed');setSession('ready')}catch(error){setLoginError(errText(error))}finally{setSigning(false)}};
- const signOut=async()=>{try{await api('admin/logout',{},'POST')}catch{}qc.clear();sessionStorage.removeItem('bs_admin_uncertain');setSession('guest')};
+ const signOut=async()=>{try{await api('admin/logout',{},'POST')}catch{}qc.clear();setSession('guest')};
  if(session==='checking')return <div className="auth-screen"><Loading label="Verifying protected admin session…"/></div>;
  if(session==='guest')return <div className="auth-screen"><form className="auth-card" onSubmit={signIn}><div className="brand-mark">B<span>.</span></div><span className="eyebrow">PRIVATE COMMAND CENTER</span><h1>Sign in to BetSightly.</h1><p>Protected football operations, data intelligence and verified publishing.</p><label>Administrator password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required autoFocus/></label>{loginError&&<ResultNote kind="error" text={loginError}/>}<button className="button primary wide" type="submit" disabled={signing}>{signing?<Loader2 className="spin" size={18}/>:<LockKeyhole size={17}/>} Secure sign in</button><small>Signed sessions are HttpOnly, Secure and SameSite=Strict. Nothing is stored in the browser beyond the protected session cookie.</small></form></div>;
  const sections:{[key in Page]:React.ReactNode}={overview:<Overview/>,manual:<ManualStudio/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
