@@ -7,13 +7,14 @@ import {
 } from 'lucide-react';
 import {api, ApiError, isAmbiguous, tiers} from './api';
 
-type Page = 'overview' | 'manual' | 'sporty' | 'readiness' | 'content' | 'publishing' | 'referrals' | 'settings';
+type Page = 'overview' | 'manual' | 'sporty' | 'readiness' | 'content' | 'campaign' | 'publishing' | 'referrals' | 'settings';
 const nav: {id: Page; label: string; icon: LucideIcon; group: string}[] = [
  {id:'overview',label:'Overview',icon:LayoutDashboard,group:'COMMAND CENTER'},
  {id:'manual',label:'Manual SportyBet',icon:Ticket,group:'COMMAND CENTER'},
  {id:'sporty',label:'Booking health',icon:Activity,group:'COMMAND CENTER'},
  {id:'readiness',label:'Market readiness',icon:Database,group:'COMMAND CENTER'},
  {id:'content',label:'Content',icon:Megaphone,group:'OPERATIONS'},
+ {id:'campaign',label:'Homepage campaign',icon:Globe2,group:'OPERATIONS'},
  {id:'publishing',label:'Publishing',icon:Send,group:'OPERATIONS'},
  {id:'referrals',label:'Referrals',icon:Users,group:'OPERATIONS'},
  {id:'settings',label:'Settings',icon:Settings2,group:'OPERATIONS'}
@@ -206,6 +207,49 @@ function Operations({mode}:{mode:'sporty'|'readiness'}) {
  </>;
 }
 
+
+type HomeCampaign={
+ enabled:boolean;reviewed:boolean;eyebrow:string;headline:string;description:string;
+ cta_text:string;cta_path:string;starts_on:string;ends_on:string;source_url:string
+};
+function CampaignEditor(){
+ const qc=useQueryClient();
+ const q=useQuery({queryKey:['homepage-campaign'],queryFn:()=>api<{campaign:HomeCampaign}>('homepage-campaign')});
+ const [draft,setDraft]=useState<HomeCampaign|null>(null),[busy,setBusy]=useState(false),[feedback,setFeedback]=useState('');
+ useEffect(()=>{if(q.data?.campaign)setDraft({...q.data.campaign})},[q.data]);
+ const edit=(field:keyof HomeCampaign,value:string|boolean)=>setDraft(current=>current?{...current,[field]:value}:current);
+ const save=async()=>{
+   if(!draft||busy)return;
+   if(draft.enabled && !window.confirm('Publish this verified time-bounded hero campaign to the public website? The event, source and dates must be fact-checked.'))return;
+   setBusy(true);setFeedback('');
+   try{await api('homepage-campaign',draft,'POST');setFeedback('Campaign saved. The public website will display it only within the approved dates.');await qc.invalidateQueries({queryKey:['homepage-campaign']});}
+   catch(e){setFeedback(errText(e))}finally{setBusy(false)}
+ };
+ return <>
+  <div className="page-heading"><div><span className="eyebrow">WEBSITE EDITORIAL</span><h1>Matchday homepage.</h1><p>Show verified Champions League, World Cup or league-week campaigns, with automatic expiration.</p></div></div>
+  {q.isPending?<Loading/>:q.isError?<DataError error={q.error} retry={()=>q.refetch()}/>:draft?<div className="split">
+  <Panel title="Campaign configuration" subtitle="Only approved events, dated and sourced, may appear on the public hero">
+   <div className="editor">
+    <label>Eyebrow (50 characters)<input maxLength={50} value={draft.eyebrow} onChange={e=>edit('eyebrow',e.target.value)}/></label>
+    <label>Headline (85 characters)<input maxLength={85} value={draft.headline} onChange={e=>edit('headline',e.target.value)}/></label>
+    <label>Description (220 characters)<textarea rows={3} maxLength={220} value={draft.description} onChange={e=>edit('description',e.target.value)}/></label>
+    <div className="split"><label className="setting-line">CTA text<input maxLength={36} value={draft.cta_text} onChange={e=>edit('cta_text',e.target.value)}/></label><label className="setting-line">CTA destination<select value={draft.cta_path} onChange={e=>edit('cta_path',e.target.value)}>{['/predictions','/build-slip','/results','/rollover'].map(x=><option key={x}>{x}</option>)}</select></label></div>
+    <div className="split"><label className="setting-line">Start date<input type="date" value={draft.starts_on} onChange={e=>edit('starts_on',e.target.value)}/></label><label className="setting-line">End date<input type="date" value={draft.ends_on} onChange={e=>edit('ends_on',e.target.value)}/></label></div>
+    <label>Public HTTPS source URL<input type="url" placeholder="https://..." maxLength={350} value={draft.source_url} onChange={e=>edit('source_url',e.target.value)}/></label>
+    <label className="check"><input type="checkbox" checked={draft.reviewed} onChange={e=>edit('reviewed',e.target.checked)}/>I have verified the event, source and date range.</label>
+    <label className="check"><input type="checkbox" checked={draft.enabled} onChange={e=>edit('enabled',e.target.checked)}/>Enable public homepage campaign for the scheduled dates</label>
+    <div className="toolbar"><button className="button primary" onClick={save} disabled={busy}>{busy?<Loader2 size={16} className="spin"/>:<CheckCircle2 size={16}/>} Save campaign</button><button className="button secondary" disabled={busy} onClick={()=>setDraft({...q.data!.campaign})}>Discard changes</button></div>
+    {feedback&&<ResultNote kind={feedback.startsWith('Campaign saved')?'success':'error'} text={feedback}/>}
+   </div>
+  </Panel>
+  <Panel title="Editorial preview" subtitle="Content preview, not a published claim">
+   <div className="campaign-preview"><span className="eyebrow">{draft.eyebrow||'MATCHDAY CAMPAIGN'}</span><h3>{draft.headline||'Your verified headline will appear here.'}</h3><p>{draft.description||'Explain what is happening this week, without promising winning bets.'}</p><span className="button secondary">{draft.cta_text||'View predictions'} <ChevronRight size={15}/></span></div>
+   <div className="data-rows"><div><span>Publication status</span><b>{draft.enabled?'Scheduled (pending validation)':'Disabled'}</b></div><div><span>Fact check</span><b>{draft.reviewed?'Reviewed':'Not reviewed'}</b></div><div><span>Source link</span><b>{draft.source_url?'Provided':'Missing'}</b></div><div><span>Active dates</span><b>{draft.starts_on||'—'} → {draft.ends_on||'—'}</b></div></div>
+   <Warning>Homepage campaigns are independent of prediction results, betting success and calibration. Expired campaigns disappear automatically.</Warning>
+  </Panel></div>:null}
+ </>;
+}
+
 function Content() {
  const qc=useQueryClient(); const q=useQuery({queryKey:['content'],queryFn:()=>api<any>('content?limit=150')});
  const [active,setActive]=useState<number|null>(null);const [message,setMessage]=useState('');
@@ -261,7 +305,7 @@ function App() {
  const signOut=async()=>{try{await api('admin/logout',{},'POST')}catch{}qc.clear();sessionStorage.removeItem('bs_admin_uncertain');setSession('guest')};
  if(session==='checking')return <div className="auth-screen"><Loading label="Verifying protected admin session…"/></div>;
  if(session==='guest')return <div className="auth-screen"><form className="auth-card" onSubmit={signIn}><div className="brand-mark">B<span>.</span></div><span className="eyebrow">PRIVATE COMMAND CENTER</span><h1>Sign in to BetSightly.</h1><p>Protected football operations, data intelligence and verified publishing.</p><label>Administrator password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required autoFocus/></label>{loginError&&<ResultNote kind="error" text={loginError}/>}<button className="button primary wide" type="submit" disabled={signing}>{signing?<Loader2 className="spin" size={18}/>:<LockKeyhole size={17}/>} Secure sign in</button><small>Signed sessions are HttpOnly, Secure and SameSite=Strict. Nothing is stored in the browser beyond the protected session cookie.</small></form></div>;
- const sections:{[key in Page]:React.ReactNode}={overview:<Overview/>,manual:<ManualStudio/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
+ const sections:{[key in Page]:React.ReactNode}={overview:<Overview/>,manual:<ManualStudio/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
  return <div className="shell"><aside className={'sidebar '+(mobile?'shown':'')}><div className="sidebar-brand"><div className="brand-mark">B<span>.</span></div><div><strong>BetSightly</strong><small>COMMAND CENTER</small></div><button className="mobile-close" onClick={()=>setMobile(false)} aria-label="Close menu"><X/></button></div><nav aria-label="Admin navigation">{nav.map((item,i)=>{const Icon=item.icon;return <React.Fragment key={item.id}>{(i===0||item.group!==nav[i-1].group)&&<div className="nav-group">{item.group}</div>}<button className={'nav-item '+(page===item.id?'active':'')} onClick={()=>{setPage(item.id);setMobile(false)}}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={14}/>}</button></React.Fragment>})}</nav><div className="sidebar-bottom"><div className="session"><ShieldCheck size={18}/><div><strong>Protected session</strong><span>Render-backed authentication</span></div></div><button onClick={signOut} className="sign-out"><LogOut size={17}/> Sign out</button></div></aside><div className="workspace"><header className="topbar"><div className="topbar-left"><button className="menu-toggle" onClick={()=>setMobile(true)} aria-label="Open menu"><Menu/></button><div className="breadcrumb">BET SIGHTLY <ChevronRight size={13}/> <strong>{nav.find(x=>x.id===page)?.label}</strong></div></div><div className="topbar-right"><span className="env-tag"><Globe2 size={13}/> Admin workspace</span><span className="clock">{new Date().toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric',timeZone:'Africa/Lagos'})}</span></div></header><main className="main">{sections[page]}</main><footer className="footer">BetSightly admin · Secure API through same-origin gateway · Data from production FastAPI</footer></div>{mobile&&<button className="scrim" aria-label="Close menu overlay" onClick={()=>setMobile(false)}/>}</div>;
 }
 export default App;
