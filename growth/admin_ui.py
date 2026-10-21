@@ -42,6 +42,91 @@ main{max-width:1520px;margin:0 auto;padding:28px 30px 64px}.page{display:none}.p
 @media(max-width:1180px){.kpis{grid-template-columns:repeat(3,1fr)}.three{grid-template-columns:1fr 1fr}.health-grid{grid-template-columns:1fr 1fr}.health-item:nth-child(3){border-left:0;border-top:1px solid var(--line)}.health-item:nth-child(4){border-top:1px solid var(--line)}}
 @media(max-width:800px){.shell{display:block}.sidebar{position:fixed;inset:0 auto 0 0;width:250px;transform:translateX(-105%);transition:.2s;box-shadow:var(--shadow)}.sidebar.open{transform:none}.mobile-toggle{display:inline-flex}.topbar{height:auto;min-height:66px;padding:12px 16px}.topbar .actions .desktop-action{display:none}main{padding:22px 16px 50px}.page-head{align-items:flex-start;flex-direction:column}.page-head>div{width:100%;min-width:0}.range{width:100%;overflow:auto}.kpis{grid-template-columns:1fr 1fr}.two,.three{grid-template-columns:1fr}.span-2{grid-column:auto}.health-grid{grid-template-columns:1fr}.health-item{border-left:0;border-top:1px solid var(--line)}.health-item:first-child{border-top:0}.retention{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:480px){.kpis{grid-template-columns:1fr 1fr}.kpi{min-height:112px;padding:14px}.kpi-value{font-size:23px}.funnel-row{grid-template-columns:1fr auto}.funnel-rate{grid-column:1/-1;text-align:left}.retention{grid-template-columns:1fr 1fr}.page-head h1{font-size:26px}}
+
+/* Atlantic Blue / editorial admin system. Green and red remain semantic status colors. */
+:root {
+  --bg:#0B2238;--shell:#102A42;--panel:#1A354A;--panel-2:#203E55;
+  --panel-3:#294961;--line:#35546D;--line-2:#4D6A80;
+  --text:#F5F9FC;--text-2:#C4D5E2;--muted:#ABC0CF;
+  --brand:#69B0D6;--brand-2:#4D9EC9;--brand-soft:rgba(105,176,214,.13);
+  --blue:#91BAF1;--amber:#E5AD70;--red:#FF969C;--purple:#BAA9E8;
+  --success:#77D4B6;--radius:13px;--shadow:0 16px 44px rgba(2,14,28,.22);
+}
+body { background:radial-gradient(circle at 70% -24%,rgba(105,176,214,.14),transparent 43%),var(--bg); }
+.sidebar { background:rgba(11,34,56,.97); }
+.topbar { background:rgba(11,34,56,.91); }
+.card { background:linear-gradient(145deg,rgba(30,57,79,.98),rgba(20,44,65,.98)); }
+.card:hover {border-color:var(--line-2)}
+.btn {border-radius:9px}
+.btn:hover {border-color:var(--brand)}
+.btn-primary { background:linear-gradient(120deg,#E5AD70,#D5A069); color:#122238; border:1px solid #E5AD70; }
+.btn-primary:hover { background:#F0BD89; border-color:#F0BD89; color:#122238; }
+.btn:disabled { opacity:.58; cursor:not-allowed; }
+.btn:focus-visible,.field:focus-visible,.nav button:focus-visible {
+  outline:2px solid var(--brand);outline-offset:3px;
+}
+.brand-mark {background:linear-gradient(145deg,#69B0D6,#A2BFFA);color:#0B2238;box-shadow:0 7px 24px rgba(105,176,214,.18)}
+.kpi.hero {border-color:var(--line-2);background:linear-gradient(145deg,var(--panel-3),var(--panel))}
+.kpi.hero .kpi-value {color:var(--text)}
+.trend-bar {background:linear-gradient(180deg,var(--brand),rgba(105,176,214,.2))}
+.ok {color:var(--success);background:rgba(119,212,182,.12)}
+.PUBLISHED,.FULL {color:var(--success);border-color:rgba(119,212,182,.4)}
+.dot {background:var(--success);box-shadow:0 0 0 5px rgba(119,212,182,.12)}
+pre {background:#10283E}
+.field {border-radius:9px;min-width:0}
+#page-manual .card {min-width:0}
+#page-manual textarea.field {line-height:1.65}
+#page-manual .row.wrap>input.field {flex:1 1 240px}
+#page-manual [data-act^="manual-"] {min-height:44px}
+#page-manual label.btn {cursor:pointer}
+.manual-workflow {
+ display:grid;gap:13px;padding:18px 20px;margin-top:20px;
+ border:1px solid var(--border-brand,var(--line-2));border-radius:12px;
+ background:linear-gradient(125deg,var(--panel-2),var(--panel));
+ box-shadow:0 9px 25px rgba(2,14,28,.10);
+}
+.manual-workflow-head {display:flex;align-items:flex-start;gap:11px}
+.manual-workflow-icon {flex:0 0 35px;display:grid;place-items:center;height:35px;border-radius:10px;background:var(--brand-soft);color:var(--brand);font-size:18px}
+.manual-workflow-copy{min-width:0;flex:1}
+.manual-workflow-title{display:block;font-size:14px;color:var(--text);font-weight:780}
+.manual-workflow-detail{display:block;margin-top:4px;color:var(--text-2);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.manual-workflow-steps {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;list-style:none;margin:0;padding:0}
+.manual-workflow-steps li {display:flex;gap:7px;align-items:center;min-width:0;padding:9px 8px;border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:11px;font-weight:620;background:rgba(10,30,47,.4)}
+.manual-workflow-steps li::before {content:"";width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:var(--line-2)}
+.manual-workflow-steps li[data-step-state="active"] {color:var(--text);border-color:var(--brand);background:var(--brand-soft)}
+.manual-workflow-steps li[data-step-state="active"]::before {background:var(--brand)}
+.manual-workflow-steps li[data-step-state="done"] {color:var(--text-2)}
+.manual-workflow-steps li[data-step-state="done"]::before {background:var(--success)}
+.manual-workflow[data-state="error"] {border-color:rgba(255,150,156,.5)}
+.manual-workflow[data-state="success"] {border-color:rgba(119,212,182,.4)}
+.manual-workflow[data-state="busy"] .manual-workflow-icon::before {
+ content:"";display:block;width:18px;height:18px;border-radius:50%;
+ border:2px solid rgba(105,176,214,.28);border-top-color:var(--brand);
+ animation:admin-progress-spin .85s linear infinite;
+}
+.manual-workflow[data-state="busy"] .manual-workflow-icon {font-size:0}
+@keyframes admin-progress-spin {to{transform:rotate(360deg)}}
+.manual-workflow-help {display:flex;flex-wrap:wrap;align-items:center;gap:9px}
+.manual-workflow-help .muted {font-size:11px}
+.manual-result {border:1px solid rgba(119,212,182,.36);background:rgba(119,212,182,.075);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--text-2);line-height:1.6;overflow-wrap:anywhere}
+.manual-result strong,.manual-result code{color:var(--text)}
+.manual-published-head {display:flex;justify-content:space-between;align-items:center;gap:12px}
+.manual-published-head .btn {min-height:40px}
+@media(max-width:850px) {
+ .manual-workflow-steps {grid-template-columns:repeat(3,minmax(0,1fr))}
+ .manual-workflow {padding:14px}
+}
+@media(max-width:520px) {
+ .manual-workflow-steps {grid-template-columns:repeat(2,minmax(0,1fr))}
+ .manual-workflow-head {gap:8px}
+ #page-manual .row.wrap > :is(button,.btn) {flex:1 1 175px}
+ #page-manual .row.wrap > label.btn {text-align:center}
+ .manual-workflow-steps li {font-size:10px;min-height:40px}
+}
+@media(prefers-reduced-motion:reduce) {
+ .manual-workflow[data-state="busy"] .manual-workflow-icon::before {animation-duration:2s}
+}
+
 """
 
 ADMIN_JS = r"""
@@ -425,7 +510,27 @@ ADMIN_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8"><met
 <section id="page-manual" class="page">
 <div class="page-head"><div><p class="eyebrow">Prediction publishing</p><h1>Manual SportyBet desk</h1><p>Publish verified manual selections to an empty tier, or explicitly replace the public Over Goals card while keeping the original engine result intact.</p></div></div>
 <div class="note">Use SportyBet event IDs and canonical market codes, one per line. The Over Goals tier accepts only normal over_1_5, over_2_5, over_3_5 or over_4_5 (mixed lines allowed), provided exact live markets exist. Example: 52587,home_win or 17187,over_2_5. The live bookmaker board supplies prices and verifies the full share code before anything goes public. Automated tickets and the official performance record cannot be overwritten.</div>
-<div class="card section">
+<div class="manual-workflow" id="manualWorkflow" data-state="idle" aria-live="polite" aria-atomic="true" aria-busy="false" role="status">
+ <div class="manual-workflow-head">
+  <span class="manual-workflow-icon" id="manualWorkflowIcon" aria-hidden="true">◎</span>
+  <div class="manual-workflow-copy">
+   <strong class="manual-workflow-title" id="manualWorkflowTitle">Ready to import</strong>
+   <span class="manual-workflow-detail" id="manualWorkflowDetail">Select a tier, paste a SportyBet code or add event ID / market rows. Nothing is published until you confirm the reviewed slip.</span>
+  </div>
+ </div>
+ <ol class="manual-workflow-steps" aria-label="Manual publishing progress">
+  <li data-manual-step="1">Read code</li>
+  <li data-manual-step="2">Review selections</li>
+  <li data-manual-step="3">Check live prices</li>
+  <li data-manual-step="4">Publish</li>
+  <li data-manual-step="5">Confirm saved</li>
+ </ol>
+ <div class="manual-workflow-help">
+  <button type="button" class="btn" data-act="manual-refresh" id="manualRefresh">Refresh published tickets</button>
+  <span class="muted">Processing feedback comes from actual server responses. Do not submit again after a network interruption until the saved tickets are checked.</span>
+ </div>
+</div>
+<div class="card section" id="manualEditor">
 <div class="row wrap" style="margin-bottom:12px"><label for="manualTier">Destination tier</label><select id="manualTier" class="field"><option value="banker">Banker</option><option value="2_odds">2 Odds (at least 2.00x)</option><option value="5_odds">5 Odds (at least 5.00x)</option><option value="10_odds">10 Odds (at least 10.00x, max 20 legs)</option><option value="over_1_5">Over Goals · mixed overs accumulator</option><option value="rollover">Rollover · 2.00x–4.00x (next eligible day)</option></select></div>
 <div id="manualRolloverStatus" class="note hidden" role="status" style="margin-bottom:12px">Rollover eligibility loads with this page. An earlier unsettled day cannot be bypassed.</div>
 <label style="display:flex;gap:10px;align-items:flex-start;margin:12px 0" class="hidden"><input type="checkbox" id="manualReplaceOfficialDisplay" style="margin-top:4px"><span><strong>Replace today's displayed official tier with my verified manual ticket</strong><small style="display:block;color:var(--muted)">Available for 2 Odds, 5 Odds, 10 Odds and Over Goals. Original model tickets and codes are preserved for Results and calibration; the new editorial ticket is recorded separately. Cannot overwrite Banker or Rollover.</small></span></label>
@@ -433,7 +538,7 @@ ADMIN_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8"><met
 <textarea id="manualLines" class="field" rows="10" style="display:block;width:100%;font-family:var(--mono);resize:vertical;margin:8px 0 10px" placeholder="52587,home_win&#10;17187,over_1_5"></textarea>
 <div class="row wrap"><label class="btn">Import CSV <input id="manualFile" type="file" accept=".csv,.txt,text/csv,text/plain" style="display:none"></label><button class="btn" data-act="manual-preview">Check prices / preview</button><button class="btn btn-primary" data-act="manual-publish-imported" id="manualCodePublish" disabled>Publish verified imported code</button><button class="btn" data-act="manual-publish">Publish reviewed rows</button></div><p class="muted">For an existing SportyBet code: choose the tier, enter the code, click <strong>Find games from code</strong>, review every market, then <strong>Check prices / preview</strong>. Only then can you publish. A verified new booking code may differ from your original code.</p>
 <p id="manualErr" class="error" role="alert"></p><div id="manualPreview" class="section"></div></div>
-<div class="section"><div class="section-head"><h2>Today's editorial tickets</h2><p>Bookmaker-validated tickets only; kept separate from automated model history.</p></div><div id="manualPublished" class="card card-flush"></div></div>
+<div class="section"><div class="section-head manual-published-head"><div><h2>Today's editorial tickets</h2><p>Bookmaker-validated tickets only; kept separate from automated model history.</p></div></div><div id="manualPublished" class="card card-flush" aria-live="polite"><div class="empty">Loading saved tickets…</div></div></div>
 </section>
 <section id="page-referrals" class="page"><div class="page-head"><div><p class="eyebrow">Acquisition</p><h1>Referral links</h1></div></div><div class="card"><div class="row wrap"><input id="refCode" class="field" placeholder="Referral code"><input id="refName" class="field" placeholder="Partner name"><button class="btn btn-primary" data-act="add-ref">Create link</button></div><p id="refErr" class="error"></p></div><div id="refTable" class="card card-flush section"></div></section>
 <section id="page-settings" class="page"><div class="page-head"><div><p class="eyebrow">Configuration</p><h1>Growth settings</h1></div><button class="btn btn-primary" data-act="save-settings">Save changes</button></div><div class="grid two"><article class="card"><div class="card-title"><h3>Engine</h3></div><div id="engineToggle"></div></article><article class="card"><div class="card-title"><h3>Channels</h3></div><div id="channelToggles"></div></article><article class="card"><div class="card-title"><h3>Auto-publish</h3></div><div id="autoToggles"></div></article><article class="card"><div class="card-title"><h3>Schedule · UTC</h3></div><div id="scheduleFields"></div></article></div><p id="settingsMsg" class="muted"></p></section>
