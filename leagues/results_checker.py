@@ -173,7 +173,7 @@ def _fetch_espn_scores(espn_slug: str, date_str: str) -> List[dict]:
     """Fetch finished scores from ESPN for one date. No API key needed."""
     try:
         resp = requests.get(
-            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{espn_slug}/scoreboard",
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{'ksa.1' if espn_slug == 'sau.1' else espn_slug}/scoreboard",
             params={"dates": date_str},
             timeout=15,
         )
@@ -431,7 +431,7 @@ def _collect_espn_scores_ranged(
         slug, month_key = request
         try:
             resp = requests.get(
-                f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+                f"https://site.api.espn.com/apis/site/v2/sports/soccer/{'ksa.1' if slug == 'sau.1' else slug}/scoreboard",
                 params={"dates": month_key, "limit": 500}, timeout=25,
             )
             if resp.status_code != 200:
