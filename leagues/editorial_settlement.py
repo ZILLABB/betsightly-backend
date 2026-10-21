@@ -78,7 +78,7 @@ def grade_manual_slip(payload: dict, scores: dict, *, now=None) -> dict:
     return updated
 
 
-def settle_pending_manual(*, allow_fallback=True, now=None) -> dict:
+def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None) -> dict:
     """Called from the background results cycle; never a public GET."""
     from database import engine
     from leagues.results_checker import _collect_scores_for_picks
@@ -121,9 +121,10 @@ def settle_pending_manual(*, allow_fallback=True, now=None) -> dict:
         return summary
     scores = {}
     if checkable:
-        scores, _ = _collect_scores_for_picks(
-            checkable, allow_fallback=allow_fallback
-        )
+        scores, _ = (score_collector(checkable) if score_collector is not None
+                     else _collect_scores_for_picks(
+                         checkable, allow_fallback=allow_fallback,
+                     ))
     for day, tier in queued:
         with engine.begin() as conn:
             # A matching admin session cannot alter this already-published
