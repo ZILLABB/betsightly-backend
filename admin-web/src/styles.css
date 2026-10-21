@@ -3,3 +3,11 @@
 .campaign-preview h3{font-size:clamp(20px,2.2vw,29px);line-height:1.2;color:#f4faff;letter-spacing:-.03em;margin:0}
 .campaign-preview p{font-size:13px;color:#afcce2;line-height:1.65;max-width:540px;margin:0}
 .campaign-preview .button{margin-top:6px;cursor:default}
+
+.file-import{font-size:11px;color:#dceafe;display:flex;align-items:center;gap:10px;border:1px dashed #3e78a1;background:#12344f;border-radius:9px;padding:13px;cursor:pointer;transition:background .14s}
+.file-import:hover{background:#1b4667}
+.file-import input{font-size:11px;max-width:100%;min-width:0;color:#9dc8eb}
+.file-import input::file-selector-button{padding:8px;border:1px solid #3a759f;background:#214f74;border-radius:6px;color:#eef7ff;margin-right:10px}
+.panel .metric-grid{margin-bottom:0}
+.panel .metric{box-shadow:none}
+@media(max-width:780px){.file-import{flex-wrap:wrap}.panel .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
