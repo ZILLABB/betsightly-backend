@@ -129,10 +129,81 @@ pre {background:#10283E}
 
 .admin-inline-spinner{display:inline-block;vertical-align:middle;width:14px;height:14px;border:2px solid var(--line-2);border-top-color:var(--brand);border-radius:50%;animation:admin-progress-spin .8s linear infinite;margin-right:8px}
 @media(prefers-reduced-motion:reduce){.admin-inline-spinner{animation-duration:2s}}
+
+/* Shared async feedback across dashboard, publishing, settings and admin actions. */
+.admin-activity {display:flex;align-items:center;gap:10px;padding:10px 22px;border-bottom:1px solid var(--line);
+ background:var(--panel-2);color:var(--text-2);font-size:12px;font-weight:560;min-height:44px;}
+.admin-activity[data-state="busy"] {border-bottom-color:var(--brand);color:var(--text)}
+.admin-activity[data-state="error"] {border-bottom-color:var(--red);color:var(--red)}
+.admin-activity[data-state="success"] {border-bottom-color:var(--success);color:var(--success)}
+.admin-activity-icon {display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;color:var(--brand)}
+.admin-activity[data-state="busy"] .admin-activity-icon {
+ border:2px solid var(--line-2);border-top-color:var(--brand);border-radius:50%;
+ animation:admin-progress-spin .85s linear infinite;font-size:0;
+}
+.btn[data-working="true"] {cursor:wait;opacity:.78}
+.btn[data-working="true"]::before {content:"";display:inline-block;width:12px;height:12px;border:2px solid currentColor;
+ border-right-color:transparent;border-radius:50%;vertical-align:-2px;margin-right:7px;animation:admin-progress-spin .8s linear infinite}
+.admin-table-skeleton {display:grid;gap:8px;padding:18px}
+.admin-table-skeleton>span {display:block;height:14px;border-radius:6px;
+ background:linear-gradient(95deg,var(--panel-2),var(--panel-3),var(--panel-2));background-size:200% 100%;
+ animation:admin-skeleton-move 1.5s linear infinite}
+.admin-table-skeleton>span:nth-child(2) {width:84%}
+.admin-table-skeleton>span:nth-child(3) {width:93%}
+@keyframes admin-skeleton-move {to{background-position-x:-200%}}
+@media(prefers-reduced-motion:reduce) {.admin-activity[data-state="busy"] .admin-activity-icon,
+ .btn[data-working="true"]::before {animation-duration:2s}
+ .admin-table-skeleton>span {animation:none}}
+
 """
 
 ADMIN_JS = r"""
 const API='/api/growth', $=id=>document.getElementById(id);let SETTINGS={},DASH=null;
+const ADMIN_ASYNC_ACTIONS=new Set([
+ 'login','logout','retry','generate','generate-publish','save-settings',
+ 'save-home-campaign','add-ref','preview','approve','publish','apply-range'
+]);
+const ADMIN_ACTION_LABELS={
+ login:'Signing in',logout:'Signing out',retry:'Retrying failed deliveries',
+ generate:'Generating content','generate-publish':'Generating and publishing content',
+ 'save-settings':'Saving settings','save-home-campaign':'Saving homepage campaign',
+ 'add-ref':'Creating referral link',preview:'Loading content preview',
+ approve:'Approving reviewed content',publish:'Publishing approved content',
+ 'apply-range':'Loading selected analytics range'
+};
+const adminActionInFlight=new Set();
+function adminActivity(state,message){
+ const el=$('adminActivity');if(!el)return;
+ el.classList.remove('hidden');el.dataset.state=state;
+ $('adminActivityText').textContent=message;
+ el.setAttribute('aria-busy',state==='busy'?'true':'false');
+}
+async function adminRunAction(act,button,callback){
+ if(adminActionInFlight.has(act))return;
+ adminActionInFlight.add(act);
+ const title=ADMIN_ACTION_LABELS[act]||'Processing request';
+ const original=button?.textContent;
+ if(button){button.disabled=true;button.dataset.working='true';button.setAttribute('aria-busy','true');}
+ adminActivity('busy',title+'… Please do not submit the action twice.');
+ try {
+  await callback(button);
+  adminActivity('success',title+' finished. Check the result panel for confirmation or errors.');
+ }catch(e){
+  adminActivity('error',title+' failed: '+(e.message||'The operation was not confirmed.'));
+ }finally{
+  adminActionInFlight.delete(act);
+  if(button){button.disabled=false;button.dataset.working='false';button.setAttribute('aria-busy','false');
+   if(original!==undefined&&button.textContent!==original)button.textContent=original;}
+ }
+}
+function adminTableLoading(id,label){
+ const node=$(id);if(!node)return;
+ node.setAttribute('aria-busy','true');
+ node.innerHTML='<div class="admin-table-skeleton" role="status" aria-label="'+esc(label)+'">'+
+  '<span></span><span></span><span></span></div>';
+}
+function adminTableReady(id){const node=$(id);if(node)node.setAttribute('aria-busy','false')}
+
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const pct=v=>v==null?'—':(Number(v)*100).toFixed(Number(v)<.1?1:0)+'%';
 const num=v=>Number(v||0).toLocaleString();
@@ -177,7 +248,11 @@ function renderSporty(){const s=DASH.summary,b=s.booking,sb=s.sportybet||{};$('s
 function renderProduct(){const s=DASH.summary,b=s.builder||{},bb=s.builder_backend||{};$('builderKpis').innerHTML=[kpi('Builder users',s.totals.builder_users,'builder_users'),kpi('Server requests',bb.requests,'slip_builds'),kpi('Tickets produced',bb.tickets_produced,'valid_code_viewers',true),kpi('Ticket rate',bb.ticket_rate,'code_copy_rate',false,'pct'),kpi('Average legs',b.average_legs,'average_legs'),kpi('Average actual odds',b.average_actual_odds,'actual_odds')].join('');$('targets').innerHTML=bars((bb.by_target||[]).map(r=>({key:r.target,visitors:r.requests})));$('features').innerHTML=audienceTable(s.by_product_source);const perf=Object.entries(s.prediction_performance||{});$('performance').innerHTML=table(['Tier','Settled','Won','Lost','Accuracy','ROI','Profit'],perf.map(([tier,r])=>`<tr><td><strong>${esc(tier)}</strong></td><td class="num">${num(r.settled)}</td><td class="num">${num(r.won)}</td><td class="num">${num(r.lost)}</td><td class="num">${pct(r.win_rate)}</td><td class="num">${pct(r.roi)}</td><td class="num">${r.profit??0}</td></tr>`))}
 function renderAnalyticsHealth(){const s=DASH.summary,h=s.analytics_health||{},p=h.provider||{},q=h.quality||{},c=s.metric_contracts||{};$('providerHealth').innerHTML=`<div class="health-grid"><div class="health-item"><div class="health-label">Human analytics</div><div class="health-value">${sourceLine(p)}</div><div class="muted">${esc(p.reason||'PostHog Query API responding')}</div></div><div class="health-item"><div class="health-label">Backend facts</div><div class="health-value">${sourceLine(s.sources?.backend_facts)}</div></div><div class="health-item"><div class="health-label">Dual validation ends</div><div class="health-value">${esc(h.dual_write_until||'not set')}</div><div class="muted">Migration remains open until live events are verified.</div></div></div>`;$('quality').innerHTML=[qualityCell('Geo coverage',q.geo_coverage),qualityCell('Device detection',q.device_coverage),qualityCell('OS detection',q.os_coverage),qualityCell('Browser detection',q.browser_coverage),qualityCell('Referrer attribution',q.referrer_attribution),qualityCell('Stable visitor IDs',q.stable_visitor_coverage)].join('');$('rateContracts').innerHTML=table(['Metric','Numerator','Denominator','Rate','Sample'],Object.entries(c).map(([name,v])=>`<tr><td>${esc(name)}</td><td class="num">${num(v.numerator)}</td><td class="num">${num(v.denominator)}</td><td class="num">${pct(v.rate)}</td><td><span class="status ${v.sample_status==='normal'?'ok':'warning'}">${esc(v.sample_status)}</span></td></tr>`))}
 function dateISO(d){return d.toISOString().slice(0,10)}
-async function loadDashboard(){const active=document.querySelector('.range button.active');const days=active?.dataset.days||'1';let q='?days='+days;if(days==='yesterday'){const d=new Date();d.setUTCDate(d.getUTCDate()-1);q=`?start=${dateISO(d)}&end=${dateISO(d)}`}if(days==='custom'){if(!$('dateStart').value||!$('dateEnd').value)return;q=`?start=${$('dateStart').value}&end=${$('dateEnd').value}`}try{const [d,s]=await Promise.all([api('/analytics'+q),api('/status')]);DASH=d;SETTINGS=s.settings||{};$('period').textContent=`${d.summary.start} → ${d.summary.end}`;renderOverview();renderAudience();renderSporty();renderProduct();renderAnalyticsHealth()}catch(e){$('toast').textContent=e.message;$('toast').classList.remove('hidden')}}
+async function loadDashboard(){
+ if(!DASH){adminTableLoading('health','Loading operation status');adminTableLoading('audienceKpis','Loading audience metrics');}
+ const period=$('period');if(period)period.textContent='Refreshing metrics…';
+ const active=document.querySelector('.range button.active');const days=active?.dataset.days||'1';let q='?days='+days;if(days==='yesterday'){const d=new Date();d.setUTCDate(d.getUTCDate()-1);q=`?start=${dateISO(d)}&end=${dateISO(d)}`}if(days==='custom'){if(!$('dateStart').value||!$('dateEnd').value)return;q=`?start=${$('dateStart').value}&end=${$('dateEnd').value}`}try{const [d,s]=await Promise.all([api('/analytics'+q),api('/status')]);DASH=d;SETTINGS=s.settings||{};$('period').textContent=`${d.summary.start} → ${d.summary.end}`;renderOverview();renderAudience();renderSporty();renderProduct();renderAnalyticsHealth()}catch(e){$('toast').textContent='Dashboard refresh failed: '+e.message;$('toast').classList.remove('hidden');adminActivity('error','Could not refresh dashboard: '+e.message)}
+ finally{adminTableReady('health');adminTableReady('audienceKpis')}}
 async function loadHomeCampaign(){
   const status=$('homeCampaignStatus');
   if(!status)return;
@@ -209,15 +284,15 @@ async function saveHomeCampaign(){
       : 'Campaign disabled. The homepage uses fixture-driven context.';
   }catch(e){status.textContent=e.message}
 }
-async function loadContent(){const p=$('fPlatform').value,st=$('fStatus').value;try{const d=await api('/content?limit=400'+(p?'&platform='+p:'')+(st?'&status='+st:''));$('contentTable').innerHTML=table(['Template','Platform','Status','Date','Actions'],d.content.map(c=>`<tr><td>${esc(c.template)}</td><td>${esc(c.platform)}</td><td><span class="tag ${esc(c.status)}">${esc(c.status)}</span></td><td>${esc(c.publish_date)}</td><td class="row wrap"><button class="btn" data-act="preview" data-id="${c.id}">View</button>${c.status==='DRAFT'?`<button class="btn" data-act="approve" data-id="${c.id}">Approve</button>`:''}${!['instagram','facebook','tiktok','youtube','x'].includes(c.platform)&&c.status!=='PUBLISHED'?`<button class="btn btn-primary" data-act="publish" data-id="${c.id}">Publish</button>`:''}</td></tr>`))}catch(e){$('contentTable').innerHTML=empty(e.message)}}
+async function loadContent(){adminTableLoading('contentTable','Loading content');const p=$('fPlatform').value,st=$('fStatus').value;try{const d=await api('/content?limit=400'+(p?'&platform='+p:'')+(st?'&status='+st:''));$('contentTable').innerHTML=table(['Template','Platform','Status','Date','Actions'],d.content.map(c=>`<tr><td>${esc(c.template)}</td><td>${esc(c.platform)}</td><td><span class="tag ${esc(c.status)}">${esc(c.status)}</span></td><td>${esc(c.publish_date)}</td><td class="row wrap"><button class="btn" data-act="preview" data-id="${c.id}">View</button>${c.status==='DRAFT'?`<button class="btn" data-act="approve" data-id="${c.id}">Approve</button>`:''}${!['instagram','facebook','tiktok','youtube','x'].includes(c.platform)&&c.status!=='PUBLISHED'?`<button class="btn btn-primary" data-act="publish" data-id="${c.id}">Publish</button>`:''}</td></tr>`))}catch(e){$('contentTable').innerHTML=empty(e.message)}finally{adminTableReady('contentTable')}}
 async function preview(id){const d=await api('/content?limit=400'),c=d.content.find(x=>x.id===id);if(!c)return;const p=c.payload||{};$('previewBody').textContent=p.text||p.caption||JSON.stringify(p,null,2);$('preview').classList.remove('hidden')}
 async function act(id,what){try{await api(`/content/${id}/${what}`,{method:'POST'});loadContent()}catch(e){alert(e.message)}}
 async function generate(publish){try{const d=await api('/generate?publish='+publish,{method:'POST'}),r=d.report;alert(`Generated ${r.generated}; stored ${r.stored}; published ${r.published.length}; failed ${r.failed.length}.`);loadContent()}catch(e){alert(e.message)}}
 async function retry(){try{const d=await api('/retry',{method:'POST'});alert(`Retried ${d.attempted}; recovered ${d.recovered}.`);loadPubs()}catch(e){alert(e.message)}}
-async function loadPubs(){try{const d=await api('/publications?limit=300');$('pubTable').innerHTML=table(['Date','Channel','Template','Status','Tries','Detail'],d.publications.map(p=>`<tr><td>${esc(p.publish_date)}</td><td>${esc(p.channel)}</td><td>${esc(p.template)}</td><td><span class="tag ${esc(p.status)}">${esc(p.status)}</span></td><td class="num">${p.attempts}</td><td class="muted">${esc(p.last_error?.slice(0,80)||p.external_id||'')}</td></tr>`))}catch(e){$('pubTable').innerHTML=empty(e.message)}}
+async function loadPubs(){adminTableLoading('pubTable','Loading publications');try{const d=await api('/publications?limit=300');$('pubTable').innerHTML=table(['Date','Channel','Template','Status','Tries','Detail'],d.publications.map(p=>`<tr><td>${esc(p.publish_date)}</td><td>${esc(p.channel)}</td><td>${esc(p.template)}</td><td><span class="tag ${esc(p.status)}">${esc(p.status)}</span></td><td class="num">${p.attempts}</td><td class="muted">${esc(p.last_error?.slice(0,80)||p.external_id||'')}</td></tr>`))}catch(e){$('pubTable').innerHTML=empty(e.message)}finally{adminTableReady('pubTable')}}
 async function loadSettings(){try{const d=await api('/settings');SETTINGS=d.settings;const toggles=(obj,prefix)=>Object.entries(obj||{}).map(([k,v])=>`<div class="switch"><span>${esc(k)}</span><input type="checkbox" id="${prefix}_${esc(k)}" ${v?'checked':''}></div>`).join('');$('engineToggle').innerHTML=`<div class="switch"><span>Growth Engine enabled</span><input type="checkbox" id="s_engine" ${SETTINGS.engine_enabled?'checked':''}></div>`;$('channelToggles').innerHTML=toggles(SETTINGS.channel_enabled,'ch');$('autoToggles').innerHTML=toggles(SETTINGS.channel_auto_publish,'auto');$('scheduleFields').innerHTML=Object.entries(SETTINGS.schedule||{}).map(([k,v])=>`<div class="switch"><span>${esc(k)}</span><input class="field" id="sch_${esc(k)}" value="${esc(v)}"></div>`).join('')}catch(e){}}
 async function saveSettings(){const ch={},auto={},sch={};Object.keys(SETTINGS.channel_enabled||{}).forEach(k=>ch[k]=$('ch_'+k).checked);Object.keys(SETTINGS.channel_auto_publish||{}).forEach(k=>auto[k]=$('auto_'+k).checked);Object.keys(SETTINGS.schedule||{}).forEach(k=>sch[k]=$('sch_'+k).value.trim());try{await api('/settings',{method:'POST',body:JSON.stringify({engine_enabled:$('s_engine').checked,channel_enabled:ch,channel_auto_publish:auto,schedule:sch})});$('settingsMsg').textContent='Settings saved'}catch(e){$('settingsMsg').textContent=e.message}}
-async function loadRefs(){try{const d=await api('/referrals');$('refTable').innerHTML=table(['Code','Name','Link'],d.referrals.map(r=>{const link=`https://www.betsightly.com/predictions?utm_source=referral&utm_medium=referral&utm_campaign=creator&ref=${encodeURIComponent(r.code)}`;return`<tr><td><code>${esc(r.code)}</code></td><td>${esc(r.name||'')}</td><td>${esc(link)}</td></tr>`}))}catch(e){}}
+async function loadRefs(){adminTableLoading('refTable','Loading referrals');try{const d=await api('/referrals');$('refTable').innerHTML=table(['Code','Name','Link'],d.referrals.map(r=>{const link=`https://www.betsightly.com/predictions?utm_source=referral&utm_medium=referral&utm_campaign=creator&ref=${encodeURIComponent(r.code)}`;return`<tr><td><code>${esc(r.code)}</code></td><td>${esc(r.name||'')}</td><td>${esc(link)}</td></tr>`}))}catch(e){$('refTable').innerHTML=empty(e.message)}finally{adminTableReady('refTable')}}
 async function addRef(){try{await api('/referrals',{method:'POST',body:JSON.stringify({code:$('refCode').value,name:$('refName').value})});$('refCode').value=$('refName').value='';loadRefs()}catch(e){$('refErr').textContent=e.message}}
 async function loadManual(){
  const el=$('manualPublished');
@@ -658,7 +733,13 @@ const ACTIONS={login,logout,retry,
  'manual-preview':()=>manualWithProgress('preview',3,'Checking live market prices',manualPreview),
  'manual-publish':()=>manualWithProgress('publish',4,'Publishing reviewed selections',manualPublish),
  'manual-refresh':()=>manualWithProgress('refresh',5,'Refreshing saved tickets',manualRefreshPublished),'generate':()=>generate(false),'generate-publish':()=>generate(true),'save-settings':saveSettings,'save-home-campaign':saveHomeCampaign,'add-ref':addRef,preview:e=>preview(Number(e.dataset.id)),approve:e=>act(Number(e.dataset.id),'approve'),publish:e=>act(Number(e.dataset.id),'publish'),'menu':()=>$('side').classList.toggle('open'),'apply-range':loadDashboard};
-document.addEventListener('click',e=>{const el=e.target.closest('[data-act],[data-page],[data-days]');if(!el)return;if(el.dataset.page){nav(el.dataset.page,el);return}if(el.dataset.days){document.querySelectorAll('.range button').forEach(b=>b.classList.remove('active'));el.classList.add('active');$('customDates').classList.toggle('hidden',el.dataset.days!=='custom');if(el.dataset.days!=='custom')loadDashboard();return}const fn=ACTIONS[el.dataset.act];if(fn){e.preventDefault();if(manualBusyOperation&&el.dataset.act?.startsWith('manual-'))return;fn(el)}});
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act],[data-page],[data-days]');if(!el)return;if(el.dataset.page){nav(el.dataset.page,el);return}if(el.dataset.days){document.querySelectorAll('.range button').forEach(b=>b.classList.remove('active'));el.classList.add('active');$('customDates').classList.toggle('hidden',el.dataset.days!=='custom');if(el.dataset.days!=='custom')loadDashboard();return}const fn=ACTIONS[el.dataset.act];if(fn){
+ e.preventDefault();
+ if(manualBusyOperation&&el.dataset.act?.startsWith('manual-'))return;
+ if(ADMIN_ASYNC_ACTIONS.has(el.dataset.act))
+  adminRunAction(el.dataset.act,el,fn);
+ else fn(el);
+}});
 document.addEventListener('change',e=>{if(e.target.dataset.change==='content')loadContent();if(e.target.id==='manualFile')manualWithProgress('file',1,'Reading CSV selections',()=>manualFile(e));if(e.target.id==='manualTier')syncManualTier();if(['manualReplaceOfficialDisplay','manualConvertSpecial'].includes(e.target.id))manualInvalidatePreview()});
 document.addEventListener('input',e=>{
  if(e.target.id==='manualShareCode'){
@@ -675,7 +756,8 @@ async function boot(){$('today').textContent=new Date().toLocaleDateString(undef
 ADMIN_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#07100e"><title>BetSightly Command Center</title><link rel="stylesheet" href="/admin/app.css"></head><body>
 <section id="login" class="login-shell"><div class="login-card"><div class="brand"><span class="brand-mark">B</span><span>BetSightly</span></div><h1>Command center</h1><p>Product growth, prediction performance and SportyBet operations in one place.</p><input id="pw" class="field" type="password" placeholder="Admin password" autocomplete="current-password"><p id="loginErr" class="error"></p><button class="btn btn-primary btn-wide" data-act="login">Enter dashboard</button><p id="cfgNote" class="muted"></p></div></section>
 <div id="app" class="shell hidden"><aside id="side" class="sidebar"><div class="brand"><span class="brand-mark">B</span><span>BetSightly</span></div><div class="nav-label">Command center</div><nav class="nav"><button class="active" data-page="overview"><span class="nav-icon">◫</span>Overview</button><button data-page="audience"><span class="nav-icon">◎</span>Users & retention</button><button data-page="product"><span class="nav-icon">◇</span>Product & predictions</button><button data-page="sporty"><span class="nav-icon">S</span>SportyBet</button></nav><div class="nav-label">Operations</div><nav class="nav"><button data-page="analytics-health"><span class="nav-icon">♥</span>Analytics health</button><button data-page="content"><span class="nav-icon">✦</span>Content</button><button data-page="publishing"><span class="nav-icon">↗</span>Publishing</button><button data-page="manual"><span class="nav-icon">▤</span>Manual picks</button><button data-page="referrals"><span class="nav-icon">⌁</span>Referrals</button><button data-page="settings"><span class="nav-icon">⚙</span>Settings</button></nav><div class="sidebar-foot"><div class="live"><span class="dot"></span>Protected admin session</div><button class="btn btn-ghost btn-danger btn-wide" data-act="logout">Sign out</button></div></aside>
-<div class="workspace"><header class="topbar"><div class="row"><button class="btn mobile-toggle" data-act="menu">☰</button><div class="topbar-title"><strong>Operations dashboard</strong><span id="today"></span></div></div><div class="actions"><span id="period" class="muted"></span><button class="btn desktop-action" data-act="generate">Generate content</button><button class="btn btn-primary desktop-action" data-act="generate-publish">Generate + publish</button></div></header><div id="toast" class="note hidden"></div>
+<div class="workspace"><header class="topbar"><div class="row"><button class="btn mobile-toggle" data-act="menu">☰</button><div class="topbar-title"><strong>Operations dashboard</strong><span id="today"></span></div></div><div class="actions"><span id="period" class="muted"></span><button class="btn desktop-action" data-act="generate">Generate content</button><button class="btn btn-primary desktop-action" data-act="generate-publish">Generate + publish</button></div></header><div id="adminActivity" class="admin-activity hidden" role="status" aria-live="polite" aria-atomic="true" data-state="idle"><span class="admin-activity-icon" aria-hidden="true">◎</span><span id="adminActivityText">Ready</span></div>
+<div id="toast" class="note hidden" role="alert"></div>
 <main>
 <section id="page-overview" class="page active"><div class="page-head"><div><p class="eyebrow">Business overview</p><h1>Today at BetSightly</h1><p>Usage, conversion and operational health—without vanity metrics.</p></div><div><div class="range"><button class="active" data-days="1">Today</button><button data-days="yesterday">Yesterday</button><button data-days="7">7 days</button><button data-days="30">30 days</button><button data-days="90">90 days</button><button data-days="custom">Custom</button></div><div id="customDates" class="row hidden"><input id="dateStart" class="field" type="date"><input id="dateEnd" class="field" type="date"><button class="btn" data-act="apply-range">Apply</button></div></div></div>
 <div class="section"><div class="section-head"><h2>Today’s health</h2><p>Can customers use the product right now?</p></div><div id="health" class="card card-flush health-grid"></div></div>
