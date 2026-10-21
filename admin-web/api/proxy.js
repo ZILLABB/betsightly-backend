@@ -6,7 +6,7 @@ const GET = new Set([
 ]);
 const POST = new Set([
  'admin/login','admin/logout','generate','retry','manual-tiers/import-code',
- 'manual-tiers/preview','manual-tiers/publish','manual-tiers/publish-imported',
+ 'manual-tiers/preview','manual-tiers/inspect','manual-tiers/publish','manual-tiers/publish-imported',
  'homepage-campaign','settings','referrals'
 ]);
 function allowed(method, route) {
