@@ -6,10 +6,14 @@ import {
  Send, Settings2, ShieldCheck, Ticket, UploadCloud, Users, X, AlertTriangle, type LucideIcon
 } from 'lucide-react';
 import {api, ApiError, isAmbiguous, tiers} from './api';
+import Insights from './Insights';
 
-type Page = 'overview' | 'manual' | 'sporty' | 'readiness' | 'content' | 'campaign' | 'publishing' | 'referrals' | 'settings';
+type Page = 'overview' | 'audience' | 'predictions' | 'analytics-health' | 'manual' | 'sporty' | 'readiness' | 'content' | 'campaign' | 'publishing' | 'referrals' | 'settings';
 const nav: {id: Page; label: string; icon: LucideIcon; group: string}[] = [
  {id:'overview',label:'Overview',icon:LayoutDashboard,group:'COMMAND CENTER'},
+ {id:'audience',label:'Users & retention',icon:Users,group:'COMMAND CENTER'},
+ {id:'predictions',label:'Predictions & builder',icon:BarChart3,group:'COMMAND CENTER'},
+ {id:'analytics-health',label:'Analytics health',icon:Activity,group:'COMMAND CENTER'},
  {id:'manual',label:'Manual SportyBet',icon:Ticket,group:'COMMAND CENTER'},
  {id:'sporty',label:'Booking health',icon:Activity,group:'COMMAND CENTER'},
  {id:'readiness',label:'Market readiness',icon:Database,group:'COMMAND CENTER'},
@@ -90,6 +94,18 @@ function ManualStudio() {
    if(record?.share_code && record.share_code!==pending.previousCode){setUncertain(false);sessionStorage.removeItem('bs_admin_uncertain');setNote({kind:'success',text:'New saved '+(pending.tier||tier)+' ticket confirmed: '+record.share_code+'. Do not publish it again.'});}
    else setNote({kind:'info',text:'Saved tickets refreshed. No matching ticket confirmed. Do not repeat an interrupted publication without reconciling the original request.'});
   }};
+ const importFile=async(event:React.ChangeEvent<HTMLInputElement>)=>{
+  const file=event.target.files?.[0];event.target.value='';if(!file)return;
+  await run('Importing CSV file',async()=>{
+   if(file.size>16000)throw Error('CSV file exceeds the 16 KB limit. No selections changed.');
+   const content=(await file.text()).replace(/\r\n/g,'\n').trim();
+   if(content.length>6000)throw Error('CSV exceeds 6,000 characters. Split the file; no games will be silently truncated.');
+   if(!content)throw Error('This CSV contains no selections.');
+   const count=content.split('\n').filter(Boolean).length;
+   setLines(content);setImported(null);setPreview(null);setStage(2);
+   setNote({kind:'info',text:count+' rows loaded from CSV. Review every selection, then run Check live prices. Nothing has been published.'});
+  });
+ };
  const importCode=()=>run('Reading SportyBet code',async()=>{
   if(code.trim().length<4)throw Error('Enter a valid SportyBet booking code.');
   setStage(1);setPreview(null);setImported(null);
@@ -181,6 +197,7 @@ function ManualStudio() {
      {!!imported?.converted_features?.length&&<Warning>{imported.converted_features.length} special markets were converted. Early payouts and bonuses are not preserved.</Warning>}
      {!!imported?.unresolved_count&&<div className="review-box"><h3>Manual market mapping required</h3><p>Review the original betslip. Select the correct regular market for every unresolved event; no silent substitutions.</p>{(imported.games||[]).map((g:any,i:number)=>g.requires_review?<label key={i}>{n(g.sportybet_event_id)} · {n(g.reported_market)}<select value={review[i]||''} onChange={e=>setReview(v=>({...v,[i]:e.target.value}))}><option value="">Choose a market…</option>{marketOptions.map(x=><option key={x}>{x}</option>)}</select></label>:null)}<button className="button secondary" type="button" onClick={applyReview}>Apply reviewed choices</button></div>}
      <label>Event ID,market — one per line<textarea rows={10} spellCheck={false} value={lines} onChange={e=>lineChange(e.target.value)} placeholder={'52587,home_win\n17187,over_1_5'}/></label>
+     <label className="file-import">Import CSV or TXT (16 KB maximum)<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={importFile}/></label>
      {['2_odds','5_odds','10_odds','over_1_5'].includes(tier)&&<label className="check"><input type="checkbox" checked={replace} onChange={e=>{setReplace(e.target.checked);edit()}}/>Replace the PUBLIC display for this tier; preserve the original model result</label>}
      <div className="toolbar"><button type="button" className="button secondary" onClick={check} disabled={!!imported?.unresolved_count||!normalized}><FileCheck2 size={16}/> Check live prices</button><button type="button" className="button primary" disabled={!ready||uncertain} onClick={publish}><Send size={16}/> Publish verified ticket</button></div>
      {ready&&<div className="notice success">Preview verified {n(preview?.data?.games?.length)} games at {n(preview?.data?.total_odds)}x. A fresh bookmaker code is issued only after confirmation.</div>}
@@ -337,7 +354,7 @@ function App() {
  const signOut=async()=>{try{await api('admin/logout',{},'POST')}catch{}qc.clear();setSession('guest')};
  if(session==='checking')return <div className="auth-screen"><Loading label="Verifying protected admin session…"/></div>;
  if(session==='guest')return <div className="auth-screen"><form className="auth-card" onSubmit={signIn}><div className="brand-mark">B<span>.</span></div><span className="eyebrow">PRIVATE COMMAND CENTER</span><h1>Sign in to BetSightly.</h1><p>Protected football operations, data intelligence and verified publishing.</p><label>Administrator password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required autoFocus/></label>{loginError&&<ResultNote kind="error" text={loginError}/>}<button className="button primary wide" type="submit" disabled={signing}>{signing?<Loader2 className="spin" size={18}/>:<LockKeyhole size={17}/>} Secure sign in</button><small>Signed sessions are HttpOnly, Secure and SameSite=Strict. Nothing is stored in the browser beyond the protected session cookie.</small></form></div>;
- const sections:{[key in Page]:React.ReactNode}={overview:<Overview/>,manual:<ManualStudio/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
+ const sections:{[key in Page]:React.ReactNode}={overview:<Overview/>,audience:<Insights page="audience"/>,predictions:<Insights page="predictions"/>, 'analytics-health':<Insights page="analytics-health"/>,manual:<ManualStudio/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
  return <div className="shell"><aside className={'sidebar '+(mobile?'shown':'')}><div className="sidebar-brand"><div className="brand-mark">B<span>.</span></div><div><strong>BetSightly</strong><small>COMMAND CENTER</small></div><button className="mobile-close" onClick={()=>setMobile(false)} aria-label="Close menu"><X/></button></div><nav aria-label="Admin navigation">{nav.map((item,i)=>{const Icon=item.icon;return <React.Fragment key={item.id}>{(i===0||item.group!==nav[i-1].group)&&<div className="nav-group">{item.group}</div>}<button className={'nav-item '+(page===item.id?'active':'')} onClick={()=>{setPage(item.id);setMobile(false)}}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={14}/>}</button></React.Fragment>})}</nav><div className="sidebar-bottom"><div className="session"><ShieldCheck size={18}/><div><strong>Protected session</strong><span>Render-backed authentication</span></div></div><button onClick={signOut} className="sign-out"><LogOut size={17}/> Sign out</button></div></aside><div className="workspace"><header className="topbar"><div className="topbar-left"><button className="menu-toggle" onClick={()=>setMobile(true)} aria-label="Open menu"><Menu/></button><div className="breadcrumb">BET SIGHTLY <ChevronRight size={13}/> <strong>{nav.find(x=>x.id===page)?.label}</strong></div></div><div className="topbar-right"><span className="env-tag"><Globe2 size={13}/> Admin workspace</span><span className="clock">{new Date().toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric',timeZone:'Africa/Lagos'})}</span></div></header><main className="main">{sections[page]}</main><footer className="footer">BetSightly admin · Secure API through same-origin gateway · Data from production FastAPI</footer></div>{mobile&&<button className="scrim" aria-label="Close menu overlay" onClick={()=>setMobile(false)}/>}</div>;
 }
 export default App;
