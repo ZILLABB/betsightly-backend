@@ -1,14 +1,14 @@
 import React, {useEffect, useMemo, useState} from 'react';
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
+import {useQuery, useQueryClient} from '@tanstack/react-query';
 import {
  Activity, BarChart3, CheckCircle2, ChevronRight, Clock3, Database, FileCheck2,
  Globe2, LayoutDashboard, Loader2, LockKeyhole, LogOut, Megaphone, Menu, RefreshCcw,
- Send, Settings2, ShieldCheck, Ticket, UploadCloud, Users, X, AlertTriangle
+ Send, Settings2, ShieldCheck, Ticket, UploadCloud, Users, X, AlertTriangle, type LucideIcon
 } from 'lucide-react';
 import {api, ApiError, isAmbiguous, tiers} from './api';
 
 type Page = 'overview' | 'manual' | 'sporty' | 'readiness' | 'content' | 'publishing' | 'referrals' | 'settings';
-const nav: {id: Page; label: string; icon: React.ComponentType<{size?:number}>; group: string}[] = [
+const nav: {id: Page; label: string; icon: LucideIcon; group: string}[] = [
  {id:'overview',label:'Overview',icon:LayoutDashboard,group:'COMMAND CENTER'},
  {id:'manual',label:'Manual SportyBet',icon:Ticket,group:'COMMAND CENTER'},
  {id:'sporty',label:'Booking health',icon:Activity,group:'COMMAND CENTER'},
