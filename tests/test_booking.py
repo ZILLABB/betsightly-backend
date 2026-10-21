@@ -962,3 +962,48 @@ def test_withheld_or_empty_card_never_attaches_an_actionable_old_code(monkeypatc
     assert "booking" not in card["rollover"]
     assert "booking" not in card["over_1_5"]
     assert card["banker"]["booking"]["actionable"] is True
+
+
+def test_rollover_exact_code_recheck_uses_fresh_verified_board_odds_when_readback_omits_total(monkeypatch):
+    """Do not mistake missing aggregate price for a contract breach.
+
+    The still-verified original code is reusable at a current bookmaker quote,
+    without re-minting, editing published selections or inventing model odds.
+    """
+    games = [_game("Fulham", "Chelsea", "over_1_5"),
+             _game("Arsenal", "Spurs", "home_win")]
+    original = _active_record(
+        games, "ROLL123", checked_at="2020-01-01T00:00:00+00:00",
+        final_booked_legs=games, original_legs=games,
+        actual_sportybet_odds=2.20,
+    )
+    B._store(DAY, "rollover", original)
+    monkeypatch.setattr("leagues.sportybet.fetch_board", lambda **kwargs: _board())
+    monkeypatch.setattr(B, "validate_code_details",
+                        lambda code, selections: (True, "ok", None))
+    monkeypatch.setattr(B, "_post_share", lambda selections:
+                        pytest.fail("valid retained code should never be reminted"))
+    output = B.book_card(DAY, {
+        "rollover": {"selected": True, "games": games, "total_odds": 2.20},
+    })
+    assert not output["booked"] and output["skipped"]
+    active = B.bookings_for(DAY)["rollover"]
+    assert active["share_code"] == "ROLL123"
+    assert active["actual_sportybet_odds"] == pytest.approx(2.196)
+    assert active["actual_sportybet_odds_source"] == "live_board_snapshot"
+    assert active["readback_validation"] == "PASSED"
+    assert len(B.booking_editions_for(DAY, "rollover")) == 1
+
+
+def test_exact_board_price_fallback_refuses_missing_and_nonbookable_quotes():
+    games = [_game("Fulham", "Chelsea", "over_1_5"),
+             _game("Arsenal", "Spurs", "home_win")]
+    assert B._verified_current_bookmaker_total(games, _board()) == pytest.approx(2.196)
+    assert B._verified_current_bookmaker_total([], _board()) is None
+    assert B._verified_current_bookmaker_total(
+        games + [_game("Unknown", "Visitor", "over_1_5")],
+        _board(),
+    ) is None
+    no_quote = _board()
+    no_quote["arsenal|spurs"]["prices"].pop("home_win")
+    assert B._verified_current_bookmaker_total(games, no_quote) is None
