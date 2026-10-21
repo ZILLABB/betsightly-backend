@@ -298,12 +298,7 @@ def test_settlement_status_reports_polling_cadence():
         .settlement_status()
     )
 
-    assert (
-        status["poll_seconds"]
-        == 900
-    )
-
-    assert (
-        status["fallback_seconds"]
-        >= 3600
-    )
+    # Fast verified FT polling is separate from broader provider recovery.
+    assert status["poll_seconds"] == 60
+    assert status["full_poll_seconds"] >= 900
+    assert status["fallback_seconds"] >= 3600
