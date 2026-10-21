@@ -613,6 +613,18 @@ def _collect_scores_for_picks(
         ])
         merge(_index_free_finals(sportsdb), "thesportsdb")
 
+    # Extra final-score coverage is opt-in only after both commercial usage
+    # rights and documented 90-minute data fields are verified. Consumer CDN
+    # display scores must never become official results by default.
+    unresolved = missing()
+    if allow_fallback and unresolved:
+        from leagues.licensed_livescore_settlement import (
+            licensed_for_settlement, licensed_livescore_finals,
+        )
+        if licensed_for_settlement():
+            merge(_index_free_finals(licensed_livescore_finals(unresolved)),
+                  "livescore-licensed")
+
     unresolved = missing()
     odds_keys = sport_keys(unresolved)
     if (
@@ -1305,20 +1317,20 @@ def check_all_pending(
 
 def _run_rapid_settlement_cycle():
     """Fast lane: bounded verified FT lookups, no costly monthly league sweeps."""
-    from leagues.fast_settlement import collect_recent_verified_finals
+    from leagues.fast_settlement import collect_rapid_verified_finals
     from leagues.editorial_settlement import settle_pending_manual
 
     # The full recovery loop continues every 15 minutes, including independent
     # sources. A missing score in this lightweight pass stays strictly pending.
     runners = (
         ("editorial_manual", lambda: settle_pending_manual(
-            score_collector=collect_recent_verified_finals)),
+            score_collector=collect_rapid_verified_finals)),
         ("published_slips", lambda: settle_published_slips(
-            score_collector=collect_recent_verified_finals)),
+            score_collector=collect_rapid_verified_finals)),
         ("rollover", lambda: check_all_pending(
-            score_collector=collect_recent_verified_finals)),
+            score_collector=collect_rapid_verified_finals)),
         ("builder", lambda: settle_builder_predictions(
-            score_collector=collect_recent_verified_finals)),
+            score_collector=collect_rapid_verified_finals)),
     )
     for component, runner in runners:
         try:
