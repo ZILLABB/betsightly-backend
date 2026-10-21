@@ -1,0 +1,77 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import handler from '../api/proxy.js';
+
+const HOST = 'betsightly-admin-preview.vercel.app';
+const BACKEND = 'https://betsightly-api.onrender.com';
+process.env.ADMIN_BACKEND_ORIGIN = BACKEND;
+const originalFetch = globalThis.fetch;
+const req = (path,method='GET',body=undefined,origin=undefined) => ({
+  url: '/api/proxy?path=' + encodeURIComponent(path),
+  headers: {host:HOST, ...(origin === undefined ? {} : {origin}),cookie:'bs_admin=signed-test'},
+  method,body
+});
+function response(){
+  return {
+    code:200,headers:{},body:null,
+    setHeader(k,v){this.headers[k.toLowerCase()]=v;return this;},
+    status(n){this.code=n;return this;},
+    json(value){this.body=value;return this;},
+    send(value){this.body=value;return this;}
+  };
+}
+test('rejects unlisted API routes without contacting the backend',async()=>{
+  globalThis.fetch=()=>{throw Error('should not fetch')};
+  try{
+    const r=response();await handler(req('../../admin/key'),r);
+    assert.equal(r.code,404);
+    const rr=response();await handler(req('manual-tiers/assistant/publish','POST',{},'https://'+HOST),rr);
+    assert.equal(rr.code,404);
+  }finally{globalThis.fetch=originalFetch}
+});
+test('blocks a state-changing request with missing or foreign origin',async()=>{
+  globalThis.fetch=()=>{throw Error('should not fetch')};
+  try{
+    const r=response();await handler(req('manual-tiers/publish','POST',{tier:'2_odds'}),r);
+    assert.equal(r.code,403);
+    const rr=response();await handler(req('manual-tiers/publish','POST',{},'https://evil.example'),rr);
+    assert.equal(rr.code,403);
+  }finally{globalThis.fetch=originalFetch}
+});
+test('proxies backend GET session read with cookie and disables caching',async()=>{
+  let seen;
+  globalThis.fetch=async(url,opts)=>{
+    seen={url:String(url),opts};return new Response(JSON.stringify({ok:true,admin:'admin'}),{status:200,headers:{'content-type':'application/json'}});
+  };
+  try{
+    const r=response();await handler(req('admin/me'),r);
+    assert.equal(r.code,200);
+    assert.equal(JSON.parse(r.body).ok,true);
+    assert.equal(seen.url,BACKEND+'/api/growth/admin/me');
+    assert.equal(seen.opts.headers.cookie,'bs_admin=signed-test');
+    assert.equal(r.headers['cache-control'],'no-store');
+  }finally{globalThis.fetch=originalFetch}
+});
+test('forwards verified same-origin mutation with backend origin, without retrying',async()=>{
+  let calls=0;let observed;
+  globalThis.fetch=async(url,opts)=>{
+    calls++;observed={url:String(url),opts};
+    return new Response(JSON.stringify({share_code:'TEST123'}),{status:200,headers:{'content-type':'application/json','set-cookie':'bs_admin=test; Secure; HttpOnly; SameSite=Strict; Path=/'}});
+  };
+  try{
+    const r=response();
+    await handler(req('manual-tiers/publish','POST',{tier:'2_odds',lines:'123,home_win'},'https://'+HOST),r);
+    assert.equal(calls,1);assert.equal(r.code,200);
+    assert.equal(observed.opts.headers.origin,BACKEND);
+    assert.equal(JSON.parse(observed.opts.body).tier,'2_odds');
+    assert.match(r.headers['set-cookie'],/SameSite=Strict/);
+  }finally{globalThis.fetch=originalFetch}
+});
+test('reports an interrupted POST as unknown without retrying',async()=>{
+  let calls=0;globalThis.fetch=async()=>{calls++;throw Error('network 502')};
+  try{
+    const r=response();await handler(req('manual-tiers/publish','POST',{tier:'2_odds'},'https://'+HOST),r);
+    assert.equal(calls,1);assert.equal(r.code,502);
+    assert.match(r.body.detail,/check saved tickets/i);
+  }finally{globalThis.fetch=originalFetch}
+});
