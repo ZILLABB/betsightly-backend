@@ -513,6 +513,14 @@ async def growth_status(admin: str = Depends(require_admin)):
     return {"status": "success", **status()}
 
 
+@router.get("/market-readiness", dependencies=[Depends(require_admin)])
+def growth_market_readiness():
+    """Read-only evidence and rejection diagnostics, never a prediction trigger."""
+    from growth.market_readiness import market_readiness_snapshot
+
+    return {"status": "success", **market_readiness_snapshot()}
+
+
 @router.get("/settings")
 async def growth_get_settings(admin: str = Depends(require_admin)):
     from growth.models import all_settings
