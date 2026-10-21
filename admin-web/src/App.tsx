@@ -143,6 +143,10 @@ function ManualStudio() {
     setUncertain(true);setNote({kind:'error',text:'SportyBet returned '+n(result.share_code)+' but DB read-back has not confirmed that exact code. Do NOT submit the same ticket twice.'});
    }
   }catch(error){
+   if(!isAmbiguous(error)){
+    sessionStorage.removeItem('bs_admin_uncertain');setUncertain(false);setStage(3);
+    setNote({kind:'error',text:'Backend rejected the ticket: '+errText(error)+'. Nothing was confirmed as published; correct the issue and recheck prices.'});return;
+   }
    setUncertain(true);await current.refetch().catch(()=>null);
    const snapshot=qc.getQueryData<any>(['manual-tiers']);
    const existing=snapshot?.published?.[tier];
