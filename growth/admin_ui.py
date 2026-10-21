@@ -467,6 +467,8 @@ function manualRequest(){
 }
 function manualRenderSuccess(d, originalCode){
  const changed=originalCode && d.share_code!==originalCode;
+ manualStage(5,'busy','Booking code returned — confirming saved record',
+  'Checking the official manual publication table before declaring success.');
  $('manualPreview').textContent='Published '+d.tier+' — '+d.leg_count+' games, '+d.total_odds+
   'x, verified SportyBet code '+d.share_code+
   (changed?' (new verified code; original input '+originalCode+' is not the displayed ticket)':'')+
@@ -513,6 +515,9 @@ async function reconcileManualPublishAfterError(tier, failure){
  // result, or assume a 502 means that the database transaction was rolled back.
  const transient=/HTTP (?:502|503|504)|Network request failed/i.test(failure.message||'');
  if(!transient)return false;
+ manualPublishUncertain=true;manualUncertainTier=tier;
+ manualStage(5,'busy','Checking uncertain publication',
+  'The network response was interrupted. Running read-only database checks; do not publish again.');
  $('manualErr').textContent='Server connection interrupted. Checking whether the ticket was saved before retrying…';
  const delays=[0,1300,2700,4200];
  for(const delay of delays){
@@ -524,11 +529,18 @@ async function reconcileManualPublishAfterError(tier, failure){
     $('manualErr').textContent='The server interrupted your response, but a '+tier+
      ' manual ticket exists in the database: '+existing.leg_count+' legs, verified code '+
      existing.share_code+' ('+existing.total_odds+'x). Review it in Today’s editorial tickets. Do NOT publish this tier again.';
+    manualPublishUncertain=false;manualUncertainTier=null;
+    manualStage(5,'success','Saved ticket confirmed',
+     tier+' has verified code '+existing.share_code+'. Do NOT publish the same slip twice.');
     await loadManual();
     return true;
    }
    $('manualErr').textContent='The server is reachable but no manual '+tier+
     ' ticket is recorded. You may re-import and preview the code before another publication attempt.';
+   manualPublishUncertain=false;manualUncertainTier=null;
+   manualPreviewConfirmed=null;
+   manualStage(5,'error','No saved ticket confirmed',
+    'The database responded but did not contain this manual ticket. Re-import and preview before considering another submission.');
    return false;
   }catch(e){
    // During a restart the read-only status request can also fail. Try again
@@ -537,6 +549,8 @@ async function reconcileManualPublishAfterError(tier, failure){
  }
  $('manualErr').textContent='The server could not confirm whether '+tier+
   ' was published. Refresh Today’s editorial tickets when the server recovers. Do NOT submit the same code twice until you verify the existing record.';
+ manualStage(5,'error','Publication outcome unknown — do not retry',
+  'The database could not be reached to confirm the save. Refresh published tickets when the connection returns. No automatic second publish will run.');
  return false;
 }
 async function manualPublishImported(){
@@ -561,10 +575,20 @@ async function manualPublishImported(){
   })});
   manualRenderSuccess(d,imported.code);
   manualImportedCode=null;manualPreviewConfirmed=null;
-  await loadManual();
+  const saved=await loadManual(),current=(saved?.published||{})[request.tier];
+  if(current?.share_code && current.share_code===d.share_code)
+   manualStage(5,'success','Published and saved ✓',
+    request.tier+' confirmed: '+num(current.leg_count)+' games, SportyBet code '+current.share_code+'. Official model results are unchanged.');
+  else {
+   manualPublishUncertain=true;manualUncertainTier=request.tier;
+   manualStage(5,'error','Publication returned a code; save check pending',
+    'Do not submit again. Refresh saved tickets to verify the code exists in the database.');
+  }
  }catch(e){
   const handled=await reconcileManualPublishAfterError(request.tier,e);
   if(!handled && !msg.textContent)msg.textContent=e.message;
+  if(!handled && !manualPublishUncertain)
+   manualStage(4,'error','Could not publish imported code',e.message);
  }
  finally{button.textContent='Publish verified imported code'}
 }
@@ -585,10 +609,20 @@ async function manualPublish(){
   const d=await api('/manual-tiers/publish',{method:'POST',body:JSON.stringify(request)});
   manualRenderSuccess(d,'');manualImportedCode=null;manualPreviewConfirmed=null;
   $('manualCodePublish').disabled=true;
-  await loadManual();
+  const saved=await loadManual(),current=(saved?.published||{})[request.tier];
+  if(current?.share_code && current.share_code===d.share_code)
+   manualStage(5,'success','Published and saved ✓',
+    request.tier+' confirmed: '+num(current.leg_count)+' games, SportyBet code '+current.share_code+'. Official model history stays separate.');
+  else {
+   manualPublishUncertain=true;manualUncertainTier=request.tier;
+   manualStage(5,'error','Publication returned a code; save check pending',
+    'Do not publish twice. Refresh saved tickets to confirm the new record.');
+  }
  }catch(e){
   const handled=await reconcileManualPublishAfterError(request.tier,e);
   if(!handled && !msg.textContent)msg.textContent=e.message;
+  if(!handled && !manualPublishUncertain)
+   manualStage(4,'error','Publication request failed',e.message);
  }
 }
 async function manualFile(event){const file=event.target.files?.[0];if(!file)return;if(file.size>16000){$('manualErr').textContent='File too large (16 KB max).';return}const source=await file.text();manualImportReview=null;$('manualLines').value=source.slice(0,6000);$('manualPreview').textContent='CSV loaded. Click Check prices / preview before publishing.';event.target.value=''}
