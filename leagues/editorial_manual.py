@@ -327,8 +327,9 @@ def _official_display_conflict(card: dict, tier: str, replacement: bool) -> bool
 
 def preview(tier: str, lines: str, *, board=None, now=None,
             replace_official_over: bool = False,
-            replace_official_display: bool = False) -> dict:
-    """Admin-only price preview. Never writes a card or creates a booking."""
+            replace_official_display: bool = False,
+            inspection_only: bool = False) -> dict:
+    """Price-check selections without writing or booking; enforce publication gates except in read-only inspection."""
     from leagues import sportybet
     from leagues.picks_db import load_card
     from leagues.booking import bookings_for
@@ -340,16 +341,17 @@ def preview(tier: str, lines: str, *, board=None, now=None,
     day = at.astimezone(WAT).date().isoformat()
     requested = parse_input(lines, tier)
     card = load_card(day) or {}
-    if tier == "rollover":
-        eligibility = rollover_eligibility(day, card=card)
-        if not eligibility["allowed"]:
-            raise ValueError(eligibility["reason"])
-    if _official_display_conflict(card, tier, replacement):
-        raise ValueError(f"{tier} already has an immutable official slip today. "
-                         "Choose explicit replacement for this tier; "
-                         "the original stays in official results.")
+    if not inspection_only:
+        if tier == "rollover":
+            eligibility = rollover_eligibility(day, card=card)
+            if not eligibility["allowed"]:
+                raise ValueError(eligibility["reason"])
+        if _official_display_conflict(card, tier, replacement):
+            raise ValueError(f"{tier} already has an immutable official slip today. "
+                             "Choose explicit replacement for this tier; "
+                             "the original stays in official results.")
     manual = list_published(day)
-    if tier in manual:
+    if not inspection_only and tier in manual:
         raise ValueError(f"{tier} already has a published manual slip")
     live_board = board if board is not None else sportybet.fetch_board(force=True)
     games = _current_bookable_games(requested, live_board, now=at, date=day)
@@ -359,11 +361,13 @@ def preview(tier: str, lines: str, *, board=None, now=None,
     total = round(prod(g["odds"] for g in games), 3)
     check_tier_target(tier, total, len(games))
     return {
-        "status": "PREVIEW", "date": day, "tier": tier,
+        "status": "INSPECTION_ONLY" if inspection_only else "PREVIEW",
+        "date": day, "tier": tier,
         "games": games, "total_odds": total,
-        "booking_code_created": False, "research_only": False,
+        "booking_code_created": False, "research_only": bool(inspection_only),
+        "publish_ready": not inspection_only,
         "editorial_manual": True,
-        "replaces_official_display": bool(replacement),
+        "replaces_official_display": bool(replacement) if not inspection_only else False,
         "original_official_record_preserved": True,
         "cross_tier_warnings": cross_tier_warnings,
     }
