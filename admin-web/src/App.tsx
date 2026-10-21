@@ -81,9 +81,11 @@ function ManualStudio() {
  const edit=()=>{setPreview(null);setNote(null);setStage(0);};
  const run=async(name:string,fn:()=>Promise<void>)=>{if(busy)return;setBusy(name);try{await fn()}catch(e){setNote({kind:'error',text:errText(e)});}finally{setBusy('')}};
  const refresh=async()=>{const r=await current.refetch();if(!r.isError && r.data && uncertain){
-   const suspect=sessionStorage.getItem('bs_admin_uncertain');
-   const record=r.data.published?.[suspect||tier];
-   if(record?.share_code){setUncertain(false);sessionStorage.removeItem('bs_admin_uncertain');setNote({kind:'success',text:'Saved '+(suspect||tier)+' ticket found: '+record.share_code+'. Do not publish it again.'});}
+   const pendingRaw=sessionStorage.getItem('bs_admin_uncertain')||'';
+   let pending:{tier:string;previousCode:string}={tier:pendingRaw||tier,previousCode:''};
+   try{pending=JSON.parse(pendingRaw)}catch{}
+   const record=r.data.published?.[pending.tier||tier];
+   if(record?.share_code && record.share_code!==pending.previousCode){setUncertain(false);sessionStorage.removeItem('bs_admin_uncertain');setNote({kind:'success',text:'New saved '+(pending.tier||tier)+' ticket confirmed: '+record.share_code+'. Do not publish it again.'});}
    else setNote({kind:'info',text:'Saved tickets refreshed. No matching ticket confirmed. Do not repeat an interrupted publication without reconciling the original request.'});
   }};
  const importCode=()=>run('Reading SportyBet code',async()=>{
@@ -124,7 +126,8 @@ function ManualStudio() {
   if(!ready || !preview)throw Error('Recheck live prices after every change before publishing.');
   if(uncertain)throw Error('Earlier publication outcome uncertain. Check saved tickets before any new POST.');
   if(!window.confirm('Publish '+preview.data.games.length+' verified selections for '+tier+'? A new SportyBet code will be created. The engine record stays separate.'))return;
-  setStage(4);sessionStorage.setItem('bs_admin_uncertain',tier);
+  const previousCode=String(saved[tier]?.share_code||'');
+  setStage(4);sessionStorage.setItem('bs_admin_uncertain',JSON.stringify({tier,previousCode}));
   try{
    const path=importedExact?'manual-tiers/publish-imported':'manual-tiers/publish';
    const payload=importedExact?{tier,code:code.trim(),replace_official_display:replace}:request;
@@ -142,10 +145,11 @@ function ManualStudio() {
    setUncertain(true);await current.refetch().catch(()=>null);
    const snapshot=qc.getQueryData<any>(['manual-tiers']);
    const existing=snapshot?.published?.[tier];
-   setNote({kind:'error',text:existing?.share_code && isAmbiguous(error) ?
+   const newTicket=!!existing?.share_code && existing.share_code!==previousCode;
+   setNote({kind:'error',text:newTicket && isAmbiguous(error) ?
     'Request interrupted; saved '+tier+' ticket detected: '+existing.share_code+'. Verify saved ticket before any other action.' :
     'Publication outcome not confirmed: '+errText(error)+'. Do NOT send another POST. Check saved tickets and reconcile the result.'});
-   if(existing?.share_code){setUncertain(false);sessionStorage.removeItem('bs_admin_uncertain');}
+   if(newTicket){setUncertain(false);sessionStorage.removeItem('bs_admin_uncertain');}
   }
  });
  const tierChange=(v:string)=>{setTier(v);setImported(null);edit();setReplace(false)};
