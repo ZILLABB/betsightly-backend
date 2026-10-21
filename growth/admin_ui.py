@@ -207,7 +207,9 @@ async function adminRunAction(act,button,callback){
  adminActivity('busy',title+'… Please do not submit the action twice.');
  try {
   await callback(button);
-  adminActivity('success',title+' finished. Check the result panel for confirmation or errors.');
+  // Legacy dashboard handlers sometimes catch and display their own API errors.
+  // Completion of a handler is NOT proof that its server operation succeeded.
+  adminActivity('idle',title+' request finished. Check the updated panel for confirmation or errors.');
  }catch(e){
   adminActivity('error',title+' failed: '+(e.message||'The operation was not confirmed.'));
  }finally{
