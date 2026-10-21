@@ -173,7 +173,7 @@ def _fetch_espn_scores(espn_slug: str, date_str: str) -> List[dict]:
     """Fetch finished scores from ESPN for one date. No API key needed."""
     try:
         resp = requests.get(
-            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{espn_slug}/scoreboard",
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{'ksa.1' if espn_slug == 'sau.1' else espn_slug}/scoreboard",
             params={"dates": date_str},
             timeout=15,
         )
@@ -431,7 +431,7 @@ def _collect_espn_scores_ranged(
         slug, month_key = request
         try:
             resp = requests.get(
-                f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+                f"https://site.api.espn.com/apis/site/v2/sports/soccer/{'ksa.1' if slug == 'sau.1' else slug}/scoreboard",
                 params={"dates": month_key, "limit": 500}, timeout=25,
             )
             if resp.status_code != 200:
@@ -612,6 +612,18 @@ def _collect_scores_for_picks(
                 row.get("date") or "")[:10] for row in unresolved
         ])
         merge(_index_free_finals(sportsdb), "thesportsdb")
+
+    # LiveScore consumer observations are strictly display-only unless
+    # commercial automated-settlement rights and 90-minute field semantics
+    # have been explicitly confirmed by the operator.
+    unresolved = missing()
+    if allow_fallback and unresolved:
+        from leagues.licensed_livescore_settlement import (
+            licensed_for_settlement, licensed_livescore_finals,
+        )
+        if licensed_for_settlement():
+            merge(_index_free_finals(licensed_livescore_finals(unresolved)),
+                  "livescore-licensed")
 
     unresolved = missing()
     odds_keys = sport_keys(unresolved)
@@ -1305,20 +1317,20 @@ def check_all_pending(
 
 def _run_rapid_settlement_cycle():
     """Fast lane: bounded verified FT lookups, no costly monthly league sweeps."""
-    from leagues.fast_settlement import collect_recent_verified_finals
+    from leagues.fast_settlement import collect_rapid_verified_finals
     from leagues.editorial_settlement import settle_pending_manual
 
     # The full recovery loop continues every 15 minutes, including independent
     # sources. A missing score in this lightweight pass stays strictly pending.
     runners = (
         ("editorial_manual", lambda: settle_pending_manual(
-            score_collector=collect_recent_verified_finals)),
+            score_collector=collect_rapid_verified_finals)),
         ("published_slips", lambda: settle_published_slips(
-            score_collector=collect_recent_verified_finals)),
+            score_collector=collect_rapid_verified_finals)),
         ("rollover", lambda: check_all_pending(
-            score_collector=collect_recent_verified_finals)),
+            score_collector=collect_rapid_verified_finals)),
         ("builder", lambda: settle_builder_predictions(
-            score_collector=collect_recent_verified_finals)),
+            score_collector=collect_rapid_verified_finals)),
     )
     for component, runner in runners:
         try:

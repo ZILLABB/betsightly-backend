@@ -41,7 +41,10 @@ def _fetch_confirmed_events(slug: str, day: str) -> list[dict]:
             return cached[1]
     try:
         resp = requests.get(
-            _SCOREBOARD.format(slug=slug),
+            # ESPN serves the Saudi Pro League at ksa.1, while the older
+            # internal registry still calls it sau.1. Never send the latter
+            # to the scoreboard: it consistently returns HTTP 400.
+            _SCOREBOARD.format(slug=("ksa.1" if slug == "sau.1" else slug)),
             params={"dates": day.replace("-", ""), "limit": 200},
             timeout=9,
         )
@@ -147,3 +150,44 @@ def collect_recent_verified_finals(
     LOG.info("Rapid verified finals leagues_dates=%s completed_rows=%s",
              len(wanted), len(rows))
     return _index_free_finals(rows), "espn-rapid"
+
+
+def collect_rapid_verified_finals(
+    picks: list[dict], *, now: datetime | None = None,
+) -> tuple[dict, str]:
+    """Verified ESPN first; optionally add only licensed LiveScore FT evidence.
+
+    A conflict stays explicitly ambiguous. Consumer CDN display observations
+    are never automatically promoted into official grading.
+    """
+    from leagues.licensed_livescore_settlement import (
+        licensed_for_settlement, licensed_livescore_finals,
+    )
+    from leagues.results_checker import _index_free_finals
+
+    scores, source = collect_recent_verified_finals(picks, now=now)
+    if not licensed_for_settlement():
+        return scores, source
+    from leagues.results_checker import _lookup_score
+    unresolved = [
+        p for p in picks if not _lookup_score(
+            scores, p.get("home_team", ""), p.get("away_team", ""),
+            str(p.get("commence_time") or p.get("kickoff") or
+                p.get("date") or "")[:10],
+        )
+    ]
+    # The source itself compares exact teams and UTC kickoff time.
+    # It is safe to request pending picks; the merge below preserves ESPN.
+    backup = _index_free_finals(licensed_livescore_finals(unresolved, now=now))
+    if not backup:
+        return scores, source
+    for key, observation in backup.items():
+        old = scores.get(key)
+        if old and old.get("ambiguous"):
+            continue
+        if old and (old.get("home_score"), old.get("away_score")) != (
+                observation.get("home_score"), observation.get("away_score")):
+            scores[key] = {"ambiguous": True}
+        elif not old:
+            scores[key] = observation
+    return scores, source + "+livescore-licensed"
