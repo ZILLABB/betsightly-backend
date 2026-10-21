@@ -1507,7 +1507,10 @@ def run_loop():
                 logger.warning("Rollover late recovery unavailable: %s",
                                type(exc).__name__)
 
-        if iteration % cleanup_every == 0:
+        # Full recovery executes on iterations 1, 1+full_every, ... .
+        # Align weekly cleanup to those cycles after the first, otherwise a
+        # 60-second fast poll with a 900-second full cycle misses it forever.
+        if iteration > 1 and (iteration - 1) % cleanup_every == 0:
             try:
                 from leagues.rollover_db import (
                     cleanup_old_chains,
