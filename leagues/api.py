@@ -108,6 +108,17 @@ async def sportybet_first_shadow_prediction_board_status():
     return status()
 
 
+@router.get("/market-health", dependencies=[Depends(require_api_key)])
+async def admin_market_health_report():
+    """Read-only current market readiness, model calibration and product gaps.
+
+    Requires the admin API key. Never retrains, regenerates, books, or
+    modifies the immutable official publication or any settled result.
+    """
+    from leagues.market_health import market_health_report
+    return market_health_report()
+
+
 @router.get("/decision-quality", dependencies=[Depends(require_api_key)])
 async def decision_quality_report(days: int = 30):
     """Admin-gated, read-only readiness and decision-memory report."""
