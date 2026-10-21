@@ -13,6 +13,31 @@ function allowed(method, route) {
  return method === 'GET' ? GET.has(route) :
    method === 'POST' && (POST.has(route) || /^content\/[0-9]+\/(approve|cancel|publish)$/.test(route));
 }
+
+// Vercel normally parses JSON into req.body. Some adapters surface it as
+// a UTF-8 Buffer or JSON string. Normalize those formats explicitly rather
+// than silently forwarding {} and reporting a real password as incorrect.
+async function decodeBody(req) {
+  let value = req.body;
+  if (value == null && typeof req[Symbol.asyncIterator] === 'function') {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of req) {
+      size += Buffer.byteLength(chunk);
+      if (size > 16384) throw Error('Request body too large');
+      chunks.push(Buffer.from(chunk));
+    }
+    value = Buffer.concat(chunks).toString('utf8');
+  }
+  if (Buffer.isBuffer(value)) value = value.toString('utf8');
+  if (typeof value === 'string') {
+    if (value.length > 16384) throw Error('Request body too large');
+    try {value = JSON.parse(value);} catch {throw Error('Request body is not valid JSON');}
+  }
+  if (value == null) throw Error('Missing request body');
+  if (typeof value !== 'object' || Array.isArray(value)) throw Error('Expected JSON object');
+  return value;
+}
 export default async function handler(req, res) {
   res.setHeader('Cache-Control','no-store');
   res.setHeader('X-Content-Type-Options','nosniff');
@@ -43,6 +68,14 @@ export default async function handler(req, res) {
     if (!permitted.has(key) || value.length > 100) return res.status(400).json({detail:'Unsupported query argument.'});
     upstream.searchParams.append(key,value);
   }
+  let payload;
+  if (req.method === 'POST') {
+    try { payload = await decodeBody(req); }
+    catch { return res.status(400).json({detail:'Invalid request format. No change was submitted.'}); }
+    if (route === 'admin/login' && (typeof payload.password !== 'string' || payload.password.length === 0)) {
+      return res.status(400).json({detail:'The admin password was not received. Please refresh and retry once.'});
+    }
+  }
   const headers = {'accept':'application/json'};
   if (req.headers.cookie) headers.cookie = req.headers.cookie;
   if (req.headers['user-agent']) headers['user-agent'] = req.headers['user-agent'];
@@ -54,7 +87,7 @@ export default async function handler(req, res) {
   try {
     const upstreamResponse = await fetch(upstream, {
       method: req.method, headers,
-      ...(req.method === 'POST' ? {body: JSON.stringify(req.body ?? {})} : {}),
+      ...(req.method === 'POST' ? {body: JSON.stringify(payload)} : {}),
       redirect:'manual', signal: AbortSignal.timeout(110000)
     });
     const cookie = upstreamResponse.headers.get('set-cookie');
