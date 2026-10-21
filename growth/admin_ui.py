@@ -127,6 +127,8 @@ pre {background:#10283E}
  .manual-workflow[data-state="busy"] .manual-workflow-icon::before {animation-duration:2s}
 }
 
+.admin-inline-spinner{display:inline-block;vertical-align:middle;width:14px;height:14px;border:2px solid var(--line-2);border-top-color:var(--brand);border-radius:50%;animation:admin-progress-spin .8s linear infinite;margin-right:8px}
+@media(prefers-reduced-motion:reduce){.admin-inline-spinner{animation-duration:2s}}
 """
 
 ADMIN_JS = r"""
@@ -217,9 +219,20 @@ async function loadSettings(){try{const d=await api('/settings');SETTINGS=d.sett
 async function saveSettings(){const ch={},auto={},sch={};Object.keys(SETTINGS.channel_enabled||{}).forEach(k=>ch[k]=$('ch_'+k).checked);Object.keys(SETTINGS.channel_auto_publish||{}).forEach(k=>auto[k]=$('auto_'+k).checked);Object.keys(SETTINGS.schedule||{}).forEach(k=>sch[k]=$('sch_'+k).value.trim());try{await api('/settings',{method:'POST',body:JSON.stringify({engine_enabled:$('s_engine').checked,channel_enabled:ch,channel_auto_publish:auto,schedule:sch})});$('settingsMsg').textContent='Settings saved'}catch(e){$('settingsMsg').textContent=e.message}}
 async function loadRefs(){try{const d=await api('/referrals');$('refTable').innerHTML=table(['Code','Name','Link'],d.referrals.map(r=>{const link=`https://www.betsightly.com/predictions?utm_source=referral&utm_medium=referral&utm_campaign=creator&ref=${encodeURIComponent(r.code)}`;return`<tr><td><code>${esc(r.code)}</code></td><td>${esc(r.name||'')}</td><td>${esc(link)}</td></tr>`}))}catch(e){}}
 async function addRef(){try{await api('/referrals',{method:'POST',body:JSON.stringify({code:$('refCode').value,name:$('refName').value})});$('refCode').value=$('refName').value='';loadRefs()}catch(e){$('refErr').textContent=e.message}}
-async function loadManual(){try{const d=await api('/manual-tiers');const r=d.rollover||{};$('manualRolloverStatus').textContent=r.allowed
- ? 'Rollover Day '+num(r.day_number)+' is eligible for '+esc(r.date)+'. Choose 2.00x–4.00x from verified, unused fixtures.'
- : (r.reason||'Rollover status unavailable; publishing is blocked.');const rows=Object.values(d.published||{});$('manualPublished').innerHTML=rows.length?table(['Tier','Games','Verified odds','Share code'],rows.map(r=>`<tr><td>${esc(r.tier)}</td><td>${num(r.leg_count)}</td><td>${esc(r.total_odds)}x</td><td><code>${esc(r.share_code||'unavailable')}</code></td></tr>`)):empty('No manual tickets published today. All official records remain unchanged.')}catch(e){$('manualPublished').textContent=e.message}}
+async function loadManual(){
+ const el=$('manualPublished');
+ if(el){el.setAttribute('aria-busy','true');el.innerHTML='<div class="empty"><span class="admin-inline-spinner" aria-hidden="true"></span> Checking saved editorial tickets…</div>';}
+ try{
+  const d=await api('/manual-tiers'),r=d.rollover||{};
+  $('manualRolloverStatus').textContent=r.allowed
+   ? 'Rollover Day '+num(r.day_number)+' is eligible for '+esc(r.date)+'. Choose 2.00x–4.00x from verified, unused fixtures.'
+   : (r.reason||'Rollover status unavailable; publishing is blocked.');
+  const rows=Object.values(d.published||{});
+  el.innerHTML=rows.length?table(['Tier','Games','Verified odds','Share code'],rows.map(r=>`<tr><td>${esc(r.tier)}</td><td>${num(r.leg_count)}</td><td>${esc(r.total_odds)}x</td><td><code>${esc(r.share_code||'unavailable')}</code></td></tr>`)):empty('No manual tickets published today. All official records remain unchanged.');
+  return d;
+ }catch(e){el.textContent='Could not load saved tickets: '+e.message;return null;}
+ finally{if(el)el.setAttribute('aria-busy','false')}
+}
 function syncManualTier(){
  const tier=$('manualTier').value;
  const replacementEligible=['2_odds','5_odds','10_odds','over_1_5'].includes(tier);
