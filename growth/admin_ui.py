@@ -180,7 +180,7 @@ ADMIN_JS = r"""
 const API='/api/growth', $=id=>document.getElementById(id);let SETTINGS={},DASH=null;
 const ADMIN_ASYNC_ACTIONS=new Set([
  'login','logout','retry','generate','generate-publish','save-settings',
- 'save-home-campaign','add-ref','preview','approve','publish','apply-range'
+ 'save-home-campaign','add-ref','preview','approve','publish','apply-range','refresh-market-readiness'
 ]);
 const ADMIN_ACTION_LABELS={
  login:'Signing in',logout:'Signing out',retry:'Retrying failed deliveries',
@@ -188,7 +188,8 @@ const ADMIN_ACTION_LABELS={
  'save-settings':'Saving settings','save-home-campaign':'Saving homepage campaign',
  'add-ref':'Creating referral link',preview:'Loading content preview',
  approve:'Approving reviewed content',publish:'Publishing approved content',
- 'apply-range':'Loading selected analytics range'
+ 'apply-range':'Loading selected analytics range',
+ 'refresh-market-readiness':'Refreshing market evidence'
 };
 const adminActionInFlight=new Set();
 function adminActivity(state,message){
@@ -243,7 +244,7 @@ async function api(path,opts={}){
  return b;
 }
 function show(which){$('login').classList.toggle('hidden',which!=='login');$('app').classList.toggle('hidden',which==='login')}
-function nav(name,button){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(button)button.classList.add('active');$('side').classList.remove('open');if(name==='content'){loadContent();loadHomeCampaign()}if(name==='publishing')loadPubs();if(name==='settings')loadSettings();if(name==='referrals')loadRefs();if(name==='manual'){syncManualTier();loadManual();manualUpdatePublishAvailability()}}
+function nav(name,button){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(button)button.classList.add('active');$('side').classList.remove('open');if(name==='content'){loadContent();loadHomeCampaign()}if(name==='publishing')loadPubs();if(name==='settings')loadSettings();if(name==='referrals')loadRefs();if(name==='product')loadMarketReadiness();if(name==='manual'){syncManualTier();loadManual();manualUpdatePublishAvailability()}}
 async function login(){try{await api('/admin/login',{method:'POST',body:JSON.stringify({password:$('pw').value})});$('pw').value='';show('app');boot()}catch(e){$('loginErr').textContent=e.message}}
 async function logout(){try{await api('/admin/logout',{method:'POST'})}catch(e){}show('login')}
 function delta(metric){const v=DASH?.vs_previous?.changes?.[metric];if(v==null)return'<span class="delta">No prior baseline</span>';return`<span class="delta ${v>=0?'up':'down'}">${v>=0?'↗':'↘'} ${Math.abs(v*100).toFixed(0)}% vs prior</span>`}
@@ -265,6 +266,54 @@ function deviceTable(rows){return table(['Device','Visitors','Prediction rate','
 function renderAudience(){const s=DASH.summary,a=s.active_users||{},q=s.analytics_quality||{},pr=s.prediction_day_return||{};$('activeUsers').innerHTML=[kpi('Daily active',a.dau,'dau'),kpi('Weekly active',a.wau,'wau'),kpi('Monthly active',a.mau,'mau'),kpi('New visitors',s.totals.new_visitors,'new_visitors'),kpi('Returning',s.totals.returning_visitors,'returning_visitors',true),kpi('Prediction day return',pr.rate,'prediction_day_return',false,'pct')].join('');$('retention').innerHTML=Object.entries(s.retention||{}).map(([k,v])=>`<div class="retention-cell"><strong>${pct(v.rate)}</strong><span>${esc(k)} retention</span><div class="muted">${v.returned}/${v.eligible} eligible</div></div>`).join('');$('quality').innerHTML=[qualityCell('Geo coverage',q.geo_coverage),qualityCell('Device detection',q.device_coverage),qualityCell('OS detection',q.os_coverage),qualityCell('Browser detection',q.browser_coverage),qualityCell('Referrer attribution',q.referrer_attribution),qualityCell('Stable visitor IDs',q.stable_visitor_coverage)].join('');$('countries').innerHTML=audienceTable(s.by_country,countryLabel);$('devices').innerHTML=deviceTable(s.by_device);$('os').innerHTML=audienceTable(s.by_os);$('browsers').innerHTML=audienceTable(s.by_browser);$('traffic').innerHTML=audienceTable(s.by_source)}
 function renderSporty(){const s=DASH.summary,b=s.booking,sb=s.sportybet||{};$('sportyKpis').innerHTML=[kpi('Automated attempts',b.attempts,'attempts'),kpi('Full success',b.full,'full',true),kpi('Rebuilt full',b.rebuilt,'rebuilt'),kpi('Partial',b.partial,'partial'),kpi('Validation success',b.validation_success_rate,'validation_success_rate',false,'pct'),kpi('No-code rate',b.no_code_rate,'no_code_rate',false,'pct')].join('');$('userBooking').innerHTML=[kpi('Valid code viewers',s.totals.valid_code_viewers,'valid_code_viewers'),kpi('Unique code copiers',s.totals.unique_code_copiers,'unique_code_copiers',true),kpi('Copy actions',s.totals.total_copy_actions,'total_copy_actions'),kpi('SportyBet openers',s.totals.sportybet_openers,'sportybet_openers')].join('');$('catalogue').innerHTML=`<div class="metric-list"><div class="metric-row"><strong>Declared fixtures</strong><span>${maybeNum(sb.declared_total)}</span></div><div class="metric-row"><strong>Raw fetched records</strong><span>${maybeNum(sb.raw_fetched_records??sb.fetched_total)}</span></div><div class="metric-row"><strong>Unique indexed fixtures</strong><span>${maybeNum(sb.unique_indexed_fixtures??sb.fixtures)}</span></div><div class="metric-row"><strong>Duplicates removed</strong><span>${maybeNum(sb.duplicates_removed)}</span></div><div class="metric-row"><strong>Invalid records</strong><span>${maybeNum(sb.invalid_records)}</span></div><div class="metric-row"><strong>Catalogue complete</strong><span class="status ${sb.is_complete===true?'ok':'bad'}">${sb.is_complete===true?'Yes':'No'}</span></div><div class="metric-row"><strong>Priced markets</strong><span>${maybeNum(sb.priced_markets)}</span></div><div class="metric-row"><strong>Cache age</strong><span>${sb.cache_age_hours==null?'—':sb.cache_age_hours+'h'}</span></div></div>`;$('tierBooking').innerHTML=table(['Tier','Generated','Full','Rebuilt','Partial','No code','Avg odds'],(b.by_tier||[]).map(r=>`<tr><td><strong>${esc(r.tier)}</strong></td><td class="num">${num(r.generated)}</td><td class="num">${num(r.full)}</td><td class="num">${num(r.rebuilt)}</td><td class="num">${num(r.partial)}</td><td class="num">${num((r.unavailable||0)+(r.failed||0)+(r.validation_failed||0))}</td><td class="num">${r.avg_actual_odds??'—'}</td></tr>`));$('failures').innerHTML=table(['Failure reason','Tier','Count'],(b.failures||[]).map(r=>`<tr><td>${esc(r.reason)}</td><td>${esc(r.tier||'unknown')}</td><td class="num">${num(r.count)}</td></tr>`))}
 function renderProduct(){const s=DASH.summary,b=s.builder||{},bb=s.builder_backend||{};$('builderKpis').innerHTML=[kpi('Builder users',s.totals.builder_users,'builder_users'),kpi('Server requests',bb.requests,'slip_builds'),kpi('Tickets produced',bb.tickets_produced,'valid_code_viewers',true),kpi('Ticket rate',bb.ticket_rate,'code_copy_rate',false,'pct'),kpi('Average legs',b.average_legs,'average_legs'),kpi('Average actual odds',b.average_actual_odds,'actual_odds')].join('');$('targets').innerHTML=bars((bb.by_target||[]).map(r=>({key:r.target,visitors:r.requests})));$('features').innerHTML=audienceTable(s.by_product_source);const perf=Object.entries(s.prediction_performance||{});$('performance').innerHTML=table(['Tier','Settled','Won','Lost','Accuracy','ROI','Profit'],perf.map(([tier,r])=>`<tr><td><strong>${esc(tier)}</strong></td><td class="num">${num(r.settled)}</td><td class="num">${num(r.won)}</td><td class="num">${num(r.lost)}</td><td class="num">${pct(r.win_rate)}</td><td class="num">${pct(r.roi)}</td><td class="num">${r.profit??0}</td></tr>`))}
+async function loadMarketReadiness(){
+ adminTableLoading('marketReadiness','Loading market and publication readiness');
+ try{
+  const d=await api('/market-readiness');
+  const root=$('marketReadiness');
+  const fields=[
+   ['Qualified fixtures',d.qualified_fixtures],
+   ['Qualified selections',d.qualified_selections],
+   ['Fixtures reserved',d.reserved_fixtures],
+   ['Remaining fixtures',d.remaining_qualified_fixtures]
+  ];
+  const cells=fields.map(([label,value])=>
+   '<div class="market-diagnostics__number"><strong>'+maybeNum(value)+'</strong><small>'+esc(label)+'</small></div>').join('');
+  const marketRows=(d.markets||[]).map(m=>{
+   const n=m.historical_replay_observations;
+   const error=m.historical_calibration_error;
+   const benchmark=m.historical_bookmaker_n;
+   const skill=m.historical_skill_vs_bookmaker;
+   return '<tr><td><strong>'+esc(m.label)+'</strong><br><small class="muted">'+esc(m.market)+'</small></td>'+
+    '<td><span class="market-status '+esc(String(m.policy||'').toLowerCase())+'">'+esc(m.policy)+'</span></td>'+
+    '<td>'+esc(m.activation)+'</td>'+
+    '<td class="num">'+(n==null?'<span class="warning">Missing</span>':num(n))+'</td>'+
+    '<td class="num">'+(error==null?'—':esc((Number(error)*100).toFixed(2)+' pp'))+'</td>'+
+    '<td class="num">'+(benchmark==null?'—':num(benchmark))+'</td>'+
+    '<td class="num">'+(skill==null?'—':esc((Number(skill)*100).toFixed(1)+'%'))+'</td></tr>';
+  });
+  const rejected=Object.entries(d.rejections||{}).sort((a,b)=>Number(b[1])-Number(a[1])).slice(0,12);
+  const rejectionHtml=rejected.length?rejected.map(([reason,count])=>
+   '<span>'+esc(reason)+' <strong>'+num(count)+'</strong></span>').join(''):'<span>No saved rejection breakdown for this day.</span>';
+  const productHtml=Object.entries(d.products||{}).map(([tier,value])=>
+   '<span>'+esc(tier)+': '+(value.selected?'published '+num(value.leg_count)+' picks':'not published')+'</span>').join('');
+  const legacy=d.telemetry_counts||{};
+  root.innerHTML='<div class="market-diagnostics">'+
+   '<div><h3>Published card · '+esc(d.date)+'</h3><p class="muted">'+
+    (d.published_card_available?'From the locked official card.':'No stored official card for this date.')+'</p></div>'+
+   '<div class="market-diagnostics__numbers">'+cells+'</div>'+
+   '<div class="market-rejections">'+productHtml+'</div>'+
+   '<div class="market-note">Replay shows historical research, not training or permission to publish. Publication also needs conservative model value, independently trusted evidence and exact SportyBet booking. Legacy telemetry: '+
+    maybeNum(legacy.model_training_runs)+' training runs; '+maybeNum(legacy.prediction_accuracy)+' accuracy rows. Those legacy counts do not by themselves prove a modern inference job succeeded or failed.</div>'+
+   '<h3>Markets & evidence</h3>'+
+   table(['Market','Policy','Activation','Replay n','Historical ECE','Bookmaker n','Skill vs bookmaker'],marketRows)+
+   '<h3>Leading rejection reasons (counts can overlap)</h3><div class="market-rejections">'+rejectionHtml+'</div>'+
+   '<p class="muted">The no-repeat rule may reserve eligible matches for other tiers. Changing prices or risk floors just to fill a tier is not a valid substitute for evidence.</p>'+
+   '</div>';
+ }catch(e){
+  $('marketReadiness').innerHTML='<div class="empty">Market-readiness diagnostics unavailable: '+esc(e.message)+'</div>';
+ }finally{adminTableReady('marketReadiness')}
+}
 function renderAnalyticsHealth(){const s=DASH.summary,h=s.analytics_health||{},p=h.provider||{},q=h.quality||{},c=s.metric_contracts||{};$('providerHealth').innerHTML=`<div class="health-grid"><div class="health-item"><div class="health-label">Human analytics</div><div class="health-value">${sourceLine(p)}</div><div class="muted">${esc(p.reason||'PostHog Query API responding')}</div></div><div class="health-item"><div class="health-label">Backend facts</div><div class="health-value">${sourceLine(s.sources?.backend_facts)}</div></div><div class="health-item"><div class="health-label">Dual validation ends</div><div class="health-value">${esc(h.dual_write_until||'not set')}</div><div class="muted">Migration remains open until live events are verified.</div></div></div>`;$('quality').innerHTML=[qualityCell('Geo coverage',q.geo_coverage),qualityCell('Device detection',q.device_coverage),qualityCell('OS detection',q.os_coverage),qualityCell('Browser detection',q.browser_coverage),qualityCell('Referrer attribution',q.referrer_attribution),qualityCell('Stable visitor IDs',q.stable_visitor_coverage)].join('');$('rateContracts').innerHTML=table(['Metric','Numerator','Denominator','Rate','Sample'],Object.entries(c).map(([name,v])=>`<tr><td>${esc(name)}</td><td class="num">${num(v.numerator)}</td><td class="num">${num(v.denominator)}</td><td class="num">${pct(v.rate)}</td><td><span class="status ${v.sample_status==='normal'?'ok':'warning'}">${esc(v.sample_status)}</span></td></tr>`))}
 function dateISO(d){return d.toISOString().slice(0,10)}
 async function loadDashboard(){
@@ -751,7 +800,8 @@ const ACTIONS={login,logout,retry,
  'manual-cancel-import-review':manualCancelImportReview,
  'manual-preview':()=>manualWithProgress('preview',3,'Checking live market prices',manualPreview),
  'manual-publish':()=>manualWithProgress('publish',4,'Publishing reviewed selections',manualPublish),
- 'manual-refresh':()=>manualWithProgress('refresh',5,'Refreshing saved tickets',manualRefreshPublished),'generate':()=>generate(false),'generate-publish':()=>generate(true),'save-settings':saveSettings,'save-home-campaign':saveHomeCampaign,'add-ref':addRef,preview:e=>preview(Number(e.dataset.id)),approve:e=>act(Number(e.dataset.id),'approve'),publish:e=>act(Number(e.dataset.id),'publish'),'menu':()=>$('side').classList.toggle('open'),'apply-range':loadDashboard};
+ 'manual-refresh':()=>manualWithProgress('refresh',5,'Refreshing saved tickets',manualRefreshPublished),
+ 'refresh-market-readiness':loadMarketReadiness,'generate':()=>generate(false),'generate-publish':()=>generate(true),'save-settings':saveSettings,'save-home-campaign':saveHomeCampaign,'add-ref':addRef,preview:e=>preview(Number(e.dataset.id)),approve:e=>act(Number(e.dataset.id),'approve'),publish:e=>act(Number(e.dataset.id),'publish'),'menu':()=>$('side').classList.toggle('open'),'apply-range':loadDashboard};
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act],[data-page],[data-days]');if(!el)return;if(el.dataset.page){nav(el.dataset.page,el);return}if(el.dataset.days){document.querySelectorAll('.range button').forEach(b=>b.classList.remove('active'));el.classList.add('active');$('customDates').classList.toggle('hidden',el.dataset.days!=='custom');if(el.dataset.days!=='custom')loadDashboard();return}const fn=ACTIONS[el.dataset.act];if(fn){
  e.preventDefault();
  if(manualBusyOperation&&el.dataset.act?.startsWith('manual-'))return;
