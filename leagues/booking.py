@@ -65,6 +65,40 @@ def _rechecked_tier_price_qualified(tier: str, price: object) -> bool:
 
 
 
+def _verified_current_bookmaker_total(games: list, board: dict) -> float | None:
+    """Quote only freshly verified SportyBet selections, never model estimates.
+
+    A code readback may prove exact events and outcomes but omit total odds.
+    The current board can supply a second independent, exact bookmaker quote.
+    Caller must first validate the whole code and all selections.
+    """
+    from math import isfinite, prod
+    from leagues.sportybet import availability_for
+
+    if not games:
+        return None
+    prices = []
+    for game in games:
+        availability = availability_for(
+            board, game.get("home_team") or "", game.get("away_team") or "",
+            game.get("kickoff") or game.get("date") or "",
+            game.get("league") or "", game.get("market") or "",
+            event_id=game.get("sportybet_event_id") or
+            (game.get("sportybet_availability") or {}).get("event_id"),
+        )
+        if not availability.get("sportybet_available"):
+            return None
+        try:
+            price = float(availability.get("sportybet_odds"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not isfinite(price) or price <= 1.0:
+            return None
+        prices.append(price)
+    total = prod(prices)
+    return round(total, 3) if isfinite(total) and total > 1 else None
+
+
 def _base() -> str:
     from leagues.sportybet import BASE_URL as SB
     return SB
@@ -1322,15 +1356,25 @@ def _book_card_unlocked(publish_date: str, accumulators: dict,
                 valid, reason, actual_odds = validate_code_details(
                     prior["share_code"], selections)
                 reusable = bool(valid)
-                # Readback can reprice a once-valid code outside its tier
-                # minimum. Do not update/store/skip it as an active booking.
+                # A perfect exact-leg code readback can omit every price. That
+                # is missing information, not evidence of an odds movement.
+                # Only the fresh SportyBet board can independently quote it.
+                if reusable and actual_odds is None:
+                    actual_odds = _verified_current_bookmaker_total(
+                        still_bookable, board)
+                    if actual_odds is not None:
+                        prior["actual_sportybet_odds_source"] = "live_board_snapshot"
                 if reusable and tier in {"rollover", "10_odds"}:
                     reusable = _rechecked_tier_price_qualified(tier, actual_odds)
                     if not reusable:
-                        logger.warning(
-                            "Tier %s held code repriced outside contract: %s",
-                            tier, actual_odds,
-                        )
+                        if actual_odds is None:
+                            logger.warning(
+                                "Tier %s held code matches selections but "
+                                "has no verified current SportyBet price", tier)
+                        else:
+                            logger.warning(
+                                "Tier %s held code repriced outside contract: %.3f",
+                                tier, actual_odds)
                 if reusable:
                     prior["checked_at"] = datetime.now(timezone.utc).isoformat()
                     if actual_odds is not None:
