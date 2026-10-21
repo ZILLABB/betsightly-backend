@@ -332,6 +332,9 @@ async function manualWithProgress(name,stage,description,fn){
 function manualInvalidatePreview(){
  if(manualBusyOperation)return;
  manualPreviewConfirmed=null;
+ const preview=$('manualPreview');
+ if(preview&&!manualImportReview&&preview.textContent.includes('Bookmaker-priced preview'))
+  preview.textContent='Selections changed. The earlier bookmaker price is now outdated. Check live prices again before publishing.';
  manualUpdatePublishAvailability();
  if(!manualImportReview)
   manualStage(2,'ready','Selections edited — preview again',
@@ -625,7 +628,28 @@ async function manualPublish(){
    manualStage(4,'error','Publication request failed',e.message);
  }
 }
-async function manualFile(event){const file=event.target.files?.[0];if(!file)return;if(file.size>16000){$('manualErr').textContent='File too large (16 KB max).';return}const source=await file.text();manualImportReview=null;$('manualLines').value=source.slice(0,6000);$('manualPreview').textContent='CSV loaded. Click Check prices / preview before publishing.';event.target.value=''}
+async function manualFile(event){
+ const file=event.target.files?.[0];if(!file)return;
+ if(file.size>16000){
+  $('manualErr').textContent='File is too large (16 KB limit).';
+  manualStage(1,'error','CSV exceeds upload limit','Select a smaller file. No rows were overwritten.');
+  event.target.value='';return;
+ }
+ try{
+  const source=await file.text();
+  if(source.length>6000)
+   throw Error('CSV exceeds 6,000 characters. Split it into smaller files; silently truncating games is unsafe.');
+  $('manualErr').textContent='';
+  manualImportReview=null;manualImportedCode=null;manualPreviewConfirmed=null;
+  $('manualLines').value=source;
+  $('manualPreview').textContent='CSV loaded. Review each row, then click Check prices / preview before publishing.';
+  manualStage(2,'ready','CSV loaded — review every row',
+   num(source.split(/\r?\n/).filter(Boolean).length)+' rows loaded. Nothing has been published.');
+ }catch(e){
+  $('manualErr').textContent=e.message;
+  manualStage(1,'error','Could not load CSV',e.message);
+ }finally{event.target.value=''}
+}
 const ACTIONS={login,logout,retry,
  'manual-import-code':()=>manualWithProgress('import',1,'Reading SportyBet code',manualImportCode),
  'manual-publish-imported':()=>manualWithProgress('publish-imported',4,'Publishing imported code',manualPublishImported),
