@@ -123,7 +123,8 @@ def _finish_settlement_cycle() -> None:
 # explicit verified fixture status or market push semantics.
 MISSING_RESULT_GRACE = timedelta(hours=48)
 
-# Check free/primary score evidence every 15 minutes.
+# Check recent explicitly confirmed full-time scores every 60 seconds.
+# Keep the costly historical and backup-source sweeps every 15 minutes.
 #
 # Keyed fallback providers remain approximately hourly so faster settlement
 # does not multiply paid/quota-limited API usage.
@@ -132,9 +133,14 @@ SETTLEMENT_POLL_SECONDS = max(
     int(
         os.getenv(
             "SETTLEMENT_POLL_SECONDS",
-            "900",
+            "60",
         )
     ),
+)
+
+SETTLEMENT_FULL_POLL_SECONDS = max(
+    SETTLEMENT_POLL_SECONDS,
+    int(os.getenv("SETTLEMENT_FULL_POLL_SECONDS", "900")),
 )
 
 SETTLEMENT_FALLBACK_SECONDS = max(
@@ -638,6 +644,7 @@ def _collect_finished_scores(
     has_club_picks: bool = True,
     *,
     allow_fallback: bool = True,
+    score_collector=None,
 ) -> tuple[Dict[str, Dict[str, Any]], str]:
     """Collect finals for pending rollover picks using the shared source path."""
     picks = []
@@ -646,6 +653,8 @@ def _collect_finished_scores(
             picks.extend(json.loads(row.picks or "[]"))
         except Exception:
             continue
+    if score_collector is not None:
+        return score_collector(picks)
     return _collect_scores_for_picks(
         picks,
         allow_fallback=allow_fallback,
@@ -1125,6 +1134,7 @@ def _sync_chain_to_db():
 def check_all_pending(
     *,
     allow_fallback: bool = True,
+    score_collector=None,
 ) -> Dict[str, int]:
     """Scan all pending rollover days; mark won/lost where matches finished."""
     global _last_successful_check
@@ -1170,11 +1180,16 @@ def check_all_pending(
             )
 
             try:
-                finished, source = _collect_finished_scores(
-                    ready,
-                    has_club_picks=True,
-                    allow_fallback=allow_fallback,
-                )
+                if score_collector is not None:
+                    finished, source = _collect_finished_scores(
+                        ready, has_club_picks=True,
+                        allow_fallback=False, score_collector=score_collector,
+                    )
+                else:
+                    finished, source = _collect_finished_scores(
+                        ready, has_club_picks=True,
+                        allow_fallback=allow_fallback,
+                    )
             except TypeError as exc:
                 # Backward compatibility for legacy helpers and test doubles
                 # that predate the Run-2 allow_fallback argument.
@@ -1288,8 +1303,34 @@ def check_all_pending(
         return summary
 
 
+def _run_rapid_settlement_cycle():
+    """Fast lane: bounded verified FT lookups, no costly monthly league sweeps."""
+    from leagues.fast_settlement import collect_recent_verified_finals
+    from leagues.editorial_settlement import settle_pending_manual
+
+    # The full recovery loop continues every 15 minutes, including independent
+    # sources. A missing score in this lightweight pass stays strictly pending.
+    runners = (
+        ("editorial_manual", lambda: settle_pending_manual(
+            score_collector=collect_recent_verified_finals)),
+        ("published_slips", lambda: settle_published_slips(
+            score_collector=collect_recent_verified_finals)),
+        ("rollover", lambda: check_all_pending(
+            score_collector=collect_recent_verified_finals)),
+        ("builder", lambda: settle_builder_predictions(
+            score_collector=collect_recent_verified_finals)),
+    )
+    for component, runner in runners:
+        try:
+            _record_settlement_component(component, runner())
+        except Exception as exc:
+            _record_settlement_error(component, exc)
+            logger.warning("Rapid settlement %s failed: %s",
+                           component, type(exc).__name__)
+
+
 def run_loop():
-    """Settle verified finals frequently without multiplying paid API calls."""
+    """Poll verified FT quickly, with regular comprehensive recovery."""
     time.sleep(
         min(
             60,
@@ -1298,6 +1339,10 @@ def run_loop():
     )
 
     iteration = 0
+
+    full_every = max(
+        1, round(SETTLEMENT_FULL_POLL_SECONDS / SETTLEMENT_POLL_SECONDS),
+    )
 
     fallback_every = max(
         1,
@@ -1323,9 +1368,22 @@ def run_loop():
         iteration += 1
         _begin_settlement_cycle(iteration)
 
+        if (iteration - 1) % full_every:
+            try:
+                _run_rapid_settlement_cycle()
+            except Exception as exc:
+                # Never let a lightweight poller fault stop the broader,
+                # independently scheduled full settlement recovery.
+                _record_settlement_error("rapid_cycle", exc)
+                logger.exception("Rapid settlement cycle failed")
+            finally:
+                _finish_settlement_cycle()
+            time.sleep(SETTLEMENT_POLL_SECONDS)
+            continue
+
         allow_fallback = (
             iteration == 1
-            or iteration % fallback_every == 0
+            or (iteration - 1) % fallback_every == 0
         )
 
         try:
@@ -1437,7 +1495,9 @@ def run_loop():
         # publication. Retry new Day 1 hourly from the already evaluated
         # board rather than requiring a manual workaround. This never
         # bypasses a pending day or modifies the immutable morning card.
-        if iteration % 4 == 1:
+        if (iteration - 1) % max(
+            1, round(3600 / SETTLEMENT_POLL_SECONDS),
+        ) == 0:
             try:
                 from leagues.rollover_late_recovery import recover_once
                 recovered = recover_once()
@@ -1497,8 +1557,9 @@ def start_background_loop():
 
     logger.info(
         "Results checker started "
-        "(poll=%ss, fallback=%ss)",
+        "(fast_poll=%ss, full_poll=%ss, fallback=%ss)",
         SETTLEMENT_POLL_SECONDS,
+        SETTLEMENT_FULL_POLL_SECONDS,
         SETTLEMENT_FALLBACK_SECONDS,
     )
 
@@ -1510,6 +1571,7 @@ def start_background_loop():
 def settle_published_slips(
     *,
     allow_fallback: bool = True,
+    score_collector=None,
 ) -> Dict[str, int]:
     """Settle archived category slips (banker / 2 odds / 5 odds / ...).
 
@@ -1531,10 +1593,10 @@ def settle_published_slips(
     published_picks = [{**pick, "date": pick.get("date") or slip.date}
                        for slip in slips
                        for pick in _json.loads(slip.picks or "[]")]
-    scores, _ = _collect_scores_for_picks(
-        published_picks,
-        allow_fallback=allow_fallback,
-    )
+    scores, _ = (score_collector(published_picks) if score_collector is not None
+                 else _collect_scores_for_picks(
+                     published_picks, allow_fallback=allow_fallback,
+                 ))
 
     won = lost = still = 0
     for slip in slips:
@@ -1756,6 +1818,7 @@ def settle_builder_predictions(
     now: datetime | None = None,
     *,
     allow_fallback: bool = True,
+    score_collector=None,
 ) -> Dict[str, int]:
     """Settle unique Builder prediction sets with the canonical evaluator."""
     from leagues.builder_runs import pending_predictions, settle_prediction
@@ -1773,10 +1836,10 @@ def settle_builder_predictions(
         due_picks = [pick for pick in all_picks if
                      str(pick.get("kickoff") or pick.get("date") or "")[:10]
                      <= current.strftime("%Y-%m-%d")]
-        scores, _ = _collect_scores_for_picks(
-            due_picks,
-            allow_fallback=allow_fallback,
-        )
+        scores, _ = (score_collector(due_picks) if score_collector is not None
+                     else _collect_scores_for_picks(
+                         due_picks, allow_fallback=allow_fallback,
+                     ))
 
     for row in rows:
         picks = json.loads(row.get("picks") or "[]")
@@ -1918,6 +1981,9 @@ def settlement_status() -> dict:
         return {
             "poll_seconds":
                 SETTLEMENT_POLL_SECONDS,
+
+            "full_poll_seconds":
+                SETTLEMENT_FULL_POLL_SECONDS,
 
             "fallback_seconds":
                 SETTLEMENT_FALLBACK_SECONDS,
