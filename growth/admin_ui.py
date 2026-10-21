@@ -151,7 +151,7 @@ async function api(path,opts={}){
  return b;
 }
 function show(which){$('login').classList.toggle('hidden',which!=='login');$('app').classList.toggle('hidden',which==='login')}
-function nav(name,button){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(button)button.classList.add('active');$('side').classList.remove('open');if(name==='content'){loadContent();loadHomeCampaign()}if(name==='publishing')loadPubs();if(name==='settings')loadSettings();if(name==='referrals')loadRefs();if(name==='manual'){syncManualTier();loadManual()}}
+function nav(name,button){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(button)button.classList.add('active');$('side').classList.remove('open');if(name==='content'){loadContent();loadHomeCampaign()}if(name==='publishing')loadPubs();if(name==='settings')loadSettings();if(name==='referrals')loadRefs();if(name==='manual'){syncManualTier();loadManual();manualUpdatePublishAvailability()}}
 async function login(){try{await api('/admin/login',{method:'POST',body:JSON.stringify({password:$('pw').value})});$('pw').value='';show('app');boot()}catch(e){$('loginErr').textContent=e.message}}
 async function logout(){try{await api('/admin/logout',{method:'POST'})}catch(e){}show('login')}
 function delta(metric){const v=DASH?.vs_previous?.changes?.[metric];if(v==null)return'<span class="delta">No prior baseline</span>';return`<span class="delta ${v>=0?'up':'down'}">${v>=0?'↗':'↘'} ${Math.abs(v*100).toFixed(0)}% vs prior</span>`}
@@ -230,11 +230,122 @@ function syncManualTier(){
  manualImportReview=null;
  manualImportedCode=null;
  manualPreviewConfirmed=null;
- $('manualCodePublish').disabled=true;
+ if(!manualBusyOperation){
+  manualStage(0,'idle','Ready to import',
+   'Choose an input: SportyBet booking code, CSV or event ID / market rows. No publication has been attempted.');
+ }
+ manualUpdatePublishAvailability();
 }
 let manualImportReview=null;
 let manualImportedCode=null;
 let manualPreviewConfirmed=null;
+let manualBusyOperation=null;
+let manualPublishUncertain=false;
+let manualUncertainTier=null;
+let manualStageNumber=0;
+function manualStage(step,state,title,detail){
+ const el=$('manualWorkflow');
+ if(!el)return;
+ manualStageNumber=step;
+ el.dataset.state=state;
+ el.setAttribute('aria-busy',state==='busy'?'true':'false');
+ $('manualWorkflowTitle').textContent=title;
+ $('manualWorkflowDetail').textContent=detail||'';
+ const icon=$('manualWorkflowIcon');
+ if(icon)icon.textContent=state==='success'?'✓':state==='error'?'!':'◎';
+ document.querySelectorAll('#manualWorkflow [data-manual-step]').forEach(node=>{
+  const index=Number(node.dataset.manualStep);
+  node.dataset.stepState=index<step?'done':index===step?
+   (state==='busy'?'active':state==='success'?'done':'active'):'future';
+ });
+}
+function manualFormLock(lock){
+ const controls=document.querySelectorAll('#page-manual [data-act^="manual-"],#manualTier,#manualShareCode,#manualConvertSpecial,#manualLines,#manualReplaceOfficialDisplay,#manualFile');
+ controls.forEach(node=>{
+  if(lock){
+   node.dataset.beforeBusyDisabled=node.disabled?'1':'0';
+   node.disabled=true;
+  }else{
+   node.disabled=node.dataset.beforeBusyDisabled==='1';
+   delete node.dataset.beforeBusyDisabled;
+  }
+ });
+ const editor=$('manualEditor');
+ if(editor)editor.setAttribute('aria-busy',lock?'true':'false');
+}
+function manualUpdatePublishAvailability(){
+ const request=manualRequest();
+ const confirmed=Boolean(manualPreviewConfirmed&&
+  manualPreviewConfirmed.tier===request.tier&&
+  manualPreviewConfirmed.lines===request.lines&&
+  manualPreviewConfirmed.replace_official_display===request.replace_official_display);
+ const imported=Boolean(confirmed&&manualImportedCode&&
+  manualImportedCode.tier===request.tier&&
+  manualImportedCode.lines===request.lines&&
+  manualImportedCode.code===$('manualShareCode').value.trim()&&
+  !$('manualConvertSpecial').checked);
+ const locked=Boolean(manualBusyOperation||manualPublishUncertain||manualImportReview);
+ const importedButton=$('manualCodePublish');
+ const reviewedButton=document.querySelector('[data-act="manual-publish"]');
+ if(importedButton)importedButton.disabled=locked||!imported;
+ if(reviewedButton)reviewedButton.disabled=locked||!confirmed;
+}
+async function manualWithProgress(name,stage,description,fn){
+ // Synchronous latch prevents double submission even before the DOM repaints.
+ if(manualBusyOperation)return;
+ if(manualPublishUncertain && (name==='publish'||name==='publish-imported')){
+  manualStage(5,'error','Publication confirmation required',
+   'The last request had an uncertain response. Refresh saved tickets before trying to publish again.');
+  return;
+ }
+ manualBusyOperation=name;
+ manualStage(stage,'busy',description,
+  'Contacting BetSightly securely. Leave this page open; do not submit another request.');
+ manualFormLock(true);
+ try{
+  await fn();
+ }catch(error){
+  $('manualErr').textContent=error.message||'Request failed. Check the saved tickets before retrying.';
+  manualStage(stage,'error',description+' failed',error.message||'No change was confirmed.');
+ }finally{
+  manualBusyOperation=null;
+  manualFormLock(false);
+  manualUpdatePublishAvailability();
+  if($('manualWorkflow')?.dataset.state==='busy')
+   manualStage(stage,'ready','Ready for the next step',
+    'The request finished. Review the message above and verify the saved code before proceeding.');
+ }
+}
+function manualInvalidatePreview(){
+ if(manualBusyOperation)return;
+ manualPreviewConfirmed=null;
+ manualUpdatePublishAvailability();
+ if(!manualImportReview)
+  manualStage(2,'ready','Selections edited — preview again',
+   'The previous price check is no longer valid. Run Check prices / preview before publishing.');
+}
+async function manualRefreshPublished(){
+ const tier=manualUncertainTier||$('manualTier').value;
+ manualStage(5,'busy','Checking published ticket','Reading saved manual tickets, without attempting another publish.');
+ try{
+  const result=await loadManual();
+  if(!result)throw Error('The server has not confirmed the current saved tickets.');
+  const ticket=(result.published||{})[tier];
+  if(ticket?.share_code){
+   manualPublishUncertain=false;manualUncertainTier=null;
+   manualStage(5,'success','Saved publication found',
+    tier+' is stored with verified code '+ticket.share_code+'. Do not submit it again.');
+  }else{
+   manualPublishUncertain=false;manualUncertainTier=null;
+   manualPreviewConfirmed=null;
+   manualStage(2,'ready','No saved ticket found for '+tier,
+    'The current database has no manual ticket for this tier. Import and verify again before a new submission.');
+  }
+ }catch(e){
+  manualStage(5,'error','Could not verify saved tickets',
+   'Publication state remains uncertain. Do not send a second publish request until the database responds.');
+ }
+}
 const REGULAR_MANUAL_MARKETS=[
   ['home_win','Home win'],['draw','Draw'],['away_win','Away win'],
   ['home_or_draw','Home or draw'],['away_or_draw','Away or draw'],
@@ -456,15 +567,22 @@ async function manualPublish(){
  }
 }
 async function manualFile(event){const file=event.target.files?.[0];if(!file)return;if(file.size>16000){$('manualErr').textContent='File too large (16 KB max).';return}const source=await file.text();manualImportReview=null;$('manualLines').value=source.slice(0,6000);$('manualPreview').textContent='CSV loaded. Click Check prices / preview before publishing.';event.target.value=''}
-const ACTIONS={login,logout,retry,'manual-import-code':manualImportCode,'manual-publish-imported':manualPublishImported,'manual-apply-import-review':manualApplyImportReview,'manual-cancel-import-review':manualCancelImportReview,'manual-preview':manualPreview,'manual-publish':manualPublish,'generate':()=>generate(false),'generate-publish':()=>generate(true),'save-settings':saveSettings,'save-home-campaign':saveHomeCampaign,'add-ref':addRef,preview:e=>preview(Number(e.dataset.id)),approve:e=>act(Number(e.dataset.id),'approve'),publish:e=>act(Number(e.dataset.id),'publish'),'menu':()=>$('side').classList.toggle('open'),'apply-range':loadDashboard};
-document.addEventListener('click',e=>{const el=e.target.closest('[data-act],[data-page],[data-days]');if(!el)return;if(el.dataset.page){nav(el.dataset.page,el);return}if(el.dataset.days){document.querySelectorAll('.range button').forEach(b=>b.classList.remove('active'));el.classList.add('active');$('customDates').classList.toggle('hidden',el.dataset.days!=='custom');if(el.dataset.days!=='custom')loadDashboard();return}const fn=ACTIONS[el.dataset.act];if(fn){e.preventDefault();fn(el)}});
-document.addEventListener('change',e=>{if(e.target.dataset.change==='content')loadContent();if(e.target.id==='manualFile')manualFile(e);if(e.target.id==='manualTier')syncManualTier()});
+const ACTIONS={login,logout,retry,
+ 'manual-import-code':()=>manualWithProgress('import',1,'Reading SportyBet code',manualImportCode),
+ 'manual-publish-imported':()=>manualWithProgress('publish-imported',4,'Publishing imported code',manualPublishImported),
+ 'manual-apply-import-review':manualApplyImportReview,
+ 'manual-cancel-import-review':manualCancelImportReview,
+ 'manual-preview':()=>manualWithProgress('preview',3,'Checking live market prices',manualPreview),
+ 'manual-publish':()=>manualWithProgress('publish',4,'Publishing reviewed selections',manualPublish),
+ 'manual-refresh':()=>manualWithProgress('refresh',5,'Refreshing saved tickets',manualRefreshPublished),'generate':()=>generate(false),'generate-publish':()=>generate(true),'save-settings':saveSettings,'save-home-campaign':saveHomeCampaign,'add-ref':addRef,preview:e=>preview(Number(e.dataset.id)),approve:e=>act(Number(e.dataset.id),'approve'),publish:e=>act(Number(e.dataset.id),'publish'),'menu':()=>$('side').classList.toggle('open'),'apply-range':loadDashboard};
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act],[data-page],[data-days]');if(!el)return;if(el.dataset.page){nav(el.dataset.page,el);return}if(el.dataset.days){document.querySelectorAll('.range button').forEach(b=>b.classList.remove('active'));el.classList.add('active');$('customDates').classList.toggle('hidden',el.dataset.days!=='custom');if(el.dataset.days!=='custom')loadDashboard();return}const fn=ACTIONS[el.dataset.act];if(fn){e.preventDefault();if(manualBusyOperation&&el.dataset.act?.startsWith('manual-'))return;fn(el)}});
+document.addEventListener('change',e=>{if(e.target.dataset.change==='content')loadContent();if(e.target.id==='manualFile')manualWithProgress('file',1,'Reading CSV selections',()=>manualFile(e));if(e.target.id==='manualTier')syncManualTier();if(['manualReplaceOfficialDisplay','manualConvertSpecial'].includes(e.target.id))manualInvalidatePreview()});
 document.addEventListener('input',e=>{
  if(e.target.id==='manualShareCode'){
   manualImportedCode=null;manualPreviewConfirmed=null;
-  $('manualCodePublish').disabled=true;
+  manualInvalidatePreview();
  } else if(e.target.id==='manualLines'){
-  manualPreviewConfirmed=null;$('manualCodePublish').disabled=true;
+  manualInvalidatePreview();
  }
 });$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
 async function boot(){$('today').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'short'});await loadDashboard();const s=SETTINGS.channel_enabled||{},sel=$('fPlatform');if(sel.options.length===1)Object.keys(s).forEach(ch=>sel.add(new Option(ch,ch)))}
