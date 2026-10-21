@@ -94,6 +94,10 @@ def collect_recent_verified_finals(
         if len(slugs) != 1:
             continue
         slug = next(iter(slugs))
+        # The competition registry uses the historical Saudi label sau.1.
+        # ESPN's *working results scoreboard* is ksa.1: sau.1 returns 400.
+        # Keep this redirect local to score retrieval, not fixture/pick IDs.
+        slug = {"sau.1": "ksa.1"}.get(slug, slug)
         # Use the provider kickoff's UTC date, not an inferred local day.
         wanted.add((slug, kickoff.date().isoformat()))
 

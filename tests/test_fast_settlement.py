@@ -123,3 +123,34 @@ def test_unknown_competitions_remain_pending_no_fuzzy_resolution(monkeypatch):
     )
     assert not scores
     assert calls == []
+
+
+def test_saudi_results_use_live_espn_ksa_slug_not_rejected_registry_slug(monkeypatch):
+    fast_settlement._CACHE.clear()
+    queried = []
+    class Response:
+        status_code = 200
+        def json(self):
+            return {"events": [_espn_event(
+                home="Al Nassr", away="Neom SC",
+                game_day="2026-10-20T18:00:00Z",
+                score_home="1", score_away="0",
+            )]}
+    def request(url, **kw):
+        queried.append(url)
+        return Response()
+    monkeypatch.setattr(fast_settlement.requests, "get", request)
+    pick = _pick(
+        home="Al Nassr Club", away="Neom SC",
+        league="Saudi Pro League", kickoff="2026-10-20T18:00:00+00:00",
+    )
+    scores, _ = fast_settlement.collect_recent_verified_finals(
+        [pick], now=NOW,
+    )
+    assert queried == [
+        "https://site.api.espn.com/apis/site/v2/sports/soccer/ksa.1/scoreboard",
+    ]
+    confirmed = _lookup_settlement_score(
+        scores, "Al Nassr Club", "Neom SC", "2026-10-20",
+    )
+    assert confirmed and confirmed["score_90"] == {"home": 1, "away": 0}
