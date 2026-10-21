@@ -417,8 +417,13 @@ async function manualImportCode(){
    :'<p>Next: click <strong>Check prices / preview</strong>. This checks exact SportyBet prices, kickoffs, tier rules and availability before a fresh verified code can be published.</p>'
     +table(['SportyBet match ID','Decoded regular market','Result'],rows);
   $('manualPreview').innerHTML='<p><strong>Code read: '+num(d.original_leg_count)+' selections.</strong> Nothing has been published. '+(d.total_odds!=null?'Original code price: '+esc(d.total_odds)+'x (NOT a current verified price).':'')+'</p>'+changes+(warnings?'<div role="status"><strong>Review before publishing:</strong><ul>'+warnings+'</ul></div>':'')+'<p class="muted">'+esc(d.note||'Special options do not transfer to regular markets.')+'</p>'+review;
+  manualStage(2,'ready',
+   needsReview?'Review special markets':'Code imported — review all selections',
+   'Read '+num(d.original_leg_count)+' selections. '+(needsReview?'Choose a regular market for every unresolved game.':'Check the rows and click Check prices / preview. Nothing has been published.'));
  }catch(e){
   msg.textContent=e.message;
+  manualStage(1,'error','SportyBet code import failed',
+   e.message+'. No publication was attempted.');
   $('manualPreview').innerHTML=existing||'Import failed. Your previous manual selections are unchanged.';
  }finally{
   if(button){button.disabled=false;button.textContent='Find games from code'}
@@ -447,11 +452,14 @@ function manualApplyImportReview(){
  manualImportedCode=null;manualPreviewConfirmed=null;
  $('manualCodePublish').disabled=true;
  $('manualPreview').textContent='All '+rows.length+' selections prepared as ordinary markets by explicit admin review. Promo features are NOT preserved. Click Check prices / preview next; the original price is not guaranteed.';
+ manualStage(2,'ready','Markets reviewed — live preview required',
+  rows.length+' selections are prepared as regular markets. The original promotional wager is not preserved. Nothing has been published.');
 }
 function manualCancelImportReview(){
  manualImportReview=null;
  $('manualErr').textContent='';
  $('manualPreview').textContent='Import review cancelled. Previous editor selections are unchanged.';
+ manualStage(0,'idle','Import review cancelled','Nothing was published. You can import another code or edit rows.');
 }
 function manualRequest(){
  return {tier:$('manualTier').value,lines:$('manualLines').value,
@@ -485,10 +493,14 @@ async function manualPreview(){
   $('manualPreview').innerHTML='<p><strong>Bookmaker-priced preview:</strong> '+esc(d.total_odds)+'x across '+num(d.games.length)+' legs. No code created yet.</p>'+
    warningHtml+table(['Fixture','Market','Price'],d.games.map(g=>`<tr><td>${esc(g.home_team)} v ${esc(g.away_team)}</td><td>${esc(g.market)}</td><td>${esc(g.odds)}x</td></tr>`));
   manualPreviewConfirmed={...request};
+  manualStage(3,'ready','Prices checked — ready to publish',
+   'Verified current odds for '+num(d.games.length)+' selections ('+esc(d.total_odds)+'x). This preview does not publish or create a final booking code.');
   if(manualImportedCode && manualImportedCode.tier===request.tier && manualImportedCode.lines===request.lines &&
      manualImportedCode.code===$('manualShareCode').value.trim() && !$('manualConvertSpecial').checked)
      $('manualCodePublish').disabled=false;
  }catch(e){
+  manualStage(3,'error','Live preview failed',
+   e.message+'. No publication was attempted.');
   msg.textContent=e.message+
    (/HTTP (?:502|503|504)|Network request failed/i.test(e.message)?
     '. Preview is read-only; no new ticket was published by this preview. Retry after the server recovers.':'');
