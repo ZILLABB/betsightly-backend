@@ -1371,6 +1371,11 @@ def run_loop():
         if (iteration - 1) % full_every:
             try:
                 _run_rapid_settlement_cycle()
+            except Exception as exc:
+                # Never let a lightweight poller fault stop the broader,
+                # independently scheduled full settlement recovery.
+                _record_settlement_error("rapid_cycle", exc)
+                logger.exception("Rapid settlement cycle failed")
             finally:
                 _finish_settlement_cycle()
             time.sleep(SETTLEMENT_POLL_SECONDS)
