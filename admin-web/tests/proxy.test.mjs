@@ -114,3 +114,41 @@ test('misconfigured upstream fails closed before contacting external domains',as
   assert.equal(r.code,503);assert.equal(calls,0);
  }finally{process.env.ADMIN_BACKEND_ORIGIN=previous;globalThis.fetch=originalFetch}
 });
+
+test('normalizes a raw JSON login body without changing the password bytes',async()=>{
+ let seen;globalThis.fetch=async(url,opts)=>{
+  seen={url:String(url),opts};
+  return new Response(JSON.stringify({detail:'Incorrect password.'}),{status:401,headers:{'content-type':'application/json'}});
+ };
+ try{
+  const textPassword=' unchanged +unicode• ';
+  const r=response();
+  await handler(req('admin/login','POST',JSON.stringify({password:textPassword}),'https://'+HOST),r);
+  assert.equal(r.code,401);
+  assert.equal(JSON.parse(seen.opts.body).password,textPassword);
+  assert.equal(JSON.parse(r.body).detail,'Incorrect password.');
+ }finally{globalThis.fetch=originalFetch}
+});
+test('normalizes a Buffer login body without substituting an empty password',async()=>{
+ let seen;globalThis.fetch=async(url,opts)=>{
+  seen=JSON.parse(opts.body);
+  return new Response(JSON.stringify({ok:true}),{status:200,headers:{'content-type':'application/json'}});
+ };
+ try{
+  const r=response();
+  await handler(req('admin/login','POST',Buffer.from(JSON.stringify({password:'sample-not-a-secret'})),'https://'+HOST),r);
+  assert.equal(r.code,200);
+  assert.equal(seen.password,'sample-not-a-secret');
+ }finally{globalThis.fetch=originalFetch}
+});
+test('missing or malformed login JSON is rejected locally and never sent upstream',async()=>{
+ let calls=0;globalThis.fetch=async()=>{calls++;throw Error('should not call upstream')};
+ try{
+  for(const body of [undefined,'{broken',{}, {password:''},['x']]){
+   const r=response();
+   await handler(req('admin/login','POST',body,'https://'+HOST),r);
+   assert.equal(r.code,400);
+  }
+  assert.equal(calls,0);
+ }finally{globalThis.fetch=originalFetch}
+});
