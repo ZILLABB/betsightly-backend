@@ -251,18 +251,44 @@ function CampaignEditor(){
 }
 
 function Content() {
- const qc=useQueryClient(); const q=useQuery({queryKey:['content'],queryFn:()=>api<any>('content?limit=150')});
- const [active,setActive]=useState<number|null>(null);const [message,setMessage]=useState('');
+ const qc=useQueryClient();
+ const q=useQuery({queryKey:['content'],queryFn:()=>api<any>('content?limit=150')});
+ const [active,setActive]=useState<number|null>(null),[generating,setGenerating]=useState<'drafts'|'publish'|null>(null);
+ const [selected,setSelected]=useState<any>(null),[message,setMessage]=useState('');
  const act=async(id:number,operation:'approve'|'publish')=>{
-  if(active!==null)return;
+  if(active!==null||generating)return;
   if(operation==='publish'&&!window.confirm('Publish this approved content now?'))return;
   setActive(id);setMessage('');
-  try{await api('content/'+id+'/'+operation,{},'POST');setMessage('Operation confirmed by the backend.');await qc.invalidateQueries({queryKey:['content']});}
+  try{await api('content/'+id+'/'+operation,{},'POST');setMessage('Action acknowledged by the backend; verify delivery status in Publishing.');await qc.invalidateQueries({queryKey:['content']});}
   catch(e){setMessage(errText(e));}finally{setActive(null)}
  };
- return <><div className="page-heading"><div><span className="eyebrow">EDITORIAL</span><h1>Content desk.</h1><p>Review, approve and publish with explicit server feedback.</p></div><button className="mini-button" onClick={()=>q.refetch()}><RefreshCcw size={16}/> Refresh</button></div><Panel title="Content inventory" subtitle="Approval first for supported distribution channels">{message&&<ResultNote kind={/confirmed/.test(message)?'success':'error'} text={message}/>}
-  {q.isPending?<Loading/>:q.isError?<DataError error={q.error} retry={()=>q.refetch()}/>:<div className="scroll-table"><table><thead><tr><th>Template</th><th>Platform</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead><tbody>{(q.data?.content||[]).map((item:any)=><tr key={item.id}><td>{item.template}</td><td>{item.platform}</td><td>{item.publish_date}</td><td><span className="status-label">{item.status}</span></td><td><div className="table-actions">{active===item.id?<Loader2 size={16} className="spin"/>:null}{item.status==='DRAFT'?<button className="mini-button" disabled={active!==null} onClick={()=>act(item.id,'approve')}>Approve</button>:null}{item.status!=='PUBLISHED'&&!['instagram','facebook','tiktok','youtube','x'].includes(item.platform)?<button className="mini-button" disabled={active!==null} onClick={()=>act(item.id,'publish')}>Publish</button>:null}</div></td></tr>)}</tbody></table>{!q.data?.content?.length&&<Empty/>}</div>}
- </Panel></>;
+ const generate=async(publish:boolean)=>{
+  if(active!==null||generating)return;
+  if(!window.confirm(publish?'Generate content and publish to all eligible configured channels?':'Generate new draft content for review?'))return;
+  setGenerating(publish?'publish':'drafts');setMessage('');
+  try{const result=await api<any>('generate?publish='+String(publish),{},'POST');const r=result.report||{};
+   setMessage('Generated '+n(r.generated)+' · stored '+n(r.stored)+' · published '+n(r.published?.length)+' · failed '+n(r.failed?.length)+'. Review the resulting content and publishing records.');
+   await qc.invalidateQueries({queryKey:['content']});await qc.invalidateQueries({queryKey:['publications']});
+  }catch(e){setMessage(errText(e))}finally{setGenerating(null)}
+ };
+ return <>
+  <div className="page-heading"><div><span className="eyebrow">EDITORIAL</span><h1>Content desk.</h1><p>Generate, preview, approve and publish with real server feedback.</p></div>
+   <div className="toolbar"><button className="mini-button" disabled={!!generating||active!==null} onClick={()=>q.refetch()}><RefreshCcw size={16}/> Refresh</button>
+   <button className="button secondary" disabled={!!generating||active!==null} onClick={()=>generate(false)}>{generating==='drafts'?<Loader2 className="spin" size={16}/>:<Megaphone size={16}/>} Generate drafts</button>
+   <button className="button primary" disabled={!!generating||active!==null} onClick={()=>generate(true)}>{generating==='publish'?<Loader2 className="spin" size={16}/>:<Send size={16}/>} Generate & publish</button></div>
+  </div>
+  <Panel title="Content inventory" subtitle="Approval first for supported distribution channels">
+   {generating&&<Loading label="Generating through FastAPI — awaiting server acknowledgment…"/>}
+   {message&&<ResultNote kind={/^(Action acknowledged|Generated)/.test(message)?'info':'error'} text={message}/>}
+   {q.isPending?<Loading/>:q.isError?<DataError error={q.error} retry={()=>q.refetch()}/>:<div className="scroll-table"><table><thead><tr><th>Template</th><th>Platform</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead><tbody>{(q.data?.content||[]).map((item:any)=><tr key={item.id}><td>{item.template}</td><td>{item.platform}</td><td>{item.publish_date}</td><td><span className="status-label">{item.status}</span></td><td><div className="table-actions">{active===item.id?<Loader2 size={16} className="spin"/>:null}
+    <button className="mini-button" disabled={active!==null||!!generating} onClick={()=>setSelected(item)}>View</button>
+    {item.status==='DRAFT'?<button className="mini-button" disabled={active!==null||!!generating} onClick={()=>act(item.id,'approve')}>Approve</button>:null}
+    {item.status!=='PUBLISHED'&&!['instagram','facebook','tiktok','youtube','x'].includes(item.platform)?<button className="mini-button" disabled={active!==null||!!generating} onClick={()=>act(item.id,'publish')}>Publish</button>:null}</div></td></tr>)}</tbody></table>{!q.data?.content?.length&&<Empty/>}</div>}
+  </Panel>
+  {selected&&<Panel title="Content review" subtitle="Verify messaging before approving or posting" action={<button className="mini-button" onClick={()=>setSelected(null)}><X size={15}/> Close</button>}>
+    <pre className="json-dump">{JSON.stringify(selected.payload||selected,null,2)}</pre>
+   </Panel>}
+ </>;
 }
 
 function Publishing() {
@@ -301,6 +327,7 @@ function App() {
  const qc=useQueryClient();
  const me=useQuery({queryKey:['me'],queryFn:()=>api<any>('admin/me'),retry:false,enabled:session==='checking'});
  useEffect(()=>{if(session==='checking'&&!me.isPending)setSession(me.isError?'guest':'ready')},[session,me.isPending,me.isError]);
+ useEffect(()=>{const expired=()=>{qc.clear();setSession('guest');setLoginError('Session expired. Please sign in again.');};window.addEventListener('betsightly:session-expired',expired);return()=>window.removeEventListener('betsightly:session-expired',expired);},[qc]);
  const signIn=async(e:React.FormEvent)=>{e.preventDefault();setSigning(true);setLoginError('');try{await api('admin/login',{password},'POST');setPassword('');await qc.invalidateQueries({queryKey:['me']});const res=await api<any>('admin/me');if(!res.ok)throw Error('Session not confirmed');setSession('ready')}catch(error){setLoginError(errText(error))}finally{setSigning(false)}};
  const signOut=async()=>{try{await api('admin/logout',{},'POST')}catch{}qc.clear();sessionStorage.removeItem('bs_admin_uncertain');setSession('guest')};
  if(session==='checking')return <div className="auth-screen"><Loading label="Verifying protected admin session…"/></div>;
