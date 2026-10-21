@@ -152,3 +152,25 @@ test('missing or malformed login JSON is rejected locally and never sent upstrea
   assert.equal(calls,0);
  }finally{globalThis.fetch=originalFetch}
 });
+
+test('forwards read-only price inspection without reclassifying as publication',async()=>{
+ let calls=0;let path;let body;
+ globalThis.fetch=async(url,opts)=>{
+  calls++;path=String(url);body=JSON.parse(opts.body);
+  return new Response(JSON.stringify({
+   status:'INSPECTION_ONLY',publish_ready:false,booking_code_created:false,
+   games:[{market:'home_win',odds:1.6}]
+  }),{status:200,headers:{'content-type':'application/json'}});
+ };
+ try {
+  const res=response();
+  await handler(req('manual-tiers/inspect','POST',
+    {tier:'10_odds',lines:'52587,home_win'},'https://'+HOST),res);
+  assert.equal(calls,1);
+  assert.equal(res.code,200);
+  assert.equal(path,BACKEND+'/api/growth/manual-tiers/inspect');
+  assert.equal(body.tier,'10_odds');
+  assert.equal(JSON.parse(res.body).publish_ready,false);
+  assert.equal(JSON.parse(res.body).booking_code_created,false);
+ }finally{globalThis.fetch=originalFetch}
+});
