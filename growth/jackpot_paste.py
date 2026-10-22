@@ -90,7 +90,8 @@ def match_fixture_lines(lines: list[dict], candidates: list[dict]) -> dict:
         if not safe or first[2] in used:
             unmatched.append({
                 **line,
-                "reason": "AMBIGUOUS_OR_DUPLICATE" if first and first[2] in used else "NOT_APPROVED_ON_CURRENT_BOARD",
+                "reason": ("AMBIGUOUS_OR_DUPLICATE" if safe and first[2] in used
+                           else "NOT_APPROVED_ON_CURRENT_BOARD"),
                 "suggested_match": (
                     f"{first[3].get('home_team')} vs {first[3].get('away_team')}"
                     if first and first[0] >= .7 else None
