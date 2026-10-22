@@ -12,9 +12,9 @@ type Proposal = {status:string;reason?:string;selection_ids?:string[];selected_g
   indicative_odds?:number;target_odds?:number;maximum_reference_odds?:number;
   estimated_conservative_hit_probability?:number;fixtures_evaluated?:number;
   estimated_all_leg_probability?:number;candidate_count?:number;distinct_fixture_count?:number;
-  maximum_model_eligible_reference_odds?:number;fixtures_without_valid_probability?:number;portfolio_type?:string;};
+  maximum_model_eligible_reference_odds?:number;fixtures_without_valid_probability?:number;portfolio_type?:string;full_ticket_complete?:boolean;partial_reference_odds?:number|null;};
 type PasteMatch = {line:number;home_team:string;away_team:string;matched_home?:string;matched_away?:string;requested_market?:string|null;reason?:string;suggested_match?:string};
-type PasteReport = Proposal & {pasted_fixture_count?:number;matched_fixture_count?:number;unmatched_fixture_count?:number;matched?:PasteMatch[];unmatched?:PasteMatch[];note?:string;exact_market_mode?:boolean;requested_market_count?:number};
+type PasteReport = Proposal & {pasted_fixture_count?:number;matched_fixture_count?:number;unmatched_fixture_count?:number;matched?:PasteMatch[];unmatched?:PasteMatch[];note?:string;exact_market_mode?:boolean;requested_market_count?:number;full_ticket_complete?:boolean;partial_reference_odds?:number|null;board_complete?:boolean};
 type Booking = Proposal & {share_code?:string;share_url?:string;verified_odds?:number;
   readback_status?:string;expires_at?:string;priced_at?:string;
   publication_status?:string;proposal?:Proposal;invalid_selections?:any[]};
@@ -24,6 +24,8 @@ const suggestedTargets=[2,5,10,100,1000,10000,100000];
 
 export default function PrivateJackpot() {
  const [horizon,setHorizon]=useState('7_days');
+ const [mode,setMode]=useState<'approved_model'|'bookmaker_only'>('approved_model');
+ const [confirmReady,setConfirmReady]=useState(false);
  const [grade,setGrade]=useState('B');
  const [style,setStyle]=useState('all');
  const [legFloor,setLegFloor]=useState('1.01');
@@ -40,10 +42,13 @@ export default function PrivateJackpot() {
  const busyLatch=useRef(false);
  const amount=Number(target);
  const maxLegs=Number(legLimit);
+ const bookmakerOnly=mode==='bookmaker_only';
+ const modeReady=!bookmakerOnly||Boolean(pasteText.trim());
+ const invalidPreview=Boolean(pasteText.trim()&&pasteReport&&pasteReport.status!=='PROPOSED_NOT_BOOKED');
  const targetValid=Number.isFinite(amount)&&amount>=2&&amount<=100000;
- const preferences=()=>({horizon,min_trust_grade:grade,min_probability:.65,market_style:style,
+ const preferences=()=>({horizon:bookmakerOnly?'today':horizon,selection_mode:mode,min_trust_grade:grade,min_probability:.65,market_style:style,
    min_leg_odds:Number(legFloor),markets:[],target_odds:amount,max_legs:maxLegs});
- const changed=()=>{setBoard(null);setProposal(null);setBooking(null);setPasteReport(null);setMessage('')};
+ const changed=()=>{setBoard(null);setProposal(null);setBooking(null);setPasteReport(null);setConfirmReady(false);setMessage('')};
  const inspect=async()=>{
   if(busyLatch.current)return;
   busyLatch.current=true;setBusy('board');setMessage('');setBooking(null);setProposal(null);
@@ -55,7 +60,8 @@ export default function PrivateJackpot() {
   finally{setBusy(null);busyLatch.current=false}
  };
  const analyze=async()=>{
-  if(busyLatch.current||!targetValid)return;
+  if(busyLatch.current||!targetValid||!modeReady)return;
+  setConfirmReady(false);
   busyLatch.current=true;setBusy('analyze');setMessage('');setBooking(null);setProposal(null);setPasteReport(null);
   try {
    const pasted=pasteText.trim().length>0;
@@ -68,12 +74,10 @@ export default function PrivateJackpot() {
   finally{setBusy(null);busyLatch.current=false}
  };
  const generate=async()=>{
-  if(busyLatch.current||!targetValid)return;
-  if(!window.confirm(
-    pasteText.trim()
-    ?'Preserve exact markets on all pasted lines when supplied; book only if all are approved and target '+decimal(amount,0)+'x is verified? No wager is placed.'
-    :'Automatically select eligible fixtures and request a verified SportyBet share code at or above '+decimal(amount,0)+'x? No stake is placed; this remains private.'
-  ))return;
+  if(busyLatch.current||!targetValid||!modeReady||invalidPreview)return;
+  // Inline confirmation does not block the browser event handler.
+  if(!confirmReady){setConfirmReady(true);return;}
+  setConfirmReady(false);
   busyLatch.current=true;setBusy('book');setMessage('');setBooking(null);setProposal(null);setPasteReport(null);
   try {
    const pasted=pasteText.trim().length>0;
@@ -97,8 +101,9 @@ export default function PrivateJackpot() {
  const candidates=board?.candidates||[];
  const selectedGames=displayed?.selected_games||selectedIds.map(key=>candidates.find(c=>c.selection_id===key)).filter((x):x is Candidate=>Boolean(x));
  const optimisticCeiling=board?.maximum_reference_odds;
- const currentCeiling=displayed?.maximum_reference_odds??optimisticCeiling;
- const modelCeiling=displayed?.maximum_model_eligible_reference_odds;
+ const partial=Boolean(pasteReport&&pasteReport.full_ticket_complete===false);
+ const currentCeiling=partial?undefined:(displayed?.maximum_reference_odds??optimisticCeiling);
+ const modelCeiling=bookmakerOnly?undefined:displayed?.maximum_model_eligible_reference_odds;
  const impossible=Number.isFinite(currentCeiling)&&Number(currentCeiling)<amount;
  const modelInsufficient=Number.isFinite(modelCeiling)&&Number(modelCeiling)<amount;
  const experimental=displayed?.portfolio_type==='HIGH_RISK_CEILING_EXPERIMENT';
