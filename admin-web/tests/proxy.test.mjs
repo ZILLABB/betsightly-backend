@@ -174,3 +174,34 @@ test('forwards read-only price inspection without reclassifying as publication',
   assert.equal(JSON.parse(res.body).booking_code_created,false);
  }finally{globalThis.fetch=originalFetch}
 });
+
+
+test('private jackpot routes are not accessible as GET and reject foreign-origin mutation',async()=>{
+ globalThis.fetch=()=>{throw Error('must not contact upstream')};
+ try {
+   const get=response();await handler(req('private-jackpot/candidates','GET'),get);
+   assert.equal(get.code,404);
+   const foreign=response();await handler(req('private-jackpot/book','POST',{selection_ids:['pick1']},'https://evil.example'),foreign);
+   assert.equal(foreign.code,403);
+ }finally{globalThis.fetch=originalFetch}
+});
+
+test('private jackpot POSTs preserve the signed admin cookie and exact selected IDs',async()=>{
+ let calls=[];
+ globalThis.fetch=async(url,opts)=>{
+   calls.push({url:String(url),opts});
+   return new Response(JSON.stringify({status:'BELOW_TARGET',share_code:null}),{status:200,headers:{'content-type':'application/json'}});
+ };
+ try {
+   const origin='https://'+HOST;
+   const candidates=response();await handler(req('private-jackpot/candidates','POST',{horizon:'today'},origin),candidates);
+   const book=response();await handler(req('private-jackpot/book','POST',{selection_ids:['pick1','pick2'],target_odds:100000},origin),book);
+   assert.equal(candidates.code,200);assert.equal(book.code,200);
+   assert.equal(calls.length,2);
+   assert.equal(calls[0].url,BACKEND+'/api/growth/private-jackpot/candidates');
+   assert.equal(calls[1].url,BACKEND+'/api/growth/private-jackpot/book');
+   assert.equal(calls[1].opts.headers.cookie,'bs_admin=signed-test');
+   assert.equal(calls[1].opts.headers.origin,BACKEND);
+   assert.deepEqual(JSON.parse(calls[1].opts.body).selection_ids,['pick1','pick2']);
+ }finally{globalThis.fetch=originalFetch}
+});
