@@ -8,7 +8,8 @@ const POST = new Set([
  'admin/login','admin/logout','generate','retry','manual-tiers/import-code',
  'manual-tiers/preview','manual-tiers/inspect','manual-tiers/publish','manual-tiers/publish-imported',
  'homepage-campaign','settings','referrals',
- 'private-jackpot/candidates','private-jackpot/book'
+ 'private-jackpot/candidates','private-jackpot/book',
+ 'private-jackpot/optimize','private-jackpot/auto-book'
 ]);
 function allowed(method, route) {
  return method === 'GET' ? GET.has(route) :
