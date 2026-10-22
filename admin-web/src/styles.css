@@ -11,3 +11,26 @@
 .panel .metric-grid{margin-bottom:0}
 .panel .metric{box-shadow:none}
 @media(max-width:780px){.file-import{flex-wrap:wrap}.panel .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Isolated admin-only jackpot composer. Never shown on public frontend. */
+.jackpot-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin-bottom:14px}
+.jackpot-layout{grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr)}
+.jackpot-search{display:flex;gap:10px;align-items:center;border:1px solid #294660;border-radius:9px;padding:5px 10px;margin-bottom:12px}
+.jackpot-search input{width:100%;border:0;background:transparent;color:inherit;outline:none;padding:8px 0}
+.jackpot-candidate-list{max-height:650px;overflow-y:auto;display:grid;gap:6px}
+.jackpot-candidate{width:100%;display:flex;align-items:center;gap:11px;border:1px solid #254562;border-radius:10px;background:#10283d;color:#dbeaf8;text-align:left;padding:12px}
+.jackpot-candidate:hover,.jackpot-candidate.chosen{border-color:#6bbafa;background:#193b58}
+.jackpot-selection-mark{display:grid;place-items:center;border:1px solid #45637f;color:#bfe0f6;width:25px;height:25px;border-radius:6px;flex:none}
+.jackpot-candidate-label{min-width:0;flex:1;display:grid;gap:5px}
+.jackpot-candidate-label strong{font-size:12px;overflow-wrap:anywhere}
+.jackpot-candidate-label small{font-size:11px;color:#8eadcb}
+.jackpot-candidate-price{font-size:13px;font-weight:800;color:#b4e0ff;white-space:nowrap}
+.jackpot-totals{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:15px}
+.jackpot-totals div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #29445c;padding:7px 0;font-size:12px}
+.jackpot-totals span{color:#94b5cf}.jackpot-totals strong{color:#e8f5ff;font-size:14px}
+.jackpot-ticket-list{max-height:310px;overflow:auto;margin:12px 0}
+.jackpot-ticket-item{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #263c54;font-size:12px}
+.jackpot-ticket-item span{display:grid;gap:4px}.jackpot-ticket-item small{font-size:10px;color:#88aac5}
+.jackpot-code{border:1px solid #467eaa;padding:15px;border-radius:13px;margin-top:15px;background:#0c2a45;display:grid;gap:10px}
+.jackpot-code p{display:flex;align-items:center;gap:8px;margin:0;color:#b9e5ff}.jackpot-code strong{font-size:30px;letter-spacing:.08em}.jackpot-code small{font-size:10px;color:#88b1d0}
+@media(max-width:900px){.jackpot-controls{grid-template-columns:1fr}.jackpot-layout{grid-template-columns:1fr}}
