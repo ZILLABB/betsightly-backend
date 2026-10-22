@@ -7,14 +7,16 @@ import {
 } from 'lucide-react';
 import {api, ApiError, isAmbiguous, tiers} from './api';
 import Insights from './Insights';
+import PrivateJackpot from './PrivateJackpot';
 
-type Page = 'overview' | 'audience' | 'predictions' | 'analytics-health' | 'manual' | 'sporty' | 'readiness' | 'content' | 'campaign' | 'publishing' | 'referrals' | 'settings';
+type Page = 'overview' | 'audience' | 'predictions' | 'analytics-health' | 'manual' | 'jackpot' | 'sporty' | 'readiness' | 'content' | 'campaign' | 'publishing' | 'referrals' | 'settings';
 const nav: {id: Page; label: string; icon: LucideIcon; group: string}[] = [
  {id:'overview',label:'Overview',icon:LayoutDashboard,group:'COMMAND CENTER'},
  {id:'audience',label:'Users & retention',icon:Users,group:'COMMAND CENTER'},
  {id:'predictions',label:'Predictions & builder',icon:BarChart3,group:'COMMAND CENTER'},
  {id:'analytics-health',label:'Analytics health',icon:Activity,group:'COMMAND CENTER'},
  {id:'manual',label:'Manual SportyBet',icon:Ticket,group:'COMMAND CENTER'},
+ {id:'jackpot',label:'Private Jackpot',icon:Ticket,group:'COMMAND CENTER'},
  {id:'sporty',label:'Booking health',icon:Activity,group:'COMMAND CENTER'},
  {id:'readiness',label:'Market readiness',icon:Database,group:'COMMAND CENTER'},
  {id:'content',label:'Content',icon:Megaphone,group:'OPERATIONS'},
@@ -354,7 +356,7 @@ function App() {
  const signOut=async()=>{try{await api('admin/logout',{},'POST')}catch{}qc.clear();setSession('guest')};
  if(session==='checking')return <div className="auth-screen"><Loading label="Verifying protected admin session…"/></div>;
  if(session==='guest')return <div className="auth-screen"><form className="auth-card" onSubmit={signIn}><div className="brand-mark">B<span>.</span></div><span className="eyebrow">PRIVATE COMMAND CENTER</span><h1>Sign in to BetSightly.</h1><p>Protected football operations, data intelligence and verified publishing.</p><label>Administrator password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required autoFocus/></label>{loginError&&<ResultNote kind="error" text={loginError}/>}<button className="button primary wide" type="submit" disabled={signing}>{signing?<Loader2 className="spin" size={18}/>:<LockKeyhole size={17}/>} Secure sign in</button><small>Signed sessions are HttpOnly, Secure and SameSite=Strict. Nothing is stored in the browser beyond the protected session cookie.</small></form></div>;
- const sections:{[key in Page]:React.ReactNode}={overview:<Overview/>,audience:<Insights page="audience"/>,predictions:<Insights page="predictions"/>, 'analytics-health':<Insights page="analytics-health"/>,manual:<ManualStudio/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
+ const sections:{[key in Page]:React.ReactNode}={overview:<Overview/>,audience:<Insights page="audience"/>,predictions:<Insights page="predictions"/>, 'analytics-health':<Insights page="analytics-health"/>,manual:<ManualStudio/>,jackpot:<PrivateJackpot/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
  return <div className="shell"><aside className={'sidebar '+(mobile?'shown':'')}><div className="sidebar-brand"><div className="brand-mark">B<span>.</span></div><div><strong>BetSightly</strong><small>COMMAND CENTER</small></div><button className="mobile-close" onClick={()=>setMobile(false)} aria-label="Close menu"><X/></button></div><nav aria-label="Admin navigation">{nav.map((item,i)=>{const Icon=item.icon;return <React.Fragment key={item.id}>{(i===0||item.group!==nav[i-1].group)&&<div className="nav-group">{item.group}</div>}<button className={'nav-item '+(page===item.id?'active':'')} onClick={()=>{setPage(item.id);setMobile(false)}}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={14}/>}</button></React.Fragment>})}</nav><div className="sidebar-bottom"><div className="session"><ShieldCheck size={18}/><div><strong>Protected session</strong><span>Render-backed authentication</span></div></div><button onClick={signOut} className="sign-out"><LogOut size={17}/> Sign out</button></div></aside><div className="workspace"><header className="topbar"><div className="topbar-left"><button className="menu-toggle" onClick={()=>setMobile(true)} aria-label="Open menu"><Menu/></button><div className="breadcrumb">BET SIGHTLY <ChevronRight size={13}/> <strong>{nav.find(x=>x.id===page)?.label}</strong></div></div><div className="topbar-right"><span className="env-tag"><Globe2 size={13}/> Admin workspace</span><span className="clock">{new Date().toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric',timeZone:'Africa/Lagos'})}</span></div></header><main className="main">{sections[page]}</main><footer className="footer">BetSightly admin · Secure API through same-origin gateway · Data from production FastAPI</footer></div>{mobile&&<button className="scrim" aria-label="Close menu overlay" onClick={()=>setMobile(false)}/>}</div>;
 }
 export default App;
