@@ -22,6 +22,23 @@ const decimal=(value:number,max=2)=>Number.isFinite(value)?value.toLocaleString(
 const friendly=(value:unknown)=>value instanceof Error?value.message:'Unexpected request error';
 const suggestedTargets=[2,5,10,100,1000,10000,100000];
 
+// Display actionable bookmaker diagnostics without changing server matching,
+// approved-market policy, pricing, or code-generation safeguards.
+const exactMatchReason=(reason?:string)=> {
+ switch(reason) {
+  case 'UNDER_MARKET_EXCLUDED':
+   return 'Under market excluded by the current backend policy. The original pick was preserved.';
+  case 'AMBIGUOUS_BOOKMAKER_FIXTURE':
+   return 'More than one event matches these teams. Senior/youth competition matching needs backend review.';
+  case 'STARTED_OR_TOO_CLOSE_TO_KICKOFF':
+   return 'The match has started or is too close to kickoff. No code can be requested.';
+  case 'MARKET_NOT_ACTIVE':
+  case 'MARKET_NOT_PRICED':
+   return 'The exact bookmaker market is not active and priced.';
+  default: return reason?.replaceAll('_',' ')||'Fixture or market unavailable';
+ }
+};
+
 export default function PrivateJackpot() {
  const [horizon,setHorizon]=useState('7_days');
  const [mode,setMode]=useState<'approved_model'|'bookmaker_only'>('approved_model');
@@ -125,7 +142,7 @@ export default function PrivateJackpot() {
   <section className="panel">
    <header className="panel-head"><div><h2>Automatic ticket settings</h2>
     <p>{bookmakerOnly
-     ?'Experimental bookmaker-only validation for today; no prediction quality or calibration claim.'
+     ?'Experimental bookmaker-only validation for the selected fixture window; no prediction quality or calibration claim.'
      :'Use model-evaluated, bookmaker-bookable fixtures. Research and booking remain separate from public predictions.'}</p></div><ShieldCheck size={21}/></header>
    <fieldset className="editor" disabled={busy!==null}>
     <label className="jackpot-policy-control">Private selection policy
@@ -142,7 +159,7 @@ export default function PrivateJackpot() {
     {bookmakerOnly&&<div className="notice warning"><AlertTriangle size={17}/><div>
      Private experimental mode for Today or Next 3 days. Paste an exact market for every game.
      Selection confidence and trust grades are not enforced, but exact SportyBet
-     fixtures, active prices and full-code readback still are. No Under markets or stakes.
+     fixtures, active prices and full-code readback still are. The backend currently excludes Under markets. No stakes are placed.
     </div></div>}
     <div className="jackpot-controls">
      <label>Search window
@@ -220,7 +237,7 @@ export default function PrivateJackpot() {
       <button type="button" className="mini-button" onClick={()=>setConfirmReady(false)}>Cancel</button>
      </div></div>}
    </fieldset>
-   <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target, never includes Under-goals markets and never places a stake. A 100,000x ticket is extremely unlikely to win. {bookmakerOnly
+   <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target and never places a stake. The current backend excludes Under-goals markets in both modes; this frontend cannot override it. A 100,000x ticket is extremely unlikely to win. {bookmakerOnly
     ?'Bookmaker-only mode can assess upcoming fixtures within the next 72 hours; prices are indicative until full SportyBet readback. Every pasted pick must be verified.'
     :'Model-approved match coverage is limited to the seven-day prepared board.'}</div></div>
    {!bookmakerOnly&&grade==='C'&&<div className="notice warning"><AlertTriangle size={17}/><div>Exploratory trust C includes less-supported predictions, not more reliable ones. The minimum model-probability and bookability gates still apply.</div></div>}
@@ -235,7 +252,7 @@ export default function PrivateJackpot() {
      <div className="jackpot-ticket-list">{(pasteReport.unmatched||[]).map(item=>
       <div className="jackpot-ticket-item" key={item.line}>
        <span>{item.line}. {item.home_team} vs {item.away_team}{item.requested_market?' | '+item.requested_market.replaceAll('_',' '):''}
-       <small>{item.reason?.replaceAll('_',' ')}{(item as PasteMatch & {detail?:string}).detail?' · '+(item as PasteMatch & {detail?:string}).detail:''} {item.suggested_match?' · Possible name: '+item.suggested_match:''}</small></span>
+       <small>{exactMatchReason(item.reason)}{(item as PasteMatch & {detail?:string}).detail?' · '+(item as PasteMatch & {detail?:string}).detail:''} {item.suggested_match?' · Possible name: '+item.suggested_match:''}</small></span>
       </div>)}</div>
     </>}
    </div>}
