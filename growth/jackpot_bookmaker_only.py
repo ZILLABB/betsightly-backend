@@ -29,6 +29,8 @@ _EQUIVALENT_CLUB_NAMES = {
     "st truidense": "sint truidense",
     "egnatia rrogozhine": "egnatia",
     "hajduk split": "hajduk split",
+    "borussia m´gladbach": "borussia monchengladbach",
+    "borussia m gladbach": "borussia monchengladbach",
 }
 
 
