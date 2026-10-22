@@ -139,6 +139,10 @@ def test_preview_never_fetches_live_bookmaker_board_on_request(monkeypatch):
     assert result["share_code"] is None
     assert result["matched_fixture_count"] == 0
     assert result["maximum_reference_odds"] is None
+    assert result["exact_market_mode"] is True
+    assert result["requested_market_count"] == 1
+    assert result["full_ticket_complete"] is False
+    assert result["booking_code_created"] is False
 
 
 def test_book_reuses_one_snapshot_and_never_attempts_missing_ticket(monkeypatch):
