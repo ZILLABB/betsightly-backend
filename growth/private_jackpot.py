@@ -14,7 +14,15 @@ MAX_LEGS = 50
 MIN_ODDS = 2.0
 MAX_TARGET = 100_000.0
 ALLOWED_HORIZONS = {"today", "3_days", "7_days"}
-ALLOWED_GRADES = {"A", "B"}
+ALLOWED_GRADES = {"A", "B", "C"}
+MARKET_STYLES = {
+    "all": (),
+    "goals": ("over_1_5", "over_2_5", "over_3_5", "home_over_0_5",
+              "home_over_1_5", "away_over_0_5", "away_over_1_5", "btts_yes"),
+    "results": ("home_win", "away_win", "draw", "home_or_draw",
+                "away_or_draw", "dnb_home", "dnb_away"),
+    "wins": ("home_win", "away_win"),
+}
 
 
 def filters_for(payload: dict) -> dict:
@@ -23,6 +31,13 @@ def filters_for(payload: dict) -> dict:
     if horizon not in ALLOWED_HORIZONS or grade not in ALLOWED_GRADES:
         raise ValueError("Invalid date horizon or trust grade.")
     markets = [str(v).strip() for v in (payload.get("markets") or [])]
+    style = str(payload.get("market_style") or "all")
+    if style not in MARKET_STYLES:
+        raise ValueError("Invalid market style.")
+    if style != "all" and markets:
+        raise ValueError("Choose either a market style or specific markets.")
+    if style != "all":
+        markets = list(MARKET_STYLES[style])
     if len(markets) > 24 or any(not v or len(v) > 40 or v.startswith("under_") for v in markets):
         raise ValueError("Invalid market filter or under-goals market requested.")
     return {
@@ -31,6 +46,7 @@ def filters_for(payload: dict) -> dict:
         "min_trust_grade": grade,
         "min_probability": max(.65, float(payload.get("min_probability") or .65)),
         "require_bookable": True,
+        "min_odds": float(payload.get("min_leg_odds") or 1.01),
     }
 
 
@@ -48,7 +64,8 @@ def candidate_board(payload: dict) -> dict:
     for value in data.get("candidates") or []:
         market = str(value.get("market") or "")
         price = float(value.get("odds") or 0)
-        if market.startswith("under_") or price <= 1 or not isfinite(price):
+        if (market.startswith("under_") or "_under_" in market or
+                price <= 1 or not isfinite(price)):
             continue
         if not value.get("bookable") or not value.get("selection_id"):
             continue
@@ -67,13 +84,67 @@ def candidate_board(payload: dict) -> dict:
             "expected_value": value.get("expected_value"),
             "recommended_for_fixture": bool(value.get("recommended_for_fixture")),
         })
+    from growth.jackpot_optimizer import capacity
+    available_leagues = sorted({str(row["league"]) for row in candidates if row.get("league")})
     return {
         "status": "success",
+        "available_leagues": available_leagues,
+        **capacity(candidates),
         "candidate_count": len(candidates),
         "candidates": candidates,
         "board": data.get("board"),
         "selection_diagnostics": data.get("selection_diagnostics"),
         "note": "Model probabilities are estimates, not assurances. One market per fixture.",
+    }
+
+
+def optimize_request(payload: dict) -> dict:
+    """Dry run only: no SportyBet share operation or public publication."""
+    from growth.jackpot_optimizer import optimize
+    target = float(payload.get("target_odds") or MIN_ODDS)
+    if not isfinite(target) or not MIN_ODDS <= target <= MAX_TARGET:
+        raise ValueError("Target odds must be between 2x and 100,000x.")
+    state = candidate_board(payload)
+    if state.get("status") != "success":
+        return {**state, "selection_ids": [], "booking_code_created": False}
+    proposal = optimize(
+        state["candidates"], target,
+        limit=int(payload.get("max_legs") or MAX_LEGS),
+    )
+    by_id = {row["selection_id"]: row for row in state["candidates"]}
+    selected = [by_id[key] for key in proposal.get("selection_ids") or []
+                if key in by_id]
+    return {
+        **proposal,
+        "selected_games": selected,
+        "board": state.get("board"),
+    }
+
+def auto_booking_request(payload: dict) -> dict:
+    """One explicit admin request: qualify, optimize, exact-book, verify.
+
+    No automatic retries and no wagers. Failure does not publish any code.
+    """
+    proposal = optimize_request(payload)
+    if proposal.get("status") != "PROPOSED_NOT_BOOKED":
+        return {
+            **proposal, "share_code": None,
+            "publication_status": "PRIVATE_NOT_PUBLISHED",
+        }
+    result = booking_request({
+        **payload,
+        "selection_ids": proposal["selection_ids"],
+    })
+    if result.get("status") != "success":
+        return {
+            **result, "proposal": proposal,
+            "share_code": None,
+        }
+    return {
+        **result,
+        "proposal": proposal,
+        "selection_ids": proposal["selection_ids"],
+        "optimization_method": proposal["optimization_method"],
     }
 
 
