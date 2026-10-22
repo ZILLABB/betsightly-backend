@@ -7,7 +7,7 @@ type Candidate = {selection_id:string;match_id:string;home_team?:string;away_tea
 type Board = {status:string;reason?:string;candidate_count?:number;distinct_fixture_count?:number;
   maximum_reference_odds?:number;maximum_legs_available?:number;upper_bound_explanation?:string;
   available_leagues?:string[];candidates?:Candidate[]};
-type Proposal = {status:string;reason?:string;selection_ids?:string[];legs?:number;
+type Proposal = {status:string;reason?:string;selection_ids?:string[];selected_games?:Candidate[];legs?:number;
   indicative_odds?:number;target_odds?:number;maximum_reference_odds?:number;
   estimated_conservative_hit_probability?:number;fixtures_evaluated?:number;
   estimated_all_leg_probability?:number;candidate_count?:number;distinct_fixture_count?:number};
@@ -66,6 +66,7 @@ export default function PrivateJackpot() {
    const result=await api<Booking>('private-jackpot/auto-book',preferences(),'POST');
    setBooking(result);
    if(result.proposal)setProposal(result.proposal);
+   else if(result.maximum_reference_odds!==undefined)setProposal(result);
    if(result.status!=='success'||!result.share_code||result.readback_status!=='PASSED')
     setMessage(result.reason||'No exact SportyBet booking code could be validated.');
   }catch(e){setMessage(friendly(e)+'. If the request timed out, do not automatically repeat it; check code records first.')}
@@ -74,7 +75,7 @@ export default function PrivateJackpot() {
  const displayed=booking?.proposal||proposal;
  const selectedIds=booking?.selection_ids||displayed?.selection_ids||[];
  const candidates=board?.candidates||[];
- const selectedGames=selectedIds.map(key=>candidates.find(c=>c.selection_id===key)).filter((x):x is Candidate=>Boolean(x));
+ const selectedGames=displayed?.selected_games||selectedIds.map(key=>candidates.find(c=>c.selection_id===key)).filter((x):x is Candidate=>Boolean(x));
  const optimisticCeiling=board?.maximum_reference_odds;
  const currentCeiling=displayed?.maximum_reference_odds??optimisticCeiling;
  const impossible=Number.isFinite(currentCeiling)&&Number(currentCeiling)<amount;
