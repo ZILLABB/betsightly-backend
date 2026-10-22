@@ -101,6 +101,30 @@ def private_jackpot_optimize(body: PrivateJackpotOptimizeRequest):
         raise HTTPException(422, str(exc))
 
 
+class PrivateJackpotPasteRequest(PrivateJackpotOptimizeRequest):
+    fixtures_text: str = Field(min_length=5, max_length=9000)
+
+
+@router.post("/private-jackpot/paste-preview", dependencies=[Depends(require_admin)])
+def private_jackpot_paste_preview(body: PrivateJackpotPasteRequest):
+    """Match pasted match names to approved bookmaker-ready games; no write."""
+    from growth.jackpot_paste import pasted_preview
+    try:
+        return pasted_preview(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/private-jackpot/paste-book", dependencies=[Depends(require_admin)])
+def private_jackpot_paste_book(body: PrivateJackpotPasteRequest):
+    """Explicit admin request: only full matches, exact verified readback."""
+    from growth.jackpot_paste import pasted_auto_book
+    try:
+        return pasted_auto_book(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 @router.post("/private-jackpot/auto-book", dependencies=[Depends(require_admin)])
 def private_jackpot_auto_book(body: PrivateJackpotOptimizeRequest):
     """Administrator-confirmed, automatic one-time optimize + exact-book."""
