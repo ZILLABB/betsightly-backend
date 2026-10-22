@@ -224,3 +224,79 @@ def test_alias_matching_requires_same_day_and_one_unique_event():
     assert result["matched_fixture_count"] == 0
     assert result["unmatched"][0]["reason"] == "AMBIGUOUS_BOOKMAKER_FIXTURE"
     assert result["share_code"] is None
+
+
+def _fixture_at(local_time, home="Flamengo", away="Estudiantes", event="evtfuture"):
+    fixture = _fixture(home, away, event, price=2.2)
+    fixture["kickoff_ms"] = int(local_time.astimezone(timezone.utc).timestamp()*1000)
+    return fixture
+
+
+def test_next_day_match_accepted_only_in_three_day_mode():
+    from zoneinfo import ZoneInfo
+    nigeria = ZoneInfo("Africa/Lagos")
+    event = _fixture_at(datetime(2026, 10, 23, 1, tzinfo=nigeria))
+    board = _board(event)
+    today_args = _args("Flamengo vs Estudiantes | Home win")
+    denied = bookmaker_paste_preview(today_args, board=board, now=NOW)
+    assert denied["unmatched"][0]["reason"] == "NOT_SCHEDULED_TODAY"
+    allowed = bookmaker_paste_preview(
+        {**today_args, "horizon": "3_days"}, board=board, now=NOW
+    )
+    assert allowed["status"] == "PROPOSED_NOT_BOOKED"
+    assert allowed["matched_fixture_count"] == 1
+    assert allowed["horizon"] == "3_days"
+    assert allowed["window_end"]
+    assert allowed["indicative_odds"] == pytest.approx(2.2)
+    assert allowed["share_code"] is None
+
+
+def test_three_day_window_rejects_event_after_72_hours():
+    board = _board(_fixture_at(NOW+timedelta(hours=73)))
+    result = bookmaker_paste_preview(
+        {**_args("Flamengo vs Estudiantes | Home win"), "horizon": "3_days"},
+        board=board, now=NOW,
+    )
+    assert result["status"] == "UNMATCHED_FIXTURES"
+    assert result["unmatched"][0]["reason"] == "OUTSIDE_THREE_DAY_WINDOW"
+    assert result["selection_ids"] == []
+
+
+def test_three_day_window_rejects_game_within_20_minutes():
+    board = _board(_fixture_at(NOW+timedelta(minutes=10)))
+    result = bookmaker_paste_preview(
+        {**_args("Flamengo vs Estudiantes | Home win"), "horizon": "3_days"},
+        board=board, now=NOW,
+    )
+    assert result["unmatched"][0]["reason"] == "STARTED_OR_TOO_CLOSE_TO_KICKOFF"
+    assert result["share_code"] is None
+
+
+def test_three_day_window_rejects_started_fixture():
+    board = _board(_fixture_at(NOW-timedelta(hours=1)))
+    result = bookmaker_paste_preview(
+        {**_args("Flamengo vs Estudiantes | Home win"), "horizon": "3_days"},
+        board=board, now=NOW,
+    )
+    assert result["unmatched"][0]["reason"] == "STARTED_OR_TOO_CLOSE_TO_KICKOFF"
+    assert result["share_code"] is None
+
+
+def test_three_day_window_does_not_guess_between_duplicate_club_events():
+    matches = _board(
+        _fixture_at(NOW+timedelta(hours=2), event="evt1"),
+        _fixture_at(NOW+timedelta(hours=45), event="evt2"),
+    )
+    result = bookmaker_paste_preview(
+        {**_args("Flamengo vs Estudiantes | Home win"), "horizon": "3_days"},
+        board=matches, now=NOW,
+    )
+    assert result["unmatched"][0]["reason"] == "AMBIGUOUS_BOOKMAKER_FIXTURE"
+    assert result["share_code"] is None
+
+
+def test_bookmaker_mode_rejects_seven_day_window():
+    with pytest.raises(ValueError, match="Today or Next 3 days"):
+        bookmaker_paste_preview({
+            **_args("Flamengo vs Estudiantes | Home win"), "horizon": "7_days"
+        })
