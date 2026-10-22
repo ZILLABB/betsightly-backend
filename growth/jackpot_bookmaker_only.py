@@ -43,6 +43,9 @@ def _identity(name: str) -> str:
 
 
 def _same_club(left: str, right: str) -> bool:
+    # Never confuse a senior club with its U19, reserves or women's side.
+    if sportybet._squad(left) != sportybet._squad(right):
+        return False
     a, b = _identity(left), _identity(right)
     if not a or not b:
         return False
