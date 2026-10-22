@@ -16,19 +16,7 @@ MAX_TEXT_LENGTH = 9000
 _VS = re.compile(r"\s+(?:vs\.?|v\.?)\s+", re.I)
 _PREFIX = re.compile(r"^\s*(?:\d+[.)-]\s*|[-*•]\s*)")
 _STOP = {"fc", "afc", "sc", "sk", "nk", "gnk", "fk", "cf", "club", "the"}
-_MARKETS = {
-    "1": "home_win", "home": "home_win", "home win": "home_win",
-    "2": "away_win", "away": "away_win", "away win": "away_win",
-    "x": "draw", "draw": "draw",
-    "btts yes": "btts_yes", "gg yes": "btts_yes",
-    "both teams to score yes": "btts_yes",
-    "over 1.5": "over_1_5", "over 2.5": "over_2_5",
-    "over 3.5": "over_3_5", "1x": "home_or_draw",
-    "home or draw": "home_or_draw", "x2": "away_or_draw",
-    "away or draw": "away_or_draw",
-    "dnb home": "dnb_home", "dnb away": "dnb_away",
-}
-_PRICE = re.compile(r"\\s*@\\s*\\d+(?:\\.\\d+)?\\s*$")
+from growth.jackpot_market_catalog import resolve_market
 
 
 def _team(value: str) -> str:
@@ -58,14 +46,13 @@ def parse_fixture_lines(value: str) -> list[dict]:
         fixture_text = sides[0].strip()
         requested_market = None
         if len(sides) == 2:
-            market_label = _PRICE.sub("", sides[1]).lower().strip()
-            market_label = " ".join(market_label.split())
-            requested_market = _MARKETS.get(market_label)
+            market_label = sides[1].strip()
+            requested_market = resolve_market(market_label)
             if not requested_market:
                 raise ValueError(
-                    f"Line {index}: unknown pick '{market_label}'. "
-                    "Use Home win, Away win, BTTS Yes, Draw, Over 1.5, "
-                    "Over 2.5, Over 3.5, 1X, X2, DNB Home or DNB Away."
+                    f"Line {index}: unknown or unsupported SportyBet market "
+                    f"'{market_label}'. View Mapped markets for supported "
+                    "outcomes and their live approval status."
                 )
         parts = _VS.split(fixture_text)
         if len(parts) != 2 or not all(2 <= len(p.strip()) <= 90 for p in parts):
