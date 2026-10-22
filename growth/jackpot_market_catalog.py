@@ -45,6 +45,8 @@ for line in ("0.5", "1.5", "2.5", "3.5", "4.5"):
     ident = line.replace(".", "_")
     _MANUAL_ALIASES[f"total over {line}"] = f"over_{ident}"
     _MANUAL_ALIASES[f"total under {line}"] = f"under_{ident}"
+    _MANUAL_ALIASES[f"over {line}"] = f"over_{ident}"
+    _MANUAL_ALIASES[f"under {line}"] = f"under_{ident}"
     _MANUAL_ALIASES[f"o{line}"] = f"over_{ident}"
     _MANUAL_ALIASES[f"u{line}"] = f"under_{ident}"
 
