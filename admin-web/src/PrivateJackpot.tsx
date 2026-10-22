@@ -27,7 +27,7 @@ const suggestedTargets=[2,5,10,100,1000,10000,100000];
 const exactMatchReason=(reason?:string)=> {
  switch(reason) {
   case 'UNDER_MARKET_EXCLUDED':
-   return 'Under market excluded by the current backend policy. The original pick was preserved.';
+   return 'The connected backend still excludes this Under outcome. Refresh after the backend deployment; the original pick was preserved.';
   case 'AMBIGUOUS_BOOKMAKER_FIXTURE':
    return 'More than one event matches these teams. Senior/youth competition matching needs backend review.';
   case 'STARTED_OR_TOO_CLOSE_TO_KICKOFF':
@@ -159,7 +159,7 @@ export default function PrivateJackpot() {
     {bookmakerOnly&&<div className="notice warning"><AlertTriangle size={17}/><div>
      Private experimental mode for Today or Next 3 days. Paste an exact market for every game.
      Selection confidence and trust grades are not enforced, but exact SportyBet
-     fixtures, active prices and full-code readback still are. The backend currently excludes Under markets. No stakes are placed.
+     fixtures, active prices and full-code readback still are. Exact mapped Under markets can be requested in this private mode; no stakes are placed.
     </div></div>}
     <div className="jackpot-controls">
      <label>Search window
@@ -176,7 +176,7 @@ export default function PrivateJackpot() {
       </select></label>
      <label>Market strategy
       <select value={style} disabled={bookmakerOnly} onChange={e=>{setStyle(e.target.value);changed()}}>
-       <option value="all">All approved (no Under markets)</option>
+       <option value="all">All model-approved (no Under markets)</option>
        <option value="goals">Overs + BTTS</option>
        <option value="results">1X2 + double chance + DNB</option>
        <option value="wins">Straight wins only</option>
@@ -237,7 +237,7 @@ export default function PrivateJackpot() {
       <button type="button" className="mini-button" onClick={()=>setConfirmReady(false)}>Cancel</button>
      </div></div>}
    </fieldset>
-   <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target and never places a stake. The current backend excludes Under-goals markets in both modes; this frontend cannot override it. A 100,000x ticket is extremely unlikely to win. {bookmakerOnly
+   <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target and never places a stake. Model-approved mode still excludes Under-goals markets; private bookmaker-only exact picks can include mapped Unders if SportyBet actively quotes the exact outcome. A 100,000x ticket is extremely unlikely to win. {bookmakerOnly
     ?'Bookmaker-only mode can assess upcoming fixtures within the next 72 hours; prices are indicative until full SportyBet readback. Every pasted pick must be verified.'
     :'Model-approved match coverage is limited to the seven-day prepared board.'}</div></div>
    {!bookmakerOnly&&grade==='C'&&<div className="notice warning"><AlertTriangle size={17}/><div>Exploratory trust C includes less-supported predictions, not more reliable ones. The minimum model-probability and bookability gates still apply.</div></div>}
