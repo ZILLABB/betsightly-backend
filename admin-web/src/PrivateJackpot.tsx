@@ -8,7 +8,8 @@ type Candidate = {
  lower_reliability_bound?:number;trust_grade?:string;recommended_for_fixture?:boolean;
  expected_value?:number;
 };
-type Board = {status:string;reason?:string;candidate_count?:number;candidates?:Candidate[];board?:any};
+type Board = {status:string;reason?:string;candidate_count?:number;candidates?:Candidate[];board?:any;distinct_fixture_count?:number;maximum_reference_odds?:number;maximum_legs_available?:number;upper_bound_explanation?:string};
+type Proposal = {status:string;reason?:string;selection_ids?:string[];legs?:number;indicative_odds?:number;target_odds?:number;maximum_reference_odds?:number;estimated_conservative_hit_probability?:number;fixtures_evaluated?:number;booking_code_created?:boolean;};
 type Booking = {status:string;reason?:string;share_code?:string;share_url?:string;verified_odds?:number;
  legs?:number;readback_status?:string;expires_at?:string;estimated_all_leg_probability?:number;
  publication_status?:string;indicative_odds?:number;invalid_selections?:any[]};
@@ -25,6 +26,8 @@ export default function PrivateJackpot() {
  const [loading,setLoading]=useState(false);
  const [booking,setBooking]=useState<Booking|null>(null);
  const [bookingBusy,setBookingBusy]=useState(false);
+ const [optimizing,setOptimizing]=useState(false);
+ const [proposal,setProposal]=useState<Proposal|null>(null);
  const [message,setMessage]=useState('');
  const latch=useRef(false);
  const rows=board?.candidates||[];
@@ -33,14 +36,14 @@ export default function PrivateJackpot() {
  const probability=selections.reduce((p,c)=>p*Number(c.selection_probability||0),1);
  const desired=Number(target);
  const acceptable=Number.isFinite(desired)&&desired>=2&&desired<=100000;
- const canBook=selections.length>0&&selections.length<=50&&acceptable&&indicative>=desired&&!bookingBusy&&!loading;
+ const canBook=selections.length>0&&selections.length<=50&&acceptable&&indicative>=desired&&!bookingBusy&&!loading&&!optimizing;
  const filtered=useMemo(()=>{
    const s=query.trim().toLowerCase();
    return rows.filter(r=>!s||[r.home_team,r.away_team,r.league,r.market].join(' ').toLowerCase().includes(s));
  },[rows,query]);
  const filters=()=>({horizon,min_trust_grade:grade,min_probability:.65,markets:[]});
  const fetchBoard=async()=>{
-   if(latch.current)return;latch.current=true;setLoading(true);setMessage('');setBooking(null);setSelected([]);
+   if(latch.current)return;latch.current=true;setLoading(true);setMessage('');setBooking(null);setProposal(null);setSelected([]);
    try{
      const result=await api<Board>('private-jackpot/candidates',filters(),'POST');
      setBoard(result);if(result.status!=='success')setMessage(result.reason||'The bookable candidate board is not ready.');
@@ -48,13 +51,36 @@ export default function PrivateJackpot() {
    finally{latch.current=false;setLoading(false);}
  };
  const toggle=(pick:Candidate)=>{
-   if(bookingBusy)return;setBooking(null);setMessage('');
+   if(bookingBusy||optimizing)return;setBooking(null);setProposal(null);setMessage('');
    setSelected(before=>{
      if(before.includes(pick.selection_id))return before.filter(x=>x!==pick.selection_id);
      const withoutFixture=before.filter(x=>rows.find(r=>r.selection_id===x)?.match_id!==pick.match_id);
      if(withoutFixture.length>=50)return before;
      return [...withoutFixture,pick.selection_id];
    });
+ };
+ const autoBuild=async()=>{
+   if(latch.current||!board||board.status!=='success'||!acceptable)return;
+   latch.current=true;setOptimizing(true);setMessage('');setBooking(null);setProposal(null);
+   try {
+     const result=await api<Proposal>('private-jackpot/optimize',{...filters(),target_odds:desired,max_legs:50},'POST');
+     setProposal(result);
+     if(result.status!=='PROPOSED_NOT_BOOKED'){
+       setSelected([]);
+       setMessage(result.reason||'No qualifying ticket is available at the requested target.');
+       return;
+     }
+     const ids=result.selection_ids||[];
+     const matches=ids.every(key=>rows.some(p=>p.selection_id===key));
+     if(!matches||!ids.length||new Set(ids).size!==ids.length){
+       setSelected([]);
+       setMessage('Live candidates changed between reads. Refresh the approved match board and run optimization again.');
+       return;
+     }
+     setSelected(ids);
+     setMessage('Auto-selected '+ids.length+' approved, distinct fixtures. Review all legs and odds before requesting a code. No SportyBet code has been created.');
+   }catch(e){setSelected([]);setMessage(errorText(e));}
+   finally{latch.current=false;setOptimizing(false);}
  };
  const book=async()=>{
    if(latch.current||!canBook)return;
@@ -73,13 +99,28 @@ export default function PrivateJackpot() {
    <header className="panel-head"><div><h2>Choose your qualified match board</h2><p>Uses the existing BetSightly calibration, trust and bookmaker-bookability gates.</p></div><ShieldCheck size={21}/></header>
    <fieldset className="editor" disabled={loading||bookingBusy}>
     <div className="jackpot-controls">
-     <label>Fixture window<select value={horizon} onChange={e=>{setHorizon(e.target.value);setBoard(null);setSelected([]);setBooking(null);}}><option value="today">Today only</option><option value="3_days">Next 3 days</option><option value="7_days">Next 7 days</option></select></label>
+     <label>Fixture window<select value={horizon} onChange={e=>{setHorizon(e.target.value);setBoard(null);setSelected([]);setBooking(null);setProposal(null);}}><option value="today">Today only</option><option value="3_days">Next 3 days</option><option value="7_days">Next 7 days</option></select></label>
      <label>Minimum model trust<select value={grade} onChange={e=>{setGrade(e.target.value);setBoard(null);setSelected([]);setBooking(null);}}><option value="B">B or A</option><option value="A">A only</option></select></label>
-     <label>Minimum verified combined odds<input type="number" value={target} min={2} max={100000} step="any" onChange={e=>{setTarget(e.target.value);setBooking(null);}}/></label>
+     <label>Minimum odds after bookmaker verification<input type="number" value={target} min={2} max={100000} step="any" onChange={e=>{setTarget(e.target.value);setBooking(null);}}/></label>
     </div>
-    <button type="button" className="button primary" disabled={loading} onClick={fetchBoard}>{loading?<Loader2 size={17} className="spin"/>:<RefreshCcw size={17}/>} {loading?'Loading bookmaker-qualified matches…':'Load approved matches'}</button>
+    <div className="toolbar">
+      <button type="button" className="button secondary" disabled={loading||optimizing} onClick={fetchBoard}>{loading?<Loader2 size={17} className="spin"/>:<RefreshCcw size={17}/>} {loading?'Loading bookmaker-qualified matches…':'Load approved matches'}</button>
+      <button type="button" className="button primary" disabled={!board||board.status!=='success'||loading||optimizing||!acceptable||Number(board.maximum_reference_odds||0)<desired} onClick={autoBuild}>
+       {optimizing?<Loader2 size={17} className="spin"/>:<Target size={17}/>} {optimizing?'Finding best eligible combination…':'Auto-build strongest eligible ticket'}
+      </button>
+    </div>
    </fieldset>
    <div className="notice info"><ShieldCheck size={17}/><div>Admin-only. No under-goals markets, no duplicate fixtures and no forced weak legs. SportyBet prices may move; 100,000x is a very low-probability target.</div></div>
+   {board?.status==='success'&&<div className="jackpot-feasibility" role="status">
+     <div><small>Distinct upcoming fixtures</small><strong>{board.distinct_fixture_count||0}</strong></div>
+     <div><small>Maximum reference-odds ceiling</small><strong>{number(Number(board.maximum_reference_odds||1))}x</strong></div>
+     <div><small>Your target</small><strong>{acceptable?number(desired)+'x':'Invalid'}</strong></div>
+     <p>{Number(board.maximum_reference_odds||0)<desired
+       ?'NO QUALIFYING 100K TICKET IN THIS BOARD. Change Today to 7 days or A only to A/B, or lower the target. Never force markets to make the number.'
+       :'A qualifying ticket may exist using the approved reference prices. Click Auto-build, review the resulting portfolio, then request separate bookmaker verification.'}</p>
+     <small>{board.upper_bound_explanation||'Mathematical ceiling, not a verified code.'}</small>
+   </div>}
+   {proposal?.status==='PROPOSED_NOT_BOOKED'&&<div className="notice info"><CheckCircle2 size={17}/><div>Suggested {proposal.legs} legs at approximately {number(Number(proposal.indicative_odds||0))}x. This is a probability-weighted, bounded approximation—not guaranteed optimal, and not yet a SportyBet code.</div></div>}
    {message&&<div role="alert" className="notice warning"><AlertTriangle size={17}/><div>{message}</div></div>}
   </section>
   {board?.status==='success'&&<div className="split jackpot-layout">
@@ -90,7 +131,7 @@ export default function PrivateJackpot() {
      {filtered.slice(0,120).map(c=>{
        const checked=selected.includes(c.selection_id);
        const replaced=selected.some(id=>rows.find(x=>x.selection_id===id)?.match_id===c.match_id);
-       return <button type="button" key={c.selection_id} disabled={bookingBusy} className={'jackpot-candidate '+(checked?'chosen':'')} onClick={()=>toggle(c)} aria-pressed={checked}>
+       return <button type="button" key={c.selection_id} disabled={bookingBusy||optimizing} className={'jackpot-candidate '+(checked?'chosen':'')} onClick={()=>toggle(c)} aria-pressed={checked}>
         <span className="jackpot-selection-mark">{checked?'✓':replaced?'↺':'+'}</span>
         <span className="jackpot-candidate-label"><strong>{c.home_team} vs {c.away_team}</strong><small>{c.league||'Football'} · {c.market.replaceAll('_',' ')} · {c.trust_grade||'—'} trust</small></span>
         <span className="jackpot-candidate-price">{number(c.odds)}x</span>
@@ -108,7 +149,7 @@ export default function PrivateJackpot() {
      <div><span>Required minimum</span><strong>{acceptable?number(desired)+'x':'Invalid target'}</strong></div>
     </div>
     {selections.length>0&&<>
-     <div className="jackpot-ticket-list">{selections.map((pick,i)=><div key={pick.selection_id} className="jackpot-ticket-item"><span>{i+1}. {pick.home_team} — {pick.away_team}<small>{pick.market.replaceAll('_',' ')} · {number(pick.odds)}x</small></span><button className="mini-button" type="button" disabled={bookingBusy} onClick={()=>toggle(pick)}>Remove</button></div>)}</div>
+     <div className="jackpot-ticket-list">{selections.map((pick,i)=><div key={pick.selection_id} className="jackpot-ticket-item"><span>{i+1}. {pick.home_team} — {pick.away_team}<small>{pick.market.replaceAll('_',' ')} · {number(pick.odds)}x</small></span><button className="mini-button" type="button" disabled={bookingBusy||optimizing} onClick={()=>toggle(pick)}>Remove</button></div>)}</div>
      <p className="muted">Approximate independent-leg model probability: {probability?String((probability*100).toPrecision(3))+'%':'Unavailable'}. Correlations and estimation error can make this unreliable.</p>
     </>}
     {selections.length===0&&<p className="empty">Choose approved match markets on the left.</p>}
