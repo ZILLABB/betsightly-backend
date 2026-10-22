@@ -97,7 +97,7 @@ def test_too_low_actual_bookmaker_price_cannot_release_code(monkeypatch):
     from growth import jackpot_bookmaker_only as module
     from leagues import sportybet
     board = _board(_fixture("Hoffenheim", "Lyon", "evt1", price=3.2))
-    monkeypatch.setattr(sportybet, "fetch_board", lambda force=False: board)
+    monkeypatch.setattr(sportybet, "cached_board_for_admin", lambda: board)
     monkeypatch.setattr(module, "datetime", datetime)
     # Override ambient time with a time in the same fixture day:
     class Clock(datetime):
@@ -126,3 +126,61 @@ def test_paste_route_dispatches_before_model_lookup(monkeypatch):
                         lambda _: {"status": "UNMATCHED_FIXTURES", "share_code": None})
     result = jackpot_paste.pasted_preview(_args("Hoffenheim vs Lyon | Home win"))
     assert result["status"] == "UNMATCHED_FIXTURES"
+
+
+def test_preview_never_fetches_live_bookmaker_board_on_request(monkeypatch):
+    from leagues import sportybet
+    monkeypatch.setattr(sportybet, "cached_board_for_admin", lambda: None)
+    monkeypatch.setattr(sportybet, "fetch_board",
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            AssertionError("no synchronous bookmaker crawl")))
+    result = bookmaker_paste_preview(_args("Hoffenheim vs Lyon | Home win"))
+    assert result["status"] == "BOARD_REFRESH_REQUIRED"
+    assert result["share_code"] is None
+    assert result["matched_fixture_count"] == 0
+    assert result["maximum_reference_odds"] is None
+
+
+def test_book_reuses_one_snapshot_and_never_attempts_missing_ticket(monkeypatch):
+    from leagues import sportybet
+    import leagues.booking as booking
+    calls = []
+    board = _board(_fixture("Hoffenheim", "Lyon", "evt1", price=2.7))
+    monkeypatch.setattr(sportybet, "cached_board_for_admin",
+                        lambda: (calls.append("cached") or board))
+    monkeypatch.setattr(sportybet, "fetch_board",
+                        lambda *a,**kw: (_ for _ in ()).throw(
+                            AssertionError("live network crawl forbidden")))
+    monkeypatch.setattr(booking, "create_booking",
+                        lambda *a,**kw: (_ for _ in ()).throw(
+                            AssertionError("incomplete booking must be refused")))
+    from growth import jackpot_bookmaker_only as module
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+    monkeypatch.setattr(module, "datetime", Clock)
+    result = bookmaker_paste_book(_args(
+        "Hoffenheim vs Lyon | Home win\nAjax vs Atalanta | BTTS Yes", 100000
+    ))
+    assert result["status"] == "UNMATCHED_FIXTURES"
+    assert result["matched_fixture_count"] == 1
+    assert calls == ["cached"]
+
+
+def test_admin_cached_board_respects_freshness_and_completeness(monkeypatch):
+    from leagues import sportybet
+    board = _board(_fixture("Hoffenheim", "Lyon", "evt1"))
+    meta = {**board["__meta__"],
+            "cache_schema_version": sportybet._CACHE_SCHEMA_VERSION}
+    monkeypatch.setattr(sportybet, "_db_get", lambda _: {
+        "metadata": meta, "fetched_at": NOW.timestamp(),
+        "fixtures": {k:v for k,v in board.items() if k!="__meta__"}
+    })
+    monkeypatch.setattr(sportybet.time, "time", lambda: NOW.timestamp()+600)
+    assert sportybet.cached_board_for_admin() is not None
+    monkeypatch.setattr(sportybet.time, "time", lambda: NOW.timestamp()+2000)
+    assert sportybet.cached_board_for_admin() is None
+    meta["is_complete"] = False
+    monkeypatch.setattr(sportybet.time, "time", lambda: NOW.timestamp()+600)
+    assert sportybet.cached_board_for_admin() is None

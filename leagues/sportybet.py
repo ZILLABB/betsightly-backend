@@ -400,6 +400,29 @@ def _snapshot(fixtures: dict, metadata: dict) -> dict:
     return {"__meta__": metadata, **fixtures}
 
 
+def cached_board_for_admin(max_age_seconds: int = 1800) -> dict | None:
+    """Read an already-fetched complete SportyBet snapshot without network I/O.
+
+    Private HTTP routes must never synchronously crawl 18+ bookmaker pages.
+    This read fails closed on absent, incomplete, older-schema or expired
+    snapshots and delegates refresh to the existing scheduled pipeline.
+    """
+    cached = _db_get(_CACHE_KEY)
+    if not isinstance(cached, dict):
+        return None
+    metadata = cached.get("metadata") or {}
+    try:
+        age = time.time() - float(cached.get("fetched_at") or 0)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    if (not metadata.get("is_complete")
+            or metadata.get("cache_schema_version") != _CACHE_SCHEMA_VERSION
+            or age < -60 or age > max_age_seconds
+            or not cached.get("fixtures")):
+        return None
+    return _snapshot(cached["fixtures"], metadata)
+
+
 def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
     """Complete upcoming board, collision-safe and cached as one snapshot."""
     cached = _db_get(_CACHE_KEY)
