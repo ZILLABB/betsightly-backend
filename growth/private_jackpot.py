@@ -64,7 +64,8 @@ def candidate_board(payload: dict) -> dict:
     for value in data.get("candidates") or []:
         market = str(value.get("market") or "")
         price = float(value.get("odds") or 0)
-        if market.startswith("under_") or price <= 1 or not isfinite(price):
+        if (market.startswith("under_") or "_under_" in market or
+                price <= 1 or not isfinite(price):
             continue
         if not value.get("bookable") or not value.get("selection_id"):
             continue
@@ -106,11 +107,16 @@ def optimize_request(payload: dict) -> dict:
     state = candidate_board(payload)
     if state.get("status") != "success":
         return {**state, "selection_ids": [], "booking_code_created": False}
+    proposal = optimize(
+        state["candidates"], target,
+        limit=int(payload.get("max_legs") or MAX_LEGS),
+    )
+    by_id = {row["selection_id"]: row for row in state["candidates"]}
+    selected = [by_id[key] for key in proposal.get("selection_ids") or []
+                if key in by_id]
     return {
-        **optimize(
-            state["candidates"], target,
-            limit=int(payload.get("max_legs") or MAX_LEGS),
-        ),
+        **proposal,
+        "selected_games": selected,
         "board": state.get("board"),
     }
 
