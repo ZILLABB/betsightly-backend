@@ -190,6 +190,11 @@ export default function PrivateJackpot() {
       {busy==='board'?<Loader2 size={16} className="spin"/>:<RefreshCcw size={16}/>} Check available games
      </button>
     </div>
+    {confirmReady&&<div className="notice warning" role="status"><AlertTriangle size={17}/>
+     <div>Confirm PRIVATE SportyBet code generation at {decimal(amount,0)}x.
+      This does not place a monetary stake and will not alter the requested selections.
+      <button type="button" className="mini-button" onClick={()=>setConfirmReady(false)}>Cancel</button>
+     </div></div>}
    </fieldset>
    <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target, never includes Under-goals markets and never places a stake. A 100,000x ticket is extremely unlikely to win. The approved match universe is currently limited to a 7-day prepared board; more future dates require additional provider coverage.</div></div>
    {!bookmakerOnly&&grade==='C'&&<div className="notice warning"><AlertTriangle size={17}/><div>Exploratory trust C includes less-supported predictions, not more reliable ones. The minimum model-probability and bookability gates still apply.</div></div>}
@@ -206,16 +211,21 @@ export default function PrivateJackpot() {
    </div>}
    {message&&<div className="notice warning" role="alert"><AlertTriangle size={17}/><div>{message}</div></div>}
   </section>
+  {pasteReport&&partial&&<div className="notice warning" role="status"><AlertTriangle size={17}/><div>
+   Partial preview only: {pasteReport.matched_fixture_count||0} of {pasteReport.pasted_fixture_count||0} exact picks were validated.
+   Partial selection product: {pasteReport.partial_reference_odds==null?'not available':decimal(pasteReport.partial_reference_odds)+'x'}.
+   This is NOT the full-ticket ceiling. No code has been generated.
+  </div></div>}
   <MarketExplorer preferences={preferences}/>
   {(board?.status==='success'||displayed)&&<section className="panel">
    <header className="panel-head"><div><h2>Feasibility & match coverage</h2><p>Shows available fixtures, not duplicate markets counted as matches.</p></div></header>
    <div className="jackpot-feasibility">
-    <div><small>Approved markets</small><strong>{decimal(board?.candidate_count??displayed?.candidate_count??0,0)}</strong></div>
-    <div><small>Distinct fixtures</small><strong>{decimal(board?.distinct_fixture_count??displayed?.distinct_fixture_count??0,0)}</strong></div>
-    <div><small>Raw price ceiling</small><strong>{currentCeiling==null?'—':decimal(Number(currentCeiling))+'x'}</strong></div>
+    <div><small>{bookmakerOnly?'Validated bookmaker markets':'Approved markets'}</small><strong>{decimal(bookmakerOnly?(pasteReport?.matched_fixture_count??0):(board?.candidate_count??displayed?.candidate_count??0),0)}</strong></div>
+    <div><small>Distinct fixtures</small><strong>{decimal(partial?(pasteReport?.matched_fixture_count??0):(board?.distinct_fixture_count??displayed?.distinct_fixture_count??0),0)}</strong></div>
+    <div><small>{bookmakerOnly?'Complete ticket reference quote':'Raw price ceiling'}</small><strong>{currentCeiling==null?'Not available':decimal(Number(currentCeiling))+'x'}</strong></div>
     {modelCeiling!=null&&<div><small>Model-eligible ceiling</small><strong>{decimal(Number(modelCeiling))}x</strong></div>}
     <div><small>Required target</small><strong>{decimal(amount)}x</strong></div>
-    <p>{impossible
+    <p>{partial?'Incomplete ticket: the partial odds cannot establish a ceiling for every requested match.':impossible
      ?'NOT POSSIBLE FROM CURRENT PRICES: even taking the highest listed market from each fixture cannot reach this target.'
      :modelInsufficient
      ?'INSUFFICIENT MODEL EVIDENCE: prices appear to reach the target, but some selections do not have valid model reliability. No qualified ticket is available.'
@@ -238,6 +248,7 @@ export default function PrivateJackpot() {
      {experimental?<AlertTriangle size={17}/>:<Target size={17}/>}
      <div>{experimental
       ?'HIGH-RISK CEILING EXPERIMENT: the normal probability search did not find a qualifying ticket. This fallback takes the highest-priced model-eligible market from each chosen match, not the most reliable combination. It is not a recommendation.'
+      :bookmakerOnly?'Bookmaker-only experiment: no model confidence evaluation applies, so this is not a prediction recommendation.'
       :'This is a bounded confidence-first model proposal, not a guaranteed optimum.'} No bookmaker code exists until verification succeeds.</div>
    </div>
    {selectedGames.length>0&&<div className="jackpot-ticket-list">{selectedGames.map((game,i)=><div className="jackpot-ticket-item" key={game.selection_id}><span>{i+1}. {game.home_team} vs {game.away_team}<small>{game.market.replaceAll('_',' ')} · {game.trust_grade||'—'} trust</small></span><strong>{decimal(game.odds)}x</strong></div>)}</div>}
