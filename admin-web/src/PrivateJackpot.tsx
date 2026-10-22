@@ -50,6 +50,15 @@ export default function PrivateJackpot() {
   pasteReport?.status==='PROPOSED_NOT_BOOKED'&&pasteReport.full_ticket_complete===true
  );
  const targetValid=Number.isFinite(amount)&&amount>=2&&amount<=100000;
+ // A completed preview may be below the requested target, which is NOT a
+ // bookmaker or matching failure. Offer a deliberate, clearly labeled lower
+ // target instead of silently weakening the user's 100,000x constraint.
+ const belowTargetQuote=bookmakerOnly&&pasteReport?.full_ticket_complete===true
+   &&pasteReport.status==='BELOW_TARGET'
+   &&Number.isFinite(Number(pasteReport.indicative_odds))
+   ?Number(pasteReport.indicative_odds):null;
+ const suggestedLowerTarget=belowTargetQuote==null?null
+   :Math.max(2,Math.floor(belowTargetQuote/1000)*1000);
  const preferences=()=>({horizon:bookmakerOnly?'today':horizon,selection_mode:mode,min_trust_grade:grade,min_probability:.65,market_style:style,
    min_leg_odds:Number(legFloor),markets:[],target_odds:amount,max_legs:maxLegs});
  const changed=()=>{setBoard(null);setProposal(null);setBooking(null);setPasteReport(null);setConfirmReady(false);setMessage('')};
@@ -203,10 +212,23 @@ export default function PrivateJackpot() {
     </div>
     {mustPreview&&!previewApproved&&<div className="notice info" role="status">
       <ShieldCheck size={17}/><div>
-       Run <strong>Preview bookmaker-only exact picks</strong> first. Generate Code
-       unlocks only after all pasted fixtures and their exact markets have valid
-       bookmaker prices and the total reaches your target. This prevents blind
-       repeated booking requests after a gateway failure.
+       {belowTargetQuote!=null
+        ?<>All {pasteReport?.matched_fixture_count||0} exact picks passed bookmaker validation,
+           but their combined quote is <strong>{decimal(belowTargetQuote)}x</strong> against
+           your {decimal(amount)}x minimum. The Generate Code button stays disabled to
+           preserve that target. Another selection or a lower target is required.</>
+        :<>Run <strong>Preview bookmaker-only exact picks</strong> first. Generate Code
+           unlocks only when every selection matches and the current quote reaches
+           the target. Failed previews never trigger a bookmaker write.</>}
+       {suggestedLowerTarget!=null&&suggestedLowerTarget<amount&&
+        <div className="jackpot-lower-target">
+         <button className="mini-button" type="button" disabled={busy!==null}
+          onClick={()=>{setTarget(String(suggestedLowerTarget));changed()}}>
+          Use {decimal(suggestedLowerTarget,0)}x as minimum instead · re-preview
+         </button>
+         <small>This changes your minimum odds requirement, not the 18 picks. It
+          will NOT reach the original {decimal(amount,0)}x target.</small>
+        </div>}
       </div>
      </div>}
     {confirmReady&&<div className="notice warning" role="status"><AlertTriangle size={17}/>
@@ -249,7 +271,9 @@ export default function PrivateJackpot() {
     {modelCeiling!=null&&<div><small>Model-eligible ceiling</small><strong>{decimal(Number(modelCeiling))}x</strong></div>}
     <div><small>Required target</small><strong>{decimal(amount)}x</strong></div>
     <p>{partial?'Incomplete ticket: the partial odds cannot establish a ceiling for every requested match.':impossible
-     ?'NOT POSSIBLE FROM CURRENT PRICES: even taking the highest listed market from each fixture cannot reach this target.'
+     ?(bookmakerOnly
+      ?'Exact pasted markets are below your target at the current reference quote. Other markets were not compared; revise a pick or knowingly lower the target.'
+      :'NOT POSSIBLE FROM CURRENT MODEL BOARD: the listed candidate ceiling cannot reach this target.')
      :modelInsufficient
      ?'INSUFFICIENT MODEL EVIDENCE: prices appear to reach the target, but some selections do not have valid model reliability. No qualified ticket is available.'
      :'Reference odds alone do not guarantee bookmaker acceptance or good predictions. Model-eligible odds are assessed separately.'}</p>
