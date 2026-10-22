@@ -139,6 +139,10 @@ def test_preview_never_fetches_live_bookmaker_board_on_request(monkeypatch):
     assert result["share_code"] is None
     assert result["matched_fixture_count"] == 0
     assert result["maximum_reference_odds"] is None
+    assert result["exact_market_mode"] is True
+    assert result["requested_market_count"] == 1
+    assert result["full_ticket_complete"] is False
+    assert result["booking_code_created"] is False
 
 
 def test_book_reuses_one_snapshot_and_never_attempts_missing_ticket(monkeypatch):
@@ -179,8 +183,44 @@ def test_admin_cached_board_respects_freshness_and_completeness(monkeypatch):
     })
     monkeypatch.setattr(sportybet.time, "time", lambda: NOW.timestamp()+600)
     assert sportybet.cached_board_for_admin() is not None
+    # Producer refreshes on the existing three-hour cadence, so a cache
+    # that is 2,000 seconds old must remain readable.
     monkeypatch.setattr(sportybet.time, "time", lambda: NOW.timestamp()+2000)
+    assert sportybet.cached_board_for_admin() is not None
+    monkeypatch.setattr(sportybet.time, "time", lambda: NOW.timestamp()+11000)
     assert sportybet.cached_board_for_admin() is None
     meta["is_complete"] = False
     monkeypatch.setattr(sportybet.time, "time", lambda: NOW.timestamp()+600)
     assert sportybet.cached_board_for_admin() is None
+
+
+def test_bookmaker_unique_match_ignores_verified_club_prefixes_and_transliteration():
+    from growth.jackpot_bookmaker_only import _same_club
+    pairs = [
+        ("Jagiellonia Bialystok", "Jagiellonia Bialystok"),
+        ("RSC Anderlecht", "Anderlecht"),
+        ("FC Thun", "Thun"),
+        ("HNK Hajduk Split", "Hajduk Split"),
+        ("Lillestroem SK", "Lillestrøm"),
+        ("St. Truidense VV", "Sint-Truidense"),
+        ("AGF Aarhus", "Aarhus"),
+        ("Kuopion Palloseura", "KuPS"),
+    ]
+    assert all(_same_club(left,right) for left,right in pairs)
+    assert not _same_club("Celtic", "Celta Vigo")
+    assert not _same_club("Hoffenheim U19", "Hoffenheim")
+
+
+def test_alias_matching_requires_same_day_and_one_unique_event():
+    board = _board(
+        _fixture("AGF Aarhus", "Egnatia", "evt1"),
+        _fixture("AGF Aarhus", "Egnatia", "evt2"),
+    )
+    result = bookmaker_paste_preview(
+        _args("Aarhus vs KF Egnatia Rrogozhine | Home win"),
+        board=board, now=NOW,
+    )
+    assert result["status"] == "UNMATCHED_FIXTURES"
+    assert result["matched_fixture_count"] == 0
+    assert result["unmatched"][0]["reason"] == "AMBIGUOUS_BOOKMAKER_FIXTURE"
+    assert result["share_code"] is None
