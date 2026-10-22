@@ -31,6 +31,7 @@ _EQUIVALENT_CLUB_NAMES = {
     "hajduk split": "hajduk split",
     "borussia m´gladbach": "borussia monchengladbach",
     "borussia m gladbach": "borussia monchengladbach",
+    "borussia gladbach": "borussia monchengladbach",
 }
 
 
