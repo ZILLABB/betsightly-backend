@@ -63,7 +63,9 @@ def manual_tiers_status():
 # Neither endpoint is exposed through the public BetSightly site.
 class PrivateJackpotFilters(BaseModel):
     horizon: str = Field(default="today", pattern="^(today|3_days|7_days)$")
-    min_trust_grade: str = Field(default="B", pattern="^[AB]$")
+    min_trust_grade: str = Field(default="B", pattern="^[ABC]$")
+    market_style: str = Field(default="all", pattern="^(all|goals|results|wins)$")
+    min_leg_odds: float = Field(default=1.01, ge=1.01, le=100)
     min_probability: float = Field(default=.65, ge=.65, le=1)
     markets: list[str] = Field(default_factory=list, max_length=24)
 
@@ -95,6 +97,16 @@ def private_jackpot_optimize(body: PrivateJackpotOptimizeRequest):
     from growth.private_jackpot import optimize_request
     try:
         return optimize_request(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/private-jackpot/auto-book", dependencies=[Depends(require_admin)])
+def private_jackpot_auto_book(body: PrivateJackpotOptimizeRequest):
+    """Administrator-confirmed, automatic one-time optimize + exact-book."""
+    from growth.private_jackpot import auto_booking_request
+    try:
+        return auto_booking_request(body.model_dump())
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 
