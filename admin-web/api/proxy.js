@@ -7,7 +7,8 @@ const GET = new Set([
 const POST = new Set([
  'admin/login','admin/logout','generate','retry','manual-tiers/import-code',
  'manual-tiers/preview','manual-tiers/inspect','manual-tiers/publish','manual-tiers/publish-imported',
- 'homepage-campaign','settings','referrals'
+ 'homepage-campaign','settings','referrals',
+ 'private-jackpot/candidates','private-jackpot/book'
 ]);
 function allowed(method, route) {
  return method === 'GET' ? GET.has(route) :
