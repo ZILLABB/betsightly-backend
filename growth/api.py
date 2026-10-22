@@ -83,6 +83,22 @@ def private_jackpot_candidates(body: PrivateJackpotFilters):
         raise HTTPException(422, str(exc))
 
 
+
+class PrivateJackpotOptimizeRequest(PrivateJackpotFilters):
+    target_odds: float = Field(default=100_000, ge=2, le=100_000)
+    max_legs: int = Field(default=50, ge=1, le=50)
+
+
+@router.post("/private-jackpot/optimize", dependencies=[Depends(require_admin)])
+def private_jackpot_optimize(body: PrivateJackpotOptimizeRequest):
+    """Read-only feasibility and confidence-weighted suggestions; never books."""
+    from growth.private_jackpot import optimize_request
+    try:
+        return optimize_request(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 @router.post("/private-jackpot/book", dependencies=[Depends(require_admin)])
 def private_jackpot_book(body: PrivateJackpotBookRequest):
     """Explicit admin request; accept only complete and verified SportyBet codes.
