@@ -50,7 +50,7 @@ export default function PrivateJackpot() {
   pasteReport?.status==='PROPOSED_NOT_BOOKED'&&pasteReport.full_ticket_complete===true
  );
  const targetValid=Number.isFinite(amount)&&amount>=2&&amount<=100000;
- const preferences=()=>({horizon:bookmakerOnly?'today':horizon,selection_mode:mode,min_trust_grade:grade,min_probability:.65,market_style:style,
+ const preferences=()=>({horizon:bookmakerOnly&&horizon==='7_days'?'3_days':horizon,selection_mode:mode,min_trust_grade:grade,min_probability:.65,market_style:style,
    min_leg_odds:Number(legFloor),markets:[],target_odds:amount,max_legs:maxLegs});
  const changed=()=>{setBoard(null);setProposal(null);setBooking(null);setPasteReport(null);setConfirmReady(false);setMessage('')};
  const inspect=async()=>{
@@ -129,22 +129,27 @@ export default function PrivateJackpot() {
      :'Use model-evaluated, bookmaker-bookable fixtures. Research and booking remain separate from public predictions.'}</p></div><ShieldCheck size={21}/></header>
    <fieldset className="editor" disabled={busy!==null}>
     <label className="jackpot-policy-control">Private selection policy
-     <select value={mode} onChange={e=>{setMode(e.target.value as 'approved_model'|'bookmaker_only');changed()}}>
+     <select value={mode} onChange={e=>{
+       const nextMode=e.target.value as 'approved_model'|'bookmaker_only';
+       setMode(nextMode);
+       if(nextMode==='bookmaker_only'&&horizon==='7_days')setHorizon('3_days');
+       changed();
+     }}>
       <option value="approved_model">Model-approved · confidence and bookmaker gates</option>
       <option value="bookmaker_only">Bookmaker-only experiment · relaxed model gates</option>
      </select>
     </label>
     {bookmakerOnly&&<div className="notice warning"><AlertTriangle size={17}/><div>
-     Private, today-only experimental mode. Paste an exact market for every game.
+     Private experimental mode for Today or Next 3 days. Paste an exact market for every game.
      Selection confidence and trust grades are not enforced, but exact SportyBet
      fixtures, active prices and full-code readback still are. No Under markets or stakes.
     </div></div>}
     <div className="jackpot-controls">
      <label>Search window
-      <select value={bookmakerOnly?"today":horizon} disabled={bookmakerOnly} onChange={e=>{setHorizon(e.target.value);changed()}}>
+      <select value={bookmakerOnly&&horizon==='7_days'?'3_days':horizon} onChange={e=>{setHorizon(e.target.value);changed()}}>
        <option value="today">Today only</option>
-       <option value="3_days">Next 3 days</option>
-       <option value="7_days">Next 7 days · more fixtures</option>
+       <option value="3_days">Next 3 days · rolling 72 hours</option>
+       <option value="7_days" disabled={bookmakerOnly}>Next 7 days · model mode only</option>
       </select></label>
      <label>Evidence/trust level
       <select value={grade} disabled={bookmakerOnly} onChange={e=>{setGrade(e.target.value);changed()}}>
@@ -178,7 +183,7 @@ export default function PrivateJackpot() {
        onChange={e=>{setTarget(e.target.value);changed()}}/></label>
     </div>
     <div className="jackpot-paste-section">
-      <label htmlFor="private-jackpot-paste"><strong>{bookmakerOnly?'Paste today’s exact fixtures and picks (required)':'Paste today’s fixtures and exact picks (optional)'}</strong></label>
+      <label htmlFor="private-jackpot-paste"><strong>{bookmakerOnly?'Paste upcoming exact fixtures and picks (required)':'Paste fixture names and exact picks (optional)'}</strong></label>
       <p className="muted">Use <code>Home vs Away | Home win @1.65</code> or <code>Home vs Away | BTTS Yes @1.53</code>. If you supply picks, supply one on every line; the system keeps the exact markets instead of replacing them. Without picks, markets are selected automatically. Pasted @prices are never trusted.</p>
       <textarea id="private-jackpot-paste" rows={7} value={pasteText}
        placeholder={'Dinamo Zagreb vs NEC Nijmegen | Home win @1.71\nBraga vs Gent | Home win @1.81\nAjax vs Atalanta | BTTS Yes @1.63'}
@@ -215,7 +220,9 @@ export default function PrivateJackpot() {
       <button type="button" className="mini-button" onClick={()=>setConfirmReady(false)}>Cancel</button>
      </div></div>}
    </fieldset>
-   <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target, never includes Under-goals markets and never places a stake. A 100,000x ticket is extremely unlikely to win. The approved match universe is currently limited to a 7-day prepared board; more future dates require additional provider coverage.</div></div>
+   <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target, never includes Under-goals markets and never places a stake. A 100,000x ticket is extremely unlikely to win. {bookmakerOnly
+    ?'Bookmaker-only mode can assess upcoming fixtures within the next 72 hours; prices are indicative until full SportyBet readback. Every pasted pick must be verified.'
+    :'Model-approved match coverage is limited to the seven-day prepared board.'}</div></div>
    {!bookmakerOnly&&grade==='C'&&<div className="notice warning"><AlertTriangle size={17}/><div>Exploratory trust C includes less-supported predictions, not more reliable ones. The minimum model-probability and bookability gates still apply.</div></div>}
    {pasteReport&&<div className="jackpot-paste-results" role="status">
     <strong>{snapshotUnavailable
