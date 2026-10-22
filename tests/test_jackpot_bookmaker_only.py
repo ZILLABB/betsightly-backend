@@ -300,3 +300,37 @@ def test_bookmaker_mode_rejects_seven_day_window():
         bookmaker_paste_preview({
             **_args("Flamengo vs Estudiantes | Home win"), "horizon": "7_days"
         })
+
+
+def test_srl_and_borussia_club_matching_regression():
+    from growth.jackpot_bookmaker_only import _same_club
+    assert not _same_club("Torino", "Torino SRL")
+    assert not _same_club("Monza", "AC Monza SRL")
+    assert not _same_club("Brest", "Brest SRL")
+    assert not _same_club("Nice", "Nice SRL")
+    assert not _same_club("Alaves", "Alaves SRL")
+    assert not _same_club("Malaga CF", "Malaga CF SRL")
+    assert _same_club("Borussia Monchengladbach", "Borussia M´gladbach")
+    assert not _same_club("Borussia Dortmund", "Borussia M´gladbach")
+
+
+@pytest.mark.parametrize("home,away,price", [
+    ("Torino", "Monza", 1.29),
+    ("Brest", "Nice", 1.22),
+    ("Alaves", "Malaga CF", 1.33),
+])
+def test_real_fixture_selected_over_srl_when_both_exist(home,away,price):
+    real = _fixture(home, away, "real-event", price=price, market="over_1_5")
+    virtual = _fixture(home+" SRL", away+" SRL", "virtual-event",
+                       price=1.8, market="over_1_5")
+    future = int((NOW+timedelta(hours=25)).timestamp()*1000)
+    real["kickoff_ms"] = future
+    virtual["kickoff_ms"] = future-3600000
+    result = bookmaker_paste_preview({
+        **_args(f"{home} vs {away} | Over 1.5"), "horizon":"3_days"
+    }, board=_board(real, virtual), now=NOW)
+    assert result["matched_fixture_count"] == 1
+    assert result["unmatched_fixture_count"] == 0
+    assert result["matched"][0]["event_id"] == "real-event"
+    assert result["matched"][0]["odds"] == pytest.approx(price)
+    assert result["share_code"] is None
