@@ -119,10 +119,16 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
             "pasted_fixture_count": len(rows),
             "matched_fixture_count": 0,
             "unmatched_fixture_count": len(rows),
+            "source": "SPORTYBET_BOOKMAKER_ONLY_EXPERIMENT",
+            "exact_market_mode": True,
+            "requested_market_count": len(rows),
+            "prediction_quality_gate_applied": False,
             "full_ticket_complete": False,
             "partial_reference_odds": None,
+            "indicative_odds": None,
             "maximum_reference_odds": None,
             "distinct_fixture_count": 0,
+            "booking_code_created": False,
         }
     meta = sportybet.board_metadata(board)
     fixtures = [entry for _, entry in sportybet._board_entries(board)]
@@ -134,7 +140,12 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
             "pasted_fixture_count": len(rows),
             "matched_fixture_count": 0,
             "unmatched_fixture_count": len(rows),
+            "exact_market_mode": True,
+            "requested_market_count": len(rows),
             "full_ticket_complete": False,
+            "partial_reference_odds": None,
+            "maximum_reference_odds": None,
+            "booking_code_created": False,
         }
 
     # Include every name match for collision detection. Reject repeated event
