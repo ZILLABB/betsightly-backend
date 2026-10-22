@@ -1,6 +1,7 @@
 import {useRef, useState} from 'react';
 import {AlertTriangle, CheckCircle2, Clipboard, Loader2, RefreshCcw, ShieldCheck, Sparkles, Target} from 'lucide-react';
 import {api} from './api';
+import MarketExplorer from './MarketExplorer';
 
 type Candidate = {selection_id:string;match_id:string;home_team?:string;away_team?:string;league?:string;
   kickoff?:string;market:string;odds:number;trust_grade?:string;selection_probability?:number};
@@ -12,8 +13,8 @@ type Proposal = {status:string;reason?:string;selection_ids?:string[];selected_g
   estimated_conservative_hit_probability?:number;fixtures_evaluated?:number;
   estimated_all_leg_probability?:number;candidate_count?:number;distinct_fixture_count?:number;
   maximum_model_eligible_reference_odds?:number;fixtures_without_valid_probability?:number;portfolio_type?:string;};
-type PasteMatch = {line:number;home_team:string;away_team:string;matched_home?:string;matched_away?:string;reason?:string;suggested_match?:string};
-type PasteReport = Proposal & {pasted_fixture_count?:number;matched_fixture_count?:number;unmatched_fixture_count?:number;matched?:PasteMatch[];unmatched?:PasteMatch[];note?:string};
+type PasteMatch = {line:number;home_team:string;away_team:string;matched_home?:string;matched_away?:string;requested_market?:string|null;reason?:string;suggested_match?:string};
+type PasteReport = Proposal & {pasted_fixture_count?:number;matched_fixture_count?:number;unmatched_fixture_count?:number;matched?:PasteMatch[];unmatched?:PasteMatch[];note?:string;exact_market_mode?:boolean;requested_market_count?:number};
 type Booking = Proposal & {share_code?:string;share_url?:string;verified_odds?:number;
   readback_status?:string;expires_at?:string;priced_at?:string;
   publication_status?:string;proposal?:Proposal;invalid_selections?:any[]};
@@ -70,7 +71,7 @@ export default function PrivateJackpot() {
   if(busyLatch.current||!targetValid)return;
   if(!window.confirm(
     pasteText.trim()
-    ?'Match every pasted fixture to the approved SportyBet board and book only if none are missing and target '+decimal(amount,0)+'x is verified? No wager is placed.'
+    ?'Preserve exact markets on all pasted lines when supplied; book only if all are approved and target '+decimal(amount,0)+'x is verified? No wager is placed.'
     :'Automatically select eligible fixtures and request a verified SportyBet share code at or above '+decimal(amount,0)+'x? No stake is placed; this remains private.'
   ))return;
   busyLatch.current=true;setBusy('book');setMessage('');setBooking(null);setProposal(null);setPasteReport(null);
@@ -150,10 +151,10 @@ export default function PrivateJackpot() {
        onChange={e=>{setTarget(e.target.value);changed()}}/></label>
     </div>
     <div className="jackpot-paste-section">
-      <label htmlFor="private-jackpot-paste"><strong>Paste today's fixtures (optional)</strong></label>
-      <p className="muted">One match per line: <code>Home vs Away</code>. No manual market selection required. Names are checked against current approved SportyBet-bookable games; pasted odds are never trusted.</p>
+      <label htmlFor="private-jackpot-paste"><strong>Paste today's fixtures and exact picks (optional)</strong></label>
+      <p className="muted">Use <code>Home vs Away | Home win @1.65</code> or <code>Home vs Away | BTTS Yes @1.53</code>. If you supply picks, supply one on every line; the system keeps the exact markets instead of replacing them. Without picks, markets are selected automatically. Pasted @prices are never trusted.</p>
       <textarea id="private-jackpot-paste" rows={7} value={pasteText}
-       placeholder={'Dinamo Zagreb vs NEC Nijmegen\nBraga vs Gent\nAjax vs Atalanta'}
+       placeholder={'Dinamo Zagreb vs NEC Nijmegen | Home win @1.71\nBraga vs Gent | Home win @1.81\nAjax vs Atalanta | BTTS Yes @1.63'}
        onChange={e=>{setPasteText(e.target.value);changed()}} maxLength={9000}/>
       {pasteText.trim()&&<button className="mini-button" type="button" onClick={()=>{setPasteText('');changed()}}>Clear fixture list · use full BetSightly pool</button>}
     </div>
@@ -177,18 +178,19 @@ export default function PrivateJackpot() {
    <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target, never includes Under-goals markets and never places a stake. A 100,000x ticket is extremely unlikely to win. The approved match universe is currently limited to a 7-day prepared board; more future dates require additional provider coverage.</div></div>
    {grade==='C'&&<div className="notice warning"><AlertTriangle size={17}/><div>Exploratory trust C includes less-supported predictions, not more reliable ones. The minimum model-probability and bookability gates still apply.</div></div>}
    {pasteReport&&<div className="jackpot-paste-results" role="status">
-    <strong>Fixture matching: {pasteReport.matched_fixture_count||0} accepted / {pasteReport.pasted_fixture_count||0} pasted</strong>
+    <strong>Fixture matching: {pasteReport.matched_fixture_count||0} accepted / {pasteReport.pasted_fixture_count||0} pasted{pasteReport.exact_market_mode?' · Exact picks preserved':' · Picks auto-selected'}</strong>
     {(pasteReport.unmatched_fixture_count||0)>0&&<>
      <div className="notice warning"><AlertTriangle size={17}/><div>{pasteReport.unmatched_fixture_count} pasted fixtures are not fully available on the approved model and bookmaker board. No missing fixture will be silently replaced.</div></div>
      <div className="jackpot-ticket-list">{(pasteReport.unmatched||[]).map(item=>
       <div className="jackpot-ticket-item" key={item.line}>
-       <span>{item.line}. {item.home_team} vs {item.away_team}
+       <span>{item.line}. {item.home_team} vs {item.away_team}{item.requested_market?' | '+item.requested_market.replaceAll('_',' '):''}
        <small>{item.reason?.replaceAll('_',' ')} {item.suggested_match?' · Possible name: '+item.suggested_match:''}</small></span>
       </div>)}</div>
     </>}
    </div>}
    {message&&<div className="notice warning" role="alert"><AlertTriangle size={17}/><div>{message}</div></div>}
   </section>
+  <MarketExplorer preferences={preferences}/>
   {(board?.status==='success'||displayed)&&<section className="panel">
    <header className="panel-head"><div><h2>Feasibility & match coverage</h2><p>Shows available fixtures, not duplicate markets counted as matches.</p></div></header>
    <div className="jackpot-feasibility">

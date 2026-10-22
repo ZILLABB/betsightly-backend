@@ -241,7 +241,7 @@ test('pasted fixture preview and bookmaker booking are signed-admin-only POST ro
  const previous=globalThis.fetch;
  globalThis.fetch=()=>{throw Error('request should have been rejected before upstream')};
  try{
-  for(const endpoint of ['private-jackpot/paste-preview','private-jackpot/paste-book']){
+  for(const endpoint of ['private-jackpot/paste-preview','private-jackpot/paste-book','private-jackpot/market-catalog']){
    const forbidden=response();await handler(req(endpoint,'GET'),forbidden);
    assert.equal(forbidden.code,404);
    const hostile=response();await handler(req(endpoint,'POST',{fixtures_text:'A vs B'},'https://malicious.invalid'),hostile);

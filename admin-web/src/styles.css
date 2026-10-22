@@ -52,3 +52,15 @@
 .jackpot-paste-section textarea:focus{outline:2px solid #3b94c9;outline-offset:2px}
 .jackpot-paste-results{margin:12px 0;display:grid;gap:11px}
 .jackpot-paste-results strong{font-size:13px}
+
+/* Complete mapped football-market explorer, gated by private signed admin. */
+.jackpot-market-search{display:grid;gap:6px;margin-top:12px}
+.jackpot-market-search input{max-width:360px;padding:10px 12px;border:1px solid #385d7e;border-radius:8px;color:inherit;background:transparent;font:inherit}
+.jackpot-market-groups{display:grid;gap:20px;margin-top:15px}
+.jackpot-market-groups h3{font-size:15px;margin:8px 0}
+.jackpot-market-option{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(135,168,198,.2)}
+.jackpot-market-option strong{display:block;font-size:14px}
+.jackpot-market-option small{display:block;font-size:12px;opacity:.8;margin-top:2px}
+.jackpot-market-inactive{font-size:12px;opacity:.55}
+.jackpot-market-option .mini-button{white-space:nowrap}
+@media(max-width:520px){.jackpot-market-option{align-items:flex-start;flex-direction:column}}

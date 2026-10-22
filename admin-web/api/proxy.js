@@ -10,7 +10,7 @@ const POST = new Set([
  'homepage-campaign','settings','referrals',
  'private-jackpot/candidates','private-jackpot/book',
  'private-jackpot/optimize','private-jackpot/auto-book',
- 'private-jackpot/paste-preview','private-jackpot/paste-book'
+ 'private-jackpot/paste-preview','private-jackpot/paste-book','private-jackpot/market-catalog'
 ]);
 function allowed(method, route) {
  return method === 'GET' ? GET.has(route) :
