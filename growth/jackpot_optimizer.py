@@ -37,7 +37,8 @@ def _unique_fixtures(candidates: list[dict]) -> dict[str, list[dict]]:
         odds = float(candidate.get("odds") or 0)
         if not key or not isfinite(odds) or odds <= 1:
             continue
-        if str(candidate.get("market") or "").startswith("under_"):
+        if (str(candidate.get("market") or "").startswith("under_") or
+                "_under_" in str(candidate.get("market") or "")):
             continue
         if not candidate.get("selection_id"):
             continue
@@ -54,10 +55,13 @@ def capacity(candidates: list[dict], limit: int = MAX_LEGS) -> dict:
     groups = _unique_fixtures(candidates)
     maximums = sorted((max(float(r["odds"]) for r in rows) for rows in groups.values()), reverse=True)
     chosen = maximums[:limit]
+    # Avoid non-finite reference ceilings in JSON for unusually large boards.
+    ceiling_log = sum(log(value) for value in chosen)
+    ceiling = round(exp(ceiling_log), 3) if ceiling_log < log(1e12) else 1e12
     return {
         "distinct_fixture_count": len(groups),
         "maximum_legs_available": min(len(groups), limit),
-        "maximum_reference_odds": round(prod(chosen), 3) if chosen else 1,
+        "maximum_reference_odds": ceiling if chosen else 1,
         "upper_bound_explanation": (
             "Mathematical upper bound from highest listed price per fixture "
             "(max 50 legs); NOT a verified or probability-optimized booking."
