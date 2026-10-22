@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from math import isfinite, prod
 from difflib import SequenceMatcher
 
 MAX_LINES = 80
@@ -15,6 +16,19 @@ MAX_TEXT_LENGTH = 9000
 _VS = re.compile(r"\s+(?:vs\.?|v\.?)\s+", re.I)
 _PREFIX = re.compile(r"^\s*(?:\d+[.)-]\s*|[-*•]\s*)")
 _STOP = {"fc", "afc", "sc", "sk", "nk", "gnk", "fk", "cf", "club", "the"}
+_MARKETS = {
+    "1": "home_win", "home": "home_win", "home win": "home_win",
+    "2": "away_win", "away": "away_win", "away win": "away_win",
+    "x": "draw", "draw": "draw",
+    "btts yes": "btts_yes", "gg yes": "btts_yes",
+    "both teams to score yes": "btts_yes",
+    "over 1.5": "over_1_5", "over 2.5": "over_2_5",
+    "over 3.5": "over_3_5", "1x": "home_or_draw",
+    "home or draw": "home_or_draw", "x2": "away_or_draw",
+    "away or draw": "away_or_draw",
+    "dnb home": "dnb_home", "dnb away": "dnb_away",
+}
+_PRICE = re.compile(r"\\s*@\\s*\\d+(?:\\.\\d+)?\\s*$")
 
 
 def _team(value: str) -> str:
@@ -38,10 +52,22 @@ def parse_fixture_lines(value: str) -> list[dict]:
     seen = set()
     for index, line in enumerate(lines, 1):
         cleaned = _PREFIX.sub("", line).strip()
-        # No invented odds or market conversion. A '|' suffix is ignored only
-        # if the line still has exactly one Home vs Away separator.
-        cleaned = cleaned.split("|", 1)[0].strip()
-        parts = _VS.split(cleaned)
+        sides = cleaned.split("|")
+        if len(sides) > 2:
+            raise ValueError(f"Line {index}: use at most one '|' separator.")
+        fixture_text = sides[0].strip()
+        requested_market = None
+        if len(sides) == 2:
+            market_label = _PRICE.sub("", sides[1]).lower().strip()
+            market_label = " ".join(market_label.split())
+            requested_market = _MARKETS.get(market_label)
+            if not requested_market:
+                raise ValueError(
+                    f"Line {index}: unknown pick '{market_label}'. "
+                    "Use Home win, Away win, BTTS Yes, Draw, Over 1.5, "
+                    "Over 2.5, Over 3.5, 1X, X2, DNB Home or DNB Away."
+                )
+        parts = _VS.split(fixture_text)
         if len(parts) != 2 or not all(2 <= len(p.strip()) <= 90 for p in parts):
             raise ValueError(f"Line {index}: expected 'Home vs Away' (no odds required).")
         home, away = (p.strip() for p in parts)
@@ -51,7 +77,8 @@ def parse_fixture_lines(value: str) -> list[dict]:
         if identity in seen:
             raise ValueError(f"Line {index}: duplicate fixture.")
         seen.add(identity)
-        parsed.append({"line": index, "home_team": home, "away_team": away})
+        parsed.append({"line": index, "home_team": home, "away_team": away,
+                       "requested_market": requested_market})
     return parsed
 
 
@@ -120,8 +147,69 @@ def pasted_preview(payload: dict) -> dict:
     qualifying = [row for row in board["candidates"] if row.get("match_id") in fixture_ids]
     target = float(payload.get("target_odds") or 100000)
     max_legs = int(payload.get("max_legs") or 50)
-    proposal = optimize(qualifying, target, max_legs)
     choices = {row["selection_id"]: row for row in qualifying}
+    explicit_count = sum(bool(row["requested_market"]) for row in items)
+    if explicit_count and explicit_count != len(items):
+        raise ValueError(
+            "Every pasted line needs a market after |, or none should. "
+            "Mixing exact selections with automatic markets is not supported."
+        )
+    if explicit_count:
+        picked = []
+        not_available = []
+        markets_by_fixture = {
+            (str(row["match_id"]), str(row["market"])): row for row in qualifying
+        }
+        for matched in result["matched"]:
+            choice = markets_by_fixture.get(
+                (matched["match_id"], matched["requested_market"])
+            )
+            if choice is None:
+                not_available.append({
+                    **matched, "reason": "REQUESTED_MARKET_NOT_APPROVED",
+                    "suggested_match": None,
+                })
+            else:
+                picked.append(choice)
+        result["unmatched"].extend(not_available)
+        # No auto-swapping markets or dropping a pick to reach target.
+        result["matched"] = [
+            row for row in result["matched"]
+            if all(row["line"] != bad["line"] for bad in not_available)
+        ]
+        total = prod(float(row["odds"]) for row in picked)
+        available = not result["unmatched"] and len(picked) == len(items)
+        within_limit = len(picked) <= max_legs
+        proposal = {
+            "status": (
+                "UNMATCHED_FIXTURES" if not available else
+                "TOO_MANY_LEGS" if not within_limit else
+                "BELOW_TARGET" if total < target else
+                "PROPOSED_NOT_BOOKED"
+            ),
+            "reason": (
+                f"{len(result['unmatched'])} exact fixtures/markets are "
+                "unavailable or unapproved. No substitutions or code requested."
+                if not available else
+                f"Exact selections require {len(picked)} legs; max_legs is {max_legs}."
+                if not within_limit else
+                f"Exact approved selections total {total:,.2f}x, below {target:,.2f}x."
+                if total < target else
+                "Exact pasted picks retained; confirmation still requires full "
+                "SportyBet readback of all selections at or above the odds target."
+            ),
+            "selection_ids": ([str(row["selection_id"]) for row in picked]
+                              if available and within_limit else []),
+            "legs": len(picked),
+            "indicative_odds": round(total, 3),
+            "maximum_reference_odds": round(total, 3),
+            "maximum_model_eligible_reference_odds": round(total, 3),
+            "portfolio_type": "USER_SUPPLIED_EXACT_MARKETS",
+            "optimization_method": "exact_pasted_market_match",
+            "booking_code_created": False,
+        }
+    else:
+        proposal = optimize(qualifying, target, max_legs)
     return {
         **proposal,
         "matched": result["matched"],
@@ -131,12 +219,16 @@ def pasted_preview(payload: dict) -> dict:
         "unmatched_fixture_count": len(result["unmatched"]),
         "candidate_count": len(qualifying),
         "selected_games": [choices[s] for s in proposal.get("selection_ids") or [] if s in choices],
-        "source": "PASTED_NAMES_MATCHED_TO_APPROVED_BOARD",
+        "source": ("PASTED_EXACT_MARKETS" if explicit_count else
+                   "PASTED_NAMES_MATCHED_TO_APPROVED_BOARD"),
+        "exact_market_mode": bool(explicit_count),
+        "requested_market_count": explicit_count,
         "bookmaker_code_created": False,
         "share_code": None,
         "note": (
-            "Pasting does NOT add unscored fixtures or invent bookmaker markets; "
-            "unmatched names need feed/model coverage before inclusion."
+            "Exact pasted markets are never swapped. Pasting cannot add "
+            "unscored fixtures or invent bookmaker prices; missing or "
+            "unapproved matches remain unavailable."
         ),
     }
 
