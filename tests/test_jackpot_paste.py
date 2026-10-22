@@ -82,3 +82,80 @@ def test_no_silent_dropping_of_pasted_fixtures_before_booking(monkeypatch):
     result = pasted_auto_book({"fixtures_text": "Missing vs Unknown"})
     assert result["status"] == "UNMATCHED_FIXTURES"
     assert result["share_code"] is None
+
+
+def test_explicit_markets_and_reference_prices_are_parsed_without_trusting_price():
+    lines = parse_fixture_lines(
+        "1. Besiktas vs Crystal Palace | BTTS Yes @1.53\\n"
+        "2. Braga vs Gent | Home win @1.81\\n"
+        "3. Sturm Graz vs Marseille | 2 @2.14"
+    )
+    assert [x["requested_market"] for x in lines] == [
+        "btts_yes", "home_win", "away_win"
+    ]
+    assert "odds" not in lines[0]
+
+
+def test_unrecognized_market_is_rejected_not_silently_ignored():
+    with pytest.raises(ValueError, match="unknown pick"):
+        parse_fixture_lines("Ajax vs Atalanta | BTTS No @2.1")
+
+
+def test_exact_picks_preserved_when_bookable(monkeypatch):
+    import growth.private_jackpot as jackpot
+    monkeypatch.setattr(jackpot, "candidate_board", lambda _:{
+        "status": "success", "candidates": [
+            {"match_id": "a", "selection_id": "a:btts_yes",
+             "home_team": "Besiktas", "away_team": "Crystal Palace",
+             "market": "btts_yes", "odds": 1.53,
+             "selection_probability": .70},
+            {"match_id": "a", "selection_id": "a:home_win",
+             "home_team": "Besiktas", "away_team": "Crystal Palace",
+             "market": "home_win", "odds": 2.20,
+             "selection_probability": .70},
+            {"match_id": "b", "selection_id": "b:home_win",
+             "home_team": "Braga", "away_team": "Gent",
+             "market": "home_win", "odds": 1.81,
+             "selection_probability": .70},
+        ]})
+    result = pasted_preview({
+        "fixtures_text": ("Besiktas vs Crystal Palace | BTTS Yes @1.53\\n"
+                          "Braga vs Gent | Home win @1.81"),
+        "target_odds": 2.0, "max_legs": 2,
+    })
+    assert result["status"] == "PROPOSED_NOT_BOOKED"
+    assert result["selection_ids"] == ["a:btts_yes", "b:home_win"]
+    assert result["portfolio_type"] == "USER_SUPPLIED_EXACT_MARKETS"
+    assert result["exact_market_mode"] is True
+    assert result["indicative_odds"] == pytest.approx(2.769, abs=1e-3)
+
+
+def test_exact_market_unavailable_returns_diagnostic_and_never_substitutes(monkeypatch):
+    import growth.private_jackpot as jackpot
+    monkeypatch.setattr(jackpot, "candidate_board", lambda _:{
+        "status": "success", "candidates": [
+            {"match_id": "a", "selection_id": "a:home_win",
+             "home_team": "Besiktas", "away_team": "Crystal Palace",
+             "market": "home_win", "odds": 2.20,
+             "selection_probability": .70},
+        ]})
+    result = pasted_preview({
+        "fixtures_text": "Besiktas vs Crystal Palace | BTTS Yes @1.53",
+        "target_odds": 2.0, "max_legs": 2,
+    })
+    assert result["status"] == "UNMATCHED_FIXTURES"
+    assert not result["selection_ids"]
+    assert result["unmatched"][0]["reason"] == "REQUESTED_MARKET_NOT_APPROVED"
+    assert result["share_code"] is None
+
+
+def test_mixed_exact_and_automatic_matches_are_rejected(monkeypatch):
+    import growth.private_jackpot as jackpot
+    monkeypatch.setattr(jackpot, "candidate_board", lambda _:{
+        "status": "success", "candidates": []})
+    with pytest.raises(ValueError, match="Every pasted line"):
+        pasted_preview({
+            "fixtures_text": ("Besiktas vs Crystal Palace | BTTS Yes @1.53\\n"
+                              "Braga vs Gent"),
+            "target_odds": 2.0, "max_legs": 2,
+        })
