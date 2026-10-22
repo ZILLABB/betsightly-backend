@@ -45,6 +45,11 @@ def _identity(name: str) -> str:
 
 
 def _same_club(left: str, right: str) -> bool:
+    # SRL fixtures are simulated events, not senior professional matches.
+    # Check raw names: existing cache metadata does not classify them.
+    import re
+    if any(re.search(r"\bsrl\b", name, flags=re.I) for name in (left,right)):
+        return False
     # Never confuse a senior club with its U19, reserves or women's side.
     if sportybet._squad(left) != sportybet._squad(right):
         return False
