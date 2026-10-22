@@ -71,12 +71,12 @@ def _competition_matches_request(entry: dict, home: str, away: str) -> bool:
     Do not treat competition words as club aliases or silently choose a side.
     """
     competition = str(entry.get("competition") or "").casefold()
-    if re.search(r"\\b(?:srl|virtual|simulated|simulation)\\b", competition):
+    if re.search(r"\b(?:srl|virtual|simulated|simulation)\b", competition):
         return False
     requested_senior = not sportybet._squad(home) and not sportybet._squad(away)
     if requested_senior and re.search(
-        r"\\b(?:u(?:17|18|19|20|21|23)|under[- ]?(?:17|18|19|20|21|23)|"
-        r"paf ligi|reserve(?:s)?|academy|youth|junior|women|ladies)\\b",
+        r"\b(?:u(?:17|18|19|20|21|23)|under[- ]?(?:17|18|19|20|21|23)|"
+        r"paf ligi|reserve(?:s)?|academy|youth|junior|women|ladies)\b",
         competition,
     ):
         return False
