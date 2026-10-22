@@ -130,12 +130,12 @@ def pasted_preview(payload: dict) -> dict:
     from growth.private_jackpot import candidate_board
     from growth.jackpot_optimizer import optimize
     items = parse_fixture_lines(str(payload.get("fixtures_text") or ""))
-    board = candidate_board(payload)
-    if board.get("status") != "success":
-        return {**board, "matched": [], "unmatched": [], "share_code": None}
     if payload.get("selection_mode") == "bookmaker_only":
         from growth.jackpot_bookmaker_only import bookmaker_paste_preview
         return bookmaker_paste_preview(payload)
+    board = candidate_board(payload)
+    if board.get("status") != "success":
+        return {**board, "matched": [], "unmatched": [], "share_code": None}
     result = match_fixture_lines(items, board.get("candidates") or [])
     fixture_ids = {row["match_id"] for row in result["matched"]}
     qualifying = [row for row in board["candidates"] if row.get("match_id") in fixture_ids]
