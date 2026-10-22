@@ -81,6 +81,7 @@ export default function PrivateJackpot() {
     pasted?{...preferences(),fixtures_text:pasteText}:preferences(),'POST'
    );
    if(result.pasted_preview)setPasteReport(result.pasted_preview);
+   else if(pasted)setPasteReport(result as PasteReport);
    setBooking(result);
    if(result.proposal)setProposal(result.proposal);
    else if(result.pasted_preview)setProposal(result.pasted_preview);
