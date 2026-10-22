@@ -34,3 +34,14 @@
 .jackpot-code{border:1px solid #467eaa;padding:15px;border-radius:13px;margin-top:15px;background:#0c2a45;display:grid;gap:10px}
 .jackpot-code p{display:flex;align-items:center;gap:8px;margin:0;color:#b9e5ff}.jackpot-code strong{font-size:30px;letter-spacing:.08em}.jackpot-code small{font-size:10px;color:#88b1d0}
 @media(max-width:900px){.jackpot-controls{grid-template-columns:1fr}.jackpot-layout{grid-template-columns:1fr}}
+
+/* Automated odds generator: filters, feasible market coverage, and presets. */
+.jackpot-presets{display:flex;flex-wrap:wrap;gap:7px;margin:5px 0 15px}
+.jackpot-preset-active{background:var(--brand,#2868a0)!important;color:#fff!important;border-color:var(--brand,#2868a0)!important}
+.jackpot-feasibility{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:10px 0 18px}
+.jackpot-feasibility>div{border:1px solid #385874;border-radius:10px;padding:12px;display:grid;gap:6px;min-width:0}
+.jackpot-feasibility small{font-size:11px;color:#7d9fb8;line-height:1.45}
+.jackpot-feasibility strong{font-size:18px;color:#bedefa;overflow-wrap:anywhere}
+.jackpot-feasibility p,.jackpot-feasibility>small{grid-column:1/-1;margin:0;line-height:1.6}
+@media(max-width:900px){.jackpot-feasibility{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.jackpot-feasibility{grid-template-columns:1fr}}
