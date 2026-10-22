@@ -222,7 +222,7 @@ def bookmaker_paste_book(payload: dict) -> dict:
     # One snapshot and one validation pass. The previous implementation ran
     # the fixture discovery twice, which amplified expensive bookmaker/cache
     # lookups on every user click and could produce inconsistent snapshots.
-    board = sportybet.cached_board_for_admin()
+    board = sportybet.cached_board_for_admin() or {}
     verified = bookmaker_paste_preview(payload, board=board)
     if verified["status"] != "PROPOSED_NOT_BOOKED":
         return {**verified, "share_code": None}
