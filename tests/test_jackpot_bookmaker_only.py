@@ -300,3 +300,15 @@ def test_bookmaker_mode_rejects_seven_day_window():
         bookmaker_paste_preview({
             **_args("Flamengo vs Estudiantes | Home win"), "horizon": "7_days"
         })
+
+
+def test_srl_and_borussia_club_matching_regression():
+    from growth.jackpot_bookmaker_only import _same_club
+    assert not _same_club("Torino", "Torino SRL")
+    assert not _same_club("Monza", "AC Monza SRL")
+    assert not _same_club("Brest", "Brest SRL")
+    assert not _same_club("Nice", "Nice SRL")
+    assert not _same_club("Alaves", "Alaves SRL")
+    assert not _same_club("Malaga CF", "Malaga CF SRL")
+    assert _same_club("Borussia Monchengladbach", "Borussia M´gladbach")
+    assert not _same_club("Borussia Dortmund", "Borussia M´gladbach")
