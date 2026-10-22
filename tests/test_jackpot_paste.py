@@ -86,8 +86,8 @@ def test_no_silent_dropping_of_pasted_fixtures_before_booking(monkeypatch):
 
 def test_explicit_markets_and_reference_prices_are_parsed_without_trusting_price():
     lines = parse_fixture_lines(
-        "1. Besiktas vs Crystal Palace | BTTS Yes @1.53\\n"
-        "2. Braga vs Gent | Home win @1.81\\n"
+        "1. Besiktas vs Crystal Palace | BTTS Yes @1.53\n"
+        "2. Braga vs Gent | Home win @1.81\n"
         "3. Sturm Graz vs Marseille | 2 @2.14"
     )
     assert [x["requested_market"] for x in lines] == [
@@ -98,7 +98,7 @@ def test_explicit_markets_and_reference_prices_are_parsed_without_trusting_price
 
 def test_unrecognized_market_is_rejected_not_silently_ignored():
     with pytest.raises(ValueError, match="unknown or unsupported"):
-        parse_fixture_lines("Ajax vs Atalanta | BTTS No @2.1")
+        parse_fixture_lines("Ajax vs Atalanta | Correct score 6:2 @2.1")
 
 
 def test_exact_picks_preserved_when_bookable(monkeypatch):
@@ -119,7 +119,7 @@ def test_exact_picks_preserved_when_bookable(monkeypatch):
              "selection_probability": .70},
         ]})
     result = pasted_preview({
-        "fixtures_text": ("Besiktas vs Crystal Palace | BTTS Yes @1.53\\n"
+        "fixtures_text": ("Besiktas vs Crystal Palace | BTTS Yes @1.53\n"
                           "Braga vs Gent | Home win @1.81"),
         "target_odds": 2.0, "max_legs": 2,
     })
@@ -155,7 +155,7 @@ def test_mixed_exact_and_automatic_matches_are_rejected(monkeypatch):
         "status": "success", "candidates": []})
     with pytest.raises(ValueError, match="Every pasted line"):
         pasted_preview({
-            "fixtures_text": ("Besiktas vs Crystal Palace | BTTS Yes @1.53\\n"
+            "fixtures_text": ("Besiktas vs Crystal Palace | BTTS Yes @1.53\n"
                               "Braga vs Gent"),
             "target_odds": 2.0, "max_legs": 2,
         })
