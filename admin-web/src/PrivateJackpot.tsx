@@ -10,7 +10,8 @@ type Board = {status:string;reason?:string;candidate_count?:number;distinct_fixt
 type Proposal = {status:string;reason?:string;selection_ids?:string[];selected_games?:Candidate[];legs?:number;
   indicative_odds?:number;target_odds?:number;maximum_reference_odds?:number;
   estimated_conservative_hit_probability?:number;fixtures_evaluated?:number;
-  estimated_all_leg_probability?:number;candidate_count?:number;distinct_fixture_count?:number};
+  estimated_all_leg_probability?:number;candidate_count?:number;distinct_fixture_count?:number;
+  maximum_model_eligible_reference_odds?:number;fixtures_without_valid_probability?:number;portfolio_type?:string;};
 type Booking = Proposal & {share_code?:string;share_url?:string;verified_odds?:number;
   readback_status?:string;expires_at?:string;priced_at?:string;
   publication_status?:string;proposal?:Proposal;invalid_selections?:any[]};
@@ -78,7 +79,10 @@ export default function PrivateJackpot() {
  const selectedGames=displayed?.selected_games||selectedIds.map(key=>candidates.find(c=>c.selection_id===key)).filter((x):x is Candidate=>Boolean(x));
  const optimisticCeiling=board?.maximum_reference_odds;
  const currentCeiling=displayed?.maximum_reference_odds??optimisticCeiling;
+ const modelCeiling=displayed?.maximum_model_eligible_reference_odds;
  const impossible=Number.isFinite(currentCeiling)&&Number(currentCeiling)<amount;
+ const modelInsufficient=Number.isFinite(modelCeiling)&&Number(modelCeiling)<amount;
+ const experimental=displayed?.portfolio_type==='HIGH_RISK_CEILING_EXPERIMENT';
  const trustworthy=(booking?.status==='success'&&booking.share_code&&booking.readback_status==='PASSED');
  return <>
   <div className="page-heading"><div><span className="eyebrow">PRIVATE · AUTOMATIC · SPORTYBET VERIFIED</span>
@@ -153,9 +157,14 @@ export default function PrivateJackpot() {
    <div className="jackpot-feasibility">
     <div><small>Approved markets</small><strong>{decimal(board?.candidate_count??displayed?.candidate_count??0,0)}</strong></div>
     <div><small>Distinct fixtures</small><strong>{decimal(board?.distinct_fixture_count??displayed?.distinct_fixture_count??0,0)}</strong></div>
-    <div><small>Max reference odds</small><strong>{currentCeiling==null?'—':decimal(Number(currentCeiling))+'x'}</strong></div>
+    <div><small>Raw price ceiling</small><strong>{currentCeiling==null?'—':decimal(Number(currentCeiling))+'x'}</strong></div>
+    {modelCeiling!=null&&<div><small>Model-eligible ceiling</small><strong>{decimal(Number(modelCeiling))}x</strong></div>}
     <div><small>Required target</small><strong>{decimal(amount)}x</strong></div>
-    <p>{impossible?'NO QUALIFYING TICKET: even taking the highest priced approved market from every different fixture does not achieve the target. Widen your date window, explore additional approved markets, or choose a lower odds target.':'The mathematical ceiling is not a prediction or confirmation. The optimizer still needs to find the strongest evidence-supported ticket.'}</p>
+    <p>{impossible
+     ?'NOT POSSIBLE FROM CURRENT PRICES: even taking the highest listed market from each fixture cannot reach this target.'
+     :modelInsufficient
+     ?'INSUFFICIENT MODEL EVIDENCE: prices appear to reach the target, but some selections do not have valid model reliability. No qualified ticket is available.'
+     :'Reference odds alone do not guarantee bookmaker acceptance or good predictions. Model-eligible odds are assessed separately.'}</p>
    </div>
    {board?.available_leagues?.length?<>
     <button className="mini-button" type="button" onClick={()=>setExpand(x=>!x)} aria-expanded={expand}>{expand?'Hide':'Show'} {board.available_leagues.length} competitions and fixture options</button>
@@ -170,7 +179,12 @@ export default function PrivateJackpot() {
   {displayed?.status==='PROPOSED_NOT_BOOKED'&&<section className="panel">
    <header className="panel-head"><div><h2>Automatic selection proposal</h2>
     <p>{displayed.legs} distinct fixtures · estimated reference odds {decimal(Number(displayed.indicative_odds||0))}x · no booking code yet.</p></div><CheckCircle2 size={20}/></header>
-   <div className="notice info"><Target size={17}/><div>This is a bounded confidence-first model proposal, not a guaranteed optimum. You can generate a code using the automatic verification button above without selecting anything manually.</div></div>
+   <div className={experimental?'notice warning':'notice info'}>
+     {experimental?<AlertTriangle size={17}/>:<Target size={17}/>}
+     <div>{experimental
+      ?'HIGH-RISK CEILING EXPERIMENT: the normal probability search did not find a qualifying ticket. This fallback takes the highest-priced model-eligible market from each chosen match, not the most reliable combination. It is not a recommendation.'
+      :'This is a bounded confidence-first model proposal, not a guaranteed optimum.'} No bookmaker code exists until verification succeeds.</div>
+   </div>
    {selectedGames.length>0&&<div className="jackpot-ticket-list">{selectedGames.map((game,i)=><div className="jackpot-ticket-item" key={game.selection_id}><span>{i+1}. {game.home_team} vs {game.away_team}<small>{game.market.replaceAll('_',' ')} · {game.trust_grade||'—'} trust</small></span><strong>{decimal(game.odds)}x</strong></div>)}</div>}
    {selectedGames.length===0&&<p className="muted">To see individual match selections, select “Check available games” after this proposal. You never have to make the selections yourself.</p>}
   </section>}
