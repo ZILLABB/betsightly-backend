@@ -117,6 +117,22 @@ def optimize(candidates: list[dict], target: float, limit: int = MAX_LEGS) -> di
             "selection_ids": [],
         }
 
+    from growth.jackpot_feasibility import model_ceiling
+    actual_ceiling = model_ceiling(candidates, limit)
+    overview["maximum_model_eligible_reference_odds"] = round(actual_ceiling["odds"], 3)
+    overview["model_eligible_fixture_count"] = actual_ceiling["eligible_fixtures"]
+    overview["fixtures_without_valid_probability"] = actual_ceiling["omitted_fixtures"]
+    if log(max(actual_ceiling["odds"], 1)) + 1e-10 < log(target):
+        return {
+            **overview,
+            "status": "INSUFFICIENT_MODEL_EVIDENCE",
+            "reason": (
+                "Raw prices reach the target, but the model-eligible "
+                "markets do not. No code was requested."
+            ),
+            "selection_ids": [],
+        }
+
     groups = _unique_fixtures(candidates)
     # The diagnostic ceiling above uses the whole board. The following
     # approximation examines a bounded, explicitly reported 300 fixtures.
@@ -152,17 +168,27 @@ def optimize(candidates: list[dict], target: float, limit: int = MAX_LEGS) -> di
         if 1 <= count <= limit and state[1] + 1e-10 >= target_log
     ]
     if not feasible:
+        # An odds-bucket may suppress a near-ceiling path. Construct the
+        # actual highest-priced model-eligible combination as a last resort.
         return {
             **overview,
-            "status": "UNREACHABLE_APPROVED",
-            "reason": (
-                "The mathematical ceiling permits this target, but this bounded "
-                "confidence optimizer could not produce a qualifying portfolio. "
-                "No guesswork or bookmaker booking was attempted."
+            "status": "PROPOSED_NOT_BOOKED",
+            "portfolio_type": "HIGH_RISK_CEILING_EXPERIMENT",
+            "optimization_method": "exact_model_eligible_ceiling",
+            "selection_ids": actual_ceiling["ids"],
+            "legs": len(actual_ceiling["ids"]),
+            "indicative_odds": round(actual_ceiling["odds"], 3),
+            "estimated_conservative_hit_probability": round(
+                exp(actual_ceiling["log_probability"]), 12
             ),
-            "selection_ids": [],
             "fixtures_evaluated": len(prepared),
             "fixtures_with_model_probability": count_all,
+            "reason": (
+                "The bounded confidence search missed this narrow target. "
+                "This highest-price combination is a high-risk experiment, "
+                "not a reliability recommendation. Exact bookmaker verification "
+                "is still required."
+            ),
         }
     best = max(feasible, key=lambda item: (item[0], -len(item[2]), -item[1]))
     proposed = exp(best[1])
