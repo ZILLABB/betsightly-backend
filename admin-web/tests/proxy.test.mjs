@@ -286,8 +286,8 @@ test('private jackpot 502 from Render returns small actionable JSON, not HTML',a
    },'https://'+HOST),out);
    assert.equal(out.code,502);
    assert.match(out.headers['content-type']||'application/json',/json/i);
-   assert.match(JSON.parse(out.body).detail,/backend returned HTTP 502/i);
-   assert.ok(out.body.length<600);
+   assert.match((typeof out.body==='string'?JSON.parse(out.body):out.body).detail,/backend returned HTTP 502/i);
+   assert.ok(JSON.stringify(out.body).length<600);
  }finally{globalThis.fetch=oldFetch;console.error=oldLog;}
 });
 
@@ -302,6 +302,6 @@ test('private jackpot network failures never trigger automatic POST retries',asy
   },'https://'+HOST),out);
   assert.equal(count,1);
   assert.equal(out.code,502);
-  assert.match(JSON.parse(out.body).detail,/Do not repeat Generate Code/i);
+  assert.match((typeof out.body==='string'?JSON.parse(out.body):out.body).detail,/Do not repeat Generate Code/i);
  }finally{globalThis.fetch=oldFetch;console.error=oldLog}
 });
