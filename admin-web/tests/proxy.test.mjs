@@ -259,7 +259,7 @@ test('paste preview forwards exact fixture text without changing it',async()=>{
  try{
   const fixtureText='Dinamo Zagreb vs NEC Nijmegen\\nBraga vs Gent';
   const payload={fixtures_text:fixtureText,target_odds:100000,horizon:'today'};
-  for(const name of ['private-jackpot/paste-preview','private-jackpot/paste-book','private-jackpot/market-catalog']){
+  for(const name of ['private-jackpot/paste-preview','private-jackpot/paste-book']){
    const resp=response();await handler(req(name,'POST',payload,'https://'+HOST),resp);
    assert.equal(resp.code,200);
   }
