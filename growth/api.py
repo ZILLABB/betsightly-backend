@@ -113,6 +113,11 @@ def private_jackpot_market_catalog(body: PrivateJackpotFilters):
 
 class PrivateJackpotPasteRequest(PrivateJackpotOptimizeRequest):
     fixtures_text: str = Field(min_length=5, max_length=9000)
+    # Admin-only, opt-in. The ordinary scored prediction path stays unchanged.
+    selection_mode: str = Field(
+        default="approved_model",
+        pattern="^(approved_model|bookmaker_only)$",
+    )
 
 
 @router.post("/private-jackpot/paste-preview", dependencies=[Depends(require_admin)])
