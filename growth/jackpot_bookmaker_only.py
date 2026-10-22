@@ -26,6 +26,7 @@ _EQUIVALENT_CLUB_NAMES = {
     "st truidense": "sint truidense",
     "sint truidense vv": "sint truidense",
     "st truidense vv": "sint truidense",
+    "st truidense": "sint truidense",
     "egnatia rrogozhine": "egnatia",
     "hajduk split": "hajduk split",
 }
@@ -33,7 +34,7 @@ _EQUIVALENT_CLUB_NAMES = {
 
 def _identity(name: str) -> str:
     """Normalize auditable football-club names without removing age markers."""
-    normalized = sportybet._norm(str(name or ""))
+    normalized = sportybet._norm(str(name or "")).replace(".", "")
     words = normalized.split()
     while len(words) > 1 and words[0] in _PROVIDER_MATCH_ONLY:
         words.pop(0)
