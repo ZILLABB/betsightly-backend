@@ -205,3 +205,34 @@ test('private jackpot POSTs preserve the signed admin cookie and exact selected 
    assert.deepEqual(JSON.parse(calls[1].opts.body).selection_ids,['pick1','pick2']);
  }finally{globalThis.fetch=originalFetch}
 });
+
+test('auto optimizer only accepts authorized admin POST, never GET',async()=>{
+ const previous=globalThis.fetch;
+ globalThis.fetch=()=>{throw Error('request must be rejected by proxy before upstream')};
+ try{
+  const get=response();await handler(req('private-jackpot/auto-book','GET'),get);
+  assert.equal(get.code,404);
+  const foreign=response();await handler(req('private-jackpot/auto-book','POST',{target_odds:100000},'https://evil.invalid'),foreign);
+  assert.equal(foreign.code,403);
+ }finally{globalThis.fetch=previous}
+});
+
+test('auto optimizer forwards explicit constraints to backend with session cookie',async()=>{
+ const previous=globalThis.fetch;const seen=[];
+ globalThis.fetch=async(url,opts)=>{
+  seen.push({url:String(url),opts});
+  return new Response(JSON.stringify({status:'UNREACHABLE',share_code:null}),{status:200,headers:{'content-type':'application/json'}});
+ };
+ try{
+  const host='https://'+HOST;
+  const target=response();
+  await handler(req('private-jackpot/auto-book','POST',{target_odds:100000,max_legs:50,horizon:'7_days',market_style:'all'},host),target);
+  assert.equal(target.code,200);
+  assert.equal(seen[0].url,BACKEND+'/api/growth/private-jackpot/auto-book');
+  assert.equal(seen[0].opts.headers.cookie,'bs_admin=signed-test');
+  assert.equal(JSON.parse(seen[0].opts.body).max_legs,50);
+  const preview=response();
+  await handler(req('private-jackpot/optimize','POST',{target_odds:100000},host),preview);
+  assert.equal(preview.code,200);
+ }finally{globalThis.fetch=previous}
+});
