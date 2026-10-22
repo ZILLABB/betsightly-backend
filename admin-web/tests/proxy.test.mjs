@@ -270,3 +270,38 @@ test('paste preview forwards exact fixture text without changing it',async()=>{
   assert.equal(JSON.parse(seen[0].opts.body).fixtures_text,fixtureText);
  }finally{globalThis.fetch=previous}
 });
+
+
+test('private jackpot 502 from Render returns small actionable JSON, not HTML',async()=>{
+ const oldFetch=globalThis.fetch;const oldLog=console.error;
+ console.error=()=>{};
+ globalThis.fetch=async()=>new Response('<html>'+('x'.repeat(223000))+'</html>',{
+   status:502,headers:{'content-type':'text/html'}
+ });
+ try {
+   const out=response();
+   await handler(req('private-jackpot/paste-preview','POST',{
+    fixtures_text:'Hoffenheim vs Lyon | Home win',
+    target_odds:100000,selection_mode:'bookmaker_only'
+   },'https://'+HOST),out);
+   assert.equal(out.code,502);
+   assert.match(out.headers['content-type']||'application/json',/json/i);
+   assert.match((typeof out.body==='string'?JSON.parse(out.body):out.body).detail,/backend returned HTTP 502/i);
+   assert.ok(JSON.stringify(out.body).length<600);
+ }finally{globalThis.fetch=oldFetch;console.error=oldLog;}
+});
+
+test('private jackpot network failures never trigger automatic POST retries',async()=>{
+ const oldFetch=globalThis.fetch;const oldLog=console.error;let count=0;
+ console.error=()=>{};
+ globalThis.fetch=async()=>{count++;throw new Error('ECONNRESET')};
+ try{
+  const out=response();
+  await handler(req('private-jackpot/paste-book','POST',{
+    fixtures_text:'Hoffenheim vs Lyon | Home win'
+  },'https://'+HOST),out);
+  assert.equal(count,1);
+  assert.equal(out.code,502);
+  assert.match((typeof out.body==='string'?JSON.parse(out.body):out.body).detail,/Do not repeat Generate Code/i);
+ }finally{globalThis.fetch=oldFetch;console.error=oldLog}
+});

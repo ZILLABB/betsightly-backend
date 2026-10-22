@@ -45,6 +45,10 @@ export default function PrivateJackpot() {
  const bookmakerOnly=mode==='bookmaker_only';
  const modeReady=!bookmakerOnly||Boolean(pasteText.trim());
  const invalidPreview=Boolean(pasteText.trim()&&pasteReport&&pasteReport.status!=='PROPOSED_NOT_BOOKED');
+ const mustPreview=bookmakerOnly&&Boolean(pasteText.trim());
+ const previewApproved=!mustPreview||(
+  pasteReport?.status==='PROPOSED_NOT_BOOKED'&&pasteReport.full_ticket_complete===true
+ );
  const targetValid=Number.isFinite(amount)&&amount>=2&&amount<=100000;
  const preferences=()=>({horizon:bookmakerOnly?'today':horizon,selection_mode:mode,min_trust_grade:grade,min_probability:.65,market_style:style,
    min_leg_odds:Number(legFloor),markets:[],target_odds:amount,max_legs:maxLegs});
@@ -74,7 +78,7 @@ export default function PrivateJackpot() {
   finally{setBusy(null);busyLatch.current=false}
  };
  const generate=async()=>{
-  if(busyLatch.current||!targetValid||!modeReady||invalidPreview)return;
+  if(busyLatch.current||!targetValid||!modeReady||invalidPreview||!previewApproved)return;
   // Inline confirmation does not block the browser event handler.
   if(!confirmReady){setConfirmReady(true);return;}
   setConfirmReady(false);
@@ -178,7 +182,7 @@ export default function PrivateJackpot() {
      {suggestedTargets.map(value=><button key={value} type="button" className={'mini-button '+(amount===value?'jackpot-preset-active':'')} onClick={()=>{setTarget(String(value));changed()}}>{decimal(value,0)}x</button>)}
     </div>
     <div className="toolbar">
-     <button className="button primary" type="button" disabled={!targetValid||!modeReady||invalidPreview||busy!==null} onClick={generate}>
+     <button className="button primary" type="button" disabled={!targetValid||!modeReady||invalidPreview||!previewApproved||busy!==null} onClick={generate}>
       {busy==='book'?<Loader2 size={17} className="spin"/>:<Sparkles size={17}/>}
       {busy==='book'?'Verifying exact bookmaker code…':confirmReady?'Confirm private code generation':'Auto-generate verified SportyBet code'}
      </button>
@@ -190,6 +194,14 @@ export default function PrivateJackpot() {
       {busy==='board'?<Loader2 size={16} className="spin"/>:<RefreshCcw size={16}/>} Check available games
      </button>
     </div>
+    {mustPreview&&!previewApproved&&<div className="notice info" role="status">
+      <ShieldCheck size={17}/><div>
+       Run <strong>Preview bookmaker-only exact picks</strong> first. Generate Code
+       unlocks only after all pasted fixtures and their exact markets have valid
+       bookmaker prices and the total reaches your target. This prevents blind
+       repeated booking requests after a gateway failure.
+      </div>
+     </div>}
     {confirmReady&&<div className="notice warning" role="status"><AlertTriangle size={17}/>
      <div>Confirm PRIVATE SportyBet code generation at {decimal(amount,0)}x.
       This does not place a monetary stake and will not alter the requested selections.
