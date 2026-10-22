@@ -20,9 +20,13 @@ from growth.jackpot_market_catalog import resolve_market
 
 
 def _team(value: str) -> str:
-    raw = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode().lower()
-    raw = raw.replace("&", "and")
+    from leagues import sportybet
+    # Use the bookmaker's audited transliteration for æ/ø/ł etc., then remove
+    # a tiny set of common organizational prefixes. Keep senior/youth split.
+    raw = sportybet._norm(value)
     pieces = re.findall(r"[a-z0-9]+", raw)
+    while pieces and pieces[0] in {"tsg", "rb", "nk", "gnk"}:
+        pieces.pop(0)
     while pieces and pieces[0] in _STOP:
         pieces.pop(0)
     while pieces and pieces[-1] in _STOP:
@@ -126,6 +130,9 @@ def pasted_preview(payload: dict) -> dict:
     from growth.private_jackpot import candidate_board
     from growth.jackpot_optimizer import optimize
     items = parse_fixture_lines(str(payload.get("fixtures_text") or ""))
+    if payload.get("selection_mode") == "bookmaker_only":
+        from growth.jackpot_bookmaker_only import bookmaker_paste_preview
+        return bookmaker_paste_preview(payload)
     board = candidate_board(payload)
     if board.get("status") != "success":
         return {**board, "matched": [], "unmatched": [], "share_code": None}
@@ -197,6 +204,20 @@ def pasted_preview(payload: dict) -> dict:
         }
     else:
         proposal = optimize(qualifying, target, max_legs)
+    # Never present a partial product as the ceiling for the full pasted
+    # ticket. Report actual valid legs separately from all on-board markets.
+    complete = not result["unmatched"] and len(result["matched"]) == len(items)
+    if not complete:
+        proposal["partial_reference_odds"] = (
+            proposal.get("indicative_odds") if explicit_count else None
+        )
+        proposal["maximum_reference_odds"] = None
+        proposal["maximum_model_eligible_reference_odds"] = None
+        proposal["indicative_odds"] = None
+    proposal["distinct_fixture_count"] = len({
+        row["match_id"] for row in result["matched"]
+    })
+    proposal["full_ticket_complete"] = complete
     return {
         **proposal,
         "matched": result["matched"],
@@ -205,6 +226,8 @@ def pasted_preview(payload: dict) -> dict:
         "matched_fixture_count": len(result["matched"]),
         "unmatched_fixture_count": len(result["unmatched"]),
         "candidate_count": len(qualifying),
+        "full_board_candidate_count": board.get("candidate_count"),
+        "full_board_distinct_fixture_count": board.get("distinct_fixture_count"),
         "selected_games": [choices[s] for s in proposal.get("selection_ids") or [] if s in choices],
         "source": ("PASTED_EXACT_MARKETS" if explicit_count else
                    "PASTED_NAMES_MATCHED_TO_APPROVED_BOARD"),
@@ -222,6 +245,9 @@ def pasted_preview(payload: dict) -> dict:
 
 def pasted_auto_book(payload: dict) -> dict:
     """Explicitly administrator-confirmed. Reject any dropped pasted fixtures."""
+    if payload.get("selection_mode") == "bookmaker_only":
+        from growth.jackpot_bookmaker_only import bookmaker_paste_book
+        return bookmaker_paste_book(payload)
     preview = pasted_preview(payload)
     if preview.get("status") != "PROPOSED_NOT_BOOKED":
         return {**preview, "share_code": None}

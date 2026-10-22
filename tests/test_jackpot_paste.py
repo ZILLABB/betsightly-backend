@@ -196,3 +196,32 @@ def test_markets_mapped_but_restricted_remain_unapproved_and_unders_excluded():
     assert keys["under_2_5"]["default_excluded"] is True
     assert keys["under_2_5"]["auto_selection_eligible"] is False
     assert "markets" in current and len(current["markets"]) == 28
+
+
+def test_partial_model_paste_shows_partial_product_not_falsely_full_ceiling(monkeypatch):
+    import growth.private_jackpot as jackpot
+    monkeypatch.setattr(jackpot, "candidate_board", lambda _: {
+        "status": "success", "candidate_count": 14,
+        "distinct_fixture_count": 6,
+        "candidates": [
+            {"match_id": "a", "selection_id": "a:home_win",
+             "home_team": "Hoffenheim", "away_team": "Lyon",
+             "market": "home_win", "odds": 2.4,
+             "selection_probability": .70},
+        ],
+    })
+    result = pasted_preview({
+        "fixtures_text": (
+            "TSG Hoffenheim vs Lyon | Home win @2.40\n"
+            "Ajax vs Atalanta | BTTS Yes @1.6"
+        ), "target_odds": 100000, "max_legs": 50,
+    })
+    assert result["matched_fixture_count"] == 1
+    assert result["unmatched_fixture_count"] == 1
+    assert result["distinct_fixture_count"] == 1
+    assert result["maximum_reference_odds"] is None
+    assert result["indicative_odds"] is None
+    assert result["partial_reference_odds"] == pytest.approx(2.4)
+    assert result["full_board_candidate_count"] == 14
+    assert result["full_board_distinct_fixture_count"] == 6
+    assert result["full_ticket_complete"] is False
