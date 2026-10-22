@@ -67,13 +67,33 @@ def candidate_board(payload: dict) -> dict:
             "expected_value": value.get("expected_value"),
             "recommended_for_fixture": bool(value.get("recommended_for_fixture")),
         })
+    from growth.jackpot_optimizer import capacity
     return {
         "status": "success",
+        **capacity(candidates),
         "candidate_count": len(candidates),
         "candidates": candidates,
         "board": data.get("board"),
         "selection_diagnostics": data.get("selection_diagnostics"),
         "note": "Model probabilities are estimates, not assurances. One market per fixture.",
+    }
+
+
+def optimize_request(payload: dict) -> dict:
+    """Dry run only: no SportyBet share operation or public publication."""
+    from growth.jackpot_optimizer import optimize
+    target = float(payload.get("target_odds") or MIN_ODDS)
+    if not isfinite(target) or not MIN_ODDS <= target <= MAX_TARGET:
+        raise ValueError("Target odds must be between 2x and 100,000x.")
+    state = candidate_board(payload)
+    if state.get("status") != "success":
+        return {**state, "selection_ids": [], "booking_code_created": False}
+    return {
+        **optimize(
+            state["candidates"], target,
+            limit=int(payload.get("max_legs") or MAX_LEGS),
+        ),
+        "board": state.get("board"),
     }
 
 
