@@ -12,9 +12,9 @@ type Proposal = {status:string;reason?:string;selection_ids?:string[];selected_g
   indicative_odds?:number;target_odds?:number;maximum_reference_odds?:number;
   estimated_conservative_hit_probability?:number;fixtures_evaluated?:number;
   estimated_all_leg_probability?:number;candidate_count?:number;distinct_fixture_count?:number;
-  maximum_model_eligible_reference_odds?:number;fixtures_without_valid_probability?:number;portfolio_type?:string;};
+  maximum_model_eligible_reference_odds?:number;fixtures_without_valid_probability?:number;portfolio_type?:string;full_ticket_complete?:boolean;partial_reference_odds?:number|null;};
 type PasteMatch = {line:number;home_team:string;away_team:string;matched_home?:string;matched_away?:string;requested_market?:string|null;reason?:string;suggested_match?:string};
-type PasteReport = Proposal & {pasted_fixture_count?:number;matched_fixture_count?:number;unmatched_fixture_count?:number;matched?:PasteMatch[];unmatched?:PasteMatch[];note?:string;exact_market_mode?:boolean;requested_market_count?:number};
+type PasteReport = Proposal & {pasted_fixture_count?:number;matched_fixture_count?:number;unmatched_fixture_count?:number;matched?:PasteMatch[];unmatched?:PasteMatch[];note?:string;exact_market_mode?:boolean;requested_market_count?:number;full_ticket_complete?:boolean;partial_reference_odds?:number|null;board_complete?:boolean};
 type Booking = Proposal & {share_code?:string;share_url?:string;verified_odds?:number;
   readback_status?:string;expires_at?:string;priced_at?:string;
   publication_status?:string;proposal?:Proposal;invalid_selections?:any[]};
@@ -24,6 +24,8 @@ const suggestedTargets=[2,5,10,100,1000,10000,100000];
 
 export default function PrivateJackpot() {
  const [horizon,setHorizon]=useState('7_days');
+ const [mode,setMode]=useState<'approved_model'|'bookmaker_only'>('approved_model');
+ const [confirmReady,setConfirmReady]=useState(false);
  const [grade,setGrade]=useState('B');
  const [style,setStyle]=useState('all');
  const [legFloor,setLegFloor]=useState('1.01');
@@ -40,10 +42,13 @@ export default function PrivateJackpot() {
  const busyLatch=useRef(false);
  const amount=Number(target);
  const maxLegs=Number(legLimit);
+ const bookmakerOnly=mode==='bookmaker_only';
+ const modeReady=!bookmakerOnly||Boolean(pasteText.trim());
+ const invalidPreview=Boolean(pasteText.trim()&&pasteReport&&pasteReport.status!=='PROPOSED_NOT_BOOKED');
  const targetValid=Number.isFinite(amount)&&amount>=2&&amount<=100000;
- const preferences=()=>({horizon,min_trust_grade:grade,min_probability:.65,market_style:style,
+ const preferences=()=>({horizon:bookmakerOnly?'today':horizon,selection_mode:mode,min_trust_grade:grade,min_probability:.65,market_style:style,
    min_leg_odds:Number(legFloor),markets:[],target_odds:amount,max_legs:maxLegs});
- const changed=()=>{setBoard(null);setProposal(null);setBooking(null);setPasteReport(null);setMessage('')};
+ const changed=()=>{setBoard(null);setProposal(null);setBooking(null);setPasteReport(null);setConfirmReady(false);setMessage('')};
  const inspect=async()=>{
   if(busyLatch.current)return;
   busyLatch.current=true;setBusy('board');setMessage('');setBooking(null);setProposal(null);
@@ -55,7 +60,8 @@ export default function PrivateJackpot() {
   finally{setBusy(null);busyLatch.current=false}
  };
  const analyze=async()=>{
-  if(busyLatch.current||!targetValid)return;
+  if(busyLatch.current||!targetValid||!modeReady)return;
+  setConfirmReady(false);
   busyLatch.current=true;setBusy('analyze');setMessage('');setBooking(null);setProposal(null);setPasteReport(null);
   try {
    const pasted=pasteText.trim().length>0;
@@ -68,12 +74,10 @@ export default function PrivateJackpot() {
   finally{setBusy(null);busyLatch.current=false}
  };
  const generate=async()=>{
-  if(busyLatch.current||!targetValid)return;
-  if(!window.confirm(
-    pasteText.trim()
-    ?'Preserve exact markets on all pasted lines when supplied; book only if all are approved and target '+decimal(amount,0)+'x is verified? No wager is placed.'
-    :'Automatically select eligible fixtures and request a verified SportyBet share code at or above '+decimal(amount,0)+'x? No stake is placed; this remains private.'
-  ))return;
+  if(busyLatch.current||!targetValid||!modeReady||invalidPreview)return;
+  // Inline confirmation does not block the browser event handler.
+  if(!confirmReady){setConfirmReady(true);return;}
+  setConfirmReady(false);
   busyLatch.current=true;setBusy('book');setMessage('');setBooking(null);setProposal(null);setPasteReport(null);
   try {
    const pasted=pasteText.trim().length>0;
@@ -97,8 +101,9 @@ export default function PrivateJackpot() {
  const candidates=board?.candidates||[];
  const selectedGames=displayed?.selected_games||selectedIds.map(key=>candidates.find(c=>c.selection_id===key)).filter((x):x is Candidate=>Boolean(x));
  const optimisticCeiling=board?.maximum_reference_odds;
- const currentCeiling=displayed?.maximum_reference_odds??optimisticCeiling;
- const modelCeiling=displayed?.maximum_model_eligible_reference_odds;
+ const partial=Boolean(pasteReport&&pasteReport.full_ticket_complete===false);
+ const currentCeiling=partial?undefined:(displayed?.maximum_reference_odds??optimisticCeiling);
+ const modelCeiling=bookmakerOnly?undefined:displayed?.maximum_model_eligible_reference_odds;
  const impossible=Number.isFinite(currentCeiling)&&Number(currentCeiling)<amount;
  const modelInsufficient=Number.isFinite(modelCeiling)&&Number(modelCeiling)<amount;
  const experimental=displayed?.portfolio_type==='HIGH_RISK_CEILING_EXPERIMENT';
@@ -112,21 +117,32 @@ export default function PrivateJackpot() {
    <header className="panel-head"><div><h2>Automatic ticket settings</h2>
     <p>Use only model-evaluated, bookmaker-bookable fixtures. Research and booking remain separate from public predictions.</p></div><ShieldCheck size={21}/></header>
    <fieldset className="editor" disabled={busy!==null}>
+    <label className="jackpot-policy-control">Private selection policy
+     <select value={mode} onChange={e=>{setMode(e.target.value as 'approved_model'|'bookmaker_only');changed()}}>
+      <option value="approved_model">Model-approved · confidence and bookmaker gates</option>
+      <option value="bookmaker_only">Bookmaker-only experiment · relaxed model gates</option>
+     </select>
+    </label>
+    {bookmakerOnly&&<div className="notice warning"><AlertTriangle size={17}/><div>
+     Private, today-only experimental mode. Paste an exact market for every game.
+     Selection confidence and trust grades are not enforced, but exact SportyBet
+     fixtures, active prices and full-code readback still are. No Under markets or stakes.
+    </div></div>}
     <div className="jackpot-controls">
      <label>Search window
-      <select value={horizon} onChange={e=>{setHorizon(e.target.value);changed()}}>
+      <select value={bookmakerOnly?"today":horizon} disabled={bookmakerOnly} onChange={e=>{setHorizon(e.target.value);changed()}}>
        <option value="today">Today only</option>
        <option value="3_days">Next 3 days</option>
        <option value="7_days">Next 7 days · more fixtures</option>
       </select></label>
      <label>Evidence/trust level
-      <select value={grade} onChange={e=>{setGrade(e.target.value);changed()}}>
+      <select value={grade} disabled={bookmakerOnly} onChange={e=>{setGrade(e.target.value);changed()}}>
        <option value="A">A only · strict</option>
        <option value="B">A + B · balanced</option>
        <option value="C">A + B + C · exploratory / higher uncertainty</option>
       </select></label>
      <label>Market strategy
-      <select value={style} onChange={e=>{setStyle(e.target.value);changed()}}>
+      <select value={style} disabled={bookmakerOnly} onChange={e=>{setStyle(e.target.value);changed()}}>
        <option value="all">All approved (no Under markets)</option>
        <option value="goals">Overs + BTTS</option>
        <option value="results">1X2 + double chance + DNB</option>
@@ -162,44 +178,54 @@ export default function PrivateJackpot() {
      {suggestedTargets.map(value=><button key={value} type="button" className={'mini-button '+(amount===value?'jackpot-preset-active':'')} onClick={()=>{setTarget(String(value));changed()}}>{decimal(value,0)}x</button>)}
     </div>
     <div className="toolbar">
-     <button className="button primary" type="button" disabled={!targetValid||busy!==null} onClick={generate}>
+     <button className="button primary" type="button" disabled={!targetValid||!modeReady||invalidPreview||busy!==null} onClick={generate}>
       {busy==='book'?<Loader2 size={17} className="spin"/>:<Sparkles size={17}/>}
-      {busy==='book'?'Analyzing matches and verifying code…':'Auto-generate verified SportyBet code'}
+      {busy==='book'?'Verifying exact bookmaker code…':confirmReady?'Confirm private code generation':'Auto-generate verified SportyBet code'}
      </button>
-     <button type="button" className="button secondary" disabled={!targetValid||busy!==null} onClick={analyze}>
+     <button type="button" className="button secondary" disabled={!targetValid||!modeReady||busy!==null} onClick={analyze}>
       {busy==='analyze'?<Loader2 size={17} className="spin"/>:<Target size={17}/>}
-      {busy==='analyze'?'Finding an eligible ticket…':'Preview best automatic combination'}
+      {busy==='analyze'?'Checking prices and fixtures…':bookmakerOnly?'Preview bookmaker-only exact picks':'Preview best automatic combination'}
      </button>
-     <button type="button" className="mini-button" disabled={busy!==null} onClick={inspect}>
+     <button type="button" className="mini-button" disabled={busy!==null||bookmakerOnly} onClick={inspect}>
       {busy==='board'?<Loader2 size={16} className="spin"/>:<RefreshCcw size={16}/>} Check available games
      </button>
     </div>
+    {confirmReady&&<div className="notice warning" role="status"><AlertTriangle size={17}/>
+     <div>Confirm PRIVATE SportyBet code generation at {decimal(amount,0)}x.
+      This does not place a monetary stake and will not alter the requested selections.
+      <button type="button" className="mini-button" onClick={()=>setConfirmReady(false)}>Cancel</button>
+     </div></div>}
    </fieldset>
    <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target, never includes Under-goals markets and never places a stake. A 100,000x ticket is extremely unlikely to win. The approved match universe is currently limited to a 7-day prepared board; more future dates require additional provider coverage.</div></div>
-   {grade==='C'&&<div className="notice warning"><AlertTriangle size={17}/><div>Exploratory trust C includes less-supported predictions, not more reliable ones. The minimum model-probability and bookability gates still apply.</div></div>}
+   {!bookmakerOnly&&grade==='C'&&<div className="notice warning"><AlertTriangle size={17}/><div>Exploratory trust C includes less-supported predictions, not more reliable ones. The minimum model-probability and bookability gates still apply.</div></div>}
    {pasteReport&&<div className="jackpot-paste-results" role="status">
     <strong>Fixture matching: {pasteReport.matched_fixture_count||0} accepted / {pasteReport.pasted_fixture_count||0} pasted{pasteReport.exact_market_mode?' · Exact picks preserved':' · Picks auto-selected'}</strong>
     {(pasteReport.unmatched_fixture_count||0)>0&&<>
-     <div className="notice warning"><AlertTriangle size={17}/><div>{pasteReport.unmatched_fixture_count} pasted fixtures are not fully available on the approved model and bookmaker board. No missing fixture will be silently replaced.</div></div>
+     <div className="notice warning"><AlertTriangle size={17}/><div>{pasteReport.unmatched_fixture_count} pasted fixtures or exact markets are unavailable in this mode. No missing pick will be substituted.</div></div>
      <div className="jackpot-ticket-list">{(pasteReport.unmatched||[]).map(item=>
       <div className="jackpot-ticket-item" key={item.line}>
        <span>{item.line}. {item.home_team} vs {item.away_team}{item.requested_market?' | '+item.requested_market.replaceAll('_',' '):''}
-       <small>{item.reason?.replaceAll('_',' ')} {item.suggested_match?' · Possible name: '+item.suggested_match:''}</small></span>
+       <small>{item.reason?.replaceAll('_',' ')}{(item as PasteMatch & {detail?:string}).detail?' · '+(item as PasteMatch & {detail?:string}).detail:''} {item.suggested_match?' · Possible name: '+item.suggested_match:''}</small></span>
       </div>)}</div>
     </>}
    </div>}
    {message&&<div className="notice warning" role="alert"><AlertTriangle size={17}/><div>{message}</div></div>}
   </section>
+  {pasteReport&&partial&&<div className="notice warning" role="status"><AlertTriangle size={17}/><div>
+   Partial preview only: {pasteReport.matched_fixture_count||0} of {pasteReport.pasted_fixture_count||0} exact picks were validated.
+   Partial selection product: {pasteReport.partial_reference_odds==null?'not available':decimal(pasteReport.partial_reference_odds)+'x'}.
+   This is NOT the full-ticket ceiling. No code has been generated.
+  </div></div>}
   <MarketExplorer preferences={preferences}/>
   {(board?.status==='success'||displayed)&&<section className="panel">
    <header className="panel-head"><div><h2>Feasibility & match coverage</h2><p>Shows available fixtures, not duplicate markets counted as matches.</p></div></header>
    <div className="jackpot-feasibility">
-    <div><small>Approved markets</small><strong>{decimal(board?.candidate_count??displayed?.candidate_count??0,0)}</strong></div>
-    <div><small>Distinct fixtures</small><strong>{decimal(board?.distinct_fixture_count??displayed?.distinct_fixture_count??0,0)}</strong></div>
-    <div><small>Raw price ceiling</small><strong>{currentCeiling==null?'—':decimal(Number(currentCeiling))+'x'}</strong></div>
+    <div><small>{bookmakerOnly?'Validated bookmaker markets':'Approved markets'}</small><strong>{decimal(bookmakerOnly?(pasteReport?.matched_fixture_count??0):(board?.candidate_count??displayed?.candidate_count??0),0)}</strong></div>
+    <div><small>Distinct fixtures</small><strong>{decimal(partial?(pasteReport?.matched_fixture_count??0):(board?.distinct_fixture_count??displayed?.distinct_fixture_count??0),0)}</strong></div>
+    <div><small>{bookmakerOnly?'Complete ticket reference quote':'Raw price ceiling'}</small><strong>{currentCeiling==null?'Not available':decimal(Number(currentCeiling))+'x'}</strong></div>
     {modelCeiling!=null&&<div><small>Model-eligible ceiling</small><strong>{decimal(Number(modelCeiling))}x</strong></div>}
     <div><small>Required target</small><strong>{decimal(amount)}x</strong></div>
-    <p>{impossible
+    <p>{partial?'Incomplete ticket: the partial odds cannot establish a ceiling for every requested match.':impossible
      ?'NOT POSSIBLE FROM CURRENT PRICES: even taking the highest listed market from each fixture cannot reach this target.'
      :modelInsufficient
      ?'INSUFFICIENT MODEL EVIDENCE: prices appear to reach the target, but some selections do not have valid model reliability. No qualified ticket is available.'
@@ -222,6 +248,7 @@ export default function PrivateJackpot() {
      {experimental?<AlertTriangle size={17}/>:<Target size={17}/>}
      <div>{experimental
       ?'HIGH-RISK CEILING EXPERIMENT: the normal probability search did not find a qualifying ticket. This fallback takes the highest-priced model-eligible market from each chosen match, not the most reliable combination. It is not a recommendation.'
+      :bookmakerOnly?'Bookmaker-only experiment: no model confidence evaluation applies, so this is not a prediction recommendation.'
       :'This is a bounded confidence-first model proposal, not a guaranteed optimum.'} No bookmaker code exists until verification succeeds.</div>
    </div>
    {selectedGames.length>0&&<div className="jackpot-ticket-list">{selectedGames.map((game,i)=><div className="jackpot-ticket-item" key={game.selection_id}><span>{i+1}. {game.home_team} vs {game.away_team}<small>{game.market.replaceAll('_',' ')} · {game.trust_grade||'—'} trust</small></span><strong>{decimal(game.odds)}x</strong></div>)}</div>}
