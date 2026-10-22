@@ -65,7 +65,7 @@ def candidate_board(payload: dict) -> dict:
         market = str(value.get("market") or "")
         price = float(value.get("odds") or 0)
         if (market.startswith("under_") or "_under_" in market or
-                price <= 1 or not isfinite(price):
+                price <= 1 or not isfinite(price)):
             continue
         if not value.get("bookable") or not value.get("selection_id"):
             continue
