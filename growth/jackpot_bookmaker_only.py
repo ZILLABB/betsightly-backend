@@ -175,7 +175,10 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
             if dt and (
                 dt.astimezone(_NG).date() == today
                 if horizon == "today"
-                else current <= dt <= window_ends
+                else (
+                    dt.astimezone(_NG).date() == today
+                    or current <= dt <= window_ends
+                )
             )
         ]
         upcoming = [(entry, dt) for entry, dt in in_window
