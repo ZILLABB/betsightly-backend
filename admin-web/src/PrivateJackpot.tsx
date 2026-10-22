@@ -186,7 +186,7 @@ export default function PrivateJackpot() {
       {busy==='analyze'?<Loader2 size={17} className="spin"/>:<Target size={17}/>}
       {busy==='analyze'?'Checking prices and fixtures…':bookmakerOnly?'Preview bookmaker-only exact picks':'Preview best automatic combination'}
      </button>
-     <button type="button" className="mini-button" disabled={busy!==null} onClick={inspect}>
+     <button type="button" className="mini-button" disabled={busy!==null||bookmakerOnly} onClick={inspect}>
       {busy==='board'?<Loader2 size={16} className="spin"/>:<RefreshCcw size={16}/>} Check available games
      </button>
     </div>
