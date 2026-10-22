@@ -400,12 +400,13 @@ def _snapshot(fixtures: dict, metadata: dict) -> dict:
     return {"__meta__": metadata, **fixtures}
 
 
-def cached_board_for_admin(max_age_seconds: int = 1800) -> dict | None:
-    """Read an already-fetched complete SportyBet snapshot without network I/O.
+def cached_board_for_admin(max_age_seconds: int = 10800) -> dict | None:
+    """Read the existing complete SportyBet snapshot without network I/O.
 
-    Private HTTP routes must never synchronously crawl 18+ bookmaker pages.
-    This read fails closed on absent, incomplete, older-schema or expired
-    snapshots and delegates refresh to the existing scheduled pipeline.
+    Match the three-hour background cache lifetime. A 30-minute admin cutoff
+    with a three-hour producer TTL made previews unavailable for most of the
+    day even when the producer was healthy. Preview odds are indicative only;
+    code creation always requires a full live bookmaker readback.
     """
     cached = _db_get(_CACHE_KEY)
     if not isinstance(cached, dict):

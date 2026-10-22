@@ -16,16 +16,38 @@ from leagues import sportybet
 from leagues.market_registry import MARKET_TO_SPORTYBET
 
 _NG = ZoneInfo("Africa/Lagos")
-_PROVIDER_MATCH_ONLY = {"tsg": "", "rb": "", "nk": "", "gnk": ""}
+_PROVIDER_MATCH_ONLY = {"tsg", "rb", "nk", "gnk", "rsc", "hnk", "fk", "pfc", "kf"}
+# Explicit aliases for football-club identities, NOT generic fuzzy matching.
+# Keep youth, women and reserves as distinct squads via _squad checks below.
+_EQUIVALENT_CLUB_NAMES = {
+    "agf aarhus": "aarhus",
+    "kups kuopio": "kuopion palloseura",
+    "kups": "kuopion palloseura",
+    "st truidense": "sint truidense",
+    "sint truidense vv": "sint truidense",
+    "st truidense vv": "sint truidense",
+    "egnatia rrogozhine": "egnatia",
+    "hajduk split": "hajduk split",
+}
 
 
 def _identity(name: str) -> str:
-    """Normalize known club-type prefixes; never fuzzy-accept wrong teams."""
+    """Normalize auditable football-club names without removing age markers."""
     normalized = sportybet._norm(str(name or ""))
     words = normalized.split()
-    if words and words[0] in _PROVIDER_MATCH_ONLY:
+    while len(words) > 1 and words[0] in _PROVIDER_MATCH_ONLY:
         words.pop(0)
-    return " ".join(words)
+    key = " ".join(words)
+    return _EQUIVALENT_CLUB_NAMES.get(key, key)
+
+
+def _same_club(left: str, right: str) -> bool:
+    a, b = _identity(left), _identity(right)
+    if not a or not b:
+        return False
+    # Strict bookmaker helper covers transliteration e.g. Lillestroem /
+    # Lillestrøm. A match must still be unique by both teams, date and squad.
+    return a == b or sportybet._same_team(a, b)
 
 
 def _entry_kickoff(entry: dict) -> datetime | None:
@@ -88,18 +110,25 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
         return {
             "status": "BOARD_REFRESH_REQUIRED",
             "reason": (
-                "No complete SportyBet snapshot fresher than 30 minutes is "
-                "available. The scheduled bookmaker sync must refresh it; "
+                "No complete SportyBet snapshot is available within the "
+                "configured three-hour cache window. Refresh the scheduled "
+                "bookmaker feed; "
                 "no share-code request was made."
             ),
             "share_code": None, "matched": [], "unmatched": [],
             "pasted_fixture_count": len(rows),
             "matched_fixture_count": 0,
             "unmatched_fixture_count": len(rows),
+            "source": "SPORTYBET_BOOKMAKER_ONLY_EXPERIMENT",
+            "exact_market_mode": True,
+            "requested_market_count": len(rows),
+            "prediction_quality_gate_applied": False,
             "full_ticket_complete": False,
             "partial_reference_odds": None,
+            "indicative_odds": None,
             "maximum_reference_odds": None,
             "distinct_fixture_count": 0,
+            "booking_code_created": False,
         }
     meta = sportybet.board_metadata(board)
     fixtures = [entry for _, entry in sportybet._board_entries(board)]
@@ -111,7 +140,12 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
             "pasted_fixture_count": len(rows),
             "matched_fixture_count": 0,
             "unmatched_fixture_count": len(rows),
+            "exact_market_mode": True,
+            "requested_market_count": len(rows),
             "full_ticket_complete": False,
+            "partial_reference_odds": None,
+            "maximum_reference_odds": None,
+            "booking_code_created": False,
         }
 
     # Include every name match for collision detection. Reject repeated event
@@ -121,8 +155,8 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
     for row in rows:
         matches = [
             candidate for candidate in fixtures
-            if _identity(row["home_team"]) == _identity(candidate.get("home_team") or "")
-            and _identity(row["away_team"]) == _identity(candidate.get("away_team") or "")
+            if _same_club(row["home_team"], candidate.get("home_team") or "")
+            and _same_club(row["away_team"], candidate.get("away_team") or "")
             and sportybet._squad(row["home_team"]) == candidate.get("home_squad", "")
             and sportybet._squad(row["away_team"]) == candidate.get("away_squad", "")
         ]
@@ -203,11 +237,16 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
         "selected_games": matched if complete else [],
         "board_complete": bool(meta.get("is_complete")),
         "board_generated_at": meta.get("fetched_at"),
+        "board_age_seconds": round(
+            max(0, current.timestamp() - float(meta.get("fetched_at") or current.timestamp()))
+        ),
+        "quote_status": "INDICATIVE_CACHED_PRICES_RECHECK_AT_BOOKING",
         "share_code": None,
         "booking_code_created": False,
         "reason": (
             f"{len(unmatched)} exact bookmaker fixtures/markets were unavailable. "
-            "The displayed partial subtotal is NOT a 26-leg ceiling."
+            "The displayed subtotal is ONLY for matched legs, not the "
+            "maximum odds for your complete pasted ticket."
             if not complete else
             f"Bookmaker prices total {subtotal:,.2f}x, below {target:,.2f}x."
             if not sufficient else
