@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from math import isfinite, prod
+import re
 from zoneinfo import ZoneInfo
 
 from growth.jackpot_paste import parse_fixture_lines
@@ -60,6 +61,26 @@ def _same_club(left: str, right: str) -> bool:
     # Strict bookmaker helper covers transliteration e.g. Lillestroem /
     # Lillestrøm. A match must still be unique by both teams, date and squad.
     return a == b or sportybet._same_team(a, b)
+
+
+def _competition_matches_request(entry: dict, home: str, away: str) -> bool:
+    """Reject virtual and incompatible squad competitions before matching clubs.
+
+    Bookmakers sometimes omit age markers from both team names and squad
+    fields: a senior-looking fixture in the U19 league is still a youth match.
+    Do not treat competition words as club aliases or silently choose a side.
+    """
+    competition = str(entry.get("competition") or "").casefold()
+    if re.search(r"\\b(?:srl|virtual|simulated|simulation)\\b", competition):
+        return False
+    requested_senior = not sportybet._squad(home) and not sportybet._squad(away)
+    if requested_senior and re.search(
+        r"\\b(?:u(?:17|18|19|20|21|23)|under[- ]?(?:17|18|19|20|21|23)|"
+        r"paf ligi|reserve(?:s)?|academy|youth|junior|women|ladies)\\b",
+        competition,
+    ):
+        return False
+    return True
 
 
 def _entry_kickoff(entry: dict) -> datetime | None:
@@ -172,7 +193,8 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
     for row in rows:
         matches = [
             candidate for candidate in fixtures
-            if _same_club(row["home_team"], candidate.get("home_team") or "")
+            if _competition_matches_request(candidate, row["home_team"], row["away_team"])
+            and _same_club(row["home_team"], candidate.get("home_team") or "")
             and _same_club(row["away_team"], candidate.get("away_team") or "")
             and sportybet._squad(row["home_team"]) == candidate.get("home_squad", "")
             and sportybet._squad(row["away_team"]) == candidate.get("away_squad", "")
@@ -216,10 +238,10 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
             if not event_id or event_id in used:
                 reason, detail = ("DUPLICATE_OR_MISSING_EVENT_ID",
                                   "Exact bookmaker event ID cannot be uniquely assigned.")
-            elif market.startswith("under_") or "_under_" in market:
-                reason, detail = ("UNDER_MARKET_EXCLUDED",
-                                  "This private mode respects the no-Under preference.")
             else:
+                # This opt-in private path respects the user's exact audited
+                # market, including mapped Unders. No public prediction or
+                # trust policy is changed; active outcome pricing is required.
                 reason, price = _price(entry, market)
                 detail = "The exact bookmaker market is not active and priced."
                 if reason == "BOOKABLE":
