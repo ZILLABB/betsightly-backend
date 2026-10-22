@@ -97,7 +97,7 @@ def test_explicit_markets_and_reference_prices_are_parsed_without_trusting_price
 
 
 def test_unrecognized_market_is_rejected_not_silently_ignored():
-    with pytest.raises(ValueError, match="unknown pick"):
+    with pytest.raises(ValueError, match="unknown or unsupported"):
         parse_fixture_lines("Ajax vs Atalanta | BTTS No @2.1")
 
 
@@ -159,3 +159,40 @@ def test_mixed_exact_and_automatic_matches_are_rejected(monkeypatch):
                               "Braga vs Gent"),
             "target_odds": 2.0, "max_legs": 2,
         })
+
+
+def test_all_registry_mapped_sportybet_outcomes_are_parseable():
+    from leagues.market_registry import MARKETS
+    from growth.jackpot_market_catalog import resolve_market, mapped_market_catalog
+    catalog = mapped_market_catalog([])
+    assert catalog["market_count"] == len(MARKETS) == 28
+    assert catalog["full_sportybet_catalog"] is False
+    for market in MARKETS:
+        assert resolve_market(market) == market
+        assert resolve_market(market.replace("_", " ")) == market
+
+
+def test_reference_odds_are_ignored_and_special_aliases_supported():
+    from growth.jackpot_market_catalog import resolve_market
+    assert resolve_market("BTTS Yes @1.53") == "btts_yes"
+    assert resolve_market("Home win @1.81") == "home_win"
+    assert resolve_market("Over 4.5 @3.6") == "over_4_5"
+    assert resolve_market("Away team over 1.5 @2.1") == "away_over_1_5"
+    assert resolve_market("Draw No Bet Away @1.43") == "dnb_away"
+    assert resolve_market("1X @1.34") == "home_or_draw"
+
+
+def test_markets_mapped_but_restricted_remain_unapproved_and_unders_excluded():
+    from growth.jackpot_market_catalog import mapped_market_catalog
+    current = mapped_market_catalog([
+        {"match_id": "a", "market": "over_1_5"},
+        {"match_id": "a", "market": "home_win"},
+        {"match_id": "b", "market": "over_1_5"},
+    ])
+    keys = {r["key"]: r for r in current["markets"]}
+    assert keys["over_1_5"]["approved_fixture_count"] == 2
+    assert keys["over_1_5"]["auto_selection_eligible"] is True
+    assert keys["btts_no"]["availability_status"] == "RESTRICTED_OR_INACTIVE"
+    assert keys["under_2_5"]["default_excluded"] is True
+    assert keys["under_2_5"]["auto_selection_eligible"] is False
+    assert "markets" in current and len(current["markets"]) == 28
