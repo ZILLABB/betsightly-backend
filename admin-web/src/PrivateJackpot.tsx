@@ -12,6 +12,8 @@ type Proposal = {status:string;reason?:string;selection_ids?:string[];selected_g
   estimated_conservative_hit_probability?:number;fixtures_evaluated?:number;
   estimated_all_leg_probability?:number;candidate_count?:number;distinct_fixture_count?:number;
   maximum_model_eligible_reference_odds?:number;fixtures_without_valid_probability?:number;portfolio_type?:string;};
+type PasteMatch = {line:number;home_team:string;away_team:string;matched_home?:string;matched_away?:string;reason?:string;suggested_match?:string};
+type PasteReport = Proposal & {pasted_fixture_count?:number;matched_fixture_count?:number;unmatched_fixture_count?:number;matched?:PasteMatch[];unmatched?:PasteMatch[];note?:string};
 type Booking = Proposal & {share_code?:string;share_url?:string;verified_odds?:number;
   readback_status?:string;expires_at?:string;priced_at?:string;
   publication_status?:string;proposal?:Proposal;invalid_selections?:any[]};
@@ -28,6 +30,8 @@ export default function PrivateJackpot() {
  const [target,setTarget]=useState('100000');
  const [board,setBoard]=useState<Board|null>(null);
  const [proposal,setProposal]=useState<Proposal|null>(null);
+ const [pasteText,setPasteText]=useState('');
+ const [pasteReport,setPasteReport]=useState<PasteReport|null>(null);
  const [booking,setBooking]=useState<Booking|null>(null);
  const [busy,setBusy]=useState<'board'|'analyze'|'book'|null>(null);
  const [message,setMessage]=useState('');
@@ -38,7 +42,7 @@ export default function PrivateJackpot() {
  const targetValid=Number.isFinite(amount)&&amount>=2&&amount<=100000;
  const preferences=()=>({horizon,min_trust_grade:grade,min_probability:.65,market_style:style,
    min_leg_odds:Number(legFloor),markets:[],target_odds:amount,max_legs:maxLegs});
- const changed=()=>{setBoard(null);setProposal(null);setBooking(null);setMessage('')};
+ const changed=()=>{setBoard(null);setProposal(null);setBooking(null);setPasteReport(null);setMessage('')};
  const inspect=async()=>{
   if(busyLatch.current)return;
   busyLatch.current=true;setBusy('board');setMessage('');setBooking(null);setProposal(null);
@@ -51,9 +55,12 @@ export default function PrivateJackpot() {
  };
  const analyze=async()=>{
   if(busyLatch.current||!targetValid)return;
-  busyLatch.current=true;setBusy('analyze');setMessage('');setBooking(null);setProposal(null);
+  busyLatch.current=true;setBusy('analyze');setMessage('');setBooking(null);setProposal(null);setPasteReport(null);
   try {
-   const result=await api<Proposal>('private-jackpot/optimize',preferences(),'POST');
+   const pasted=pasteText.trim().length>0;
+   const result=await api<PasteReport>(pasted?'private-jackpot/paste-preview':'private-jackpot/optimize',
+     pasted?{...preferences(),fixtures_text:pasteText}:preferences(),'POST');
+   if(pasted)setPasteReport(result);
    setProposal(result);
    if(result.status!=='PROPOSED_NOT_BOOKED')setMessage(result.reason||'No eligible ticket for this target.');
   }catch(e){setMessage(friendly(e))}
@@ -61,12 +68,23 @@ export default function PrivateJackpot() {
  };
  const generate=async()=>{
   if(busyLatch.current||!targetValid)return;
-  if(!window.confirm('Automatically search all eligible fixtures, select the strongest estimated combination and request a verified SportyBet share code at or above '+decimal(amount,0)+'x? No stake is placed; this remains private.'))return;
-  busyLatch.current=true;setBusy('book');setMessage('');setBooking(null);setProposal(null);
+  if(!window.confirm(
+    pasteText.trim()
+    ?'Match every pasted fixture to the approved SportyBet board and book only if none are missing and target '+decimal(amount,0)+'x is verified? No wager is placed.'
+    :'Automatically select eligible fixtures and request a verified SportyBet share code at or above '+decimal(amount,0)+'x? No stake is placed; this remains private.'
+  ))return;
+  busyLatch.current=true;setBusy('book');setMessage('');setBooking(null);setProposal(null);setPasteReport(null);
   try {
-   const result=await api<Booking>('private-jackpot/auto-book',preferences(),'POST');
+   const pasted=pasteText.trim().length>0;
+   const result=await api<Booking & {pasted_preview?:PasteReport}>(
+    pasted?'private-jackpot/paste-book':'private-jackpot/auto-book',
+    pasted?{...preferences(),fixtures_text:pasteText}:preferences(),'POST'
+   );
+   if(result.pasted_preview)setPasteReport(result.pasted_preview);
+   else if(pasted)setPasteReport(result as PasteReport);
    setBooking(result);
    if(result.proposal)setProposal(result.proposal);
+   else if(result.pasted_preview)setProposal(result.pasted_preview);
    else if(result.maximum_reference_odds!==undefined)setProposal(result);
    if(result.status!=='success'||!result.share_code||result.readback_status!=='PASSED')
     setMessage(result.reason||'No exact SportyBet booking code could be validated.');
@@ -131,6 +149,14 @@ export default function PrivateJackpot() {
       <input type="number" value={target} min={2} max={100000} step="any"
        onChange={e=>{setTarget(e.target.value);changed()}}/></label>
     </div>
+    <div className="jackpot-paste-section">
+      <label htmlFor="private-jackpot-paste"><strong>Paste today's fixtures (optional)</strong></label>
+      <p className="muted">One match per line: <code>Home vs Away</code>. No manual market selection required. Names are checked against current approved SportyBet-bookable games; pasted odds are never trusted.</p>
+      <textarea id="private-jackpot-paste" rows={7} value={pasteText}
+       placeholder={'Dinamo Zagreb vs NEC Nijmegen\nBraga vs Gent\nAjax vs Atalanta'}
+       onChange={e=>{setPasteText(e.target.value);changed()}} maxLength={9000}/>
+      {pasteText.trim()&&<button className="mini-button" type="button" onClick={()=>{setPasteText('');changed()}}>Clear fixture list · use full BetSightly pool</button>}
+    </div>
     <div className="jackpot-presets" aria-label="Quick odds targets">
      {suggestedTargets.map(value=><button key={value} type="button" className={'mini-button '+(amount===value?'jackpot-preset-active':'')} onClick={()=>{setTarget(String(value));changed()}}>{decimal(value,0)}x</button>)}
     </div>
@@ -150,6 +176,17 @@ export default function PrivateJackpot() {
    </fieldset>
    <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target, never includes Under-goals markets and never places a stake. A 100,000x ticket is extremely unlikely to win. The approved match universe is currently limited to a 7-day prepared board; more future dates require additional provider coverage.</div></div>
    {grade==='C'&&<div className="notice warning"><AlertTriangle size={17}/><div>Exploratory trust C includes less-supported predictions, not more reliable ones. The minimum model-probability and bookability gates still apply.</div></div>}
+   {pasteReport&&<div className="jackpot-paste-results" role="status">
+    <strong>Fixture matching: {pasteReport.matched_fixture_count||0} accepted / {pasteReport.pasted_fixture_count||0} pasted</strong>
+    {(pasteReport.unmatched_fixture_count||0)>0&&<>
+     <div className="notice warning"><AlertTriangle size={17}/><div>{pasteReport.unmatched_fixture_count} pasted fixtures are not fully available on the approved model and bookmaker board. No missing fixture will be silently replaced.</div></div>
+     <div className="jackpot-ticket-list">{(pasteReport.unmatched||[]).map(item=>
+      <div className="jackpot-ticket-item" key={item.line}>
+       <span>{item.line}. {item.home_team} vs {item.away_team}
+       <small>{item.reason?.replaceAll('_',' ')} {item.suggested_match?' · Possible name: '+item.suggested_match:''}</small></span>
+      </div>)}</div>
+    </>}
+   </div>}
    {message&&<div className="notice warning" role="alert"><AlertTriangle size={17}/><div>{message}</div></div>}
   </section>
   {(board?.status==='success'||displayed)&&<section className="panel">

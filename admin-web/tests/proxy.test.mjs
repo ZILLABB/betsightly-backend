@@ -236,3 +236,37 @@ test('auto optimizer forwards explicit constraints to backend with session cooki
   assert.equal(preview.code,200);
  }finally{globalThis.fetch=previous}
 });
+
+test('pasted fixture preview and bookmaker booking are signed-admin-only POST routes',async()=>{
+ const previous=globalThis.fetch;
+ globalThis.fetch=()=>{throw Error('request should have been rejected before upstream')};
+ try{
+  for(const endpoint of ['private-jackpot/paste-preview','private-jackpot/paste-book']){
+   const forbidden=response();await handler(req(endpoint,'GET'),forbidden);
+   assert.equal(forbidden.code,404);
+   const hostile=response();await handler(req(endpoint,'POST',{fixtures_text:'A vs B'},'https://malicious.invalid'),hostile);
+   assert.equal(hostile.code,403);
+  }
+ }finally{globalThis.fetch=previous}
+});
+
+test('paste preview forwards exact fixture text without changing it',async()=>{
+ const previous=globalThis.fetch;let seen=[];
+ globalThis.fetch=async(url,opts)=>{
+  seen.push({url:String(url),opts});
+  return new Response(JSON.stringify({status:'UNREACHABLE',matched:[],unmatched:[]}),{status:200,headers:{'content-type':'application/json'}});
+ };
+ try{
+  const fixtureText='Dinamo Zagreb vs NEC Nijmegen\\nBraga vs Gent';
+  const payload={fixtures_text:fixtureText,target_odds:100000,horizon:'today'};
+  for(const name of ['private-jackpot/paste-preview','private-jackpot/paste-book']){
+   const resp=response();await handler(req(name,'POST',payload,'https://'+HOST),resp);
+   assert.equal(resp.code,200);
+  }
+  assert.equal(seen.length,2);
+  assert.equal(seen[0].url,BACKEND+'/api/growth/private-jackpot/paste-preview');
+  assert.equal(seen[1].url,BACKEND+'/api/growth/private-jackpot/paste-book');
+  assert.equal(seen[0].opts.headers.cookie,'bs_admin=signed-test');
+  assert.equal(JSON.parse(seen[0].opts.body).fixtures_text,fixtureText);
+ }finally{globalThis.fetch=previous}
+});
