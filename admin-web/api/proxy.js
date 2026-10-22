@@ -95,11 +95,29 @@ export default async function handler(req, res) {
     });
     const cookie = upstreamResponse.headers.get('set-cookie');
     if (cookie) res.setHeader('Set-Cookie',cookie);
+    if (upstreamResponse.status >= 500) {
+      // Render can reply with a large HTML gateway page. Do not forward HTML
+      // into a JSON-only admin client, or hide which side returned the 502.
+      console.error('BetSightly backend HTTP '+upstreamResponse.status+' on '+route);
+      return res.status(upstreamResponse.status).json({
+        detail: route.startsWith('private-jackpot/')
+          ?'The BetSightly backend returned HTTP '+upstreamResponse.status+
+           ' while checking the private jackpot. No code is confirmed; run a fresh read-only preview after service recovery, and do not blindly repeat Generate Code.'
+          :'The BetSightly backend is temporarily unavailable (HTTP '+upstreamResponse.status+').'
+      });
+    }
     const contentType = upstreamResponse.headers.get('content-type') || 'application/json';
     res.status(upstreamResponse.status).setHeader('Content-Type',contentType);
     res.send(await upstreamResponse.text());
-  } catch {
-    // A timed-out publication may already have committed. Never auto-retry POSTs.
-    res.status(502).json({detail:'Backend request interrupted. For publishing, check saved tickets before trying again.'});
+  } catch (error) {
+    // Never log cookies, input picks or the bearer session. Only the error class.
+    console.error('BetSightly upstream request interrupted on '+route,
+      error instanceof Error ? error.name : 'unknown');
+    // A timed-out share-code request may already have completed. No auto retry.
+    res.status(502).json({
+      detail:route.startsWith('private-jackpot/')
+        ?'Private jackpot connection was interrupted. Whether a share code was created is unknown. Do not repeat Generate Code until existing code records are checked.'
+        :'Backend request interrupted. For publishing, check saved tickets before trying again.'
+    });
   }
 }
