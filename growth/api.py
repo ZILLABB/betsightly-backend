@@ -59,6 +59,43 @@ def manual_tiers_status():
     }
 
 
+# Private jackpot booking uses the same signed admin cookie as publishing.
+# Neither endpoint is exposed through the public BetSightly site.
+class PrivateJackpotFilters(BaseModel):
+    horizon: str = Field(default="today", pattern="^(today|3_days|7_days)$")
+    min_trust_grade: str = Field(default="B", pattern="^[AB]$")
+    min_probability: float = Field(default=.65, ge=.65, le=1)
+    markets: list[str] = Field(default_factory=list, max_length=24)
+
+
+class PrivateJackpotBookRequest(PrivateJackpotFilters):
+    selection_ids: list[str] = Field(min_length=1, max_length=50)
+    target_odds: float = Field(default=2, ge=2, le=100_000)
+
+
+@router.post("/private-jackpot/candidates", dependencies=[Depends(require_admin)])
+def private_jackpot_candidates(body: PrivateJackpotFilters):
+    """Read approved/upcoming/bookable candidates without making any bet or code."""
+    from growth.private_jackpot import candidate_board
+    try:
+        return candidate_board(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/private-jackpot/book", dependencies=[Depends(require_admin)])
+def private_jackpot_book(body: PrivateJackpotBookRequest):
+    """Explicit admin request; accept only complete and verified SportyBet codes.
+
+    Unrelated manual/public predictions, publishing and calibration never change.
+    """
+    from growth.private_jackpot import booking_request
+    try:
+        return booking_request(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 class ManualCodeImportRequest(BaseModel):
     tier: str = Field(min_length=3, max_length=20)
     code: str = Field(min_length=4, max_length=32)
