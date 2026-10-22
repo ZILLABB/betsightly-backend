@@ -81,15 +81,37 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
     if current.tzinfo is None:
         raise ValueError("Current time must be timezone-aware.")
     if board is None:
-        board = sportybet.fetch_board(force=False)
+        # Deliberately never launch a full bookmaker crawl on the HTTP request.
+        # A scheduled refresh is responsible for obtaining fresh quotes.
+        board = sportybet.cached_board_for_admin()
+    if not board:
+        return {
+            "status": "BOARD_REFRESH_REQUIRED",
+            "reason": (
+                "No complete SportyBet snapshot fresher than 30 minutes is "
+                "available. The scheduled bookmaker sync must refresh it; "
+                "no share-code request was made."
+            ),
+            "share_code": None, "matched": [], "unmatched": [],
+            "pasted_fixture_count": len(rows),
+            "matched_fixture_count": 0,
+            "unmatched_fixture_count": len(rows),
+            "full_ticket_complete": False,
+            "partial_reference_odds": None,
+            "maximum_reference_odds": None,
+            "distinct_fixture_count": 0,
+        }
     meta = sportybet.board_metadata(board)
     fixtures = [entry for _, entry in sportybet._board_entries(board)]
     if not fixtures:
         return {
             "status": "BOOKMAKER_BOARD_UNAVAILABLE",
-            "reason": "SportyBet's upcoming fixture board is empty.",
+            "reason": "The cached SportyBet board has no upcoming fixtures.",
             "share_code": None, "matched": [], "unmatched": [],
             "pasted_fixture_count": len(rows),
+            "matched_fixture_count": 0,
+            "unmatched_fixture_count": len(rows),
+            "full_ticket_complete": False,
         }
 
     # Include every name match for collision detection. Reject repeated event
@@ -197,15 +219,14 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
 
 def bookmaker_paste_book(payload: dict) -> dict:
     """Create only a complete privately confirmed code, with full readback."""
-    proposal = bookmaker_paste_preview(payload)
-    if proposal["status"] != "PROPOSED_NOT_BOOKED":
-        return {**proposal, "share_code": None}
-    from leagues.booking import create_booking
-    board = sportybet.fetch_board(force=False)
-    # Re-run exact matching on the same snapshot as the bookmaker write.
+    # One snapshot and one validation pass. The previous implementation ran
+    # the fixture discovery twice, which amplified expensive bookmaker/cache
+    # lookups on every user click and could produce inconsistent snapshots.
+    board = sportybet.cached_board_for_admin()
     verified = bookmaker_paste_preview(payload, board=board)
     if verified["status"] != "PROPOSED_NOT_BOOKED":
         return {**verified, "share_code": None}
+    from leagues.booking import create_booking
     games = [{
         "home_team": row["matched_home"],
         "away_team": row["matched_away"],
