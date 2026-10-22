@@ -90,7 +90,7 @@ def _price(entry: dict, market: str) -> tuple[str, float | None]:
 
 def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
                             now: datetime | None = None) -> dict:
-    """One-day exact picks from the bookmaker itself, not model candidates."""
+    """Exact picks within today or the next 72 hours, independent of the model."""
     rows = parse_fixture_lines(str(payload.get("fixtures_text") or ""))
     if any(not item["requested_market"] for item in rows):
         raise ValueError(
@@ -101,8 +101,11 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
     target = float(payload.get("target_odds") or MAX_TARGET)
     if not isfinite(target) or not MIN_ODDS <= target <= MAX_TARGET:
         raise ValueError("Target odds must be between 2x and 100,000x.")
-    if str(payload.get("horizon") or "today") != "today":
-        raise ValueError("Bookmaker-only experimental mode is restricted to today.")
+    horizon = str(payload.get("horizon") or "today")
+    if horizon not in {"today", "3_days"}:
+        raise ValueError(
+            "Bookmaker-only experimental mode supports Today or Next 3 days."
+        )
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
         raise ValueError("Current time must be timezone-aware.")
@@ -156,6 +159,8 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
     # names rather than guessing at which league/date a fixture refers to.
     matched, unmatched, used = [], [], set()
     today = current.astimezone(_NG).date()
+    window_ends = current + timedelta(hours=72)
+    minimum_kickoff = current + timedelta(minutes=20)
     for row in rows:
         matches = [
             candidate for candidate in fixtures
@@ -165,17 +170,28 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
             and sportybet._squad(row["away_team"]) == candidate.get("away_squad", "")
         ]
         when = [(entry, _entry_kickoff(entry)) for entry in matches]
-        same_day = [(entry, dt) for entry, dt in when
-                    if dt and dt.astimezone(_NG).date() == today]
-        upcoming = [(entry, dt) for entry, dt in same_day
-                    if dt >= current + timedelta(minutes=20)]
+        in_window = [
+            (entry, dt) for entry, dt in when
+            if dt and (
+                dt.astimezone(_NG).date() == today
+                if horizon == "today"
+                else current <= dt <= window_ends
+            )
+        ]
+        upcoming = [(entry, dt) for entry, dt in in_window
+                    if dt >= minimum_kickoff]
 
         if not matches:
             reason, detail = ("FIXTURE_NOT_ON_SPORTYBET_BOARD",
                               "No bookmaker fixture matched both teams.")
-        elif not same_day:
-            reason, detail = ("NOT_SCHEDULED_TODAY",
-                              "Bookmaker lists the fixture on another date or without a kickoff.")
+        elif not in_window:
+            reason = ("NOT_SCHEDULED_TODAY" if horizon == "today"
+                      else "OUTSIDE_THREE_DAY_WINDOW")
+            detail = (
+                "SportyBet lists this event outside today's Lagos calendar date."
+                if horizon == "today" else
+                "SportyBet lists this event outside the next 72 hours."
+            )
         elif not upcoming:
             reason, detail = ("STARTED_OR_TOO_CLOSE_TO_KICKOFF",
                               "The event has started or begins within 20 minutes.")
@@ -207,7 +223,7 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
                         "kickoff": kickoff.isoformat(),
                         "league": entry.get("competition") or "",
                         "event_id": event_id,
-                        "match_method": "bookmaker_exact_club_and_date",
+                        "match_method": "bookmaker_exact_club_and_window",
                     })
                     continue
         unmatched.append({**row, "reason": reason, "detail": detail})
@@ -221,6 +237,8 @@ def bookmaker_paste_preview(payload: dict, *, board: dict | None = None,
         "status": status,
         "source": "SPORTYBET_BOOKMAKER_ONLY_EXPERIMENT",
         "portfolio_type": "USER_SUPPLIED_BOOKMAKER_ONLY",
+        "horizon": horizon,
+        "window_end": window_ends.isoformat() if horizon == "3_days" else None,
         "prediction_quality_gate_applied": False,
         "exact_market_mode": True,
         "requested_market_count": len(rows),
