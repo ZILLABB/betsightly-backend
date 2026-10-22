@@ -105,7 +105,10 @@ export default function PrivateJackpot() {
  const candidates=board?.candidates||[];
  const selectedGames=displayed?.selected_games||selectedIds.map(key=>candidates.find(c=>c.selection_id===key)).filter((x):x is Candidate=>Boolean(x));
  const optimisticCeiling=board?.maximum_reference_odds;
- const partial=Boolean(pasteReport&&pasteReport.full_ticket_complete===false);
+ const snapshotUnavailable=bookmakerOnly&&Boolean(pasteReport&&[
+   'BOARD_REFRESH_REQUIRED','BOOKMAKER_BOARD_UNAVAILABLE',
+ ].includes(pasteReport.status));
+ const partial=Boolean(pasteReport&&pasteReport.full_ticket_complete===false&&!snapshotUnavailable);
  const currentCeiling=partial?undefined:(displayed?.maximum_reference_odds??optimisticCeiling);
  const modelCeiling=bookmakerOnly?undefined:displayed?.maximum_model_eligible_reference_odds;
  const impossible=Number.isFinite(currentCeiling)&&Number(currentCeiling)<amount;
@@ -115,11 +118,15 @@ export default function PrivateJackpot() {
  return <>
   <div className="page-heading"><div><span className="eyebrow">PRIVATE · AUTOMATIC · SPORTYBET VERIFIED</span>
    <h1>Smart Jackpot Generator.</h1>
-   <p>One click searches the available BetSightly-approved matches and creates a verified share code when your odds target is achievable. You do not need to pick matches.</p>
+   <p>{bookmakerOnly
+    ?'Paste exact picks to check the current SportyBet bookmaker board. Model confidence restrictions do not apply; a code is generated only after a complete verified readback.'
+    :'Search model-approved matches and request a verified share code when your target is achievable. You do not need to choose matches yourself.'}</p>
   </div></div>
   <section className="panel">
    <header className="panel-head"><div><h2>Automatic ticket settings</h2>
-    <p>Use only model-evaluated, bookmaker-bookable fixtures. Research and booking remain separate from public predictions.</p></div><ShieldCheck size={21}/></header>
+    <p>{bookmakerOnly
+     ?'Experimental bookmaker-only validation for today; no prediction quality or calibration claim.'
+     :'Use model-evaluated, bookmaker-bookable fixtures. Research and booking remain separate from public predictions.'}</p></div><ShieldCheck size={21}/></header>
    <fieldset className="editor" disabled={busy!==null}>
     <label className="jackpot-policy-control">Private selection policy
      <select value={mode} onChange={e=>{setMode(e.target.value as 'approved_model'|'bookmaker_only');changed()}}>
@@ -171,7 +178,7 @@ export default function PrivateJackpot() {
        onChange={e=>{setTarget(e.target.value);changed()}}/></label>
     </div>
     <div className="jackpot-paste-section">
-      <label htmlFor="private-jackpot-paste"><strong>Paste today's fixtures and exact picks (optional)</strong></label>
+      <label htmlFor="private-jackpot-paste"><strong>{bookmakerOnly?'Paste today’s exact fixtures and picks (required)':'Paste today’s fixtures and exact picks (optional)'}</strong></label>
       <p className="muted">Use <code>Home vs Away | Home win @1.65</code> or <code>Home vs Away | BTTS Yes @1.53</code>. If you supply picks, supply one on every line; the system keeps the exact markets instead of replacing them. Without picks, markets are selected automatically. Pasted @prices are never trusted.</p>
       <textarea id="private-jackpot-paste" rows={7} value={pasteText}
        placeholder={'Dinamo Zagreb vs NEC Nijmegen | Home win @1.71\nBraga vs Gent | Home win @1.81\nAjax vs Atalanta | BTTS Yes @1.63'}
@@ -211,8 +218,12 @@ export default function PrivateJackpot() {
    <div className="notice info"><ShieldCheck size={17}/><div>Never forces legs to hit a target, never includes Under-goals markets and never places a stake. A 100,000x ticket is extremely unlikely to win. The approved match universe is currently limited to a 7-day prepared board; more future dates require additional provider coverage.</div></div>
    {!bookmakerOnly&&grade==='C'&&<div className="notice warning"><AlertTriangle size={17}/><div>Exploratory trust C includes less-supported predictions, not more reliable ones. The minimum model-probability and bookability gates still apply.</div></div>}
    {pasteReport&&<div className="jackpot-paste-results" role="status">
-    <strong>Fixture matching: {pasteReport.matched_fixture_count||0} accepted / {pasteReport.pasted_fixture_count||0} pasted{pasteReport.exact_market_mode?' · Exact picks preserved':' · Picks auto-selected'}</strong>
-    {(pasteReport.unmatched_fixture_count||0)>0&&<>
+    <strong>{snapshotUnavailable
+      ?'Bookmaker snapshot unavailable · 0 fixtures assessed'
+      :'Fixture matching: '+(pasteReport.matched_fixture_count||0)+' accepted / '+(pasteReport.pasted_fixture_count||0)+' pasted'}
+     {bookmakerOnly?' · Bookmaker-only exact picks'
+      :pasteReport.exact_market_mode?' · Exact picks preserved':' · Picks auto-selected'}</strong>
+    {!snapshotUnavailable&&(pasteReport.unmatched_fixture_count||0)>0&&<>
      <div className="notice warning"><AlertTriangle size={17}/><div>{pasteReport.unmatched_fixture_count} pasted fixtures or exact markets are unavailable in this mode. No missing pick will be substituted.</div></div>
      <div className="jackpot-ticket-list">{(pasteReport.unmatched||[]).map(item=>
       <div className="jackpot-ticket-item" key={item.line}>
@@ -229,7 +240,7 @@ export default function PrivateJackpot() {
    This is NOT the full-ticket ceiling. No code has been generated.
   </div></div>}
   <MarketExplorer preferences={preferences}/>
-  {(board?.status==='success'||displayed)&&<section className="panel">
+  {!snapshotUnavailable&&(board?.status==='success'||displayed)&&<section className="panel">
    <header className="panel-head"><div><h2>Feasibility & match coverage</h2><p>Shows available fixtures, not duplicate markets counted as matches.</p></div></header>
    <div className="jackpot-feasibility">
     <div><small>{bookmakerOnly?'Validated bookmaker markets':'Approved markets'}</small><strong>{decimal(bookmakerOnly?(pasteReport?.matched_fixture_count??0):(board?.candidate_count??displayed?.candidate_count??0),0)}</strong></div>
