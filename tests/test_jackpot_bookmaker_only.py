@@ -110,7 +110,10 @@ def test_requested_under_markets_remain_exact_and_quoted(home, away, market, pri
         **_args(f"{home} vs {away} | {market.replace('_', ' ')}"),
         "horizon": "3_days",
     }, board=_board(real), now=NOW)
-    assert result["status"] == "PROPOSED_NOT_BOOKED"
+    # A single quoted 1.37x-1.73x leg must pass exact-market validation,
+    # but cannot satisfy the existing 2.00x minimum accumulator target.
+    assert result["status"] == "BELOW_TARGET"
+    assert result["full_ticket_complete"] is True
     assert result["matched_fixture_count"] == 1
     assert result["matched"][0]["market"] == market
     assert result["matched"][0]["event_id"] == "senior-event"
@@ -141,7 +144,8 @@ def test_senior_fixture_ignores_youth_competition_without_squad_markers():
     youth["kickoff_ms"] = senior["kickoff_ms"]
     payload = _args("Alanyaspor vs Kocaelispor | Under 2.5")
     result = bookmaker_paste_preview(payload, board=_board(senior, youth), now=NOW)
-    assert result["status"] == "PROPOSED_NOT_BOOKED"
+    assert result["status"] == "BELOW_TARGET"
+    assert result["full_ticket_complete"] is True
     assert result["matched"][0]["event_id"] == "real-senior"
     assert result["matched"][0]["odds"] == pytest.approx(1.62)
     assert result["share_code"] is None
