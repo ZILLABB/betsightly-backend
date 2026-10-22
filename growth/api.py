@@ -101,6 +101,16 @@ def private_jackpot_optimize(body: PrivateJackpotOptimizeRequest):
         raise HTTPException(422, str(exc))
 
 
+@router.post("/private-jackpot/market-catalog", dependencies=[Depends(require_admin)])
+def private_jackpot_market_catalog(body: PrivateJackpotFilters):
+    """Return all registry-mapped SportyBet football outcomes with real approval flags."""
+    from growth.jackpot_market_catalog import market_catalog_request
+    try:
+        return market_catalog_request(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 class PrivateJackpotPasteRequest(PrivateJackpotOptimizeRequest):
     fixtures_text: str = Field(min_length=5, max_length=9000)
 
