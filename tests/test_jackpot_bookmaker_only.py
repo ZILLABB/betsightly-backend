@@ -80,17 +80,88 @@ def test_wrong_away_side_is_not_matched():
     assert result["unmatched"][0]["reason"] == "FIXTURE_NOT_ON_SPORTYBET_BOARD"
 
 
-def test_undermarket_excluded_and_started_fixture_rejected():
-    from leagues.market_registry import MARKET_TO_SPORTYBET
+def test_quoted_under_allowed_in_private_mode_but_started_fixture_rejected():
     board = _board(_fixture("Ajax", "Atalanta", "evt1", price=2.3,
                             market="under_2_5"),
                    _fixture("Hoffenheim", "Lyon", "evt2", hour=14))
     under = bookmaker_paste_preview(
         _args("Ajax vs Atalanta | Under 2.5"), board=board, now=NOW)
-    assert under["unmatched"][0]["reason"] == "UNDER_MARKET_EXCLUDED"
+    assert under["status"] == "PROPOSED_NOT_BOOKED"
+    assert under["matched"][0]["market"] == "under_2_5"
+    assert under["matched"][0]["odds"] == pytest.approx(2.3)
+    assert under["share_code"] is None
     started = bookmaker_paste_preview(
         _args("Hoffenheim vs Lyon | Home win"), board=board, now=NOW)
     assert started["unmatched"][0]["reason"] == "STARTED_OR_TOO_CLOSE_TO_KICKOFF"
+
+
+@pytest.mark.parametrize("home,away,market,price", [
+    ("Torino", "Monza", "under_3_5", 1.37),
+    ("Alaves", "Malaga CF", "under_3_5", 1.32),
+    ("Vitoria SC Guimaraes", "Maritimo Madeira", "under_3_5", 1.32),
+    ("Granada", "Valladolid", "under_2_5", 1.73),
+    ("Alanyaspor", "Kocaelispor", "under_2_5", 1.62),
+])
+def test_requested_under_markets_remain_exact_and_quoted(home, away, market, price):
+    real = _fixture(home, away, "senior-event", price=price, market=market)
+    real["competition"] = "Domestic Senior League"
+    real["kickoff_ms"] = int((NOW + timedelta(hours=26)).timestamp() * 1000)
+    result = bookmaker_paste_preview({
+        **_args(f"{home} vs {away} | {market.replace('_', ' ')}"),
+        "horizon": "3_days",
+    }, board=_board(real), now=NOW)
+    assert result["status"] == "PROPOSED_NOT_BOOKED"
+    assert result["matched_fixture_count"] == 1
+    assert result["matched"][0]["market"] == market
+    assert result["matched"][0]["event_id"] == "senior-event"
+    assert result["indicative_odds"] == pytest.approx(price)
+    assert result["share_code"] is None
+
+
+def test_under_market_suspended_outcome_remains_unavailable():
+    event = _fixture("Torino", "Monza", "senior", market="under_3_5")
+    ref = next(iter(event["market_refs"].values()))
+    next(iter(ref["outcomes"].values()))["active"] = False
+    result = bookmaker_paste_preview(
+        _args("Torino vs Monza | Under 3.5"), board=_board(event), now=NOW)
+    assert result["matched_fixture_count"] == 0
+    assert result["unmatched"][0]["reason"] == "OUTCOME_SUSPENDED"
+    assert result["share_code"] is None
+
+
+def test_senior_fixture_ignores_youth_competition_without_squad_markers():
+    senior = _fixture("Alanyaspor", "Kocaelispor", "real-senior",
+                      price=1.62, market="under_2_5")
+    senior["competition"] = "Super Lig"
+    youth = _fixture("Alanyaspor", "Kocaelispor", "youth-event",
+                     price=2.05, market="under_2_5")
+    # SportyBet records sometimes lack U19 markers in both team names
+    # and home_squad/away_squad, so competition must be checked too.
+    youth["competition"] = "U19 PAF Ligi"
+    youth["kickoff_ms"] = senior["kickoff_ms"]
+    payload = _args("Alanyaspor vs Kocaelispor | Under 2.5")
+    result = bookmaker_paste_preview(payload, board=_board(senior, youth), now=NOW)
+    assert result["status"] == "PROPOSED_NOT_BOOKED"
+    assert result["matched"][0]["event_id"] == "real-senior"
+    assert result["matched"][0]["odds"] == pytest.approx(1.62)
+    assert result["share_code"] is None
+
+    youth_only = bookmaker_paste_preview(payload, board=_board(youth), now=NOW)
+    assert youth_only["matched_fixture_count"] == 0
+    assert youth_only["unmatched"][0]["reason"] == "FIXTURE_NOT_ON_SPORTYBET_BOARD"
+
+
+def test_duplicate_senior_fixtures_remain_ambiguous():
+    first = _fixture("Alanyaspor", "Kocaelispor", "first",
+                     market="under_2_5")
+    second = _fixture("Alanyaspor", "Kocaelispor", "second",
+                      market="under_2_5")
+    result = bookmaker_paste_preview(
+        _args("Alanyaspor vs Kocaelispor | Under 2.5"),
+        board=_board(first, second), now=NOW)
+    assert result["matched_fixture_count"] == 0
+    assert result["unmatched"][0]["reason"] == "AMBIGUOUS_BOOKMAKER_FIXTURE"
+    assert result["share_code"] is None
 
 
 def test_too_low_actual_bookmaker_price_cannot_release_code(monkeypatch):
