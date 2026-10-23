@@ -47,6 +47,13 @@ for line in ("0.5", "1.5", "2.5", "3.5", "4.5"):
     _MANUAL_ALIASES[f"total under {line}"] = f"under_{ident}"
     _MANUAL_ALIASES[f"over {line}"] = f"over_{ident}"
     _MANUAL_ALIASES[f"under {line}"] = f"under_{ident}"
+    # Accept common pasted labels while keeping the same audited market IDs.
+    # A trailing @price is already stripped in resolve_market; it is never
+    # trusted as a SportyBet quote or used for booking.
+    _MANUAL_ALIASES[f"over {line} goals"] = f"over_{ident}"
+    _MANUAL_ALIASES[f"under {line} goals"] = f"under_{ident}"
+    _MANUAL_ALIASES[f"total over {line} goals"] = f"over_{ident}"
+    _MANUAL_ALIASES[f"total under {line} goals"] = f"under_{ident}"
     _MANUAL_ALIASES[f"o{line}"] = f"over_{ident}"
     _MANUAL_ALIASES[f"u{line}"] = f"under_{ident}"
 
