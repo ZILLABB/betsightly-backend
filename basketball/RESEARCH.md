@@ -14,6 +14,25 @@ basketball disabled. The maintained offline track is:
 - `research_cli.py`: explicit local-only commands, without web server
 - `tests/test_basketball_research.py`: schema and look-ahead regression tests
 
+## 0. Preferred no-key research dataset (actually tested)
+
+The full keyless import and actual held-out model report were verified on 23 October 2026:
+
+    python -m basketball.research_cli fetch-public --seasons 2017 2018 2019 2020 2021 2022 2023 2024 2025 2026 2027
+    python -m basketball.research_cli report
+    python -m basketball.research_cli train
+
+Source: https://github.com/sportsdataverse/sportsdataverse-data/releases/tag/espn_nba_schedules
+
+Read [the verified report](RESEARCH_EVIDENCE_2026-10-23.md) for dataset hashes,
+coverage and precise validation/test results. Source rights for commercial use
+must be separately approved. No paid API or API key was needed for the first
+real-data run; the optional BALLDONTLIE method below is a secondary adapter.
+
+Current season 2026–27 has **zero eligible upcoming paper fixtures** in the
+first downloaded snapshot, because both teams must have five previously
+completed games in that season. We never fabricate unavailable picks.
+
 ## 1. Get real NBA games using a free API key
 
 Create a **free** key via https://www.balldontlie.io/ and set it **locally**
@@ -119,6 +138,6 @@ post-tipoff forecasts. It never computes ROI without historical odds.
 6. Do not mount public basketball routes or enable booking/distribution without
    a separate explicit release decision.
 
-`python -m pytest tests/test_basketball_research.py -v` covers the offline
+`python -m pytest --noconftest tests/test_basketball_research.py -v` covers the offline
 contract. Unit tests use synthetic fixtures **only as isolated test inputs**,
 never as training data for real BetSightly predictions.
