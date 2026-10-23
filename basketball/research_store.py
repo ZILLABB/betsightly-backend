@@ -48,6 +48,8 @@ def open_ledger(path: str | Path = DEFAULT_DB) -> sqlite3.Connection:
             away_team_id TEXT NOT NULL,
             model_version TEXT NOT NULL,
             home_win_probability REAL NOT NULL CHECK(home_win_probability BETWEEN 0 AND 1),
+            expected_total_points REAL,
+            expected_home_margin REAL,
             raw_json TEXT NOT NULL,
             sha256 TEXT NOT NULL,
             inserted_at TEXT NOT NULL
@@ -67,6 +69,14 @@ def open_ledger(path: str | Path = DEFAULT_DB) -> sqlite3.Connection:
             message TEXT NOT NULL
         );
     """)
+    # Older local pilot ledgers are upgraded without touching immutable rows.
+    existing_columns = {
+        col[1] for col in connection.execute("PRAGMA table_info(forecasts)")
+    }
+    for column in ("expected_total_points", "expected_home_margin"):
+        if column not in existing_columns:
+            connection.execute(f"ALTER TABLE forecasts ADD COLUMN {column} REAL")
+    connection.commit()
     return connection
 
 
@@ -105,6 +115,18 @@ def save_forecasts(connection: sqlite3.Connection,
                         "home_team", "away_team", "model_version", "date"):
                 if not str(item.get(key, "")).strip():
                     raise ValueError(f"Missing {key} for paper prediction")
+            expected_total = item.get("expected_total_points")
+            expected_margin = item.get("expected_home_margin")
+            if (expected_total is None) != (expected_margin is None):
+                raise ValueError("Score projection fields must be both present or absent")
+            if expected_total is not None:
+                expected_total = float(expected_total)
+                expected_margin = float(expected_margin)
+                if (not math.isfinite(expected_total) or
+                        not math.isfinite(expected_margin) or
+                        not 50 <= expected_total <= 450 or
+                        not -100 <= expected_margin <= 100):
+                    raise ValueError("Invalid NBA point/total projections")
             game_id = str(item["game_id"])
             serialized = _canonical(item)
             digest = hashlib.sha256(serialized.encode()).hexdigest()
@@ -122,12 +144,14 @@ def save_forecasts(connection: sqlite3.Connection,
                 """INSERT INTO forecasts(
                     game_id, fixture_date, start_utc, created_at, home_team,
                     away_team, home_team_id, away_team_id, model_version,
-                    home_win_probability, raw_json, sha256, inserted_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    home_win_probability, expected_total_points,
+                    expected_home_margin, raw_json, sha256, inserted_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (game_id, item["date"], kickoff.isoformat(),
                  created.isoformat(), item["home_team"], item["away_team"],
                  str(item["home_team_id"]), str(item["away_team_id"]),
-                 item["model_version"], p, serialized, digest, now),
+                 item["model_version"], p, expected_total, expected_margin,
+                 serialized, digest, now),
             )
             inserted += 1
     return {"inserted": inserted, "unchanged": skipped,
@@ -189,6 +213,14 @@ def performance_report(connection: sqlite3.Connection) -> dict:
          ORDER BY f.fixture_date, f.game_id
     """).fetchall()
     count = len(rows)
+    score_rows = connection.execute("""
+        SELECT f.expected_total_points AS predicted_total,
+               f.expected_home_margin AS predicted_margin,
+               s.home_score AS home_score, s.away_score AS away_score
+          FROM forecasts f JOIN settlements s ON f.game_id=s.game_id
+         WHERE f.expected_total_points IS NOT NULL
+           AND f.expected_home_margin IS NOT NULL
+    """).fetchall()
     result = {
         "status": "research_only", "market": "nba_moneyline",
         "forecast_count": stats["total"] or 0,
@@ -206,6 +238,27 @@ def performance_report(connection: sqlite3.Connection) -> dict:
                 for r in rows
             ) / count, 5),
         })
+    if score_rows:
+        total_error = [
+            r["predicted_total"] - r["home_score"] - r["away_score"]
+            for r in score_rows
+        ]
+        margin_error = [
+            r["predicted_margin"] - r["home_score"] + r["away_score"]
+            for r in score_rows
+        ]
+        result["score_projections"] = {
+            "settled": len(score_rows),
+            "total_points_mae": round(sum(abs(x) for x in total_error) /
+                                       len(score_rows), 4),
+            "total_points_rmse": round(math.sqrt(
+                sum(x*x for x in total_error) / len(score_rows)), 4),
+            "home_margin_mae": round(sum(abs(x) for x in margin_error) /
+                                      len(score_rows), 4),
+            "home_margin_rmse": round(math.sqrt(
+                sum(x*x for x in margin_error) / len(score_rows)), 4),
+            "bookmaker_spreads_verified": False,
+        }
     return result
 
 
@@ -213,7 +266,8 @@ def list_forecasts(connection: sqlite3.Connection, limit: int = 200) -> list[dic
     rows = connection.execute("""
         SELECT f.game_id,f.fixture_date,f.start_utc,f.created_at,
                f.home_team,f.away_team,f.model_version,
-               f.home_win_probability, f.sha256, s.home_score,
+               f.home_win_probability, f.expected_total_points,
+               f.expected_home_margin, f.sha256, s.home_score,
                s.away_score, s.home_won, s.recorded_at
           FROM forecasts f LEFT JOIN settlements s ON f.game_id=s.game_id
          ORDER BY f.start_utc DESC LIMIT ?
