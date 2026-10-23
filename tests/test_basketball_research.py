@@ -110,7 +110,8 @@ def test_chronological_split_and_paper_model_only(tmp_path):
     as_of = datetime.combine(date.fromisoformat(games[-1]["date"]),
                              datetime.min.time(), tzinfo=timezone.utc)
     forecasts = paper_forecasts(games, path, games[-1]["date"], as_of=as_of)
-    assert paper_forecasts(games, path, games[-1]["date"]) == []\n    assert len(forecasts) == 1
+    assert paper_forecasts(games, path, games[-1]["date"]) == []
+    assert len(forecasts) == 1
     assert forecasts[0]["booking_code"] is None
     assert 0 <= forecasts[0]["home_win_probability"] <= 1
     with pytest.raises(ValueError, match="after model training"):
