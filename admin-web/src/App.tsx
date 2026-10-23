@@ -2,12 +2,13 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {useIsFetching, useQuery, useQueryClient} from '@tanstack/react-query';
 import {
  Activity, BarChart3, CheckCircle2, ChevronRight, Clock3, Database, FileCheck2,
- Globe2, LayoutDashboard, Loader2, LockKeyhole, LogOut, Megaphone, Menu, RefreshCcw,
+ Globe2, LayoutDashboard, Loader2, LockKeyhole, LogOut, Megaphone, Menu, PanelLeftClose, PanelLeftOpen, Search, RefreshCcw,
  Send, Settings2, ShieldCheck, Ticket, UploadCloud, Users, X, AlertTriangle, type LucideIcon
 } from 'lucide-react';
 import {api, ApiError, isAmbiguous, tiers} from './api';
 import Insights from './Insights';
 import PrivateJackpot from './PrivateJackpot';
+import {AdminActionDialog, AdminCommandPalette, PremiumOperationsOverview} from './PremiumComponents';
 
 type Page = 'overview' | 'audience' | 'predictions' | 'analytics-health' | 'manual' | 'jackpot' | 'sporty' | 'readiness' | 'content' | 'campaign' | 'publishing' | 'referrals' | 'settings';
 const nav: {id: Page; label: string; icon: LucideIcon; group: string}[] = [
@@ -43,31 +44,19 @@ function ResultNote({kind,text}:{kind:'error'|'success'|'info';text:string}) {
  return <div role={kind==='error'?'alert':'status'} className={'notice ' + kind}>{kind==='success'?<CheckCircle2 size={18}/>:kind==='error'?<AlertTriangle size={18}/>:<Clock3 size={18}/>}<div>{text}</div></div>;
 }
 
-function Overview() {
+function Overview({onNavigate}:{onNavigate:(page:Page)=>void}) {
  const [days,setDays]=useState(1);
  const q=useQuery({queryKey:['analytics',days],queryFn:()=>api<any>('analytics?days='+days)});
- const s=useQuery({queryKey:['growth-status'],queryFn:()=>api<any>('status')});
- const d=q.data?.summary;const totals=d?.totals||{},book=d?.booking||{},report=s.data||{};
+ const status=useQuery({queryKey:['growth-status'],queryFn:()=>api<any>('status')});
+ const summary=q.data?.summary||{}, totals=summary.totals||{}, booking=summary.booking||{}, report=status.data||{};
+ const refresh=()=>{void q.refetch();void status.refetch();};
  return <>
-  <div className="page-heading"><div><span className="eyebrow">LIVE COMMAND CENTER</span><h1>Today at BetSightly.</h1><p>Audience, predictions and bookmaker operations — one accountable view.</p></div><div className="toolbar">{[1,7,30].map(x=><button key={x} className={days===x?'chip active':'chip'} onClick={()=>setDays(x)}>{x===1?'Today':x+' days'}</button>)}</div></div>
-  {(q.isError||s.isError) && <DataError error={q.error||s.error} retry={()=>{q.refetch();s.refetch();}}/>}
-  {(q.isPending && !q.data) ? <MetricsSkeleton/> : <div className="metric-grid">
-   <Metric label="Visitors" value={totals.visitors} detail="Unique visitors"/>
-   <Metric label="Sessions" value={totals.sessions}/>
-   <Metric label="Predictions viewed" value={totals.prediction_viewers}/>
-   <Metric label="Builder users" value={totals.builder_users}/>
-   <Metric label="Valid-code viewers" value={totals.valid_code_viewers}/>
-   <Metric label="Copied booking codes" value={totals.unique_code_copiers}/>
-  </div>}
-  <div className="split">
-   <Panel title="Publishing & booking" subtitle="Verified operational information, not estimated bets placed">
-     <div className="data-rows"><div><span>Automated booking attempts</span><b>{n(book.attempts)}</b></div><div><span>Full bookings</span><b>{n(book.full)}</b></div><div><span>Partially recovered</span><b>{n(book.partial)}</b></div><div><span>No-code rate</span><b>{book.no_code_rate==null?'—':Math.round(book.no_code_rate*100)+'%'}</b></div></div>
-   </Panel>
-   <Panel title="Backend & scheduler" subtitle="Read-only health from the existing Render API" action={<button className="mini-button" onClick={()=>s.refetch()}><RefreshCcw size={15}/> Refresh</button>}>
-    {s.isPending?<Loading/>:<div className="data-rows"><div><span>API status</span><b>{report.status||'Unknown'}</b></div><div><span>Recent operations</span><b>{n(report.runs?.length??d?.operations?.runs?.length)}</b></div><div><span>Last observed run</span><b>{String(report.runs?.[0]?.status||d?.operations?.runs?.[0]?.status||'Unavailable')}</b></div></div>}
-   </Panel>
-  </div>
-  <Info>Operational figures come from the backend. A valid booking code is not proof that a customer placed a bet; manual tickets remain separate from model-calibration results.</Info>
+  <div className="page-heading premium-overview-heading"><div><span className="eyebrow">PRIVATE WORKSPACE / LIVE OPERATIONS</span><h1>Command overview.</h1><p>Monitor the operation, identify friction and move from evidence to action.</p></div>
+   <div className="premium-period-switch" role="group" aria-label="Reporting period">{[1,7,30].map(x=><button type="button" key={x} className={days===x?'active':''} aria-pressed={days===x} onClick={()=>setDays(x)}>{x===1?'Today':x+' days'}</button>)}</div></div>
+  {(q.isError||status.isError)&&<DataError error={q.error||status.error} retry={refresh}/>}
+  <PremiumOperationsOverview totals={totals} booking={booking} report={report} period={days} loading={q.isPending&&!q.data}
+    refreshing={q.isFetching||status.isFetching} onRefresh={refresh} onNavigate={id=>onNavigate(id as Page)}/>
+  <Info>Dashboard metrics are observed backend records, not estimated bets or guaranteed outcomes. Model scoring, manual publications and bookmaker verification remain separate.</Info>
  </>;
 }
 
