@@ -46,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     train.add_argument("--min-games", type=int, default=300)
 
+    markets = commands.add_parser(
+        "train-markets", help="Offline total-points and point-margin benchmarks")
+    markets.add_argument("--data", type=Path, default=DEFAULT_DATA)
+    markets.add_argument("--model", type=Path,
+                         default=Path("data/basketball/research/nba_scores.joblib"))
+
     paper = commands.add_parser("paper", help="Private non-bookable forecast")
     paper.add_argument("--data", type=Path, default=DEFAULT_DATA)
     paper.add_argument("--model", type=Path, default=DEFAULT_MODEL)
@@ -104,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("At least 300 real, eligible game rows required")
         result = train_offline(read_games(args.data), args.model,
                                min_games=args.min_games)
+    elif args.command == "train-markets":
+        from basketball.research_market_models import train_score_baselines
+        result = train_score_baselines(read_games(args.data), args.model)
     elif args.command == "paper":
         predictions = paper_forecasts(read_games(args.data), args.model, args.date)
         result = {"status": "research_only", "date": args.date,
