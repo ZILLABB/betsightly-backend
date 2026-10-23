@@ -5,7 +5,7 @@ become training data for an actual research model or public prediction.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import json
 
 import pytest
@@ -106,8 +106,10 @@ def test_chronological_split_and_paper_model_only(tmp_path):
     assert result["research_only"] is True
     assert result["publishing_enabled"] is False
     assert result["betting_roi_measured"] is False
-    forecasts = paper_forecasts(games, path, games[-1]["date"])
-    assert len(forecasts) == 1
+    as_of = datetime.combine(date.fromisoformat(games[-1]["date"]),
+                             datetime.min.time(), tzinfo=timezone.utc)
+    forecasts = paper_forecasts(games, path, games[-1]["date"], as_of=as_of)
+    assert paper_forecasts(games, path, games[-1]["date"]) == []\n    assert len(forecasts) == 1
     assert forecasts[0]["booking_code"] is None
     assert 0 <= forecasts[0]["home_win_probability"] <= 1
     with pytest.raises(ValueError, match="after model training"):
