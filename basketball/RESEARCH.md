@@ -89,6 +89,22 @@ the private forecast list is empty. **We will not fill tiers with guesses.**
 
 Results include probabilities and an explicit `not_for_betting` flag.
 Booking code is always `null`. No publishing mechanism is imported.
+The paper command rejects tip-offs that have already started or fixtures lacking
+a trusted start time. It creates an **immutable local pregame archive** (it never
+overwrites an existing one). `--output` chooses the private archive path.
+
+After a game is final, fetch the same season again and independently score the
+archived picks against actual completed scores:
+
+```bash
+python -m basketball.research_cli fetch --seasons 2022 2023 2024 2025 2026
+python -m basketball.research_cli score \\
+  --archive data/basketball/research/private-forecast.json
+```
+
+`score` reports finalized vs pending games, accuracy, Brier score and log
+loss. It verifies the paper archive checksum and fixture identity, and refuses
+post-tipoff forecasts. It never computes ROI without historical odds.
 
 ## Safety and next gates
 
