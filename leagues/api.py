@@ -650,7 +650,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
 
 
 @router.get("/recommendations")
-def get_fixture_recommendations(date: str | None = None,
+async def get_fixture_recommendations(date: str | None = None,
                                       days_ahead: int = 3):
     """One ranked football opinion per analysed fixture on a WAT date."""
     try:
