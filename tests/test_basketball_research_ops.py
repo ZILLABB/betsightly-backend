@@ -38,6 +38,8 @@ def test_sqlite_forecast_records_are_append_only(tmp_path):
     connection = open_ledger(tmp_path / "private.sqlite")
     try:
         prediction = valid_prediction()
+        prediction["expected_total_points"] = 228.0
+        prediction["expected_home_margin"] = 6.0
         assert save_forecasts(connection, [prediction])["inserted"] == 1
         assert save_forecasts(connection, [prediction])["unchanged"] == 1
         changed = {**prediction, "home_win_probability": 0.97,
@@ -58,6 +60,9 @@ def test_sqlite_forecast_records_are_append_only(tmp_path):
         report = performance_report(connection)
         assert report["settled"] == 1 and report["pending"] == 0
         assert report["accuracy"] == 1 and report["betting_roi"] is None
+        assert report["score_projections"]["settled"] == 1
+        assert report["score_projections"]["total_points_mae"] == 5.0
+        assert report["score_projections"]["home_margin_mae"] == 1.0
         with pytest.raises(ValueError, match="changed after settlement"):
             settle_forecasts(connection, [{**game, "home_score": 113}])
     finally:
@@ -156,4 +161,16 @@ def test_score_models_use_true_labels_and_later_holdout(tmp_path):
     assert report["research_only"] is True
     assert report["targets"]["total_points"]["test"]["mae"] >= 0
     assert report["targets"]["home_margin"]["test"]["rmse"] >= 0
+    future_day = (datetime.now(timezone.utc) + timedelta(days=2)).date()
+    upcoming = {**data[-1], "game_id": "future-score-11",
+                "date": future_day.isoformat(), "status": "scheduled",
+                "start_utc": future_day.isoformat() + "T20:00:00Z",
+                "home_score": None, "away_score": None}
+    from basketball.research_market_models import private_score_estimates
+    forecasts = private_score_estimates(
+        data + [upcoming], tmp_path / "scores.joblib", future_day.isoformat()
+    )
+    assert len(forecasts) == 1
+    assert forecasts[0]["bookmaker_line"] is None
+    assert forecasts[0]["not_a_betting_market"] is True
     assert (tmp_path / "scores.joblib").is_file()
