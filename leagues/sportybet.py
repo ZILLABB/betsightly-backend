@@ -33,6 +33,7 @@ import hashlib
 import logging
 import math
 import os
+import re
 import time
 import unicodedata
 import urllib.request
