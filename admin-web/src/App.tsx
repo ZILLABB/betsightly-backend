@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {useQuery, useQueryClient} from '@tanstack/react-query';
+import {useIsFetching, useQuery, useQueryClient} from '@tanstack/react-query';
 import {
  Activity, BarChart3, CheckCircle2, ChevronRight, Clock3, Database, FileCheck2,
  Globe2, LayoutDashboard, Loader2, LockKeyhole, LogOut, Megaphone, Menu, RefreshCcw,
@@ -27,10 +27,12 @@ const nav: {id: Page; label: string; icon: LucideIcon; group: string}[] = [
 ];
 const n = (x: unknown) => typeof x === 'number' ? x.toLocaleString() : (x == null ? '—' : String(x));
 const errText = (error: unknown) => error instanceof Error ? error.message : 'Unexpected error';
-function Loading({label='Retrieving verified data…'}:{label?:string}) {return <div className="loading" role="status"><Loader2 size={19} className="spin"/>{label}</div>;}
+function Loading({label='Retrieving verified data…'}:{label?:string}) {return <div className="loading loading-rich" role="status" aria-live="polite"><Loader2 size={19} className="spin"/><div><strong>{label}</strong><span>Waiting for the connected service · no result has been confirmed yet</span></div></div>;}
+function MetricsSkeleton() {return <div className="metric-grid" role="status" aria-label="Loading analytics metrics">{Array.from({length:6},(_,i)=><div className="metric metric-skeleton" key={i} aria-hidden="true"><span className="skeleton-line short"/><strong className="skeleton-line value"/><small className="skeleton-line medium"/></div>)}</div>;}
 function Warning({children}:{children:React.ReactNode}) {return <div className="notice warning" role="alert"><AlertTriangle size={17}/><div>{children}</div></div>;}
+function Info({children}:{children:React.ReactNode}) {return <div className="notice info" role="note"><ShieldCheck size={17}/><div>{children}</div></div>;}
 function Empty({text='No records for the selected period.'}:{text?:string}) {return <div className="empty">{text}</div>;}
-function DataError({error, retry}:{error:unknown;retry:()=>void}) {return <div className="notice warning"><AlertTriangle size={17}/><div>{errText(error)} <button className="text-button" onClick={retry}>Retry read</button></div></div>;}
+function DataError({error, retry}:{error:unknown;retry:()=>void}) {return <div className="notice error" role="alert"><AlertTriangle size={17}/><div><strong>Unable to load verified data.</strong><p>{errText(error)}</p><button type="button" className="mini-button" onClick={retry}><RefreshCcw size={14}/> Retry request</button></div></div>;}
 function Panel({title,subtitle,children,action}:{title:string;subtitle?:string;children:React.ReactNode;action?:React.ReactNode}) {
  return <section className="panel"><header className="panel-head"><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{action}</header>{children}</section>;
 }
@@ -49,7 +51,7 @@ function Overview() {
  return <>
   <div className="page-heading"><div><span className="eyebrow">LIVE COMMAND CENTER</span><h1>Today at BetSightly.</h1><p>Audience, predictions and bookmaker operations — one accountable view.</p></div><div className="toolbar">{[1,7,30].map(x=><button key={x} className={days===x?'chip active':'chip'} onClick={()=>setDays(x)}>{x===1?'Today':x+' days'}</button>)}</div></div>
   {(q.isError||s.isError) && <DataError error={q.error||s.error} retry={()=>{q.refetch();s.refetch();}}/>}
-  {(q.isPending && !q.data) ? <Loading/> : <div className="metric-grid">
+  {(q.isPending && !q.data) ? <MetricsSkeleton/> : <div className="metric-grid">
    <Metric label="Visitors" value={totals.visitors} detail="Unique visitors"/>
    <Metric label="Sessions" value={totals.sessions}/>
    <Metric label="Predictions viewed" value={totals.prediction_viewers}/>
@@ -65,7 +67,7 @@ function Overview() {
     {s.isPending?<Loading/>:<div className="data-rows"><div><span>API status</span><b>{report.status||'Unknown'}</b></div><div><span>Recent operations</span><b>{n(report.runs?.length??d?.operations?.runs?.length)}</b></div><div><span>Last observed run</span><b>{String(report.runs?.[0]?.status||d?.operations?.runs?.[0]?.status||'Unavailable')}</b></div></div>}
    </Panel>
   </div>
-  <Warning>The admin reports verified backend evidence only. A valid booking code is not proof that a customer placed a bet. Manual tickets must remain separate from model-calibration results.</Warning>
+  <Info>Operational figures come from the backend. A valid booking code is not proof that a customer placed a bet; manual tickets remain separate from model-calibration results.</Info>
  </>;
 }
 
@@ -183,17 +185,18 @@ function ManualStudio() {
  return <>
   <div className="page-heading"><div><span className="eyebrow">BOOKMAKER-VERIFIED</span><h1>Manual Publishing Studio.</h1><p>Import, review, live-price and confirm every selection — never guess whether a publish worked.</p></div><button className="mini-button" disabled={active} onClick={()=>run('Refreshing saved tickets',refresh)}><RefreshCcw size={16}/> Refresh saved</button></div>
   <Panel title="Publication progress" subtitle="Server-confirmed steps only">
-   <div className="steps">{['Read code','Review markets','Verify prices','Publish','Confirm saved'].map((x,i)=><div key={x} className={'step '+(stage>i?'done':stage===i+1?'current':'')}><span>{stage>i?<CheckCircle2 size={16}/>:i+1}</span>{x}</div>)}</div>
-   {active&&<div className="busy-line" role="status"><Loader2 className="spin" size={16}/>{busy}… do not submit another request.</div>}
+   <div className="workflow-header" role="status" aria-live="polite"><div><span className="workflow-kicker">CURRENT OPERATION</span><strong>{uncertain?'Action needed: reconcile the last publication':busy||(['Ready to import or enter picks','Reading SportyBet selections','Review the exact market choices','Prices verified · awaiting your approval','Publishing · awaiting saved result','Published and confirmed'][stage]||'Review ticket')}</strong></div><span className={'workflow-stage '+(uncertain?'attention':stage===5?'complete':'')}>{stage===0?'Not started':stage+'/5 confirmed stages'}</span></div>
+   <div className="steps" aria-label="Manual ticket publication stages">{['Read code','Review markets','Verify prices','Publish','Confirm saved'].map((x,i)=><div key={x} className={'step '+(stage>i?'done':stage===i+1?'current':'')}><span>{stage>i?<CheckCircle2 size={16}/>:i+1}</span>{x}</div>)}</div>
+   {active&&<div className="operation-signal" role="status" aria-live="polite"><div className="operation-spinner"><Loader2 className="spin" size={19}/></div><div><strong>{busy}…</strong><span>Request in progress. Controls are locked; wait for the server response and saved-record confirmation. Never retry an uncertain publication.</span></div></div>}
    {uncertain&&<Warning>An earlier manual publishing response was interrupted. Duplicate publishing is blocked until the saved record is reconciled.</Warning>}
    {note&&<ResultNote kind={note.kind} text={note.text}/>}
   </Panel>
   <div className="split manual-layout">
    <Panel title="Ticket editor" subtitle="Original model selections and calibration are never overwritten">
-    <fieldset disabled={active} className="editor">
+    <fieldset disabled={active} aria-busy={active} className="editor">
      <label>Destination tier<select value={tier} onChange={e=>tierChange(e.target.value)}>{tiers.map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label>
      {tier==='rollover'&&<div className="notice info">Rollover eligibility is determined by the backend. An unsettled day cannot be bypassed. {current.data?.rollover?.message||''}</div>}
-     <label>SportyBet booking code<div className="input-action"><input value={code} onChange={e=>codeChange(e.target.value)} placeholder="Paste booking code"/><button className="button secondary" onClick={importCode} type="button"><UploadCloud size={16}/> Read code</button></div></label>
+     <label>SportyBet booking code<div className="input-action"><input value={code} onChange={e=>codeChange(e.target.value)} placeholder="Paste booking code"/><button className="button secondary" onClick={importCode} type="button">{busy==='Reading SportyBet code'?<Loader2 size={16} className="spin"/>:<UploadCloud size={16}/>} {busy==='Reading SportyBet code'?'Reading code…':'Read code'}</button></div></label>
      <label className="check"><input type="checkbox" checked={convert} onChange={e=>{setConvert(e.target.checked);setImported(null);edit()}}/>Convert early-goal/1UP/2UP specials to ordinary markets (changes the wager)</label>
      {imported?.warnings?.length ? <Warning>{imported.warnings.join(' · ')}</Warning>:null}
      {!!imported?.converted_features?.length&&<Warning>{imported.converted_features.length} special markets were converted. Early payouts and bonuses are not preserved.</Warning>}
@@ -201,8 +204,8 @@ function ManualStudio() {
      <label>Event ID,market — one per line<textarea rows={10} spellCheck={false} value={lines} onChange={e=>lineChange(e.target.value)} placeholder={'52587,home_win\n17187,over_1_5'}/></label>
      <label className="file-import">Import CSV or TXT (16 KB maximum)<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={importFile}/></label>
      {['2_odds','5_odds','10_odds','over_1_5'].includes(tier)&&<label className="check"><input type="checkbox" checked={replace} onChange={e=>{setReplace(e.target.checked);edit()}}/>Replace the PUBLIC display for this tier; preserve the original model result</label>}
-     <div className="toolbar"><button type="button" className="button secondary" onClick={check} disabled={!!imported?.unresolved_count||!normalized}><FileCheck2 size={16}/> Check live prices</button><button type="button" className="button primary" disabled={!ready||uncertain} onClick={publish}><Send size={16}/> Publish verified ticket</button></div>
-     {ready&&<div className="notice success">Preview verified {n(preview?.data?.games?.length)} games at {n(preview?.data?.total_odds)}x. A fresh bookmaker code is issued only after confirmation.</div>}
+     <div className="toolbar"><button type="button" className="button secondary" onClick={check} disabled={!!imported?.unresolved_count||!normalized}>{busy==='Checking live SportyBet prices'?<Loader2 size={16} className="spin"/>:<FileCheck2 size={16}/>} {busy==='Checking live SportyBet prices'?'Checking every price…':'Check live prices'}</button><button type="button" className="button primary" disabled={!ready||uncertain} onClick={publish}>{busy==='Publishing verified ticket'?<Loader2 size={16} className="spin"/>:<Send size={16}/>} {busy==='Publishing verified ticket'?'Publishing and confirming…':'Publish verified ticket'}</button></div>
+     {ready&&<div className="notice success" role="status"><CheckCircle2 size={17}/><div><strong>Ready for your confirmation</strong><p>{n(preview?.data?.games?.length)} exact games verified at {n(preview?.data?.total_odds)}x. A fresh bookmaker code is issued only after confirmation and saved readback.</p></div></div>}
     </fieldset>
    </Panel>
    <div className="panel-stack">
@@ -269,7 +272,7 @@ function CampaignEditor(){
   <Panel title="Editorial preview" subtitle="Content preview, not a published claim">
    <div className="campaign-preview"><span className="eyebrow">{draft.eyebrow||'MATCHDAY CAMPAIGN'}</span><h3>{draft.headline||'Your verified headline will appear here.'}</h3><p>{draft.description||'Explain what is happening this week, without promising winning bets.'}</p><span className="button secondary">{draft.cta_text||'View predictions'} <ChevronRight size={15}/></span></div>
    <div className="data-rows"><div><span>Publication status</span><b>{draft.enabled?'Scheduled (pending validation)':'Disabled'}</b></div><div><span>Fact check</span><b>{draft.reviewed?'Reviewed':'Not reviewed'}</b></div><div><span>Source link</span><b>{draft.source_url?'Provided':'Missing'}</b></div><div><span>Active dates</span><b>{draft.starts_on||'—'} → {draft.ends_on||'—'}</b></div></div>
-   <Warning>Homepage campaigns are independent of prediction results, betting success and calibration. Expired campaigns disappear automatically.</Warning>
+   <Info>Homepage campaigns are independent of prediction results, betting success and calibration. Expired campaigns disappear automatically.</Info>
   </Panel></div>:null}
  </>;
 }
@@ -349,6 +352,7 @@ function Settings() {
 function App() {
  const [session,setSession]=useState<'checking'|'guest'|'ready'>('checking'),[password,setPassword]=useState(''),[loginError,setLoginError]=useState(''),[signing,setSigning]=useState(false),[page,setPage]=useState<Page>('overview'),[mobile,setMobile]=useState(false);
  const qc=useQueryClient();
+ const fetching=useIsFetching();
  const me=useQuery({queryKey:['me'],queryFn:()=>api<any>('admin/me'),retry:false,enabled:session==='checking'});
  useEffect(()=>{if(session==='checking'&&!me.isPending)setSession(me.isError?'guest':'ready')},[session,me.isPending,me.isError]);
  useEffect(()=>{const expired=()=>{qc.clear();setSession('guest');setLoginError('Session expired. Please sign in again.');};window.addEventListener('betsightly:session-expired',expired);return()=>window.removeEventListener('betsightly:session-expired',expired);},[qc]);
@@ -357,6 +361,6 @@ function App() {
  if(session==='checking')return <div className="auth-screen"><Loading label="Verifying protected admin session…"/></div>;
  if(session==='guest')return <div className="auth-screen"><form className="auth-card" onSubmit={signIn}><div className="brand-mark">B<span>.</span></div><span className="eyebrow">PRIVATE COMMAND CENTER</span><h1>Sign in to BetSightly.</h1><p>Protected football operations, data intelligence and verified publishing.</p><label>Administrator password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required autoFocus/></label>{loginError&&<ResultNote kind="error" text={loginError}/>}<button className="button primary wide" type="submit" disabled={signing}>{signing?<Loader2 className="spin" size={18}/>:<LockKeyhole size={17}/>} Secure sign in</button><small>Signed sessions are HttpOnly, Secure and SameSite=Strict. Nothing is stored in the browser beyond the protected session cookie.</small></form></div>;
  const sections:{[key in Page]:React.ReactNode}={overview:<Overview/>,audience:<Insights page="audience"/>,predictions:<Insights page="predictions"/>, 'analytics-health':<Insights page="analytics-health"/>,manual:<ManualStudio/>,jackpot:<PrivateJackpot/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
- return <div className="shell"><aside className={'sidebar '+(mobile?'shown':'')}><div className="sidebar-brand"><div className="brand-mark">B<span>.</span></div><div><strong>BetSightly</strong><small>COMMAND CENTER</small></div><button className="mobile-close" onClick={()=>setMobile(false)} aria-label="Close menu"><X/></button></div><nav aria-label="Admin navigation">{nav.map((item,i)=>{const Icon=item.icon;return <React.Fragment key={item.id}>{(i===0||item.group!==nav[i-1].group)&&<div className="nav-group">{item.group}</div>}<button className={'nav-item '+(page===item.id?'active':'')} onClick={()=>{setPage(item.id);setMobile(false)}}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={14}/>}</button></React.Fragment>})}</nav><div className="sidebar-bottom"><div className="session"><ShieldCheck size={18}/><div><strong>Protected session</strong><span>Render-backed authentication</span></div></div><button onClick={signOut} className="sign-out"><LogOut size={17}/> Sign out</button></div></aside><div className="workspace"><header className="topbar"><div className="topbar-left"><button className="menu-toggle" onClick={()=>setMobile(true)} aria-label="Open menu"><Menu/></button><div className="breadcrumb">BET SIGHTLY <ChevronRight size={13}/> <strong>{nav.find(x=>x.id===page)?.label}</strong></div></div><div className="topbar-right"><span className="env-tag"><Globe2 size={13}/> Admin workspace</span><span className="clock">{new Date().toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric',timeZone:'Africa/Lagos'})}</span></div></header><main className="main">{sections[page]}</main><footer className="footer">BetSightly admin · Secure API through same-origin gateway · Data from production FastAPI</footer></div>{mobile&&<button className="scrim" aria-label="Close menu overlay" onClick={()=>setMobile(false)}/>}</div>;
+ return <div className="shell"><aside className={'sidebar '+(mobile?'shown':'')}><div className="sidebar-brand"><div className="brand-mark">B<span>.</span></div><div><strong>BetSightly</strong><small>COMMAND CENTER</small></div><button className="mobile-close" onClick={()=>setMobile(false)} aria-label="Close menu"><X/></button></div><nav aria-label="Admin navigation">{nav.map((item,i)=>{const Icon=item.icon;return <React.Fragment key={item.id}>{(i===0||item.group!==nav[i-1].group)&&<div className="nav-group">{item.group}</div>}<button className={'nav-item '+(page===item.id?'active':'')} aria-current={page===item.id?'page':undefined} onClick={()=>{setPage(item.id);setMobile(false)}}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={14}/>}</button></React.Fragment>})}</nav><div className="sidebar-bottom"><div className="session"><ShieldCheck size={18}/><div><strong>Protected session</strong><span>Render-backed authentication</span></div></div><button onClick={signOut} className="sign-out"><LogOut size={17}/> Sign out</button></div></aside><div className="workspace"><header className="topbar"><div className="topbar-left"><button className="menu-toggle" onClick={()=>setMobile(true)} aria-label="Open menu"><Menu/></button><div className="breadcrumb">BET SIGHTLY <ChevronRight size={13}/> <strong>{nav.find(x=>x.id===page)?.label}</strong></div></div><div className="topbar-right"><span className={'workspace-activity '+(fetching?'syncing':'')} role="status" aria-live="polite"><span className="workspace-activity-dot" aria-hidden="true"/>{fetching?'Refreshing data…':'Protected workspace'}</span><span className="clock">{new Date().toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric',timeZone:'Africa/Lagos'})}</span></div></header><main className="main">{sections[page]}</main><footer className="footer">BetSightly admin · Secure API through same-origin gateway · Data from production FastAPI</footer></div>{mobile&&<button className="scrim" aria-label="Close menu overlay" onClick={()=>setMobile(false)}/>}</div>;
 }
 export default App;
