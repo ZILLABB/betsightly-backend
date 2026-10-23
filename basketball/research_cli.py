@@ -16,6 +16,7 @@ from pathlib import Path
 from basketball.research_data import fetch_seasons, read_games, write_games
 from basketball.research_features import quality_report
 from basketball.research_model import paper_forecasts, train_offline
+from basketball.research_tracking import score_paper_archive, write_paper_archive
 
 DEFAULT_DATA = Path("data/basketball/research/nba_games.jsonl")
 DEFAULT_MODEL = Path("data/basketball/research/nba_moneyline.joblib")
@@ -44,6 +45,10 @@ def build_parser() -> argparse.ArgumentParser:
     paper.add_argument("--date", required=True, help="NBA provider date YYYY-MM-DD")
     paper.add_argument("--output", type=Path, help="Optional private JSON file")
 
+    score = commands.add_parser("score", help="Verify archived paper picks with final scores")
+    score.add_argument("--data", type=Path, default=DEFAULT_DATA)
+    score.add_argument("--archive", type=Path, required=True)
+
     return parser
 
 
@@ -67,10 +72,13 @@ def main(argv: list[str] | None = None) -> int:
         result = {"status": "research_only", "date": args.date,
                   "market": "nba_moneyline", "bookable": False,
                   "predictions": predictions}
-        if args.output:
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(json.dumps(result, indent=2) + "\n",
-                                   encoding="utf-8")
+        if predictions:
+            archive_path = args.output or (
+                Path("data/basketball/research/papers") / (args.date + ".json")
+            )
+            result["archive"] = write_paper_archive(predictions, archive_path)
+    elif args.command == "score":
+        result = score_paper_archive(args.archive, read_games(args.data))
     else:
         raise AssertionError("Unknown command")
     print(json.dumps(result, indent=2, default=str))
