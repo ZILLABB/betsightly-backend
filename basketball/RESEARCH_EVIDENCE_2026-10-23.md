@@ -39,6 +39,40 @@ After freezing the historical test report, the model was refit on all 11,192
 eligible completed games (up to 2026-04-12) for *future* paper predictions.
 The refitted prospective model was not used to re-score the historical test.
 
+## Additional real-score models (separate research targets)
+
+Three historical models now have actual-data outcomes, each using the **same
+1,711-game later-period test**, with no bookmaker market lines involved.
+
+| Target | Test metric | Constant training-mean baseline | Validation |
+|---|---:|---:|---:|
+| Match winner | 65.926% correct; Brier 0.21347 | 54.880%; Brier 0.24804 | 64.231% correct |
+| Total game points | MAE **15.1751**; RMSE 19.0499 | MAE 17.3960; RMSE 22.0938 | MAE 14.8809 |
+| Home-team point margin | MAE **11.6726**; RMSE 14.8445 | MAE 13.1202; RMSE 16.4520 | MAE 11.2802 |
+
+Source: [successful real-data backtest with score models](https://github.com/ZILLABB/betsightly-backend/actions/runs/40039305377).
+
+Totals and margins are point **regressions** from verified final scores.
+They are **not** bookmaker Over/Under or handicap betting models, have no
+timestamped sportsbook lines or quotes, and make no edge/ROI claim.
+Unit tests validate that actual final scores are training labels, not
+pregame features.
+
+## Private operation completed as code, not activated remotely
+
+The research branch now contains an isolated, owner-run private system:
+a SQLite ledger of immutable first-recorded forecasts, full private model
+storage, real-source updates, genuine-final-score reconciliation, a
+localhost-only Atlantic lab UI and an optional Windows Task Scheduler
+installer. Three estimates (moneyline, points total, point margin) can be
+recorded before tipoff and evaluated after verified results.
+
+**No Windows scheduled task has been installed by us, and no persistent
+cloud/private server has been provisioned.** GitHub Actions' files are
+ephemeral and its public repository is never used to publish private picks,
+source downloads or trained model objects. See
+[PRIVATE_OPERATIONS.md](PRIVATE_OPERATIONS.md) for instructions.
+
 ## What this evidence does **not** show
 
 - It does not establish expected betting return, moneyline market value,
