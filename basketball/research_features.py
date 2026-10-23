@@ -87,6 +87,8 @@ def make_rows(games: list[dict], min_prior: int = 5) -> list[dict]:
                 }
                 if game["status"] == "final":
                     row["home_win"] = int(game["home_score"] > game["away_score"])
+                    row["total_points"] = game["home_score"] + game["away_score"]
+                    row["home_margin"] = game["home_score"] - game["away_score"]
                 result.append(row)
             if game["status"] == "final":
                 to_append.append(game)
