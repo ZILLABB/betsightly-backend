@@ -400,6 +400,64 @@ def _snapshot(fixtures: dict, metadata: dict) -> dict:
     return {"__meta__": metadata, **fixtures}
 
 
+def _reconcile_terminal_duplicate_gap(metadata: dict) -> dict:
+    """Accept a narrow bookmaker total discrepancy only after a verified last page.
+
+    SportyBet can count duplicate boundary records toward totalNum. A successful
+    crawl can therefore have more raw records than its declared count but one
+    fewer distinct event ID. Never infer completeness merely from a small gap:
+    we need an explicitly empty page beyond the declared number of pages,
+    no unparsable events, and raw >= declared. This does not excuse transport
+    errors, truncated crawling, or a material fixture deficit.
+    """
+    if metadata.get("is_complete") is True:
+        return metadata
+    try:
+        declared = int(metadata.get("declared_total") or 0)
+        raw = int(metadata.get("raw_fetched_records") or 0)
+        parsed = int(metadata.get("parsed_records") or 0)
+        unique = int(metadata.get("unique_indexed_fixtures") or 0)
+        duplicates = int(metadata.get("duplicates_removed") or 0)
+        invalid = int(metadata.get("invalid_records") or 0)
+        pages = int(metadata.get("page_count") or 0)
+        required = int(metadata.get("required_pages") or 0)
+        match = re.fullmatch(
+            r"empty page (\d+) before declared total",
+            str(metadata.get("error") or ""),
+        )
+        terminal_page = int(match.group(1)) if match else 0
+    except (ValueError, TypeError, OverflowError):
+        return metadata
+    shortfall = declared - unique
+    permitted_gap = min(2, max(1, math.ceil(declared / 1000)))
+    if not (
+        declared > 0
+        and required > 0
+        and pages >= required
+        and terminal_page == pages + 1
+        and terminal_page > required
+        and raw >= declared
+        and parsed == raw
+        and invalid == 0
+        and unique + duplicates == parsed
+        and 0 < shortfall <= permitted_gap
+        and duplicates >= shortfall
+    ):
+        return metadata
+    return {
+        **metadata,
+        "is_complete": True,
+        "completion_basis": "terminal_empty_page_minor_duplicate_total_discrepancy",
+        "provider_total_shortfall": shortfall,
+        "provider_total_warning": (
+            f"SportyBet declared {declared} records but the completed page crawl "
+            f"contains {unique} unique events and {duplicates} duplicate records."
+        ),
+        "original_error": metadata.get("error"),
+        "error": None,
+    }
+
+
 def cached_board_for_admin(max_age_seconds: int = 10800) -> dict | None:
     """Read the existing complete SportyBet snapshot without network I/O.
 
@@ -411,7 +469,7 @@ def cached_board_for_admin(max_age_seconds: int = 10800) -> dict | None:
     cached = _db_get(_CACHE_KEY)
     if not isinstance(cached, dict):
         return None
-    metadata = cached.get("metadata") or {}
+    metadata = _reconcile_terminal_duplicate_gap(cached.get("metadata") or {})
     try:
         age = time.time() - float(cached.get("fetched_at") or 0)
     except (ValueError, TypeError, OverflowError):
@@ -429,7 +487,7 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
     cached = _db_get(_CACHE_KEY)
     if not force and cached:
         age_h = (time.time() - cached.get("fetched_at", 0)) / 3600.0
-        metadata = cached.get("metadata") or {}
+        metadata = _reconcile_terminal_duplicate_gap(cached.get("metadata") or {})
         # Old cache entries had no completeness metadata. Refetch them instead
         # of reusing a board which may have silently stopped at page twelve.
         if (
@@ -546,6 +604,9 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
         "fetched_at": fetched_at,
         "error": error,
     }
+
+    metadata = _reconcile_terminal_duplicate_gap(metadata)
+    is_complete = bool(metadata.get("is_complete"))
 
     if fixtures:
         _db_set(_CACHE_KEY, {"fetched_at": fetched_at, "fixtures": fixtures,
