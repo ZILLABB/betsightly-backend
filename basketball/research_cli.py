@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         games, manifest = fetch_public_seasons(args.seasons)
         count = write_games(games, args.output)
         args.manifest.parent.mkdir(parents=True, exist_ok=True)
-        args.manifest.write_text(json.dumps(manifest, indent=2) + "\\n",
+        args.manifest.write_text(json.dumps(manifest, indent=2) + "\n",
                                  encoding="utf-8")
         result = {"status": "complete", "downloaded": count,
                   "path": str(args.output), "source_manifest": str(args.manifest),
