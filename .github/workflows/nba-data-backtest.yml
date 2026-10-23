@@ -1,0 +1,67 @@
+name: NBA Historical Research Backtest (private, no deployment)
+
+# This job deliberately pulls real NBA seasons, backtests a model and then
+# discards raw provider data/models when the ephemeral runner terminates.
+# It has no betting credentials, production DB, or publishing permissions.
+on:
+  pull_request:
+    paths:
+      - "basketball/research_*.py"
+      - "tests/test_basketball_research.py"
+      - ".github/workflows/nba-data-backtest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-nba-moneyline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install research dependencies only
+        run: python -m pip install scikit-learn==1.8.0 joblib
+
+      - name: Download historical NBA schedules with public releases (NO API key)
+        run: |
+          python -m basketball.research_cli fetch-public \
+            --seasons 2017 2018 2019 2020 2021 2022 2023 2024 2025 2026 2027
+      - name: Verify historical coverage, seasons and outcomes
+        run: |
+          python -m basketball.research_cli report | tee /tmp/nba-coverage.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("/tmp/nba-coverage.json").read_text())
+          assert report["completed_regular_games"] > 6000, report
+          assert report["eligible_model_rows"] > 5000, report
+          assert not report["bookmaker_odds_present"]
+          assert report["markets_supported"] == ["nba_moneyline"]
+          PY
+      - name: Chronological real-data backtest and prospective-only refit
+        run: |
+          python -m basketball.research_cli train | tee /tmp/nba-real-backtest.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("/tmp/nba-real-backtest.json").read_text())
+          assert report["test"]["games"] >= 100
+          assert report["validation"]["games"] >= 100
+          assert report["research_only"] is True
+          assert report["betting_roi_measured"] is False
+          assert report["prospective_refit"]["games"] > 5000
+          PY
+      - name: Save metrics and source hashes only (NO RAW DATA OR MODEL)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nba-free-real-backtest-summary
+          retention-days: 14
+          path: |
+            /tmp/nba-coverage.json
+            /tmp/nba-real-backtest.json
+            data/basketball/research/source_manifest.json
