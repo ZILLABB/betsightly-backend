@@ -82,6 +82,7 @@ def make_rows(games: list[dict], min_prior: int = 5) -> list[dict]:
                     "season": game["season"], "home_id": game["home_id"],
                     "away_id": game["away_id"], "home_name": game["home_name"],
                     "away_name": game["away_name"], "status": game["status"],
+                    "start_utc": game["start_utc"],
                     "features": x, "source": game["source"],
                 }
                 if game["status"] == "final":
