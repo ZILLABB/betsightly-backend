@@ -2,12 +2,13 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {useIsFetching, useQuery, useQueryClient} from '@tanstack/react-query';
 import {
  Activity, BarChart3, CheckCircle2, ChevronRight, Clock3, Database, FileCheck2,
- Globe2, LayoutDashboard, Loader2, LockKeyhole, LogOut, Megaphone, Menu, RefreshCcw,
+ Globe2, LayoutDashboard, Loader2, LockKeyhole, LogOut, Megaphone, Menu, PanelLeftClose, PanelLeftOpen, Search, RefreshCcw,
  Send, Settings2, ShieldCheck, Ticket, UploadCloud, Users, X, AlertTriangle, type LucideIcon
 } from 'lucide-react';
 import {api, ApiError, isAmbiguous, tiers} from './api';
 import Insights from './Insights';
 import PrivateJackpot from './PrivateJackpot';
+import {AdminActionDialog, AdminCommandPalette, PremiumOperationsOverview} from './PremiumComponents';
 
 type Page = 'overview' | 'audience' | 'predictions' | 'analytics-health' | 'manual' | 'jackpot' | 'sporty' | 'readiness' | 'content' | 'campaign' | 'publishing' | 'referrals' | 'settings';
 const nav: {id: Page; label: string; icon: LucideIcon; group: string}[] = [
@@ -43,31 +44,19 @@ function ResultNote({kind,text}:{kind:'error'|'success'|'info';text:string}) {
  return <div role={kind==='error'?'alert':'status'} className={'notice ' + kind}>{kind==='success'?<CheckCircle2 size={18}/>:kind==='error'?<AlertTriangle size={18}/>:<Clock3 size={18}/>}<div>{text}</div></div>;
 }
 
-function Overview() {
+function Overview({onNavigate}:{onNavigate:(page:Page)=>void}) {
  const [days,setDays]=useState(1);
  const q=useQuery({queryKey:['analytics',days],queryFn:()=>api<any>('analytics?days='+days)});
- const s=useQuery({queryKey:['growth-status'],queryFn:()=>api<any>('status')});
- const d=q.data?.summary;const totals=d?.totals||{},book=d?.booking||{},report=s.data||{};
+ const status=useQuery({queryKey:['growth-status'],queryFn:()=>api<any>('status')});
+ const summary=q.data?.summary||{}, totals=summary.totals||{}, booking=summary.booking||{}, report=status.data||{};
+ const refresh=()=>{void q.refetch();void status.refetch();};
  return <>
-  <div className="page-heading"><div><span className="eyebrow">LIVE COMMAND CENTER</span><h1>Today at BetSightly.</h1><p>Audience, predictions and bookmaker operations — one accountable view.</p></div><div className="toolbar">{[1,7,30].map(x=><button key={x} className={days===x?'chip active':'chip'} onClick={()=>setDays(x)}>{x===1?'Today':x+' days'}</button>)}</div></div>
-  {(q.isError||s.isError) && <DataError error={q.error||s.error} retry={()=>{q.refetch();s.refetch();}}/>}
-  {(q.isPending && !q.data) ? <MetricsSkeleton/> : <div className="metric-grid">
-   <Metric label="Visitors" value={totals.visitors} detail="Unique visitors"/>
-   <Metric label="Sessions" value={totals.sessions}/>
-   <Metric label="Predictions viewed" value={totals.prediction_viewers}/>
-   <Metric label="Builder users" value={totals.builder_users}/>
-   <Metric label="Valid-code viewers" value={totals.valid_code_viewers}/>
-   <Metric label="Copied booking codes" value={totals.unique_code_copiers}/>
-  </div>}
-  <div className="split">
-   <Panel title="Publishing & booking" subtitle="Verified operational information, not estimated bets placed">
-     <div className="data-rows"><div><span>Automated booking attempts</span><b>{n(book.attempts)}</b></div><div><span>Full bookings</span><b>{n(book.full)}</b></div><div><span>Partially recovered</span><b>{n(book.partial)}</b></div><div><span>No-code rate</span><b>{book.no_code_rate==null?'—':Math.round(book.no_code_rate*100)+'%'}</b></div></div>
-   </Panel>
-   <Panel title="Backend & scheduler" subtitle="Read-only health from the existing Render API" action={<button className="mini-button" onClick={()=>s.refetch()}><RefreshCcw size={15}/> Refresh</button>}>
-    {s.isPending?<Loading/>:<div className="data-rows"><div><span>API status</span><b>{report.status||'Unknown'}</b></div><div><span>Recent operations</span><b>{n(report.runs?.length??d?.operations?.runs?.length)}</b></div><div><span>Last observed run</span><b>{String(report.runs?.[0]?.status||d?.operations?.runs?.[0]?.status||'Unavailable')}</b></div></div>}
-   </Panel>
-  </div>
-  <Info>Operational figures come from the backend. A valid booking code is not proof that a customer placed a bet; manual tickets remain separate from model-calibration results.</Info>
+  <div className="page-heading premium-overview-heading"><div><span className="eyebrow">PRIVATE WORKSPACE / LIVE OPERATIONS</span><h1>Command overview.</h1><p>Monitor the operation, identify friction and move from evidence to action.</p></div>
+   <div className="premium-period-switch" role="group" aria-label="Reporting period">{[1,7,30].map(x=><button type="button" key={x} className={days===x?'active':''} aria-pressed={days===x} onClick={()=>setDays(x)}>{x===1?'Today':x+' days'}</button>)}</div></div>
+  {(q.isError||status.isError)&&<DataError error={q.error||status.error} retry={refresh}/>}
+  <PremiumOperationsOverview totals={totals} booking={booking} report={report} period={days} loading={q.isPending&&!q.data}
+    refreshing={q.isFetching||status.isFetching} onRefresh={refresh} onNavigate={id=>onNavigate(id as Page)}/>
+  <Info>Dashboard metrics are observed backend records, not estimated bets or guaranteed outcomes. Model scoring, manual publications and bookmaker verification remain separate.</Info>
  </>;
 }
 
@@ -78,6 +67,7 @@ function ManualStudio() {
  const [tier,setTier]=useState<string>('2_odds'),[code,setCode]=useState(''),[lines,setLines]=useState(''),[convert,setConvert]=useState(false);
  const [replace,setReplace]=useState(false),[imported,setImported]=useState<Imported|null>(null),[preview,setPreview]=useState<{request:ManualRequest;data:any}|null>(null);
  const [stage,setStage]=useState(0),[busy,setBusy]=useState(''),[note,setNote]=useState<{kind:'error'|'success'|'info';text:string}|null>(null);
+ const [publishReview,setPublishReview]=useState(false);
  const [uncertain,setUncertain]=useState(!!sessionStorage.getItem('bs_admin_uncertain'));
  const [review,setReview]=useState<Record<number,string>>({});
  const operationLatch=useRef(false);
@@ -147,7 +137,7 @@ function ManualStudio() {
  const publish=()=>run('Publishing verified ticket',async()=>{
   if(!ready || !preview)throw Error('Recheck live prices after every change before publishing.');
   if(uncertain)throw Error('Earlier publication outcome uncertain. Check saved tickets before any new POST.');
-  if(!window.confirm('Publish '+preview.data.games.length+' verified selections for '+tier+'? A new SportyBet code will be created. The engine record stays separate.'))return;
+  // The review dialog requires explicit confirmation before this mutation.
   const previousCode=String(saved[tier]?.share_code||'');
   setStage(4);sessionStorage.setItem('bs_admin_uncertain',JSON.stringify({tier,previousCode}));
   try{
@@ -204,7 +194,7 @@ function ManualStudio() {
      <label>Event ID,market — one per line<textarea rows={10} spellCheck={false} value={lines} onChange={e=>lineChange(e.target.value)} placeholder={'52587,home_win\n17187,over_1_5'}/></label>
      <label className="file-import">Import CSV or TXT (16 KB maximum)<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={importFile}/></label>
      {['2_odds','5_odds','10_odds','over_1_5'].includes(tier)&&<label className="check"><input type="checkbox" checked={replace} onChange={e=>{setReplace(e.target.checked);edit()}}/>Replace the PUBLIC display for this tier; preserve the original model result</label>}
-     <div className="toolbar"><button type="button" className="button secondary" onClick={check} disabled={!!imported?.unresolved_count||!normalized}>{busy==='Checking live SportyBet prices'?<Loader2 size={16} className="spin"/>:<FileCheck2 size={16}/>} {busy==='Checking live SportyBet prices'?'Checking every price…':'Check live prices'}</button><button type="button" className="button primary" disabled={!ready||uncertain} onClick={publish}>{busy==='Publishing verified ticket'?<Loader2 size={16} className="spin"/>:<Send size={16}/>} {busy==='Publishing verified ticket'?'Publishing and confirming…':'Publish verified ticket'}</button></div>
+     <div className="toolbar"><button type="button" className="button secondary" onClick={check} disabled={!!imported?.unresolved_count||!normalized}>{busy==='Checking live SportyBet prices'?<Loader2 size={16} className="spin"/>:<FileCheck2 size={16}/>} {busy==='Checking live SportyBet prices'?'Checking every price…':'Check live prices'}</button><button type="button" className="button primary" disabled={!ready||uncertain} onClick={()=>setPublishReview(true)}>{busy==='Publishing verified ticket'?<Loader2 size={16} className="spin"/>:<Send size={16}/>} {busy==='Publishing verified ticket'?'Publishing and confirming…':'Publish verified ticket'}</button></div>
      {ready&&<div className="notice success" role="status"><CheckCircle2 size={17}/><div><strong>Ready for your confirmation</strong><p>{n(preview?.data?.games?.length)} exact games verified at {n(preview?.data?.total_odds)}x. A fresh bookmaker code is issued only after confirmation and saved readback.</p></div></div>}
     </fieldset>
    </Panel>
@@ -217,6 +207,9 @@ function ManualStudio() {
     </Panel>
    </div>
   </div>
+  <AdminActionDialog open={publishReview} title="Publish this verified ticket?"
+    summary={String(preview?.data?.games?.length||0)+' exact selections for '+tier+' at '+n(preview?.data?.total_odds)+'x. This may create a new SportyBet code. Original model results remain separate, and the saved result must be verified.'}
+    confirmText="Publish and verify" busy={active} onCancel={()=>setPublishReview(false)} onConfirm={()=>{setPublishReview(false);void publish();}}/>
  </>;
 }
 
@@ -351,8 +344,10 @@ function Settings() {
 
 function App() {
  const [session,setSession]=useState<'checking'|'guest'|'ready'>('checking'),[password,setPassword]=useState(''),[loginError,setLoginError]=useState(''),[signing,setSigning]=useState(false),[page,setPage]=useState<Page>('overview'),[mobile,setMobile]=useState(false);
+ const [commandOpen,setCommandOpen]=useState(false),[sidebarCompact,setSidebarCompact]=useState(false);
  const qc=useQueryClient();
  const fetching=useIsFetching();
+ useEffect(()=>{const onShortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();setCommandOpen(value=>!value)}};window.addEventListener('keydown',onShortcut);return()=>window.removeEventListener('keydown',onShortcut)},[]);
  const me=useQuery({queryKey:['me'],queryFn:()=>api<any>('admin/me'),retry:false,enabled:session==='checking'});
  useEffect(()=>{if(session==='checking'&&!me.isPending)setSession(me.isError?'guest':'ready')},[session,me.isPending,me.isError]);
  useEffect(()=>{const expired=()=>{qc.clear();setSession('guest');setLoginError('Session expired. Please sign in again.');};window.addEventListener('betsightly:session-expired',expired);return()=>window.removeEventListener('betsightly:session-expired',expired);},[qc]);
@@ -360,7 +355,7 @@ function App() {
  const signOut=async()=>{try{await api('admin/logout',{},'POST')}catch{}qc.clear();setSession('guest')};
  if(session==='checking')return <div className="auth-screen"><Loading label="Verifying protected admin session…"/></div>;
  if(session==='guest')return <div className="auth-screen"><form className="auth-card" onSubmit={signIn}><div className="brand-mark">B<span>.</span></div><span className="eyebrow">PRIVATE COMMAND CENTER</span><h1>Sign in to BetSightly.</h1><p>Protected football operations, data intelligence and verified publishing.</p><label>Administrator password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required autoFocus/></label>{loginError&&<ResultNote kind="error" text={loginError}/>}<button className="button primary wide" type="submit" disabled={signing}>{signing?<Loader2 className="spin" size={18}/>:<LockKeyhole size={17}/>} Secure sign in</button><small>Signed sessions are HttpOnly, Secure and SameSite=Strict. Nothing is stored in the browser beyond the protected session cookie.</small></form></div>;
- const sections:{[key in Page]:React.ReactNode}={overview:<Overview/>,audience:<Insights page="audience"/>,predictions:<Insights page="predictions"/>, 'analytics-health':<Insights page="analytics-health"/>,manual:<ManualStudio/>,jackpot:<PrivateJackpot/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
- return <div className="shell"><aside className={'sidebar '+(mobile?'shown':'')}><div className="sidebar-brand"><div className="brand-mark">B<span>.</span></div><div><strong>BetSightly</strong><small>COMMAND CENTER</small></div><button className="mobile-close" onClick={()=>setMobile(false)} aria-label="Close menu"><X/></button></div><nav aria-label="Admin navigation">{nav.map((item,i)=>{const Icon=item.icon;return <React.Fragment key={item.id}>{(i===0||item.group!==nav[i-1].group)&&<div className="nav-group">{item.group}</div>}<button className={'nav-item '+(page===item.id?'active':'')} aria-current={page===item.id?'page':undefined} onClick={()=>{setPage(item.id);setMobile(false)}}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={14}/>}</button></React.Fragment>})}</nav><div className="sidebar-bottom"><div className="session"><ShieldCheck size={18}/><div><strong>Protected session</strong><span>Render-backed authentication</span></div></div><button onClick={signOut} className="sign-out"><LogOut size={17}/> Sign out</button></div></aside><div className="workspace"><header className="topbar"><div className="topbar-left"><button className="menu-toggle" onClick={()=>setMobile(true)} aria-label="Open menu"><Menu/></button><div className="breadcrumb">BET SIGHTLY <ChevronRight size={13}/> <strong>{nav.find(x=>x.id===page)?.label}</strong></div></div><div className="topbar-right"><span className={'workspace-activity '+(fetching?'syncing':'')} role="status" aria-live="polite"><span className="workspace-activity-dot" aria-hidden="true"/>{fetching?'Refreshing data…':'Protected workspace'}</span><span className="clock">{new Date().toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric',timeZone:'Africa/Lagos'})}</span></div></header><main className="main">{sections[page]}</main><footer className="footer">BetSightly admin · Secure API through same-origin gateway · Data from production FastAPI</footer></div>{mobile&&<button className="scrim" aria-label="Close menu overlay" onClick={()=>setMobile(false)}/>}</div>;
+ const sections:{[key in Page]:React.ReactNode}={overview:<Overview onNavigate={setPage}/>,audience:<Insights page="audience"/>,predictions:<Insights page="predictions"/>, 'analytics-health':<Insights page="analytics-health"/>,manual:<ManualStudio/>,jackpot:<PrivateJackpot/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
+ return <div className="shell"><aside className={'sidebar '+(mobile?'shown ':'')+(sidebarCompact?'compact':'')}><div className="sidebar-brand"><div className="brand-mark">B<span>.</span></div><div className="sidebar-brand-name"><strong>BetSightly</strong><small>COMMAND CENTER</small></div><button className="mobile-close" onClick={()=>setMobile(false)} aria-label="Close menu"><X/></button></div><button type="button" className="sidebar-collapse-toggle" aria-label={sidebarCompact?'Expand sidebar':'Collapse sidebar'} onClick={()=>setSidebarCompact(v=>!v)}>{sidebarCompact?<PanelLeftOpen size={18}/>:<PanelLeftClose size={18}/>}<span>{sidebarCompact?'':'Collapse menu'}</span></button><nav aria-label="Admin navigation">{nav.map((item,i)=>{const Icon=item.icon;return <React.Fragment key={item.id}>{(i===0||item.group!==nav[i-1].group)&&<div className="nav-group">{item.group}</div>}<button className={'nav-item '+(page===item.id?'active':'')} aria-current={page===item.id?'page':undefined} onClick={()=>{setPage(item.id);setMobile(false)}} aria-label={item.label} title={sidebarCompact?item.label:undefined}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={14}/>}</button></React.Fragment>})}</nav><div className="sidebar-bottom"><div className="session"><ShieldCheck size={18}/><div><strong>Protected session</strong><span>Render-backed authentication</span></div></div><button onClick={signOut} className="sign-out"><LogOut size={17}/> Sign out</button></div></aside><div className="workspace"><header className="topbar"><div className="topbar-left"><button className="menu-toggle" onClick={()=>setMobile(true)} aria-label="Open menu"><Menu/></button><div className="breadcrumb">BET SIGHTLY <ChevronRight size={13}/> <strong>{nav.find(x=>x.id===page)?.label}</strong></div></div><div className="topbar-right"><button type="button" className="premium-search-trigger" onClick={()=>setCommandOpen(true)} aria-label="Search admin pages"><Search size={16}/><span>Search workspace</span><kbd>Ctrl K</kbd></button><span className={'workspace-activity '+(fetching?'syncing':'')} role="status" aria-live="polite"><span className="workspace-activity-dot" aria-hidden="true"/>{fetching?'Refreshing data…':'Protected workspace'}</span><span className="clock">{new Date().toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric',timeZone:'Africa/Lagos'})}</span></div></header><main className="main">{sections[page]}</main><footer className="footer">BetSightly admin · Secure API through same-origin gateway · Data from production FastAPI</footer></div>{mobile&&<button className="scrim" aria-label="Close menu overlay" onClick={()=>setMobile(false)}/>}<AdminCommandPalette open={commandOpen} onClose={()=>setCommandOpen(false)} items={nav.map(({id,label,group})=>({id,label,group}))} onSelect={id=>{setPage(id as Page);setMobile(false)}}/></div>;
 }
 export default App;
