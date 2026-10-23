@@ -89,10 +89,19 @@ def run_cycle(
         inserted = 0
         candidates = 0
         eligible_dates = []
+        from basketball.research_market_models import private_score_estimates
         for offset in range(days_ahead):
             forecast_day = (first_date + timedelta(days=offset)).isoformat()
             forecasts = paper_forecasts(games, model_path, forecast_day,
                                         as_of=timestamp)
+            score_list = private_score_estimates(games, score_model_path,
+                                                 forecast_day, as_of=timestamp)
+            by_game = {entry["game_id"]: entry for entry in score_list}
+            for forecast in forecasts:
+                score = by_game.get(forecast["game_id"])
+                if score is not None:
+                    forecast["expected_total_points"] = score["expected_total_points"]
+                    forecast["expected_home_margin"] = score["expected_home_margin"]
             candidates += len(forecasts)
             new_forecasts = [p for p in forecasts if p["game_id"] not in existing]
             if new_forecasts:
