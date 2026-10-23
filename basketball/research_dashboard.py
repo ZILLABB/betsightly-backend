@@ -40,6 +40,12 @@ def render_dashboard(report: dict, forecasts: list[dict],
         metric("BRIER SCORE", report.get("brier", "—"), "Lower is better"),
         metric("LOG LOSS", report.get("log_loss", "—"), "Lower is better"),
     ])
+    if report.get("score_projections"):
+        scores = report["score_projections"]
+        metrics += metric("TOTAL-POINTS MAE", scores.get("total_points_mae"),
+                          "Prospective paper score errors")
+        metrics += metric("POINT-MARGIN MAE", scores.get("home_margin_mae"),
+                          "Not bookmaker spread results")
     rows = []
     for row in forecasts:
         finished = row["recorded_at"] is not None
@@ -54,6 +60,8 @@ def render_dashboard(report: dict, forecasts: list[dict],
             "<small>" + _safe(row["fixture_date"]) + " · " +
             _safe(row["game_id"]) + "</small></td><td>" +
             _safe(_percent(row["home_win_probability"])) + "</td><td>" +
+            _safe(row.get("expected_total_points")) + "</td><td>" +
+            _safe(row.get("expected_home_margin")) + "</td><td>" +
             _safe(score) + "</td><td>" + _safe(correct) + "</td><td>" +
             _safe(label) + "</td></tr>"
         )
@@ -111,9 +119,9 @@ return. The public BetSightly app remains separate.</div>
 <section class="stats">""" + metrics + """</section>
 <h2>Paper prediction ledger</h2><div class="panel"><table>
 <thead><tr><th>NBA fixture</th><th>Home ML probability</th>
-<th>Verified score</th><th>Correct</th><th>Status</th></tr></thead><tbody>""" + (
+<th>Expected total</th><th>Expected home margin</th><th>Verified score</th><th>Correct</th><th>Status</th></tr></thead><tbody>""" + (
         "".join(rows) if rows else
-        "<tr><td colspan='5'>No eligible pregame paper predictions recorded."
+        "<tr><td colspan='7'>No eligible pregame paper predictions recorded."
         " The season warm-up gate may still be active.</td></tr>"
     ) + """</tbody></table></div>
 <h2>Research activity</h2><div class="panel"><ul>""" + (
