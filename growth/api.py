@@ -194,6 +194,20 @@ def preview_manual_tier(body: ManualTierRequest):
         raise HTTPException(422, str(exc))
 
 
+@router.post("/manual-tiers/inspect", dependencies=[Depends(require_admin)])
+def inspect_manual_tier_prices(body: ManualTierRequest):
+    """Read-only live price inspection even when this tier was already published.
+
+    Does not create a booking code or authorize another publication. The normal
+    preview and publish endpoints retain their tier and rollover guards.
+    """
+    from leagues.editorial_manual import preview
+    try:
+        return preview(body.tier, body.lines, inspection_only=True)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 @router.post("/manual-tiers/publish", dependencies=[Depends(require_admin)])
 def publish_manual_tier(body: ManualTierRequest):
     from leagues.editorial_manual import publish
