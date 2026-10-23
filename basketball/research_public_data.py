@@ -54,6 +54,12 @@ def normalize_schedule_row(raw: dict, requested_season: int,
     """Normalize one ESPN schedule row; skip non-regular-season games."""
     if str(raw.get("season_type", "")).strip() != "2":
         return None
+    # Some source schedules include TBA/postponed placeholders without team IDs.
+    # Exclude rather than invent an opponent, and report rejection totals.
+    identifiers = [str(raw.get(key) or "").strip()
+                   for key in ("game_id", "home_id", "away_id")]
+    if not all(value.isdecimal() and int(value) > 0 for value in identifiers):
+        return None
     season = int(raw["season"])
     if season != requested_season:
         raise ValueError("Season mismatch in ESPN schedule asset")
@@ -104,10 +110,13 @@ def read_release_csv(data: bytes, season: int, retrieved_at: str | None = None) 
         raise ValueError("NBA schedule CSV missing required columns")
     games = {}
     row_count = 0
+    rejected_regular = 0
     for row in reader:
         row_count += 1
         parsed = normalize_schedule_row(row, season, timestamp)
         if parsed is None:
+            if str(row.get("season_type", "")).strip() == "2":
+                rejected_regular += 1
             continue
         before = games.get(parsed["game_id"])
         if before is not None:
@@ -124,6 +133,13 @@ def read_release_csv(data: bytes, season: int, retrieved_at: str | None = None) 
             games[parsed["game_id"]] = parsed
     if row_count < 500 or len(games) < 400:
         raise ValueError(f"Implausibly incomplete NBA season: {len(games)} games")
+    if rejected_regular > max(5, round(0.01 * len(games))):
+        raise ValueError(
+            f"NBA season {season} has {rejected_regular} invalid regular-season "
+            f"fixtures; exceeds 1% identity coverage budget")
+    if rejected_regular:
+        print(f"NBA season {season}: excluded {rejected_regular} unidentifiable "
+              "regular-season rows (no invented identities)", flush=True)
     return list(games.values())
 
 
