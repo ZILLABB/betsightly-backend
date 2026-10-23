@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 from basketball.research_data import fetch_seasons, read_games, write_games
+from basketball.research_public_data import DEFAULT_SEASONS, fetch_public_seasons
 from basketball.research_features import quality_report
 from basketball.research_model import paper_forecasts, train_offline
 from basketball.research_tracking import score_paper_archive, write_paper_archive
@@ -30,6 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--seasons", type=int, nargs="+", required=True)
     fetch.add_argument("--output", type=Path, default=DEFAULT_DATA)
     fetch.add_argument("--max-pages", type=int, default=1000)
+
+    public = commands.add_parser("fetch-public", help="Download keyless public historical NBA schedules")
+    public.add_argument("--seasons", type=int, nargs="+", default=list(DEFAULT_SEASONS))
+    public.add_argument("--output", type=Path, default=DEFAULT_DATA)
+    public.add_argument("--manifest", type=Path,
+                        default=Path("data/basketball/research/source_manifest.json"))
 
     report = commands.add_parser("report", help="Check real dataset coverage")
     report.add_argument("--data", type=Path, default=DEFAULT_DATA)
@@ -60,6 +67,15 @@ def main(argv: list[str] | None = None) -> int:
         count = write_games(games, args.output)
         result = {"status": "complete", "downloaded": count, "path": str(args.output),
                   "research_only": True}
+    elif args.command == "fetch-public":
+        games, manifest = fetch_public_seasons(args.seasons)
+        count = write_games(games, args.output)
+        args.manifest.parent.mkdir(parents=True, exist_ok=True)
+        args.manifest.write_text(json.dumps(manifest, indent=2) + "\\n",
+                                 encoding="utf-8")
+        result = {"status": "complete", "downloaded": count,
+                  "path": str(args.output), "source_manifest": str(args.manifest),
+                  "seasons": len(manifest), "research_only": True}
     elif args.command == "report":
         result = quality_report(read_games(args.data))
     elif args.command == "train":
