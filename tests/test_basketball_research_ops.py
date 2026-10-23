@@ -130,3 +130,30 @@ def test_offline_cycle_retains_model_and_does_not_invent_picks(tmp_path):
     assert second["performance"]["forecast_count"] == 0
     with open_ledger(tmp_path / "nba_paper.sqlite") as connection:
         assert performance_report(connection)["settled"] == 0
+
+def test_score_models_use_true_labels_and_later_holdout(tmp_path):
+    pytest.importorskip("sklearn")
+    from basketball.research_market_models import train_score_baselines
+    from basketball.research_data import read_games
+    from basketball.research_model import train_offline
+    start = date(2024, 1, 1)
+    data = []
+    for i in range(350):
+        when = (start + timedelta(days=i)).isoformat()
+        data.append({
+            "game_id": str(3000 + i), "date": when, "season": 2023,
+            "status": "final", "home_id": "1", "away_id": "2",
+            "home_name": "A", "away_name": "B",
+            "home_score": 105 + i % 17, "away_score": 100 + (i * 3) % 21,
+            "start_utc": when + "T20:00:00Z", "postseason": False,
+            "source": "balldontlie:nba:v1",
+            "retrieved_at": "2026-10-23T00:00:00Z",
+        })
+    report = train_score_baselines(data, tmp_path / "scores.joblib")
+    assert set(report["targets"]) == {"total_points", "home_margin"}
+    assert report["historical_test_period"]["games"] >= 20
+    assert report["betting_roi_computed"] is False
+    assert report["research_only"] is True
+    assert report["targets"]["total_points"]["test"]["mae"] >= 0
+    assert report["targets"]["home_margin"]["test"]["rmse"] >= 0
+    assert (tmp_path / "scores.joblib").is_file()
