@@ -56,6 +56,21 @@ jobs:
           assert report["betting_roi_measured"] is False
           assert report["prospective_refit"]["games"] > 5000
           PY
+      - name: Train and verify actual-score regression baselines
+        run: |
+          python -m basketball.research_cli train-markets | tee /tmp/nba-score-models.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path("/tmp/nba-score-models.json").read_text())
+          assert data["research_only"]
+          assert data["betting_roi_computed"] is False
+          assert set(data["targets"]) == {"total_points", "home_margin"}
+          assert data["historical_test_period"]["games"] >= 100
+          for target in data["targets"].values():
+              assert target["test"]["mae"] >= 0
+              assert target["eligible_for_bookmaker_publication"] is False
+          PY
       - name: Save metrics and source hashes only (NO RAW DATA OR MODEL)
         uses: actions/upload-artifact@v4
         with:
@@ -64,4 +79,5 @@ jobs:
           path: |
             /tmp/nba-coverage.json
             /tmp/nba-real-backtest.json
+            /tmp/nba-score-models.json
             data/basketball/research/source_manifest.json
