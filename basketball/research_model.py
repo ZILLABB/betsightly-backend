@@ -123,10 +123,23 @@ def train_offline(games: list[dict], artifact_path: str | Path,
         json.dumps([(g["game_id"], g["date"], g["status"], g["home_score"],
                      g["away_score"]) for g in games], sort_keys=True).encode()
     ).hexdigest()
+    # Evaluate the untouched holdout once, then refit the SELECTED model
+    # on every historically completed game for future *prospective* use.
+    # This refit is never used to recompute the held-out test metrics.
+    completed = sorted([row for row in rows if row["status"] == "final"],
+                       key=lambda row: (row["date"], row["game_id"]))
+    x_all, y_all = _array(completed, np)
+    prospective = make_pipeline(StandardScaler(), LogisticRegression(
+        C=c, max_iter=1000, random_state=42, solver="lbfgs"))
+    prospective.fit(x_all, y_all)
+    metrics["prospective_refit"] = {
+        "games": len(completed), "through": completed[-1]["date"],
+        "note": "Trained after holdout evaluation; never used to score historical test.",
+    }
     bundle = {
-        "model": winner, "model_version": MODEL_VERSION,
+        "model": prospective, "model_version": MODEL_VERSION,
         "feature_columns": FEATURE_COLUMNS, "schema": SCHEMA_VERSION,
-        "trained_through": train[-1]["date"], "source_hash": data_digest,
+        "trained_through": completed[-1]["date"], "source_hash": data_digest,
         "research_only": True, "metrics": metrics,
     }
     output = Path(artifact_path)
