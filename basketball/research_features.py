@@ -5,7 +5,7 @@ Never use final-score columns of the game being predicted. No randomness.
 """
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date
 from itertools import groupby
 from statistics import mean
@@ -110,9 +110,14 @@ def quality_report(games: list[dict]) -> dict:
     finals = [g for g in games if g["status"] == "final" and not g["postseason"]]
     rows = make_rows(games)
     training = [row for row in rows if row["status"] == "final"]
+    per_season = defaultdict(Counter)
+    for game in games:
+        per_season[game["season"]][game["status"]] += 1
     return {
         "source": sorted({g["source"] for g in games}),
         "seasons": seasons,
+        "games_by_season": {str(season): dict(per_season[season])
+                            for season in seasons},
         "games": len(games),
         "completed_regular_games": len(finals),
         "eligible_model_rows": len(training),
