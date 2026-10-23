@@ -13,6 +13,7 @@ import pytest
 from basketball.research_data import normalize_game, read_games, write_games
 from basketball.research_features import FEATURE_COLUMNS, make_rows, quality_report
 from basketball.research_model import chronological_split, paper_forecasts, train_offline
+from basketball.research_tracking import score_paper_archive, write_paper_archive
 
 
 def fixture(day: str, number: int, status: str = "final", home_win: bool = True):
@@ -114,3 +115,30 @@ def test_chronological_split_and_paper_model_only(tmp_path):
     assert 0 <= forecasts[0]["home_win_probability"] <= 1
     with pytest.raises(ValueError, match="after model training"):
         paper_forecasts(games, path, result["splits"]["training"]["through"])
+
+def test_immutable_paper_record_and_scoreboard_readback(tmp_path):
+    pytest.importorskip("sklearn")
+    pytest.importorskip("joblib")
+    games = fixture_days(180, upcoming=True)
+    model = tmp_path / "nba.joblib"
+    train_offline(games, model, min_games=120)
+    as_of = datetime.combine(date.fromisoformat(games[-1]["date"]),
+                             datetime.min.time(), tzinfo=timezone.utc)
+    predictions = paper_forecasts(games, model, games[-1]["date"], as_of=as_of)
+    archive = tmp_path / "paper.json"
+    receipt = write_paper_archive(predictions, archive)
+    assert receipt["forecast_count"] == 1
+    with pytest.raises(FileExistsError):
+        write_paper_archive(predictions, archive)
+    assert score_paper_archive(archive, games)["pending"] == 1
+    completed = list(games)
+    completed[-1] = {**completed[-1], "status": "final",
+                     "home_score": 117, "away_score": 111}
+    scored = score_paper_archive(archive, completed)
+    assert scored["settled"] == 1 and scored["pending"] == 0
+    assert 0 <= scored["brier"] <= 1
+    payload = json.loads(archive.read_text(encoding="utf-8"))
+    payload["predictions"][0]["home_win_probability"] = 0.99
+    archive.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="checksum"):
+        score_paper_archive(archive, completed)
