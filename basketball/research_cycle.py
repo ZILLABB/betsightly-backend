@@ -59,6 +59,7 @@ def run_cycle(
         write_games(games, data_path)
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n",
                                  encoding="utf-8")
+    score_model_path = root / "nba_scores.joblib"
     if retrain or not model_path.exists():
         # Trained artifacts remain local; do not upload .joblib to public GitHub.
         metrics = train_offline(games, model_path)
@@ -68,6 +69,14 @@ def run_cycle(
         trained = True
     else:
         trained = False
+
+    score_trained = False
+    if retrain or not score_model_path.exists():
+        from basketball.research_market_models import train_score_baselines
+        score_metrics = train_score_baselines(games, score_model_path)
+        (root / "score_training_metrics.json").write_text(
+            json.dumps(score_metrics, indent=2) + "\n", encoding="utf-8")
+        score_trained = True
 
     db = open_ledger(root / "nba_paper.sqlite")
     try:
@@ -100,7 +109,9 @@ def run_cycle(
         result = {
             "status": "research_only", "date": first_date.isoformat(),
             "generated_at": timestamp.isoformat(), "data_rows": len(games),
-            "model_retrained": trained, "eligible_forecasts": candidates,
+            "model_retrained": trained,
+            "score_models_retrained": score_trained,
+            "eligible_forecasts": candidates,
             "new_forecasts": inserted, "new_dates": eligible_dates,
             "settlement": settled, "performance": performance_report(db),
             "next_action": ("Wait for enough earlier same-season games and "
