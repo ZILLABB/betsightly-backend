@@ -132,6 +132,9 @@ export default function PrivateJackpot() {
  const modelInsufficient=Number.isFinite(modelCeiling)&&Number(modelCeiling)<amount;
  const experimental=displayed?.portfolio_type==='HIGH_RISK_CEILING_EXPERIMENT';
  const trustworthy=(booking?.status==='success'&&booking.share_code&&booking.readback_status==='PASSED');
+ const pastedCount=pasteText.split(/\r?\n/).filter(x=>x.trim()).length;
+ const previewStatus=busy==='analyze'?'Checking exact fixture prices…':busy==='book'?'Requesting and validating the full code…':trustworthy?'Exact code verified':pasteReport?.full_ticket_complete?'All pasted fixtures validated':pasteReport?'Review unavailable fixtures':pastedCount?'Picks awaiting preview':'Paste your selections to start';
+ const previewTone=trustworthy||pasteReport?.status==='PROPOSED_NOT_BOOKED'?'complete':pasteReport?'attention':'idle';
  return <>
   <div className="page-heading"><div><span className="eyebrow">PRIVATE · AUTOMATIC · SPORTYBET VERIFIED</span>
    <h1>Smart Jackpot Generator.</h1>
@@ -139,12 +142,13 @@ export default function PrivateJackpot() {
     ?'Paste exact picks to check the current SportyBet bookmaker board. Model confidence restrictions do not apply; a code is generated only after a complete verified readback.'
     :'Search model-approved matches and request a verified share code when your target is achievable. You do not need to choose matches yourself.'}</p>
   </div></div>
+  <div className={'jackpot-status-strip '+previewTone} role="status" aria-live="polite"><span className={'jackpot-status-mark '+(busy?'working':'')} aria-hidden="true">{busy?<Loader2 size={18} className="spin"/>:trustworthy?<CheckCircle2 size={18}/>:<ShieldCheck size={18}/>}</span><div><span className="workflow-kicker">TICKET VALIDATION</span><strong>{previewStatus}</strong><small>{pasteReport?'Exact matches: '+(pasteReport.matched_fixture_count||0)+' / '+(pasteReport.pasted_fixture_count||0)+(pasteReport.full_ticket_complete?' · complete preview':' · no code released'):pastedCount+' pasted selections · current bookmaker prices required'}</small></div><span className="jackpot-validation-tag">{trustworthy?'Verified code':pasteReport?.full_ticket_complete?'Preview complete':busy?'Checking':'No code issued'}</span></div>
   <section className="panel">
    <header className="panel-head"><div><h2>Automatic ticket settings</h2>
     <p>{bookmakerOnly
      ?'Experimental bookmaker-only validation for the selected fixture window; no prediction quality or calibration claim.'
      :'Use model-evaluated, bookmaker-bookable fixtures. Research and booking remain separate from public predictions.'}</p></div><ShieldCheck size={21}/></header>
-   <fieldset className="editor" disabled={busy!==null}>
+   <fieldset className="editor" disabled={busy!==null} aria-busy={busy!==null}>
     <label className="jackpot-policy-control">Private selection policy
      <select value={mode} onChange={e=>{
        const nextMode=e.target.value as 'approved_model'|'bookmaker_only';
@@ -156,7 +160,7 @@ export default function PrivateJackpot() {
       <option value="bookmaker_only">Bookmaker-only experiment · relaxed model gates</option>
      </select>
     </label>
-    {bookmakerOnly&&<div className="notice warning"><AlertTriangle size={17}/><div>
+    {bookmakerOnly&&<div className="notice info" role="note"><ShieldCheck size={17}/><div>
      Private experimental mode for Today or Next 3 days. Paste an exact market for every game.
      Selection confidence and trust grades are not enforced, but exact SportyBet
      fixtures, active prices and full-code readback still are. Exact mapped Under markets can be requested in this private mode; no stakes are placed.
@@ -223,7 +227,7 @@ export default function PrivateJackpot() {
       {busy==='board'?<Loader2 size={16} className="spin"/>:<RefreshCcw size={16}/>} Check available games
      </button>
     </div>
-    {mustPreview&&!previewApproved&&<div className="notice info" role="status">
+    {mustPreview&&!previewApproved&&!busy&&<div className="notice info" role="status">
       <ShieldCheck size={17}/><div>
        Run <strong>Preview bookmaker-only exact picks</strong> first. Generate Code
        unlocks only after all pasted fixtures and their exact markets have valid
@@ -241,7 +245,7 @@ export default function PrivateJackpot() {
     ?'Bookmaker-only mode can assess upcoming fixtures within the next 72 hours; prices are indicative until full SportyBet readback. Every pasted pick must be verified.'
     :'Model-approved match coverage is limited to the seven-day prepared board.'}</div></div>
    {!bookmakerOnly&&grade==='C'&&<div className="notice warning"><AlertTriangle size={17}/><div>Exploratory trust C includes less-supported predictions, not more reliable ones. The minimum model-probability and bookability gates still apply.</div></div>}
-   {pasteReport&&<div className="jackpot-paste-results" role="status">
+   {pasteReport&&<div className="jackpot-paste-results" role="status" aria-live="polite">
     <strong>{snapshotUnavailable
       ?'Bookmaker snapshot unavailable · 0 fixtures assessed'
       :'Fixture matching: '+(pasteReport.matched_fixture_count||0)+' accepted / '+(pasteReport.pasted_fixture_count||0)+' pasted'}
