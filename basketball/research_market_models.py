@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 
 from basketball.research_features import FEATURE_COLUMNS, SCHEMA_VERSION, make_rows
 from basketball.research_model import chronological_split
@@ -102,9 +103,13 @@ def train_score_baselines(games: list[dict], artifact_path: str | Path) -> dict:
 
 
 def private_score_estimates(games: list[dict], artifact_path: str | Path,
-                            on_date: str) -> list[dict]:
+                            on_date: str, as_of: datetime | None = None) -> list[dict]:
     """Projected means only. No sportsbook line, no staking or pick outcome."""
     joblib, np, _, _, _ = _imports()
+    generated_at = as_of or datetime.now(timezone.utc)
+    if generated_at.tzinfo is None or generated_at.utcoffset() is None:
+        raise ValueError("Research forecast time must have timezone")
+    generated_at = generated_at.astimezone(timezone.utc)
     bundle = joblib.load(artifact_path)  # trusted local-only artifact
     if (bundle.get("version") != VERSION or not bundle.get("research_only")
             or bundle.get("schema") != SCHEMA_VERSION
@@ -112,8 +117,13 @@ def private_score_estimates(games: list[dict], artifact_path: str | Path,
         raise ValueError("Incompatible research score model")
     if on_date <= bundle["trained_through"]:
         raise ValueError("Future dates only; model saw historical labels")
-    predictions = [r for r in make_rows(games)
-                   if r["status"] == "scheduled" and r["date"] == on_date]
+    predictions = [
+        r for r in make_rows(games)
+        if r["status"] == "scheduled" and r["date"] == on_date
+        and r["start_utc"]
+        and datetime.fromisoformat(str(r["start_utc"]).replace("Z", "+00:00"))
+        > generated_at
+    ]
     if not predictions:
         return []
     x = np.asarray([r["features"] for r in predictions], dtype=float)
@@ -124,6 +134,7 @@ def private_score_estimates(games: list[dict], artifact_path: str | Path,
          "home_team": r["home_name"], "away_team": r["away_name"],
          "expected_total_points": round(float(t), 2),
          "expected_home_margin": round(float(m), 2),
+         "generated_at": generated_at.isoformat(),
          "research_only": True, "not_a_betting_market": True,
          "bookmaker_line": None, "booking_code": None}
         for r, t, m in zip(predictions, total, margin)
