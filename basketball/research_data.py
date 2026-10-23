@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 
 API_URL = "https://api.balldontlie.io/v1/games"
 SOURCE = "balldontlie:nba:v1"
+APPROVED_RESEARCH_SOURCES = frozenset({SOURCE, "sportsdataverse:espn_nba_schedules:v1"})
 FIELDS = (
     "game_id", "date", "season", "status", "home_id", "away_id",
     "home_name", "away_name", "home_score", "away_score", "start_utc",
@@ -73,8 +74,8 @@ def normalize_game(raw: dict, retrieved_at: str | None = None) -> dict:
 def _verify_game(game: dict) -> None:
     if not isinstance(game, dict) or any(field not in game for field in FIELDS):
         raise ValueError("Invalid normalized game schema")
-    if game["source"] != SOURCE:
-        raise ValueError("Unknown source: expected BALLDONTLIE NBA games")
+    if game["source"] not in APPROVED_RESEARCH_SOURCES:
+        raise ValueError("Unknown historical NBA game source")
     date.fromisoformat(game["date"])
     if not game["game_id"] or not game["home_id"] or not game["away_id"]:
         raise ValueError("Invalid game identifiers")
