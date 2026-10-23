@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from basketball.research_features import FEATURE_COLUMNS, SCHEMA_VERSION, make_rows
@@ -137,10 +137,14 @@ def train_offline(games: list[dict], artifact_path: str | Path,
 
 
 def paper_forecasts(games: list[dict], artifact_path: str | Path,
-                    on_date: str) -> list[dict]:
+                    on_date: str, as_of: datetime | None = None) -> list[dict]:
     """Private forecasts for scheduled fixtures only (no bookmaker odds/code)."""
     joblib, np, _, _, _, _, _, _ = _dependencies()
     date.fromisoformat(on_date)
+    generated_at = as_of or datetime.now(timezone.utc)
+    if generated_at.tzinfo is None or generated_at.utcoffset() is None:
+        raise ValueError("Forecast timestamp must be timezone-aware")
+    generated_at = generated_at.astimezone(timezone.utc)
     bundle = joblib.load(artifact_path)  # Load only locally created, trusted artifacts.
     if (bundle.get("schema") != SCHEMA_VERSION or
             bundle.get("model_version") != MODEL_VERSION or
@@ -149,8 +153,14 @@ def paper_forecasts(games: list[dict], artifact_path: str | Path,
         raise ValueError("Incompatible or non-research basketball model")
     if on_date <= bundle["trained_through"]:
         raise ValueError("Forecast date must be after model training cutoff")
-    rows = [r for r in make_rows(games)
-            if r["date"] == on_date and r["status"] == "scheduled"]
+    # Do not issue a forecast after tip-off or for an unknown start time.
+    rows = [
+        r for r in make_rows(games)
+        if r["date"] == on_date and r["status"] == "scheduled"
+        and r["start_utc"]
+        and datetime.fromisoformat(str(r["start_utc"]).replace("Z", "+00:00"))
+        > generated_at
+    ]
     if not rows:
         return []
     x = np.asarray([r["features"] for r in rows], dtype=float)
@@ -159,7 +169,9 @@ def paper_forecasts(games: list[dict], artifact_path: str | Path,
     probabilities = bundle["model"].predict_proba(x)[:, 1]
     return [{
         "game_id": r["game_id"], "date": r["date"],
+        "home_team_id": r["home_id"], "away_team_id": r["away_id"],
         "home_team": r["home_name"], "away_team": r["away_name"],
+        "start_utc": r["start_utc"], "generated_at": generated_at.isoformat(),
         "home_win_probability": round(float(p), 5),
         "away_win_probability": round(float(1 - p), 5),
         "model_version": MODEL_VERSION, "feature_schema": SCHEMA_VERSION,
