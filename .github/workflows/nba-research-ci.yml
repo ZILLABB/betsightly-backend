@@ -26,4 +26,4 @@ jobs:
       - name: Compile research modules
         run: python -m compileall -q basketball/research_data.py basketball/research_features.py basketball/research_model.py basketball/research_tracking.py basketball/research_cli.py
       - name: Run offline NBA regression tests
-        run: python -m pytest tests/test_basketball_research.py -q
+        run: python -m pytest --noconftest tests/test_basketball_research.py -q
