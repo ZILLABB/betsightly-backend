@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -144,8 +145,15 @@ def train_offline(games: list[dict], artifact_path: str | Path,
     }
     output = Path(artifact_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    # This is local offline research, never mounted into the public service.
-    joblib.dump(bundle, output)
+    # Use an atomic local artifact replacement; a failed model write cannot
+    # erase a previously successful, trustworthy training result.
+    temp = output.with_name(output.name + ".tmp")
+    try:
+        joblib.dump(bundle, temp)
+        os.replace(temp, output)
+    finally:
+        if temp.exists():
+            temp.unlink()
     return metrics
 
 
