@@ -64,3 +64,118 @@
 .jackpot-market-inactive{font-size:12px;opacity:.55}
 .jackpot-market-option .mini-button{white-space:nowrap}
 @media(max-width:520px){.jackpot-market-option{align-items:flex-start;flex-direction:column}}
+
+
+/* BetSightly admin design system v2 — Atlantic Blue operations workspace.
+   Readability before decoration; status tones communicate server evidence. */
+:root{
+  color-scheme:dark;
+  --ops-ink:#edf5ff;
+  --ops-muted:#9db6cc;
+  --ops-border:#24445e;
+  --ops-blue:#54abf0;
+  --ops-blue-soft:#102f4a;
+  --ops-elevated:#102b42;
+  --ops-shadow:0 20px 60px rgba(0,9,23,.14);
+}
+html{scroll-behavior:smooth}
+body{font-feature-settings:"cv11","ss01";-webkit-font-smoothing:antialiased}
+button,input,textarea,select{transition:border-color .18s ease,background-color .18s ease,box-shadow .18s ease,transform .18s ease}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:2px solid #81caff!important;outline-offset:3px;
+}
+button:active:not(:disabled){transform:translateY(1px)}
+.shell{background:radial-gradient(ellipse at 85% -15%,rgba(31,100,151,.15),transparent 58%),#091827}
+.sidebar{background:linear-gradient(180deg,#081a2b,#0c2439 90%);border-right:1px solid #24435a;width:258px;flex-basis:258px}
+.sidebar-brand{border-bottom:1px solid #1c364c;padding-top:22px;padding-bottom:21px}
+.brand-mark{background:linear-gradient(145deg,#54aeea,#236caa);border:1px solid rgba(178,224,255,.25);box-shadow:0 10px 24px rgba(4,33,66,.24);border-radius:13px}
+.nav-group{color:#7394b3;padding-top:23px;padding-bottom:8px}
+.nav-item{margin-block:2px;border:1px solid transparent;border-radius:10px;font-size:12px;min-height:44px}
+.nav-item:hover{background:#17334c;border-color:#244d6a;transform:translateX(2px)}
+.nav-item.active{background:#193e60;border-color:#37668a;box-shadow:inset 3px 0 #67baf4;color:#fff}
+.nav-item.active svg{color:#9dd9ff}
+.sidebar-bottom{background:rgba(5,17,29,.25)}
+.topbar{min-height:75px;background:rgba(9,26,42,.94);border-bottom:1px solid #284760;backdrop-filter:blur(18px)}
+.breadcrumb{letter-spacing:.07em;color:#86a4c2}
+.breadcrumb strong{color:#f4faff;font-size:13px;letter-spacing:-.01em}
+.workspace-activity{display:inline-flex;gap:9px;align-items:center;border:1px solid #284b62;border-radius:100px;padding:8px 12px;background:#112d42;color:#bfdae8;font-size:11px;font-weight:700;white-space:nowrap}
+.workspace-activity-dot{width:8px;height:8px;background:#77ccae;border-radius:50%;box-shadow:0 0 0 3px rgba(119,204,174,.09)}
+.workspace-activity.syncing{border-color:#34749d;color:#bde6ff}
+.workspace-activity.syncing .workspace-activity-dot{background:#66bef7;animation:ops-pulse 1.6s ease-in-out infinite}
+.main{max-width:1500px;padding-top:34px}
+.page-heading{margin-bottom:26px}
+.page-heading h1{font-weight:790;letter-spacing:-.048em}
+.page-heading p{font-size:13px;line-height:1.75;max-width:760px;color:#aec4d8}
+.eyebrow{font-size:10px;letter-spacing:.18em;color:#83c7f0}
+.panel{background:linear-gradient(155deg,rgba(19,47,69,.95),rgba(12,33,51,.98));border-color:#294a63;border-radius:16px;padding:23px;box-shadow:var(--ops-shadow)}
+.panel-head{margin-bottom:20px;padding-bottom:2px}
+.panel-head h2{font-size:15px;letter-spacing:-.025em;font-weight:760}
+.panel-head p{color:#a2b9cf;font-size:12px;line-height:1.55;max-width:660px}
+.metric{background:linear-gradient(150deg,#153750,#112b42);border-color:#305370;padding:23px;border-radius:14px;position:relative;overflow:hidden}
+.metric:before{content:"";position:absolute;left:0;top:0;width:44px;height:2px;background:#56b0eb;opacity:.9}
+.metric strong{font-size:32px;margin-top:17px;margin-bottom:11px}
+.metric span{font-size:11px;color:#b5cde0}
+.metric small{font-size:11px;color:#90acc5}
+.metric:not(.metric-skeleton):hover{border-color:#4a83a9;transform:translateY(-2px);box-shadow:0 16px 32px rgba(0,12,29,.18)}
+.button.primary{background:linear-gradient(140deg,#2389c9,#12639f);border-color:#4998cb;box-shadow:0 9px 26px rgba(9,74,120,.19)}
+.button.secondary,.mini-button,.chip{border-color:#335875;background:#16354e}
+.button:hover:not(:disabled),.mini-button:hover:not(:disabled),.chip:hover:not(:disabled){border-color:#73b5e4;filter:none;box-shadow:0 5px 19px rgba(18,68,102,.17)}
+.button:disabled{opacity:.52}
+.editor input:not([type="checkbox"]),.editor textarea,.editor select,.auth-card input,.setting-line input,.review-box select{background:#0b2134;border-color:#31516a;min-height:43px}
+.editor input:not([type="checkbox"]):focus,.editor textarea:focus,.editor select:focus{border-color:#68afde;box-shadow:0 0 0 3px rgba(76,157,217,.11)}
+.notice{border-radius:12px;padding:14px 16px;border-left-width:3px;line-height:1.65;background:#102c41;color:#cfdfed;font-size:12px;box-shadow:none}
+.notice.info{background:rgba(38,104,155,.10);border-color:#2c6285;border-left-color:#68b9ec;color:#c6dff4}
+.notice.warning{background:rgba(180,132,46,.10);border-color:#756039;border-left-color:#d9b46a;color:#f2ddb0}
+.notice.error{background:rgba(181,70,80,.10);border-color:#864854;border-left-color:#f18a91;color:#ffdce1}
+.notice.success{background:rgba(38,144,109,.10);border-color:#2b795f;border-left-color:#78d4b1;color:#d0f4e4}
+.notice p{margin:5px 0 0;color:inherit}
+.notice strong{font-weight:800}
+.loading-rich{border:1px solid #2b4d69;border-radius:13px;background:linear-gradient(90deg,#113049,#0e263d);padding:18px 20px;min-height:70px;margin-bottom:12px}
+.loading-rich>svg{color:#7ccaff;flex-shrink:0}
+.loading-rich>div{display:grid;gap:5px}
+.loading-rich strong{color:#e8f4ff;font-size:12px}
+.loading-rich span{color:#95b5ce;font-size:11px}
+.metric-skeleton:before{opacity:.18}
+.metric-skeleton{min-height:150px}
+.skeleton-line{background:linear-gradient(90deg,#29475f 15%,#416781 46%,#29475f 78%);background-size:220% 100%;animation:ops-shimmer 1.8s ease-in-out infinite;display:block!important;color:transparent!important;border-radius:5px;height:11px!important;margin:0!important}
+.skeleton-line.short{width:42%}.skeleton-line.medium{width:65%}.skeleton-line.value{height:35px!important;width:60%;margin:23px 0 16px!important}
+.empty{border:1px dashed #365670;border-radius:12px;background:rgba(5,19,31,.2);padding:34px;color:#aac2d8;line-height:1.65}
+.workflow-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;margin:-1px 0 16px;border:1px solid #2c5879;border-radius:12px;background:linear-gradient(105deg,#123a56,#103047)}
+.workflow-header>div{display:grid;gap:6px;min-width:0}
+.workflow-header strong{font-size:13px;color:#eaf8ff;line-height:1.4}
+.workflow-kicker{font-weight:800;color:#8ec5e8;letter-spacing:.14em;font-size:9px}
+.workflow-stage{font-size:11px;padding:6px 11px;background:#173b55;border:1px solid #367092;border-radius:30px;white-space:nowrap;color:#c2e3f7;font-weight:750}
+.workflow-stage.complete{border-color:#348768;background:#154634;color:#aaf1ce}
+.workflow-stage.attention{border-color:#a07739;background:#573c1f;color:#f3d1a3}
+.steps{gap:8px}
+.step{border-radius:11px;min-height:55px;padding:11px 9px;background:#0d293f;border-color:#31536e;font-weight:700;transition:background .2s ease,border-color .2s ease}
+.step.current{box-shadow:inset 0 0 0 1px rgba(100,188,247,.18)}
+.step.done{background:rgba(30,114,87,.12)}
+.operation-signal{display:flex;gap:13px;align-items:center;padding:15px;border:1px solid #38779e;border-radius:12px;background:rgba(39,116,162,.14);margin:14px 0;color:#d3ebff}
+.operation-spinner{height:36px;width:36px;border-radius:10px;background:#18527a;display:grid;place-items:center;color:#b6e5ff;flex:none}
+.operation-signal>div:last-child{display:grid;gap:5px;min-width:0}
+.operation-signal strong{font-size:12px}
+.operation-signal span{font-size:11px;color:#a7c9e1;line-height:1.5}
+.scroll-table th{font-size:10px;letter-spacing:.08em;color:#aac0d2}
+.scroll-table tbody tr:hover{background:rgba(81,147,193,.07)}
+.saved-card{padding:15px 9px;border-radius:7px}
+.saved-card:hover{background:rgba(48,105,145,.1)}
+.jackpot-status-strip{display:flex;align-items:center;gap:14px;border:1px solid #315675;border-radius:15px;background:linear-gradient(110deg,#153b58,#0f2b42);padding:15px 19px;margin-bottom:21px}
+.jackpot-status-strip>div{display:grid;gap:4px;flex:1;min-width:0}
+.jackpot-status-strip strong{color:#e9f7ff;font-size:14px}
+.jackpot-status-strip small{font-size:11px;color:#a0c0d6;line-height:1.5}
+.jackpot-status-strip.complete{border-color:#35856e;background:linear-gradient(110deg,#123e3a,#0d2d3b)}
+.jackpot-status-strip.attention{border-color:#81643a}
+.jackpot-status-mark{display:grid;place-items:center;width:40px;height:40px;background:#1c5276;color:#a4d9fa;border-radius:12px;flex:none}
+.jackpot-status-strip.complete .jackpot-status-mark{color:#b8f7d5;background:#165c4b}
+.jackpot-validation-tag{display:inline-flex;border:1px solid #3b6683;border-radius:30px;padding:6px 10px;color:#b9dcf1;font-size:11px;font-weight:700;white-space:nowrap}
+.jackpot-paste-results{border:1px solid #385973;border-radius:13px;padding:15px;background:rgba(8,27,43,.33)}
+.jackpot-paste-results>strong{font-size:14px}
+.jackpot-feasibility>div{background:#0c283d;border-color:#31546e;border-radius:12px}
+.jackpot-code{border-color:#36856e;background:linear-gradient(120deg,#124c40,#0f3145)}
+.jackpot-code strong{font-variant-numeric:tabular-nums;letter-spacing:.06em}
+@keyframes ops-pulse{50%{box-shadow:0 0 0 7px rgba(110,193,246,.09)}}
+@keyframes ops-shimmer{100%{background-position-x:-220%}}
+@media(max-width:800px){.workspace-activity{font-size:10px;padding:7px 9px}.workflow-header{align-items:flex-start;flex-direction:column}.jackpot-validation-tag{display:none}.jackpot-status-strip{padding:14px}}
+@media(max-width:520px){.sidebar{width:min(275px,85vw);flex-basis:min(275px,85vw)}.metric{min-height:124px;padding:15px}.metric strong{font-size:25px}.steps{grid-template-columns:repeat(2,minmax(0,1fr))}.topbar{padding-inline:13px}.workspace-activity{display:none}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
