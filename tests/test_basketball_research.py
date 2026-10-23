@@ -143,3 +143,28 @@ def test_immutable_paper_record_and_scoreboard_readback(tmp_path):
     archive.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="checksum"):
         score_paper_archive(archive, completed)
+
+def test_public_espn_source_adapter_has_real_provenance_and_no_fabricated_scores():
+    from basketball.research_public_data import normalize_schedule_row
+    row = {
+        "game_id": "401469330", "game_date": "2023-04-02",
+        "date": "2023-04-03T00:30Z", "game_date_time": "2023-04-03T00:30:00Z",
+        "season": "2023", "season_type": "2", "home_id": "7", "away_id": "9",
+        "home_display_name": "Denver Nuggets",
+        "away_display_name": "Golden State Warriors",
+        "status_type_completed": "TRUE", "status_type_name": "STATUS_FINAL",
+        "home_score": "112", "away_score": "110",
+    }
+    game = normalize_schedule_row(row, 2023, "2026-10-23T00:00:00Z")
+    assert game["status"] == "final" and game["home_score"] == 112
+    assert game["season"] == 2023 and game["date"] == "2023-04-02"
+    assert game["start_utc"].startswith("2023-04-03")
+    assert "sportsdataverse" in game["source"]
+    row["status_type_completed"] = "FALSE"
+    row["status_type_name"] = "STATUS_SCHEDULED"
+    assert normalize_schedule_row(row, 2023, "2026-10-23T00:00:00Z")["home_score"] is None
+    row["season_type"] = "3"  # Playoffs not evaluated with regular-season model
+    assert normalize_schedule_row(row, 2023, "2026-10-23T00:00:00Z") is None
+    row["season_type"] = "2"
+    with pytest.raises(ValueError, match="mismatch"):
+        normalize_schedule_row(row, 2024, "2026-10-23T00:00:00Z")
