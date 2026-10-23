@@ -1,9 +1,9 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
-  Activity, ArrowDownRight, ArrowUpRight, ArrowRight, BarChart3, CheckCircle2,
-  ChevronRight, Command, CornerDownLeft, Eye, FileCheck2, Fingerprint,
+  Activity, ArrowRight, BarChart3, CheckCircle2,
+  ChevronRight, CornerDownLeft, Eye, FileCheck2, Fingerprint,
   Gauge, LayoutDashboard, LockKeyhole, Search, ShieldCheck, Sparkles,
-  TrendingUp, Users, X, AlertTriangle, type LucideIcon
+  TrendingUp, Users, type LucideIcon
 } from 'lucide-react';
 
 /** An accessible, dependency-free command interface inspired by 21st.dev's dashboard patterns. */
@@ -72,7 +72,7 @@ export function PremiumOperationsOverview({totals,booking,report,period,loading,
   const largest=Math.max(1,...bars.map(bar=>bar.value??0));
   const backend=String(report.status||'').toLowerCase();
   const statusKnown=Boolean(report.status);
-  const operations=Array.isArray(report.runs)?report.runs:[];
+  const operations=Array.isArray(report.runs)?report.runs:null;
   return <div className="premium-overview">
     <section className="premium-hero" aria-label="BetSightly business overview">
       <div className="premium-hero-grid" aria-hidden="true"/>
@@ -87,8 +87,8 @@ export function PremiumOperationsOverview({totals,booking,report,period,loading,
       <div className="premium-hero-system">
         <div className="premium-system-top"><span className="premium-system-orb"><Activity size={22}/></span><span>SYSTEM OBSERVATION<small>Read from the production API</small></span></div>
         <div className="premium-system-state"><span className={'premium-system-led '+(statusKnown&&['healthy','ok','success','running','active'].includes(backend)?'ok':'unknown')}/><strong>{statusKnown?String(report.status):loading?'Checking…':'Status unavailable'}</strong></div>
-        <div className="premium-system-row"><span>Recorded operations</span><strong>{loading?'—':print(operations.length)}</strong></div>
-        <div className="premium-system-row"><span>Last observed run</span><strong>{loading?'—':print(operations[0]?.status)}</strong></div>
+        <div className="premium-system-row"><span>Recorded operations</span><strong>{loading?'—':operations?print(operations.length):'Unavailable'}</strong></div>
+        <div className="premium-system-row"><span>Last observed run</span><strong>{loading?'—':operations?print(operations[0]?.status):'Unavailable'}</strong></div>
         <button type="button" className="premium-system-update" onClick={onRefresh} disabled={refreshing}>
           <span>{refreshing?'Refreshing snapshot…':'Refresh backend snapshot'}</span> <ArrowRight size={14}/></button>
       </div>
