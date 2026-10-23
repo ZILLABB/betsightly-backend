@@ -573,6 +573,8 @@ class BasketballPredictionService:
         return None
     
     def train_models(self, data_path: Optional[str] = None) -> Dict[str, Any]:
+        raise RuntimeError("Legacy NBA code generates synthetic training inputs; use "
+                           "python -m basketball.research_cli instead.")
         """
         Train basketball prediction models.
         
