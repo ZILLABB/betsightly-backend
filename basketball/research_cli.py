@@ -56,6 +56,27 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument("--data", type=Path, default=DEFAULT_DATA)
     score.add_argument("--archive", type=Path, required=True)
 
+    cycle = commands.add_parser("cycle", help="Local-only full refresh and paper-test cycle")
+    cycle.add_argument("--home", type=Path,
+                       default=Path("data/basketball/research"))
+    cycle.add_argument("--date", help="First NBA fixture date; defaults to UTC today")
+    cycle.add_argument("--days-ahead", type=int, default=2)
+    cycle.add_argument("--seasons", nargs="+", type=int)
+    cycle.add_argument("--offline", action="store_true",
+                       help="Use current local snapshot, no network")
+    cycle.add_argument("--retrain", action="store_true",
+                       help="Explicitly refresh the prospective model only")
+
+    ledger = commands.add_parser("ledger", help="Local research ledger performance")
+    ledger.add_argument("--home", type=Path,
+                        default=Path("data/basketball/research"))
+
+    dashboard = commands.add_parser("dashboard",
+                                    help="Read-only Atlantic view (localhost only)")
+    dashboard.add_argument("--db", type=Path,
+                           default=Path("data/basketball/research/nba_paper.sqlite"))
+    dashboard.add_argument("--port", type=int, default=8767)
+
     return parser
 
 
@@ -95,6 +116,18 @@ def main(argv: list[str] | None = None) -> int:
             result["archive"] = write_paper_archive(predictions, archive_path)
     elif args.command == "score":
         result = score_paper_archive(args.archive, read_games(args.data))
+    elif args.command == "cycle":
+        from basketball.research_cycle import run_cycle
+        result = run_cycle(home=args.home, start_date=args.date,
+                           days_ahead=args.days_ahead, seasons=args.seasons,
+                           offline=args.offline, retrain=args.retrain)
+    elif args.command == "ledger":
+        from basketball.research_cycle import ledger_report
+        result = ledger_report(home=args.home)
+    elif args.command == "dashboard":
+        from basketball.research_dashboard import serve_dashboard
+        serve_dashboard(db_path=args.db, port=args.port)
+        return 0
     else:
         raise AssertionError("Unknown command")
     print(json.dumps(result, indent=2, default=str))
