@@ -49,7 +49,7 @@ async def replay_decision_snapshot(snapshot_id: str,
 
 
 @router.get("/daily-accumulators")
-def get_daily_accumulators():
+async def get_daily_accumulators():
     """Daily accumulator picks (2 odds / 5 odds / 10 odds / over 1.5 / rollover)."""
     try:
         from leagues.daily_feed import build_daily_accumulators
@@ -650,7 +650,7 @@ async def slip_builder_generate(target: float, horizon: str = "week",
 
 
 @router.get("/recommendations")
-def get_fixture_recommendations(date: str | None = None,
+async def get_fixture_recommendations(date: str | None = None,
                                       days_ahead: int = 3):
     """One ranked football opinion per analysed fixture on a WAT date."""
     try:
