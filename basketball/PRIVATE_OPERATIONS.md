@@ -214,3 +214,43 @@ The research dataset remains usable and no score is invented. The
 To see Stage 2B's dashboard changes, stop the existing localhost server
 with Ctrl+C and restart using
 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\nba_paper_research.ps1 -ShowDashboard`.
+
+### Stage 2B provider diagnostic fix (2026-10-24)
+
+An October 24 local test initially showed `scoreboard.status=partial`,
+`dates_checked=0`, with one bare `RuntimeError`. This confirms **no ESPN
+scoreboard data was actually verified**, even though the hourly Windows task
+had exit code 0. The initial code incorrectly treated a partial provider check
+as successful task completion.
+
+The checker now tries ESPN site scoreboard **and** the documented ESPN CDN
+scoreboard endpoint (`cdn.espn.com/core/nba/scoreboard?xhr=1&date=YYYYMMDD`).
+Both are ESPN-owned, unofficial, free-to-query feeds, NOT independent
+providers or guarantees. The parser only accepts the CDN's real `sbData`
+scoreboard events. All final-result identity safeguards still apply.
+
+The `settle` output now includes sanitized diagnostic details such as
+`site:HTTP_403; cdn:HTTP_403`, `TIMEOUT`, `NETWORK_ERROR` or
+`CDN_MISSING_EVENTS`. Provider HTML, redirects, response bodies and
+auth details are **not** printed. No data is invented.
+
+The hourly PowerShell task now returns a **nonzero failure** if
+`scoreboard.status != ok`, rather than reporting TaskResult 0 while ESPN
+verification failed. `nba_paper.sqlite` remains persistent, and the last
+failure is visible in `scoreboard_health.json` and in
+`score_check.log`.
+
+To check after updating your Windows checkout, manually execute:
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+.\.venv\Scripts\python.exe -m basketball.research_cli settle
+```
+
+Inspect `scoreboard.failed_dates[].detail` for real network/HTTP failure.
+If both ESPN access methods are blocked on this PC, do not repeatedly
+poll or attempt to evade provider blocks: stop the optional hourly task
+and retain the safe historical snapshot while a distinct authorized
+no-cost provider is evaluated. A successful Windows script or hourly
+schedule does not prove that a final was obtained.
