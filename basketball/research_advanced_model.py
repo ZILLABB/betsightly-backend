@@ -99,6 +99,44 @@ def build_candidate(home:Path|str)->dict:
         refit.fit(X(all_history,baseline),
                   np.asarray([r["home_win"] for r in all_history],dtype=int))
         fits[name]=refit
+    # Score projection research is also independent of bookmaker markets.
+    # Validation is historical/development-only and uses real final scores.
+    from sklearn.linear_model import Ridge
+    score_results={}
+    score_fits={}
+    historical=[r for r in rows if r["status"]=="final" and r["season"]<=2026]
+    for target in ("total_points","home_margin"):
+        score_results[target]={}
+        score_fits[target]={}
+        for name,baseline in (("matched_v1_features",True),
+                              ("advanced_candidate",False)):
+            Xt=X(train,baseline)
+            Xv=X(valid,baseline)
+            target_train=np.asarray([r[target] for r in train],dtype=float)
+            target_valid=np.asarray([r[target] for r in valid],dtype=float)
+            candidates=[]
+            for alpha in (.1,1.,10.,100.):
+                reg=pipe(scaler(),Ridge(alpha=alpha))
+                reg.fit(Xt,target_train)
+                predictions=reg.predict(Xv)
+                candidates.append((
+                    float(np.mean(np.abs(predictions-target_valid))),
+                    alpha,reg))
+            _,selected,chosen=min(candidates,key=lambda r:(r[0],r[1]))
+            difference=chosen.predict(Xv)-target_valid
+            score_results[target][name]={
+                "selected_alpha":selected,
+                "historical_validation_2026":{
+                    "games":len(valid),
+                    "mae":round(float(np.mean(np.abs(difference))),5),
+                    "rmse":round(float(np.sqrt(np.mean(difference**2))),5),
+                    "bias":round(float(np.mean(difference)),5),
+                },
+            }
+            frozen=pipe(scaler(),Ridge(alpha=selected))
+            frozen.fit(X(historical,baseline),
+                       np.asarray([r[target] for r in historical],dtype=float))
+            score_fits[target][name]=frozen
     # Selection on validation doesn't license promotion or establish a
     # fresh holdout result: 2026 previously appeared in v1 historical tests.
     report={
@@ -108,6 +146,9 @@ def build_candidate(home:Path|str)->dict:
         "training_games":len(train),"validation_games":len(valid),
         "matched_feature_count":len(FEATURE_COLUMNS),
         "matched_model_comparison":results,
+        "score_projection_comparison":score_results,
+        "bookmaker_lines_or_spreads_validated":False,
+        "first_half_splits_available":False,
         "validation_2026_is_not_new_unseen_holdout":True,
         "true_prospective_2027_settled_games":0,
         "pass_to_public_model":False,"bookmaker_odds_present":False,
@@ -125,6 +166,7 @@ def build_candidate(home:Path|str)->dict:
             "trained_through_season":2026,
             "candidate":fits["advanced_candidate"],
             "matched_v1":fits["matched_v1_features"],
+            "score_models":score_fits,
             "report":report,"research_only":True,
         },staged)
         os.replace(staged,target)
@@ -203,6 +245,13 @@ def run_shadow(home:Path|str,*,now:datetime|None=None)->dict:
         x=np.asarray([row["features"]],dtype=float)
         prob=float(bundle["candidate"].predict_proba(x)[:,1][0])
         reference=float(bundle["matched_v1"].predict_proba(x[:,:14])[:,1][0])
+        score_models=bundle.get("score_models") or {}
+        def expected(target,variant):
+            models=score_models.get(target) or {}
+            m=models.get(variant)
+            if m is None:return None
+            features=x[:,:14] if variant=="matched_v1_features" else x
+            return round(float(m.predict(features)[0]),3)
         item={
             "game_id":gid,"season":2027,"fixture_date":game["date"],
             "home_id":str(game["home_id"]),"away_id":str(game["away_id"]),
@@ -211,6 +260,10 @@ def run_shadow(home:Path|str,*,now:datetime|None=None)->dict:
             "candidate_home_win_probability":round(prob,5),
             "matched_v1_home_win_probability":round(reference,5),
             "source_feature_schema":VERSION,
+            "candidate_total_points":expected("total_points","advanced_candidate"),
+            "candidate_home_margin":expected("home_margin","advanced_candidate"),
+            "matched_v1_total_points":expected("total_points","matched_v1_features"),
+            "matched_v1_home_margin":expected("home_margin","matched_v1_features"),
             "bookmaker_odds_verified":False,"not_for_betting":True,
             "research_only":True,
         }
@@ -265,11 +318,30 @@ def run_shadow(home:Path|str,*,now:datetime|None=None)->dict:
             "candidate":_score(y,[r["candidate_home_win_probability"] for r in scored],np),
             "matched_v1":_score(y,[r["matched_v1_home_win_probability"] for r in scored],np),
         }
+    score_errors={}
+    for kind in ("candidate","matched_v1"):
+        for target in ("total_points","home_margin"):
+            estimates=[item for item in scored
+                       if item.get(f"{kind}_{target}") is not None]
+            if not estimates:
+                score_errors[f"{kind}_{target}_mae"]=None
+                continue
+            actual=[
+                sum(settled[item["game_id"]]["scores"])
+                if target=="total_points" else
+                settled[item["game_id"]]["scores"][0]-
+                settled[item["game_id"]]["scores"][1]
+                for item in estimates
+            ]
+            score_errors[f"{kind}_{target}_mae"]=round(
+                sum(abs(item[f"{kind}_{target}"]-value)
+                    for item,value in zip(estimates,actual))/len(estimates),4)
     return {
         "status":"research_only","created":len(new),
         "total_shadow_forecasts":len(original),
         "settled":len(scored),"newly_settled":changed,
         "performance":info,
+        "point_projection_errors":score_errors,
         "minimum_descriptive_games":100,
         "sample_gate_met":len(scored)>=100,
         "first_2027_pregame_only":True,
