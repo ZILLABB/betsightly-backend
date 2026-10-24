@@ -72,6 +72,11 @@ jobs:
           assert v.get('public_publishing_enabled',False) is False
           assert v.get('pass_to_public_model',False) is False
           PY
+      - name: Probe official injury PDF snapshot (advisory source availability)
+        continue-on-error: true
+        run: |
+          python -m basketball.research_cli capture-injury > /tmp/nba-official-injury.json
+          python -m basketball.research_cli injury-status
       - name: Remove private downloaded source data and artifacts
         if: always()
         run: rm -rf data/basketball/research /tmp/nba-advanced-*.json
