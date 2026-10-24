@@ -170,6 +170,11 @@ def build_parser() -> argparse.ArgumentParser:
     markets_v4.add_argument("--home", type=Path,
         default=Path("data/basketball/research"))
 
+    bootstrap = commands.add_parser(
+        "stage4-bootstrap", help="One private locked setup of verified advanced NBA sources and shadow lab")
+    bootstrap.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     stage4 = commands.add_parser(
         "stage4-report", help="Read-only Stage 4 NBA source, model and market readiness")
     stage4.add_argument("--home", type=Path,
@@ -305,6 +310,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "market-evaluation":
         from basketball.research_markets_v4 import market_report_from_home
         result = market_report_from_home(args.home)
+    elif args.command == "stage4-bootstrap":
+        from basketball.research_stage4_setup import bootstrap_stage4
+        result = bootstrap_stage4(args.home)
     elif args.command == "stage4-report":
         from basketball.research_stage4_operations import stage4_report
         result = stage4_report(args.home)
