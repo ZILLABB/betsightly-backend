@@ -71,6 +71,21 @@ jobs:
               assert target["test"]["mae"] >= 0
               assert target["eligible_for_bookmaker_publication"] is False
           PY
+      - name: Exercise current-season paper cycle without durable storage or betting
+        run: |
+          python -m basketball.research_cli cycle --offline --days-ahead 2 > /tmp/nba-paper-cycle-smoke.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path("/tmp/nba-paper-cycle-smoke.json").read_text())
+          assert result["status"] == "research_only"
+          assert result["local_only"] is True
+          assert result["public_publishing_enabled"] is False
+          assert result["bookmaker_booking_enabled"] is False
+          assert result["new_forecasts"] <= result["eligible_forecasts"]
+          assert Path("data/basketball/research/nba_paper.sqlite").exists()
+          print("NBA paper cycle smoke check passed; no private forecasts were uploaded.")
+          PY
       - name: Save metrics and source hashes only (NO RAW DATA OR MODEL)
         uses: actions/upload-artifact@v4
         with:
