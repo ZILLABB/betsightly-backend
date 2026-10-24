@@ -140,6 +140,13 @@ def save_forecasts(connection: sqlite3.Connection,
                     )
                 skipped += 1
                 continue
+            # The insert must actually occur before tipoff, not just contain
+            # an arbitrarily forged pregame generated_at timestamp.
+            clock = datetime.now(timezone.utc)
+            if kickoff <= clock:
+                raise ValueError("Refusing first-time paper insertion after tipoff")
+            if (clock - created).total_seconds() > 3600:
+                raise ValueError("Refusing stale/backdated paper forecast")
             connection.execute(
                 """INSERT INTO forecasts(
                     game_id, fixture_date, start_utc, created_at, home_team,
