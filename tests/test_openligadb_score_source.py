@@ -168,3 +168,42 @@ def test_espn_already_verified_german_result_does_not_call_openligadb(
     scores, provider = results_checker._collect_scores_for_picks(picks)
     assert provider == "espn"
     assert len(scores) == 1
+
+
+def test_sportybet_league_label_can_feed_keyless_german_score_fallback(monkeypatch):
+    """Most manual tickets have no league_slug; they must still be eligible."""
+    from leagues import live_scores
+    monkeypatch.setenv("OPENLIGADB_ENABLED", "true")
+    monkeypatch.setattr(
+        live_scores, "infer_published_competition_slugs",
+        lambda picks: ({"ger.1"}, 0)
+        if picks[0].get("league") == "German Bundesliga" else (set(), 1),
+    )
+    calls = []
+    def season_finals(shortcut, season):
+        calls.append((shortcut, season))
+        return [source._normalize_fixture(_match(), "bl1", 2026)]
+    monkeypatch.setattr(source, "_season_finals", season_finals)
+    games = [{"league": "German Bundesliga", "home_team": "Bayern Munich",
+              "away_team": "Borussia Dortmund",
+              "kickoff": "2026-10-10T13:30:00Z"}]
+    result = source.openligadb_finals(games)
+    assert calls == [("bl1", 2026)]
+    assert len(result) == 1
+    assert result[0]["score_90"] == {"home": 2, "away": 1}
+
+
+def test_unmapped_bookmaker_competition_does_not_guess_league(monkeypatch):
+    from leagues import live_scores
+    monkeypatch.setenv("OPENLIGADB_ENABLED", "true")
+    monkeypatch.setattr(
+        live_scores, "infer_published_competition_slugs",
+        lambda picks: ({"ger.1", "ger.2"}, 0),
+    )
+    monkeypatch.setattr(source, "_season_finals",
+                        lambda *args: (_ for _ in ()).throw(
+                            AssertionError("unverified league fetched")))
+    assert source.openligadb_finals([{
+        "league": "1st Division",
+        "kickoff": "2026-10-10T13:30:00Z",
+    }]) == []
