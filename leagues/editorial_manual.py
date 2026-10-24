@@ -216,6 +216,16 @@ def _current_bookable_games(requested: list[tuple[str, str]], board: dict,
             "model_probability_available": False,
             "model_sources": ["Admin curated · bookmaker verified"],
         }
+        # Record the supported ESPN competition at publication, when the
+        # bookmaker's league label resolves to exactly one VERIFIED slug.
+        # Unknown/ambiguous competitions are flagged, never guessed.
+        from leagues.live_scores import infer_published_competition_slugs
+        matched, unmapped = infer_published_competition_slugs([game])
+        if unmapped == 0 and len(matched) == 1:
+            game["league_slug"] = next(iter(matched))
+            game["score_competition_mapped"] = True
+        else:
+            game["score_competition_mapped"] = False
         games.append(game)
     return games
 
