@@ -44,10 +44,17 @@ try {
 } catch {
     throw "NBA score check did not return valid JSON. See $log"
 }
-if ($result.scoreboard.status -ne "ok") {
+if ($result.scoreboard.status -eq "idle" -and
+    $result.scoreboard.dates_requested -eq 0) {
+    Write-Host "NBA score checker idle: no overdue fixture date requires a request."
+    Write-Host "No provider verification was attempted. This is NOT a successful provider probe."
+    exit 0
+}
+if ($result.scoreboard.status -ne "ok" -or
+    $result.scoreboard.dates_checked -lt 1) {
     throw ("NBA provider verification incomplete: " +
         "$($result.scoreboard.dates_checked)/$($result.scoreboard.dates_requested) " +
         "dates checked; see $log. Scheduled task reports failure.")
 }
-Write-Host "NBA score verification cycle completed successfully."
+Write-Host "NBA score verification cycle checked the requested dates successfully."
 
