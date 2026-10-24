@@ -1,6 +1,6 @@
 # Private BetSightly NBA lab — operating instructions
 
-**Status:** standalone local research tools on draft GitHub PR #171. The live
+**Status:** isolated Stage 1 research branch (based on live `devil`) with no production merge. The live
 BetSightly backend, Vercel/Cloudflare frontend, administrator, SportyBet codes,
 Telegram and calibration records are never touched. There is **no cloud
 deployment, automatic cloud task or remote private admin URL**.
@@ -22,12 +22,12 @@ deployment, automatic cloud task or remote private admin URL**.
 
 ## One-time Windows setup
 
-Open PowerShell in a local checkout of the draft research branch. Do **not**
-merge it into `dev` or deploy to Render.
+Open PowerShell in a local checkout of the Stage 1 research branch. The commands below operate only on your Windows computer; GitHub CI does not install a local scheduled task. Do **not**
+merge it into `devil` or deploy to Render.
 
 ```powershell
-git fetch origin research/nba-offline-pipeline-20261023
-git switch -c nba-research --track origin/research/nba-offline-pipeline-20261023
+git fetch origin stage1/nba-private-research-20261024
+git switch -c nba-research --track origin/stage1/nba-private-research-20261024
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install scikit-learn==1.8.0 joblib
 ```
@@ -131,3 +131,12 @@ models, predictions or the SQLite file to a public GitHub repository.
 A previous baseline passed a 1,711-game **historical** holdout at **65.93%
 accuracy** (Brier **0.21347**). That is historical probability discrimination,
 not prospective performance, ROI or bookmaker-beating evidence.
+
+## Stage 1 isolation checks (24 October 2026)
+
+- The Stage 1 branch was created from the current `devil` commit to avoid merging the obsolete `dev` history.
+- Only the standalone `basketball/`, NBA-specific workflows/tests, local runner, and a `.gitignore` privacy rule were changed; no live FastAPI route or Render configuration was changed.
+- `data/basketball/research/` is explicitly ignored by Git so the private ledger, downloaded raw data, source manifests, and model artifacts do not enter the public repo.
+- A CI research cycle may run on an ephemeral GitHub-hosted runner for **smoke validation only**; its SQLite paper ledger is discarded and does **not** count as persistent prospective tracking.
+- To start *durable* prospective paper testing, run the script locally once and use `-InstallSchedule` only on the Windows PC where data/model files will persist. A computer that is powered off will miss its local scheduled run.
+- Until a private persistent machine has actually executed and retained a cycle, operational status is **READY FOR LOCAL ACTIVATION**, not actively running.
