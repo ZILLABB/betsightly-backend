@@ -904,6 +904,11 @@ _SETTLEMENT_TEAM_ALIASES = {
     "swansea city": "swansea",
     "fc schalke 04": "schalke",
     "schalke 04": "schalke",
+    "feyenoord rotterdam": "feyenoord",
+    "internazionale": "inter",
+    "internazionale milano": "inter",
+    "inter milan": "inter",
+    "real betis balompie": "betis",
 }
 
 
