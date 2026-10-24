@@ -85,6 +85,16 @@ def build_parser() -> argparse.ArgumentParser:
                             default=Path("data/basketball/research"))
     settlement.add_argument("--offline", action="store_true")
 
+    diagnose = commands.add_parser(
+        "diagnose-scores", help="Read-only local NBA scores and provider provenance")
+    diagnose.add_argument("--home", type=Path,
+                          default=Path("data/basketball/research"))
+    probe = commands.add_parser(
+        "probe-scores", help="Check real final-score providers without modifying data")
+    probe.add_argument("--home", type=Path,
+                       default=Path("data/basketball/research"))
+    probe.add_argument("--date", help="Local provider game date; last 14 days")
+
     ledger = commands.add_parser("ledger", help="Local research ledger performance")
     ledger.add_argument("--home", type=Path,
                         default=Path("data/basketball/research"))
@@ -148,6 +158,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "settle":
         from basketball.research_score_only import settle_once
         result = settle_once(home=args.home, offline=args.offline)
+    elif args.command == "diagnose-scores":
+        from basketball.research_score_diagnostics import inspect_home
+        result = inspect_home(args.home)
+    elif args.command == "probe-scores":
+        from basketball.research_score_diagnostics import probe_source
+        result = probe_source(args.home, day=args.date)
     elif args.command == "ledger":
         from basketball.research_cycle import ledger_report
         result = ledger_report(home=args.home)
