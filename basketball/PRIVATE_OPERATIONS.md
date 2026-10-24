@@ -160,3 +160,57 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\nba_paper_rese
 ```
 
 The dashboard's READY label is **only pregame research eligibility**, never a recommendation to bet. Readiness uses a 36-hour maximum age for the snapshot and explicitly reports missing or invalid local snapshots. Existing immutable forecast rows and historical model results are not changed by diagnostics.
+
+## Stage 2B — verified private NBA finals and monitoring
+
+Updated sources remain **unofficial/keyless and research-only**. The historical
+SportsDataverse schedule and ESPN's scoreboard are two different access
+paths to ESPN data, **not two independent licensors or a paid SLA**. Failures
+or unresolved finals are reported and never silently converted into wins.
+
+From the Windows NBA research checkout:
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+
+# Manual one-off lightweight score verification; no model training
+.\.venv\Scripts\python.exe -m basketball.research_cli settle
+
+# Confirm immutable existing forecasts/results (if any)
+.\.venv\Scripts\python.exe -m basketball.research_cli ledger
+
+# Confirm upcoming vs started-but-unverified games
+.\.venv\Scripts\python.exe -m basketball.research_cli readiness --days-ahead 7
+```
+
+Optional, **only after the manual score check succeeds**: install a separate
+Windows task for hourly score checks at HH:20 (computer-local time).
+The existing daily 18:00 model cycle is not changed.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\nba_score_check.ps1 -InstallSchedule
+Get-ScheduledTaskInfo -TaskName "BetSightly NBA Score Check" |
+    Select-Object LastRunTime, NextRunTime, LastTaskResult
+```
+
+The optional repeated task is registered for one year and must be renewed
+after expiration; the Windows PC needs to be on. It is not an immediate
+post-buzzer settlement guarantee. It never fetches 11 seasons or retrains.
+Its local log is git-ignored at
+`data/basketball/research/score_check.log`. Scoreboard health appears at
+`data/basketball/research/scoreboard_health.json` and in the dashboard.
+
+Final acceptance is keyed by **exact ESPN event ID, home/away IDs, verified
+final status, plausible same tipoff and non-tied integer scores**. A conflicting
+final or fixture identity stops the run without changing prior settled
+records. The research ledger remains append-only.
+
+If the scoreboard endpoint returns 403, times out or changes its JSON schema,
+`scoreboard.status` becomes `partial`, with failed dates listed.
+The research dataset remains usable and no score is invented. The
+`settle --offline` command only reconciles already saved verified scores.
+
+To see Stage 2B's dashboard changes, stop the existing localhost server
+with Ctrl+C and restart using
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\nba_paper_research.ps1 -ShowDashboard`.
