@@ -812,3 +812,27 @@ later verified exact fixture settlement, intact forecast SHA256, at least
 100 forward settlements for initial model review, no unresolved
 leakage/source corruption, and licensing + price data review for any
 eventual public product.
+
+### Single setup command — Stage 4A/B/C (recommended)
+
+After pulling the private GitHub branch and installing the optional
+`pyarrow` and `pdfplumber` dependencies, run just one coordinator:
+
+```powershell
+.\.venv\Scripts\python.exe -m basketball.research_cli stage4-bootstrap
+```
+
+It shares the existing Windows task lock and verifies all 2024–2026
+historical team/player advanced files **only if missing**, attempts
+each 2027 source independently, builds a separate advanced candidate
+only when complete historical inputs exist, collects an official NBA
+injury report and returns one overall Stage 4 readiness report.
+
+**Important:** `configured` means the private engineering environment
+has the required model and 2027 data files, **not that public basketball
+predictions are licensed, calibrated or launch-ready**. If an asset is
+absent or source terms block it, the run reports `partial` with
+details instead of faking results. Never remove the private data folder
+to rerun it. The existing 18:00 cycle and hourly score checker remain
+intact. The model is frozen once a genuine prospective shadow
+forecast exists and cannot be silently refitted.
