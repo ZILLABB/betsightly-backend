@@ -1,0 +1,77 @@
+name: NBA Stage 3B-C Advanced Source Acceptance (private)
+
+# Research-only: temporary authenticated? NO. Provider assets are keyless.
+# No deployed services, raw data artifacts, model publications, or bookmaker odds.
+on:
+  pull_request:
+    paths:
+      - "basketball/research_advanced_data.py"
+      - "basketball/research_advanced_features.py"
+      - "basketball/research_advanced_model.py"
+      - "basketball/research_injury_reports.py"
+      - "basketball/research_cli.py"
+      - ".github/workflows/nba-stage3bc-sources.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  temporary-real-source-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install research-only parquet and offline ML libraries
+        run: python -m pip install pyarrow scikit-learn==1.8.0 joblib pdfplumber
+      - name: Download authentic NBA schedules for 2024-2026
+        run: |
+          python -m basketball.research_cli fetch-public --seasons 2024 2025 2026
+      - name: Strictly validate released ESPN team and player box scores
+        run: |
+          python -m basketball.research_cli fetch-advanced --seasons 2024 2025 2026 > /tmp/nba-advanced-ingest.json
+          python - <<'PY'
+          import json
+          result=json.load(open('/tmp/nba-advanced-ingest.json'))
+          for item in result['source_coverage']:
+              print('Verified asset:',item['season'],item['kind'],
+                    'rows:',item['accepted_rows'],
+                    'game coverage:',item['fixture_coverage'])
+          assert result['files_written']==6
+          assert result['public_publishing_enabled'] is False
+          PY
+      - name: Inspect pregame-only feature coverage
+        run: |
+          python -m basketball.research_cli advanced-report > /tmp/nba-advanced-coverage.json
+          python - <<'PY'
+          import json
+          result=json.load(open('/tmp/nba-advanced-coverage.json'))
+          print('Advanced pregame:',result['pregame_feature_readiness']['status'])
+          print('Advanced eligible:',result['pregame_feature_readiness'].get('advanced_eligible_rows'))
+          assert result['team_seasons']==3
+          assert result['player_seasons']==3
+          PY
+      - name: Fit development-only 2026 validation candidate
+        run: |
+          python -m basketball.research_cli advanced-build > /tmp/nba-advanced-candidate.json
+          python - <<'PY'
+          import json
+          v=json.load(open('/tmp/nba-advanced-candidate.json'))
+          print('Advanced candidate:',v['status'])
+          print('Train/valid:',v.get('training_games'),v.get('validation_games'))
+          if v['status']=='development_only':
+              print('Matched v1 Brier:',v['matched_model_comparison']['matched_v1_features']['validation_2026']['brier'])
+              print('Advanced Brier:',v['matched_model_comparison']['advanced_candidate']['validation_2026']['brier'])
+          assert v.get('public_publishing_enabled',False) is False
+          assert v.get('pass_to_public_model',False) is False
+          PY
+      - name: Remove private downloaded source data and artifacts
+        if: always()
+        run: rm -rf data/basketball/research /tmp/nba-advanced-*.json
