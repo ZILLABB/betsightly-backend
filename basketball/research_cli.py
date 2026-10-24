@@ -95,6 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
                        default=Path("data/basketball/research"))
     probe.add_argument("--date", help="Local provider game date; last 14 days")
 
+    operations = commands.add_parser(
+        "operations", help="Read-only first forecast and settlement lifecycle status")
+    operations.add_argument("--home", type=Path,
+                            default=Path("data/basketball/research"))
+
     prospective = commands.add_parser(
         "prospective", help="Read-only real pregame NBA paper evaluation")
     prospective.add_argument("--db", type=Path,
@@ -169,6 +174,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "probe-scores":
         from basketball.research_score_diagnostics import probe_source
         result = probe_source(args.home, day=args.date)
+    elif args.command == "operations":
+        from basketball.research_operations import operations_from_home
+        result = operations_from_home(args.home)
     elif args.command == "prospective":
         from basketball.research_prospective import prospective_report
         result = prospective_report(args.db)
