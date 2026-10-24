@@ -17,6 +17,8 @@ from basketball.research_operations import operations_from_home
 from basketball.research_automation import reliability_from_home
 from basketball.research_advanced_data import advanced_coverage
 from basketball.research_injury_reports import injury_status
+from basketball.research_stage4_operations import stage4_report
+from basketball.research_markets_v4 import market_report_from_home
 from basketball.research_store import (
     DEFAULT_DB, latest_events, list_forecasts, open_ledger,
     performance_report,
@@ -37,7 +39,8 @@ def render_dashboard(report: dict, forecasts: list[dict],
                      operations: dict | None = None,
                      reliability: dict | None = None,
                      advanced: dict | None = None,
-                     injuries: dict | None = None) -> str:
+                     injuries: dict | None = None,
+                     stage4: dict | None = None) -> str:
     """Server-rendered and escaped HTML, no tracking or external dependencies."""
     metric = lambda name, value, note: (
         '<div class="metric"><small>' + _safe(name) + '</small>'
@@ -227,6 +230,35 @@ def render_dashboard(report: dict, forecasts: list[dict],
             "are NOT yet approved as joined pregame model features. "
             "The locked v1 model remains unchanged."
         )
+    stage4_metrics = ""
+    stage4_note = ("Advanced source data and market probabilities have not "
+                   "yet been fully reviewed.")
+    if stage4 is not None:
+        support = stage4.get("market_support") or {}
+        market = stage4.get("probability_markets") or {}
+        crosswalk = stage4.get("injury_player_identity") or {}
+        stage4_metrics = "".join([
+            metric("2027 VERIFIED ADVANCED FILES",
+                   2-len(stage4.get("current_2027_missing_assets") or []),
+                   "Two required: verified team + verified player"),
+            metric("FULL-GAME PROBABILITY LAB",
+                   "READY" if support.get("full_game_total") else "BLOCKED",
+                   "Synthetic thresholds, not bookable lines"),
+            metric("Genuine MARKET SETTLEMENTS",
+                   market.get("verified_final_count",0),
+                   "Private pregame research only"),
+            metric("EXACT INJURY ID MATCHES",
+                   crosswalk.get("matched_unique_player_rows",0),
+                   "Still blocked for injury-adjusted forecasts"),
+        ])
+        problems = stage4.get("blockers") or []
+        stage4_note = (
+            "Publication blocked. " + str(len(problems)) +
+            " remaining data/evidence requirements: " +
+            (", ".join(problems) if problems else "none") +
+            ". First-half and player-prop probabilities are NOT enabled; "
+            "no licensed bookmaker odds, stakes or ROI."
+        )
     # A prospective cohort uses only the privately settled pregame ledger.
     # Historical validation metrics are never mixed into this panel.
     evaluation_metrics = ""
@@ -361,6 +393,11 @@ still lack an accepted final score. They are never pregame candidates.</p>
 official injury snapshots. No betting selections or after-the-fact features.</p>
 <section class="stats">""" + advanced_metrics + """</section>
 <div class="notice">""" + _safe(advanced_note) + """</div>
+<h2>Stage 4 · model, source and market readiness</h2>
+<p>Verified free source coverage and research-only full-game probability
+distributions. Missing injury or first-half data never becomes a pick.</p>
+<section class="stats">""" + stage4_metrics + """</section>
+<div class="notice">""" + _safe(stage4_note) + """</div>
 <h2>Stage 2E · automation reliability</h2>
 <p>Separate recorded outcomes for the pregame, score and daily jobs.
 A skipped overlapping run never changes a forecast or final score.</p>
@@ -416,7 +453,8 @@ def make_handler(db_path: Path):
             route = urlsplit(self.path).path
             if route not in {"/", "/api/summary", "/api/fixtures",
                              "/api/readiness", "/api/prospective", "/api/operations",
-                             "/api/reliability", "/api/advanced", "/api/injuries"}:
+                             "/api/reliability", "/api/advanced", "/api/injuries",
+                             "/api/stage4", "/api/markets"}:
                 self.send_error(404)
                 return
             connection = open_ledger(db_path)
@@ -433,9 +471,11 @@ def make_handler(db_path: Path):
                 reliability = reliability_from_home(db_path.parent)
                 advanced = advanced_coverage(db_path.parent)
                 injuries = injury_status(db_path.parent)
+                stage4 = stage4_report(db_path.parent)
                 payload = render_dashboard(
                     report, rows, events, readiness, prospective,
-                    operations, reliability, advanced, injuries).encode("utf-8")
+                    operations, reliability, advanced, injuries,
+                    stage4).encode("utf-8")
                 mime = "text/html; charset=utf-8"
             else:
                 if route == "/api/summary":
@@ -452,6 +492,10 @@ def make_handler(db_path: Path):
                     value = advanced_coverage(db_path.parent)
                 elif route == "/api/injuries":
                     value = injury_status(db_path.parent)
+                elif route == "/api/stage4":
+                    value = stage4_report(db_path.parent)
+                elif route == "/api/markets":
+                    value = market_report_from_home(db_path.parent)
                 else:
                     value = {"fixtures": rows, "research_only": True}
                 payload = json.dumps(value).encode("utf-8")
