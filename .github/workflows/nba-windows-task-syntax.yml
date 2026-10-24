@@ -1,0 +1,52 @@
+name: NBA Windows scheduler script syntax (private)
+
+on:
+  pull_request:
+    paths:
+      - "scripts/nba_task_reliability.ps1"
+      - "scripts/nba_paper_research.ps1"
+      - "scripts/nba_score_check.ps1"
+      - "scripts/nba_pregame_check.ps1"
+      - ".github/workflows/nba-windows-task-syntax.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-script-syntax:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse all scheduled task scripts in Windows PowerShell
+        shell: powershell
+        run: |
+          $paths = @(
+              "scripts/nba_task_reliability.ps1",
+              "scripts/nba_paper_research.ps1",
+              "scripts/nba_score_check.ps1",
+              "scripts/nba_pregame_check.ps1"
+          )
+          foreach ($path in $paths) {
+              $tokens = $null
+              $issues = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseFile(
+                  (Resolve-Path $path).Path, [ref]$tokens, [ref]$issues
+              )
+              if ($issues.Count -gt 0) {
+                  $issues | Format-List
+                  throw "Invalid scheduled task PowerShell: $path"
+              }
+              Write-Host "PowerShell syntax OK: $path"
+          }
+      - name: Assert opt-in repair has no default task mutations
+        shell: powershell
+        run: |
+          $source = Get-Content "scripts/nba_task_reliability.ps1" -Raw
+          if ($source -notmatch 'if \(\$Repair\)' -or
+              $source -notmatch 'Export-ScheduledTask' -or
+              $source -notmatch 'Set-ScheduledTask') {
+              throw "Scheduler diagnostic lacks guarded, backed-up task repair"
+          }
+          Write-Host "Repair requires explicit switch and exports backups first."
