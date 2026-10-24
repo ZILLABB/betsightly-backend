@@ -15,8 +15,9 @@ from basketball.research_features import make_rows
 from basketball.research_features_v2 import (
     FEATURE_COLUMNS, BASE_FEATURES, EXTRA_FEATURES, make_rows_v2,
 )
-from basketball.research_quality_v2 import audit_games
+from basketball.research_quality_v2 import audit_games, audit_home
 from basketball.research_public_data import read_release_csv, REQUIRED
+from basketball.research_data import write_games
 
 
 def g(i, *, season=2026, date_override=None, status="final", home="1",
@@ -119,6 +120,8 @@ def test_quality_audit_never_invents_missing_travel_injuries_or_pace():
         },
     }])
     assert report["source_rejected_regular_rows"]==6
+    assert report["source_audit_provenance"]=="complete"
+    assert report["source_unaudited_seasons"]==[]
     assert report["seasons"]["2026"]["distinct_team_ids"]==2
     assert report["seasons"]["2026"]["final"]==7
     assert report["unavailable_inputs"]["injuries_and_lineups"]
@@ -162,3 +165,60 @@ def test_csv_exclusion_details_are_preserved_in_audit_not_accepted_as_picks():
     assert stats["rejection_reasons"]=={"invalid_away_id":6}
     assert len(stats["excluded_examples"])==6
     assert all(i["away_id"]=="" for i in stats["excluded_examples"])
+
+
+def test_legacy_manifest_unknown_not_a_false_zero():
+    games=[g(i) for i in range(7)]
+    result=audit_games(games,[{"season":2026,"quality":{}}])
+    assert result["source_rejected_regular_rows"] is None
+    assert result["source_rejected_regular_rows_known"]==0
+    assert result["source_audit_provenance"]=="not_recorded"
+    assert result["source_unaudited_seasons"]==["2026"]
+
+
+def test_partial_source_audit_remains_explicitly_incomplete():
+    data=[g(i) for i in range(7)]+[g(99,season=2027)]
+    record=audit_games(data,[{
+        "season":2027,"quality":{
+            "rejected_regular_rows":6,
+            "rejection_reasons":{"invalid_away_id":6},
+        },
+    }])
+    assert record["source_rejected_regular_rows"] is None
+    assert record["source_rejected_regular_rows_known"]==6
+    assert record["source_audit_provenance"]=="partial"
+    assert record["source_unaudited_seasons"]==["2026"]
+    assert record["season_source_audits"]["2027"]["rejected_regular_rows"]==6
+
+
+def test_audit_home_new_current_season_receipt_replaces_old_empty_quality(tmp_path):
+    games=[g(i) for i in range(7)]+[g(99,season=2027)]
+    write_games(games,tmp_path/"nba_games.jsonl")
+    (tmp_path/"source_manifest.json").write_text(json.dumps([
+        {"season":2026,"quality":{"rejected_regular_rows":0}},
+        {"season":2027},
+    ]))
+    (tmp_path/"current_season_refresh.json").write_text(json.dumps({
+        "source_manifest":[{"season":2027,"quality":{
+            "rejected_regular_rows":6,
+            "rejection_reasons":{"invalid_away_id":6},
+        }}]
+    }))
+    report=audit_home(tmp_path)
+    assert report["source_rejected_regular_rows"]==6
+    assert report["source_audit_provenance"]=="complete"
+    assert report["source_audited_seasons"]==["2026","2027"]
+
+
+def test_old_current_receipt_does_not_override_valid_historical_audit(tmp_path):
+    games=[g(i) for i in range(7)]
+    write_games(games,tmp_path/"nba_games.jsonl")
+    (tmp_path/"source_manifest.json").write_text(json.dumps([
+        {"season":2026,"quality":{"rejected_regular_rows":3}}
+    ]))
+    (tmp_path/"current_season_refresh.json").write_text(json.dumps({
+        "source_manifest":[{"season":2026,"quality":{}}]
+    }))
+    report=audit_home(tmp_path)
+    assert report["source_rejected_regular_rows"]==3
+    assert report["source_audit_provenance"]=="complete"
