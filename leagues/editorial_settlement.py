@@ -107,6 +107,27 @@ def grade_manual_slip(payload: dict, scores: dict, *, now=None,
     return updated
 
 
+def _pending_manual_query(dialect_name: str) -> str:
+    """Include historical unresolved legs: no silent 14-day settlement expiry.
+
+    Recent tickets are always included to preserve previous behavior. Older
+    terminal slips are skipped, but older *individual* pending legs must remain
+    eligible even if the accumulator already has a losing leg.
+    """
+    select = "SELECT publish_date,tier,detail FROM editorial_tier_slips "
+    if dialect_name == "postgresql":
+        return (
+            select +
+            "WHERE publish_date >= :earliest OR EXISTS ("
+            "SELECT 1 FROM jsonb_array_elements("
+            "COALESCE(detail::jsonb->'games', '[]'::jsonb)) AS g "
+            "WHERE COALESCE(g->>'status','pending')='pending'"
+            ") ORDER BY publish_date,tier"
+        )
+    # The local SQLite test database does not implement jsonb_array_elements.
+    return select + "ORDER BY publish_date,tier"
+
+
 def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None) -> dict:
     """Called from the background results cycle; never a public GET."""
     from database import engine
@@ -124,10 +145,10 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
     }
     try:
         with engine.connect() as conn:
-            rows = conn.execute(text(
-                "SELECT publish_date,tier,detail FROM editorial_tier_slips "
-                "WHERE publish_date >= :earliest ORDER BY publish_date,tier"
-            ), {"earliest": earliest}).all()
+            rows = conn.execute(
+                text(_pending_manual_query(conn.dialect.name)),
+                {"earliest": earliest},
+            ).all()
     except Exception as exc:
         # On a new deployment the table may not exist until the first manual
         # publication. Absence is not a reason to fail all settlement jobs.
