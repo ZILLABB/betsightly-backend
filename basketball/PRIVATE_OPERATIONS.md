@@ -951,3 +951,56 @@ identity crosswalks. Task Scheduler wake-on-sleep requires Windows wake
 timer support; the registered `Interactive` principal still needs
 an active Windows sign-in session. All installed task battery settings
 currently refuse tasks when on battery, by owner choice.
+
+## Oct 24 10:05 PM / 10:20 PM WAT — scheduled exit code versus receipt
+
+After enabling `StartWhenAvailable` and `WakeToRun`, local Windows
+Task Scheduler verified that actual hourly invocations resumed, with
+`NumberOfMissedRuns=0`. But diagnostics exposed a critical distinction:
+
+- **Pregame trigger** 10:05 PM: `LastTaskResult=1` means that actual
+  scheduled process failed. A 10:07 PM successful **manual** receipt
+  must not mask this error. Its exact stack/output should be checked in
+  `data/basketball/research/pregame_check.log`.
+- **Score trigger** 10:20 PM: `LastTaskResult=0`, but the most recent
+  `automation_score.json` receipt still showed 9:56 PM. A shared-lock
+  `busy` skip exits zero **without performing score verification or
+  writing a new receipt**. This is possible, not yet confirmed, until
+  `score_check.log` identifies the task's exact response.
+- The 6 PM daily scheduled run was already missed. A later manual
+  `full` receipt only verifies the cycle logic, not the next day's
+  unattended Windows trigger.
+
+### Durable scheduled attempt reporting
+
+The hourly scripts now separately write:
+`scheduled_pregame_attempt.json` and
+`scheduled_score_attempt.json` (in the gitignored local NBA research
+folder) **for every wrapped invocation**, recording UTC start/end,
+Python process exit code, and top-level status (including `busy` and
+`failed`). The original `automation_*.json` success receipts remain
+independent, and a `busy` skip never falsely changes them.
+
+`research_cli reliability` now includes
+`tasks.pregame.scheduled_attempt` and
+`tasks.score.scheduled_attempt`. A scheduled failure produces an issue
+even if a later manual invocation succeeded; a `busy` skip is shown as
+skipped and no settlement/prediction is invented.
+
+To inspect exact earlier output **without modifying or rerunning
+jobs**, run from the isolated research checkout:
+
+```powershell
+Get-Content .\data\basketball\research\pregame_check.log -Tail 90
+Get-Content .\data\basketball\research\score_check.log -Tail 70
+.\.venv\Scripts\python.exe -m basketball.research_cli reliability
+```
+
+After pulling the updated scripts, the next **actual Task Scheduler
+trigger** creates the structured attempt receipt. Merely pulling code
+or running the CLI manually does not create such an attempt record.
+The next pregame at 11:05 PM and score at 11:20 PM WAT can demonstrate
+unattended success; daily 6 PM next day needs separate acceptance.
+No scheduled task needs reinstalling; its existing action points to
+the scripts in this checkout. Source rights and forecast market gates
+are unchanged.
