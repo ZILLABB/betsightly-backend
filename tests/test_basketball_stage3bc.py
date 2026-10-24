@@ -228,3 +228,41 @@ def test_advanced_candidate_requires_real_history_no_fabricated_metrics(tmp_path
     assert not (tmp_path/"advanced"/"shadow_model.joblib").exists()
     assert run_shadow(tmp_path)["status"]=="not_configured"
     assert advanced_coverage(tmp_path)["team_seasons"]==0
+
+
+def test_windows_missing_iana_tzdata_has_actionable_error(monkeypatch):
+    """Do not guess a fixed ET offset if ZoneInfo has no Windows tzdb."""
+    from zoneinfo import ZoneInfoNotFoundError
+    import basketball.research_injury_reports as reports
+
+    def missing(_name):
+        raise ZoneInfoNotFoundError("No time zone found with key America/New_York")
+
+    monkeypatch.setattr(reports, "ZoneInfo", missing)
+    html = (
+        '<a href="https://ak-static.cms.nba.com/referee/injury/'
+        'Injury-Report_2026-10-24_05_00AM.pdf">Official NBA report</a>'
+    )
+    with pytest.raises(RuntimeError, match="pip install tzdata"):
+        reports.select_report(html, now=datetime(2026, 10, 24, 14, tzinfo=UTC))
+
+
+def test_missing_windows_timezone_never_stops_v1_pregame_sidecar(
+    tmp_path, monkeypatch
+):
+    """The optional injury feed must not turn a healthy v1 run into failed."""
+    from basketball.research_automation import _advanced_sidecar
+    import basketball.research_injury_reports as reports
+
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError(
+            "NBA injury archive needs IANA tzdata: python -m pip install tzdata"
+        )
+
+    monkeypatch.setattr(reports, "capture_injury", unavailable)
+    report = _advanced_sidecar(
+        tmp_path, datetime(2026, 10, 24, 20, tzinfo=UTC)
+    )
+    assert report["injury"]["status"] == "unavailable"
+    assert "tzdata" in report["injury"]["error"]
+    assert report["shadow"]["status"] == "not_configured"
