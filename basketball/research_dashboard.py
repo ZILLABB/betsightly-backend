@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from basketball.research_readiness import readiness_from_home
 from basketball.research_prospective import prospective_report
+from basketball.research_operations import operations_from_home
 from basketball.research_store import (
     DEFAULT_DB, latest_events, list_forecasts, open_ledger,
     performance_report,
@@ -29,7 +30,8 @@ def _percent(value: float | None) -> str:
 
 def render_dashboard(report: dict, forecasts: list[dict],
                      events: list[dict], readiness: dict | None = None,
-                     prospective: dict | None = None) -> str:
+                     prospective: dict | None = None,
+                     operations: dict | None = None) -> str:
     """Server-rendered and escaped HTML, no tracking or external dependencies."""
     metric = lambda name, value, note: (
         '<div class="metric"><small>' + _safe(name) + '</small>'
@@ -130,6 +132,46 @@ def render_dashboard(report: dict, forecasts: list[dict],
                 _safe(game["away_prior_games"]) + " / 5</td><td>" +
                 _safe("READY" if game["eligible"] else "BLOCKED") +
                 "</td><td>" + _safe(reason) + "</td></tr>"
+            )
+    operations_metrics = ""
+    operations_note = (
+        "First-forecast operational monitor unavailable; refresh the local "
+        "research snapshot and check the read-only operations command."
+    )
+    ops_rows = []
+    if operations is not None:
+        cycle = operations.get("daily_cycle") or {}
+        operations_metrics = "".join([
+            metric("STAGE 2D STATE",
+                   operations.get("operational_state", "unknown").upper(),
+                   "Local first-forecast milestone"),
+            metric("READY IN DAILY WINDOW",
+                   operations.get("eligible_in_daily_cycle_window", "—"),
+                   "Provider dates today and tomorrow"),
+            metric("PAPER FORECASTS SAVED",
+                   operations.get("total_recorded_paper_forecasts", "—"),
+                   "Original immutable private records"),
+            metric("OVERDUE PENDING",
+                   len(operations.get("overdue_pending", [])),
+                   "More than four hours after tipoff"),
+            metric("DAILY CYCLE",
+                   cycle.get("status", "not_seen").upper(),
+                   "Last detected: " + str(cycle.get("last_seen_at") or "—")),
+        ])
+        warnings = operations.get("warnings") or []
+        operations_note = (
+            "Next: " + operations.get("next_step", "review lab health") +
+            ". Warnings: " + (", ".join(warnings) if warnings else "none") +
+            ". A missing forecast is not a loss and cannot be backfilled."
+        )
+        for item in operations.get("eligible_not_yet_recorded", [])[:20]:
+            ops_rows.append(
+                "<tr><td>" + _safe(item["home_team"]) +
+                " <span class='muted'>vs</span> " +
+                _safe(item["away_team"]) + "</td><td>" +
+                _safe(item["game_id"]) + "</td><td>" +
+                _safe(item["start_utc"]) + "</td><td>" +
+                "Eligible, not yet recorded</td></tr>"
             )
     # A prospective cohort uses only the privately settled pregame ledger.
     # Historical validation metrics are never mixed into this panel.
@@ -260,6 +302,18 @@ still lack an accepted final score. They are never pregame candidates.</p>
     "".join(overdue_rows) if overdue_rows else
     "<tr><td colspan='6'>No started-but-unverified games in the last 72h.</td></tr>"
 ) + """</tbody></table></div>
+<h2>First-forecast operations</h2>
+<p>Tracks the first genuine recorded NBA prediction through settlement,
+without backfilling or making synthetic picks. The 18:00 local Windows
+task may be missed while the computer is asleep.</p>
+<section class="stats">""" + operations_metrics + """</section>
+<div class="notice">""" + _safe(operations_note) + """</div>
+<div class="panel"><table><thead><tr>
+<th>Eligible NBA fixture</th><th>Fixture ID</th><th>Tipoff (UTC)</th>
+<th>Ledger status</th></tr></thead><tbody>""" + (
+    "".join(ops_rows) if ops_rows else
+    "<tr><td colspan='4'>No eligible, unrecorded games in this daily window.</td></tr>"
+) + """</tbody></table></div>
 <h2>Prospective research evaluation</h2>
 <p>Only forecasts originally saved before tipoff and subsequently settled.
 No historical backtests, bookmaker odds, or after-the-fact picks.</p>
@@ -297,7 +351,7 @@ def make_handler(db_path: Path):
                 return
             route = urlsplit(self.path).path
             if route not in {"/", "/api/summary", "/api/fixtures",
-                             "/api/readiness", "/api/prospective"}:
+                             "/api/readiness", "/api/prospective", "/api/operations"}:
                 self.send_error(404)
                 return
             connection = open_ledger(db_path)
@@ -310,9 +364,10 @@ def make_handler(db_path: Path):
             if route == "/":
                 readiness = readiness_from_home(db_path.parent)
                 prospective = prospective_report(db_path)
+                operations = operations_from_home(db_path.parent)
                 payload = render_dashboard(
                     report, rows, events, readiness,
-                    prospective).encode("utf-8")
+                    prospective, operations).encode("utf-8")
                 mime = "text/html; charset=utf-8"
             else:
                 if route == "/api/summary":
@@ -321,6 +376,8 @@ def make_handler(db_path: Path):
                     value = readiness_from_home(db_path.parent)
                 elif route == "/api/prospective":
                     value = prospective_report(db_path)
+                elif route == "/api/operations":
+                    value = operations_from_home(db_path.parent)
                 else:
                     value = {"fixtures": rows, "research_only": True}
                 payload = json.dumps(value).encode("utf-8")
