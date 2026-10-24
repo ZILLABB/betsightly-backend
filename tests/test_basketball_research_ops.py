@@ -174,3 +174,10 @@ def test_score_models_use_true_labels_and_later_holdout(tmp_path):
     assert forecasts[0]["bookmaker_line"] is None
     assert forecasts[0]["not_a_betting_market"] is True
     assert (tmp_path / "scores.joblib").is_file()
+
+
+def test_private_nba_forecasts_are_excluded_from_public_git():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    ignore = (root / ".gitignore").read_text(encoding="utf-8")
+    assert "data/basketball/research/" in ignore
