@@ -191,3 +191,15 @@ def test_readiness_reads_latest_scoreboard_health(tmp_path):
         [], [], report,
     )
     assert "Failed dates: 1" in page
+
+
+def test_recent_scoreboard_final_does_not_hide_stale_schedule():
+    delayed = (NOW - timedelta(days=3)).isoformat()
+    games = [{**row, "retrieved_at": delayed} for row in sample()]
+    score = game(999, "2026-10-24", status="final")
+    score["source"] = "espn:nba:scoreboard:v1"
+    score["retrieved_at"] = NOW.isoformat()
+    games.append(score)
+    report = build_readiness(games, now=NOW, model_cutoff="2026-10-23")
+    assert report["snapshot"]["status"] == "stale"
+    assert report["eligible_forecasts"] == 0
