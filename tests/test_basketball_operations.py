@@ -79,7 +79,11 @@ def test_crossing_five_games_enables_first_forecast_window():
 
 
 def test_completed_cycle_after_fresh_snapshot_flags_unsaved_eligible_pick():
-    games = historical_games(5)+[scheduled()]
+    # Source refresh at T-10 minutes, then the cycle ran at T-3.
+    retrieved = (NOW-timedelta(minutes=10)).isoformat()
+    games = historical_games(5, retrieved=retrieved)+[
+        scheduled(retrieved=retrieved)
+    ]
     report = _operation(games, cycle=NOW-timedelta(minutes=3))
     assert "eligible_not_saved_after_cycle" in report["warnings"]
     assert report["operational_state"] == "attention_required"
