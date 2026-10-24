@@ -15,6 +15,8 @@ from basketball.research_readiness import readiness_from_home
 from basketball.research_prospective import prospective_report
 from basketball.research_operations import operations_from_home
 from basketball.research_automation import reliability_from_home
+from basketball.research_advanced_data import advanced_coverage
+from basketball.research_injury_reports import injury_status
 from basketball.research_store import (
     DEFAULT_DB, latest_events, list_forecasts, open_ledger,
     performance_report,
@@ -33,7 +35,9 @@ def render_dashboard(report: dict, forecasts: list[dict],
                      events: list[dict], readiness: dict | None = None,
                      prospective: dict | None = None,
                      operations: dict | None = None,
-                     reliability: dict | None = None) -> str:
+                     reliability: dict | None = None,
+                     advanced: dict | None = None,
+                     injuries: dict | None = None) -> str:
     """Server-rendered and escaped HTML, no tracking or external dependencies."""
     metric = lambda name, value, note: (
         '<div class="metric"><small>' + _safe(name) + '</small>'
@@ -194,6 +198,29 @@ def render_dashboard(report: dict, forecasts: list[dict],
             ". An unobserved task is not a successful run; the Windows "
             "computer must be awake for scheduled checks."
         )
+    advanced_metrics = ""
+    advanced_note = "No validated NBA team/player box-score assets installed."
+    if advanced is not None:
+        advanced_metrics = "".join([
+            metric("VERIFIED TEAM SEASONS",
+                   advanced.get("team_seasons",0), "Validated ESPN game joins"),
+            metric("VERIFIED PLAYER SEASONS",
+                   advanced.get("player_seasons",0), "Player-game identities"),
+            metric("OFFICIAL INJURY REPORT",
+                   (injuries or {}).get("status","not_observed").upper(),
+                   "Latest report: " +
+                   str((injuries or {}).get("latest_published_at") or "—")),
+            metric("INJURY PLAYER ROWS",
+                   (injuries or {}).get("player_rows",0),
+                   "Never backfilled to past match outcomes"),
+        ])
+        advanced_note = (
+            "Season assets are research-only; genuine possession estimates "
+            "are derived from box scores, not directly measured. "
+            "Injury snapshots are stored by official publication time and "
+            "are NOT yet approved as joined pregame model features. "
+            "The locked v1 model remains unchanged."
+        )
     # A prospective cohort uses only the privately settled pregame ledger.
     # Historical validation metrics are never mixed into this panel.
     evaluation_metrics = ""
@@ -323,6 +350,11 @@ still lack an accepted final score. They are never pregame candidates.</p>
     "".join(overdue_rows) if overdue_rows else
     "<tr><td colspan='6'>No started-but-unverified games in the last 72h.</td></tr>"
 ) + """</tbody></table></div>
+<h2>Stage 3B–3C · advanced basketball intelligence</h2>
+<p>Validated free season assets, pregame-only player/efficiency research and
+official injury snapshots. No betting selections or after-the-fact features.</p>
+<section class="stats">""" + advanced_metrics + """</section>
+<div class="notice">""" + _safe(advanced_note) + """</div>
 <h2>Stage 2E · automation reliability</h2>
 <p>Separate recorded outcomes for the pregame, score and daily jobs.
 A skipped overlapping run never changes a forecast or final score.</p>
@@ -378,7 +410,7 @@ def make_handler(db_path: Path):
             route = urlsplit(self.path).path
             if route not in {"/", "/api/summary", "/api/fixtures",
                              "/api/readiness", "/api/prospective", "/api/operations",
-                             "/api/reliability"}:
+                             "/api/reliability", "/api/advanced", "/api/injuries"}:
                 self.send_error(404)
                 return
             connection = open_ledger(db_path)
@@ -393,9 +425,11 @@ def make_handler(db_path: Path):
                 prospective = prospective_report(db_path)
                 operations = operations_from_home(db_path.parent)
                 reliability = reliability_from_home(db_path.parent)
+                advanced = advanced_coverage(db_path.parent)
+                injuries = injury_status(db_path.parent)
                 payload = render_dashboard(
-                    report, rows, events, readiness,
-                    prospective, operations, reliability).encode("utf-8")
+                    report, rows, events, readiness, prospective,
+                    operations, reliability, advanced, injuries).encode("utf-8")
                 mime = "text/html; charset=utf-8"
             else:
                 if route == "/api/summary":
@@ -408,6 +442,10 @@ def make_handler(db_path: Path):
                     value = operations_from_home(db_path.parent)
                 elif route == "/api/reliability":
                     value = reliability_from_home(db_path.parent)
+                elif route == "/api/advanced":
+                    value = advanced_coverage(db_path.parent)
+                elif route == "/api/injuries":
+                    value = injury_status(db_path.parent)
                 else:
                     value = {"fixtures": rows, "research_only": True}
                 payload = json.dumps(value).encode("utf-8")
