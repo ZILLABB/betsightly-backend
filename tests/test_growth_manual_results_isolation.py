@@ -86,3 +86,31 @@ def test_telegram_reports_manual_outcomes_even_if_no_model_slips_settled():
         },
     }, "telegram")
     assert result and "✅ 5 Odds (5.24x)" in result["text"]
+
+
+def test_telegram_distinguishes_overdue_score_verification_from_live_match():
+    result = templates.results({
+        "date": "2026-10-24",
+        "results": {
+            "window_days": 7, "won": 0, "lost": 0,
+            "settled": 0, "win_rate": None, "pending_products": 0,
+            "slips_settled": [], "rollover_settled": [],
+            "manual_record": {
+                "won": 0, "lost": 0, "pending": 1, "settled": 0,
+            },
+            "manual_yesterday": [{
+                "tier": "10_odds", "status": "pending",
+                "total_odds": 11.57, "score_verification_delayed": True,
+                "games": [
+                    {"status": "won"}, {"status": "won"},
+                    {"status": "pending"}, {"status": "pending"},
+                ],
+            }],
+        },
+    }, "telegram")
+    assert result is not None
+    message = result["text"]
+    assert "2/4 legs verified" in message
+    assert "final-score verification delayed" in message
+    assert "⚠️ 10 Odds (11.57x)" in message
+    assert "official" not in message.lower() or "Official slip record" in message
