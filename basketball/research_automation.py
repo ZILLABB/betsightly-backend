@@ -170,11 +170,66 @@ def _snapshot(mode: str, now: datetime, status: str,
     }
 
 
+def _advanced_sidecar(root: Path, now: datetime) -> dict:
+    """Auxiliary source snapshots are separate from the trusted v1 ledger."""
+    from basketball.research_injury_reports import capture_injury
+    from basketball.research_advanced_model import run_shadow
+    outcome = {}
+    try:
+        injury = capture_injury(root, now=now)
+        outcome["injury"] = {
+            "status": injury["status"], "published_at": injury["published_at"],
+            "parsed_player_rows": injury["player_rows"],
+            "extract_status": injury["extraction"]["status"],
+        }
+    except (RuntimeError, ValueError, OSError, ImportError) as exc:
+        outcome["injury"] = {"status": "unavailable", "error": _safe_error(exc)}
+    candidate = root / "advanced" / "shadow_model.joblib"
+    if not candidate.is_file():
+        outcome["shadow"] = {"status": "not_configured"}
+        return outcome
+    try:
+        # Refresh the current season at most every eight hours. The
+        # advance data is optional and unavailable historical snapshots
+        # do not modify previous v1/private research data.
+        from basketball.research_advanced_data import fetch_advanced
+        year = _current_season(now)
+        manifest = root / "advanced" / f"team_{year}.manifest.json"
+        stale = True
+        if manifest.is_file():
+            try:
+                state = json.loads(manifest.read_text(encoding="utf-8"))
+                when = datetime.fromisoformat(state["provenance_checked_at"])
+                stale = (now - when.astimezone(timezone.utc)).total_seconds() >= 8*3600
+            except (OSError, ValueError, KeyError, TypeError):
+                stale = True
+        if stale:
+            try:
+                fetched = fetch_advanced(home=root, seasons=[year])
+                outcome["advanced_refresh"] = {
+                    "status": "succeeded", "files": fetched["files_written"],
+                }
+            except (RuntimeError, ValueError, OSError) as exc:
+                outcome["advanced_refresh"] = {
+                    "status": "unavailable", "error": _safe_error(exc),
+                }
+        shadow = run_shadow(root, now=now)
+        outcome["shadow"] = {
+            "status": shadow["status"],
+            "new_forecasts": shadow.get("created", 0),
+            "settled": shadow.get("settled", 0),
+        }
+    except (RuntimeError, ValueError, OSError, ImportError) as exc:
+        outcome["shadow"] = {"status": "unavailable", "error": _safe_error(exc)}
+    return outcome
+
+
 def run_automation(*, home: str | Path = Path("data/basketball/research"),
                    mode: str, now: datetime | None = None,
                    season_fetcher=fetch_public_seasons,
                    score_runner=settle_once, cycle_runner=run_cycle,
-                   sleeper=time.sleep) -> dict:
+                   sleeper=time.sleep,
+                   with_advanced: bool = False) -> dict:
     """Synchronous scheduled run; returns explicit succeeded/degraded/failed.
 
     Any previous verified final remains monotonic. An unsuccessful source
@@ -225,6 +280,11 @@ def run_automation(*, home: str | Path = Path("data/basketball/research"),
                             result["score_models_retrained"]
                         ),
                     }
+                    if with_advanced:
+                        # Optional, non-critical sidecar: never let an
+                        # independent public injury PDF or parquet outage
+                        # block the original verified v1 pregame pipeline.
+                        result["advanced_sidecar"] = _advanced_sidecar(root, timestamp)
                     status = (
                         "degraded" if score_result["scoreboard"]["status"] ==
                         "partial" else "succeeded"
@@ -237,6 +297,7 @@ def run_automation(*, home: str | Path = Path("data/basketball/research"),
                                      result.get("refresh", {}).get("attempts")),
                     "scoreboard_status": result.get("scoreboard", {}).get(
                         "status"),
+                    "advanced_sidecar": result.get("advanced_sidecar"),
                 })
                 _atomic_json(_mode_file(root, mode), health)
                 return {"status": status, "mode": mode, "run": result,
