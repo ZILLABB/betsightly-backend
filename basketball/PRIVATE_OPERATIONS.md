@@ -618,3 +618,109 @@ placeholder records. The other ten historical seasons remain
 `unaudited` until their release files have been fetched again with the
 new parser; the known total is still visible separately. No historical
 dataset reset, model retrain or fixture fabrication is necessary.
+
+## Stage 3B–3C: ONE integrated advanced basketball research batch
+
+**Still private research, no live football deployment or betting publication.**
+The existing immutable NBA v1 moneyline/point paper ledger remains unchanged.
+A failed experimental source or model does not stop the NBA pregame cycle.
+
+### Sources and constraints
+
+- ESPN NBA team and player boxscores from keyless SportsDataverse release
+  parquet files `espn_nba_team_boxscores/team_box_{season}.parquet` and
+  `espn_nba_player_boxscores/player_box_{season}.parquet`; both use the
+  **season ENDING year** and native ESPN game/team IDs, also used in our
+  schedules. A bounded 40 MB asset downloader validates required columns
+  and rejects non-regular-season, nonfinal, conflicting, duplicated or
+  incomplete rows; full team coverage requires BOTH final-score verified
+  teams and >=85% complete fixture coverage.
+- Calculated possessions
+  `FGA - offensive rebounds + turnovers + 0.44 * FTA` are **estimates**,
+  not observed play-by-play possessions nor pace adjusted to regulation
+  minutes. Offensive and opponent defensive estimates, effective FG rate,
+  three-point rate, turnover rate and completed earlier-game player minutes
+  and top-scorer fraction are candidates **only if prior same-season
+  game and player source coverage passes**.
+- Official NBA `official.nba.com/nba-injury-report-2026-27-season/`
+  provides 15-minute PDF versions from `ak-static.cms.nba.com`.
+  Each archived PDF is keyed by **actual publication timestamp (ET
+  converted to UTC)** plus SHA256 and stored append-only in the gitignored
+  private folder. A parser only accepts exact report columns; unreadable
+  or incomplete material is marked `unparsed`. **The injury/player
+  crosswalk is NOT yet verified, so injury statuses are deliberately not
+  used as historical features or as betting signals.** `NOT YET
+  SUBMITTED` is NOT evidence a team has zero injuries.
+- Source availability does not establish betting/commercial distribution
+  rights. The assessment remains `commercial_use_review_required`.
+
+### One-time Windows setup and source intake
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+.\.venv\Scripts\python.exe -m pip install pyarrow pdfplumber
+
+# Authenticated by public download asset, no API key or payment.
+# Historical seasons needed for advanced candidate train+validation:
+.\.venv\Scripts\python.exe -m basketball.research_cli fetch-advanced --seasons 2024 2025 2026
+
+# Current season may not yet have the corresponding two ESPN releases:
+.\.venv\Scripts\python.exe -m basketball.research_cli fetch-advanced --seasons 2027
+
+# Read-only coverage and pregame feature eligibility:
+.\.venv\Scripts\python.exe -m basketball.research_cli advanced-report
+
+# Train separate matching v1/advanced candidate cohorts. Validation
+# is 2026 development diagnostics, NOT new untouched 2027 evidence.
+.\.venv\Scripts\python.exe -m basketball.research_cli advanced-build
+
+# Independently check the official PDF's timestamp and parse status:
+.\.venv\Scripts\python.exe -m basketball.research_cli capture-injury
+.\.venv\Scripts\python.exe -m basketball.research_cli injury-status
+
+# Optional pregame / immutable shadow experiment once model exists:
+.\.venv\Scripts\python.exe -m basketball.research_cli advanced-shadow
+```
+
+**Important:** if a free asset is missing, blocked or below quality
+coverage, the intake fails explicitly. Do not substitute a guessed
+league/team score, silently change the confidence gate, or claim a
+successful advanced candidate. Individual season files are private,
+separate from original schedules and immutable v1 model artifacts.
+
+When the existing Windows pregame runner is updated from this branch, its
+CLI automatically attempts the independent official injury archive and,
+**only if the advanced candidate exists**, an at-most-eight-hour current
+season advanced source refresh and before-tipoff shadow evaluation.
+Failures are reported as `advanced_sidecar` diagnostics in its task
+receipt and do not change the primary v1 result status. Models are never
+silently retrained from 2027 fixtures. A `not_configured` shadow is
+expected until `advanced-build` succeeds.
+
+The experiment `shadow_2027.jsonl` stores only immutable before-tipoff
+predictions with SHA256, and a separate monotonic verified settlement map.
+Historical 2027 outcomes already final when the model is built are never
+backfilled as forecasts. Comparisons against the matched v1 feature
+baseline require at least 100 real forward settlements for descriptive
+review. **The old model cannot be replaced on 2026 reused holdout data**.
+
+The Atlantic localhost dashboard includes separate **Stage 3B–3C**
+data coverage and injury-monitor summaries and read-only endpoints
+`/api/advanced` and `/api/injuries`; restart localhost server after
+pulling for these views. No public API or user traffic changes.
+
+### Important statistical and licensing limitations
+
+- Missing player boxscore rows do not mean players were unavailable.
+- Current injury reports cannot be retroactively assigned to past match
+  outcomes or used without robust ESPN-ID/player crosswalk and verified
+  before-tipoff snapshots. Player name similarity is not a valid join.
+- NBA scoring/regulation and market rules vary; this stage **does not
+  claim betting odds, ROI, first-half markets, player props, or spread
+  coverage**. Separate dated bookmaker lines and period-specific data
+  are prerequisites to those validations.
+- Multi-year boxscore datasets use raw provider values; a pregame
+  benchmark may be limited by data reliability and survivorship.
+- SportsDataverse and NBA use terms/licenses requiring legal review for
+  commercial gambling applications; keyless does not equal sublicensed.
