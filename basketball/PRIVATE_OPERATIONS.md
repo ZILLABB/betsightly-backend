@@ -836,3 +836,57 @@ details instead of faking results. Never remove the private data folder
 to rerun it. The existing 18:00 cycle and hourly score checker remain
 intact. The model is frozen once a genuine prospective shadow
 forecast exists and cannot be silently refitted.
+
+## Oct 24 evening — missed Windows NBA scheduled jobs: detection and repair
+
+Local task audit at 2026-10-24 21:38 WAT showed Windows recorded:
+- Daily: last run 11:52 AM, one missed run, next Oct 25 6 PM.
+- Score hourly: last 2:20 PM, seven missed runs; next 10:20 PM.
+- Pregame hourly: last 3:05 PM, six missed runs; next 10:05 PM.
+- New Stage 2E receipts: pregame stale for 6.55 hours,
+  score and full not_observed (prior Task Scheduler success result does
+  **not** prove a new Stage 2E run happened).
+
+This is an **unattended host-scheduling gap**, not proof that either ESPN
+or the model has stopped working. A laptop being sleeping, off, losing
+WiFi, or Windows power/user-logon conditions can all cause gaps.
+The actual cause needs local Windows Task Scheduler diagnostics and
+power history; never guess it from LastTaskResult=0.
+
+The repository now contains a read-only default, explicit-repair
+PowerShell script that checks the existing three exact expected actions,
+prints current task settings including user-session logon type, and
+preserves all triggers, actions and principals.
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+
+# Inspection first: no task settings changes
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    -File .\scripts\nba_task_reliability.ps1
+
+# Opt-in settings repair: preserves installed triggers and tasks;
+# configure catch-up and wake from sleep (may need elevated PowerShell).
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    -File .\scripts\nba_task_reliability.ps1 -Repair -WakeToRun
+
+# Check Stage 2E receipts after the next successful scheduled execution.
+.\.venv\Scripts\python.exe -m basketball.research_cli reliability
+```
+
+For missing runs on battery, `-AllowBattery` is another **optional**
+explicit parameter; it may reduce battery life. Do not enable it without
+considering the laptop's power source. The script exports local XML
+backups under `data/basketball/research/scheduler_backups` before any
+task modification. Windows permissions may require a PowerShell
+session run as administrator. On Windows, WakeToRun depends on wake timer
+settings and hardware sleep support; it does not wake an entirely
+shut-down PC. StartWhenAvailable schedules a delayed catch-up once
+the machine is available; it does **not** retroactively replay every
+hour missed.
+
+For 24/7 verification regardless of whether the laptop is on, a
+separate always-on host is required, with an isolated private research
+data store and schedule/credential protections. Do not reuse or expose
+the public football production SQLite or prediction endpoints.
