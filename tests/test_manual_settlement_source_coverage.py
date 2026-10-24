@@ -157,3 +157,40 @@ def test_live_fixture_link_blocks_wrong_kickoff_and_wrong_team():
                                             tzinfo=timezone.utc))
     assert result["result_status"] == "pending"
     assert result["games"][0]["settlement_pending_reason"] == "AMBIGUOUS_FIXTURE"
+
+
+def test_real_uefa_oct21_recovery_requires_exact_bookmaker_id_and_identity():
+    from services.verified_incident_finals import incident_finals
+    from leagues.results_checker import _index_free_finals
+    at = datetime(2026, 10, 22, 4, tzinfo=timezone.utc)
+    fixtures = [
+        ("sr:match:74165958", "Como 1907", "Man Utd", "home_or_draw", "lost"),
+        ("sr:match:74165972", "Betis", "Feyenoord", "home_or_draw", "won"),
+        ("sr:match:74165968", "Inter", "Shakhtar D", "home_win", "won"),
+        ("sr:match:74165960", "Lille", "Galatasaray Istanbul", "over_1_5", "won"),
+        ("sr:match:74165974", "Sporting", "LASK Linz", "home_win", "lost"),
+    ]
+    games = [
+        {
+            "sportybet_event_id": event, "home_team": home, "away_team": away,
+            "kickoff": "2026-10-21T19:00:00Z", "market": market,
+        }
+        for event, home, away, market, _ in fixtures
+    ]
+    verified = incident_finals(games)
+    assert len(verified) == 5
+    assert all(x["provider"] == "verified-official-fixture-report"
+               and x["evidence_url"].startswith("https://www.uefa.com/")
+               for x in verified)
+    scores = _index_free_finals(verified)
+    graded = grade_manual_slip({"games": games}, scores, now=at)
+    assert [g["status"] for g in graded["games"]] == [
+        expected for _, _, _, _, expected in fixtures
+    ]
+    assert graded["result_status"] == "lost"
+    wrong = {**games[0], "sportybet_event_id": "sr:match:99999"}
+    assert incident_finals([wrong]) == []
+    changed = {**games[0], "home_team": "Como Women"}
+    assert incident_finals([changed]) == []
+    previous_day = {**games[0], "kickoff": "2026-10-20T16:45:00Z"}
+    assert incident_finals([previous_day]) == []
