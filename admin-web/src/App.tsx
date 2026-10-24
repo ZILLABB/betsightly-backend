@@ -195,6 +195,10 @@ function ManualStudio() {
      <label className="file-import">Import CSV or TXT (16 KB maximum)<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={importFile}/></label>
      {['2_odds','5_odds','10_odds','over_1_5'].includes(tier)&&<label className="check"><input type="checkbox" checked={replace} onChange={e=>{setReplace(e.target.checked);edit()}}/>Replace the PUBLIC display for this tier; preserve the original model result</label>}
      <div className="toolbar"><button type="button" className="button secondary" onClick={check} disabled={!!imported?.unresolved_count||!normalized}>{busy==='Checking live SportyBet prices'?<Loader2 size={16} className="spin"/>:<FileCheck2 size={16}/>} {busy==='Checking live SportyBet prices'?'Checking every price…':'Check live prices'}</button><button type="button" className="button primary" disabled={!ready||uncertain} onClick={()=>setPublishReview(true)}>{busy==='Publishing verified ticket'?<Loader2 size={16} className="spin"/>:<Send size={16}/>} {busy==='Publishing verified ticket'?'Publishing and confirming…':'Publish verified ticket'}</button></div>
+     {ready&&Number(preview?.data?.settlement_source_coverage?.unmapped||0)>0&&<Warning>
+      <strong>Final-score verification coverage warning:</strong> {n(preview?.data?.settlement_source_coverage?.unmapped)} of {n(preview?.data?.games?.length)} fixtures lack a verified ESPN competition mapping. A bookmaker code may still be valid, but those results could remain unverified after full time. Unsupported competitions are not automatically marked won, lost or void.
+      {(preview?.data?.settlement_source_warnings||[]).slice(0,8).map((warning:any,i:number)=><div key={i}>{n(warning.fixture)} · {n(warning.league)}</div>)}
+     </Warning>}
      {ready&&<div className="notice success" role="status"><CheckCircle2 size={17}/><div><strong>Ready for your confirmation</strong><p>{n(preview?.data?.games?.length)} exact games verified at {n(preview?.data?.total_odds)}x. A fresh bookmaker code is issued only after confirmation and saved readback.</p></div></div>}
     </fieldset>
    </Panel>
@@ -208,7 +212,7 @@ function ManualStudio() {
    </div>
   </div>
   <AdminActionDialog open={publishReview} title="Publish this verified ticket?"
-    summary={String(preview?.data?.games?.length||0)+' exact selections for '+tier+' at '+n(preview?.data?.total_odds)+'x. This may create a new SportyBet code. Original model results remain separate, and the saved result must be verified.'}
+    summary={String(preview?.data?.games?.length||0)+' exact selections for '+tier+' at '+n(preview?.data?.total_odds)+'x. This may create a new SportyBet code. Original model results remain separate, and the saved result must be verified.'+(Number(preview?.data?.settlement_source_coverage?.unmapped||0)>0?' IMPORTANT: '+n(preview?.data?.settlement_source_coverage?.unmapped)+' fixture(s) lack verified score-source coverage, so settlement may be delayed.':'')}
     confirmText="Publish and verify" busy={active} onCancel={()=>setPublishReview(false)} onConfirm={()=>{setPublishReview(false);void publish();}}/>
  </>;
 }
