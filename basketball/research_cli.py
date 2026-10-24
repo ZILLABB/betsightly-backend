@@ -95,6 +95,17 @@ def build_parser() -> argparse.ArgumentParser:
                        default=Path("data/basketball/research"))
     probe.add_argument("--date", help="Local provider game date; last 14 days")
 
+    automate = commands.add_parser(
+        "automate", help="Serialized scheduled NBA score/pregame/daily run")
+    automate.add_argument("--mode", required=True,
+                          choices=("score", "pregame", "full"))
+    automate.add_argument("--home", type=Path,
+                          default=Path("data/basketball/research"))
+    reliability = commands.add_parser(
+        "reliability", help="Read-only local scheduled run receipts and age")
+    reliability.add_argument("--home", type=Path,
+                             default=Path("data/basketball/research"))
+
     operations = commands.add_parser(
         "operations", help="Read-only first forecast and settlement lifecycle status")
     operations.add_argument("--home", type=Path,
@@ -174,6 +185,14 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "probe-scores":
         from basketball.research_score_diagnostics import probe_source
         result = probe_source(args.home, day=args.date)
+    elif args.command == "automate":
+        from basketball.research_automation import run_automation
+        result = run_automation(home=args.home, mode=args.mode)
+        print(json.dumps(result, indent=2, default=str))
+        return 2 if result["status"] in ("degraded", "failed") else 0
+    elif args.command == "reliability":
+        from basketball.research_automation import reliability_from_home
+        result = reliability_from_home(args.home)
     elif args.command == "operations":
         from basketball.research_operations import operations_from_home
         result = operations_from_home(args.home)
