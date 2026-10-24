@@ -17,7 +17,10 @@ from urllib.request import Request, urlopen
 
 API_URL = "https://api.balldontlie.io/v1/games"
 SOURCE = "balldontlie:nba:v1"
-APPROVED_RESEARCH_SOURCES = frozenset({SOURCE, "sportsdataverse:espn_nba_schedules:v1"})
+APPROVED_RESEARCH_SOURCES = frozenset({
+    SOURCE, "sportsdataverse:espn_nba_schedules:v1",
+    "espn:nba:scoreboard:v1",
+})
 FIELDS = (
     "game_id", "date", "season", "status", "home_id", "away_id",
     "home_name", "away_name", "home_score", "away_score", "start_utc",
