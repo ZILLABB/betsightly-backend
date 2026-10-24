@@ -137,6 +137,7 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
 
     queued = []
     checkable = []
+    linkable = []
     for day, tier, raw in rows:
         record = json.loads(raw)
         games = record.get("games") or []
@@ -147,6 +148,8 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
             if game.get("status") in TERMINAL:
                 continue
             kickoff = _kickoff(game)
+            if kickoff and not game.get("settlement_source_link"):
+                linkable.append({**game, "date": game.get("date") or day})
             if kickoff and kickoff + timedelta(minutes=90) <= current:
                 checkable.append({**game, "date": game.get("date") or day})
 
@@ -178,10 +181,10 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
     # Save the scoreboard's stable event identity for future final-score
     # reconciliation. Live-score observations cannot themselves win a leg.
     links = {}
-    if checkable and score_collector is None:
+    if linkable and score_collector is None:
         try:
             from leagues.editorial_live_link import collect_verified_manual_links
-            links = collect_verified_manual_links(checkable, now=current)
+            links = collect_verified_manual_links(linkable, now=current)
         except Exception as exc:
             LOG.warning("Manual live identity probe unavailable: %s",
                         type(exc).__name__)

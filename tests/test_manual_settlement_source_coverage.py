@@ -194,3 +194,66 @@ def test_real_uefa_oct21_recovery_requires_exact_bookmaker_id_and_identity():
     assert incident_finals([changed]) == []
     previous_day = {**games[0], "kickoff": "2026-10-20T16:45:00Z"}
     assert incident_finals([previous_day]) == []
+
+
+def test_upcoming_fixture_identity_is_captured_before_kickoff():
+    """Do not wait for full time to remember the stable provider event ID."""
+    from leagues.editorial_live_link import collect_verified_manual_links
+    game = {
+        "match_id": "sportybet:sr:match:43214321",
+        "league": "UEFA Champions League",
+        "home_team": "Como 1907", "away_team": "Man Utd",
+        "kickoff": "2026-10-24T19:00:00Z",
+        "market": "over_1_5",
+    }
+    observed = {
+        "match": {
+            "source": "espn",
+            "provider_event_id": "92837465",
+            "home_team": "Como", "away_team": "Manchester United",
+            "kickoff_utc": "2026-10-24T19:00:00Z",
+            "state": "pre",
+        },
+    }
+    links = collect_verified_manual_links(
+        [game], now=datetime(2026, 10, 24, 16, tzinfo=timezone.utc),
+        score_reader=lambda slugs, day: observed,
+    )
+    assert links[game["match_id"]]["score_verified"] is False
+    pregame = grade_manual_slip({"games": [game]}, {},
+                                now=datetime(2026, 10, 24, 16,
+                                             tzinfo=timezone.utc),
+                                observed_links=links)
+    assert pregame["result_status"] == "pending"
+    assert pregame["games"][0]["settlement_source_link"]["event_id"] == "92837465"
+
+
+def test_scoreboard_lookup_is_rate_limited_without_weakening_final_verification(monkeypatch):
+    from leagues import editorial_live_link as live
+    from leagues import live_scores
+    game = {
+        "match_id": "sportybet:sr:match:43214321",
+        "league": "UEFA Champions League",
+        "home_team": "Como 1907", "away_team": "Man Utd",
+        "kickoff": "2026-10-24T19:00:00Z",
+    }
+    observed = {
+        "m": {
+            "source": "espn", "provider_event_id": "92837465",
+            "home_team": "Como", "away_team": "Manchester United",
+            "kickoff_utc": "2026-10-24T19:00:00Z",
+        },
+    }
+    calls = []
+    monkeypatch.setattr(live, "_LAST_IDENTITY_PROBE", 0.)
+    monkeypatch.setattr(live.time, "monotonic", lambda: 1000.)
+    monkeypatch.setattr(live_scores, "scores_for",
+                        lambda slugs, day: calls.append((slugs, day)) or observed)
+    at = datetime(2026, 10, 24, 17, tzinfo=timezone.utc)
+    first = live.collect_verified_manual_links([game], now=at)
+    assert len(first) == 1 and len(calls) == 1
+    second = live.collect_verified_manual_links([game], now=at)
+    assert second == {} and len(calls) == 1
+    monkeypatch.setattr(live.time, "monotonic", lambda: 1000. + 481)
+    third = live.collect_verified_manual_links([game], now=at)
+    assert len(third) == 1 and len(calls) == 2
