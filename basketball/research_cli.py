@@ -154,6 +154,27 @@ def build_parser() -> argparse.ArgumentParser:
     injury_state.add_argument("--home", type=Path,
         default=Path("data/basketball/research"))
 
+    current_data = commands.add_parser(
+        "refresh-current-advanced",
+        help="Per-source 2027 NBA advanced refresh with explicit partial availability")
+    current_data.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
+    injury_identity = commands.add_parser(
+        "injury-identity", help="Read-only exact current-season NBA player crosswalk")
+    injury_identity.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
+    markets_v4 = commands.add_parser(
+        "market-evaluation", help="Read-only full-game forward market probability evaluation")
+    markets_v4.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
+    stage4 = commands.add_parser(
+        "stage4-report", help="Read-only Stage 4 NBA source, model and market readiness")
+    stage4.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     operations = commands.add_parser(
         "operations", help="Read-only first forecast and settlement lifecycle status")
     operations.add_argument("--home", type=Path,
@@ -275,6 +296,18 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "injury-status":
         from basketball.research_injury_reports import injury_status
         result = injury_status(args.home)
+    elif args.command == "refresh-current-advanced":
+        from basketball.research_current_advanced_v4 import refresh_current_advanced
+        result = refresh_current_advanced(args.home, season=2027)
+    elif args.command == "injury-identity":
+        from basketball.research_injury_identity_v4 import injury_crosswalk
+        result = injury_crosswalk(args.home)
+    elif args.command == "market-evaluation":
+        from basketball.research_markets_v4 import market_report_from_home
+        result = market_report_from_home(args.home)
+    elif args.command == "stage4-report":
+        from basketball.research_stage4_operations import stage4_report
+        result = stage4_report(args.home)
     elif args.command == "operations":
         from basketball.research_operations import operations_from_home
         result = operations_from_home(args.home)
