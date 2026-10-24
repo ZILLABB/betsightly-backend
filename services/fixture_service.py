@@ -374,8 +374,10 @@ class FixtureService:
                     "country": meta.get("country", ""),
                     "date": commence,
                     "status": "NS",
-                    "home_team_logo": "",
-                    "away_team_logo": "",
+                    # Football-data.org v4 embeds a verified crest per team.
+                    # Keep provider URLs instead of silently discarding them.
+                    "home_team_logo": match.get("homeTeam", {}).get("crest") or "",
+                    "away_team_logo": match.get("awayTeam", {}).get("crest") or "",
                     "odds": {"home": None, "draw": None, "away": None,
                              "over_2_5": None, "under_2_5": None, "bookmaker": None},
                     "source": "football-data.org",
