@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
@@ -88,6 +89,9 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
     summary = {
         "slips_checked": 0, "won": 0, "lost": 0, "void": 0,
         "still_pending": 0, "legs_updated": 0,
+        "due_legs": 0, "verified_final_matches": 0,
+        "overdue_48h": 0, "unmapped_competitions": 0,
+        "pending_reasons": {}, "score_source": "none",
     }
     try:
         with engine.connect() as conn:
@@ -121,10 +125,28 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
         return summary
     scores = {}
     if checkable:
-        scores, _ = (score_collector(checkable) if score_collector is not None
-                     else _collect_scores_for_picks(
-                         checkable, allow_fallback=allow_fallback,
-                     ))
+        from leagues.live_scores import infer_published_competition_slugs
+        from leagues.results_checker import _lookup_settlement_score
+        summary["due_legs"] = len(checkable)
+        _, summary["unmapped_competitions"] = (
+            infer_published_competition_slugs(checkable))
+        summary["overdue_48h"] = sum(
+            1 for g in checkable
+            if _kickoff(g) and _kickoff(g) + timedelta(hours=48) <= current
+        )
+        scores, summary["score_source"] = (
+            score_collector(checkable) if score_collector is not None
+            else _collect_scores_for_picks(checkable, allow_fallback=allow_fallback)
+        )
+        for g in checkable:
+            found = _lookup_settlement_score(
+                scores, g.get("home_team", ""), g.get("away_team", ""),
+                str(g.get("commence_time") or g.get("kickoff") or
+                    g.get("date") or "")[:10],
+            )
+            if found and not found.get("ambiguous"):
+                summary["verified_final_matches"] += 1
+    reasons = Counter()
     for day, tier in queued:
         with engine.begin() as conn:
             # A matching admin session cannot alter this already-published
@@ -150,11 +172,23 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
                     for a, b in zip(previous["games"], graded["games"])
                 )
         summary["slips_checked"] += 1
+        for game in graded.get("games") or []:
+            if game.get("status") == "pending":
+                reasons[game.get("settlement_pending_reason") or
+                        "FINAL_SCORE_UNVERIFIED"] += 1
         result = graded.get("result_status", "pending")
         if result in TERMINAL:
             summary[result] += 1
         else:
             summary["still_pending"] += 1
+    summary["pending_reasons"] = dict(reasons)
+    if summary["overdue_48h"] and not summary["verified_final_matches"]:
+        LOG.warning(
+            "Manual settlement backlog: checked=%s overdue_48h=%s "
+            "unmapped_competitions=%s source=%s; verified_finals=0",
+            summary["due_legs"], summary["overdue_48h"],
+            summary["unmapped_competitions"], summary["score_source"],
+        )
     return summary
 
 
