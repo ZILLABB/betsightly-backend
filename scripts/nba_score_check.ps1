@@ -33,19 +33,31 @@ Set-Location $root
 $private = Join-Path $root "data\basketball\research"
 New-Item -ItemType Directory -Force -Path $private | Out-Null
 $log = Join-Path $private "score_check.log"
+. (Join-Path $PSScriptRoot "nba_task_attempt.ps1")
+$attemptStart = [DateTime]::UtcNow.ToString("o")
+$attemptStatus = "failed"
+$attemptExit = 1
 # Capture the machine-readable output so Windows Task Scheduler does not
 # confuse "Python exited successfully" with "the data provider was healthy".
-$resultText = (& $python -m basketball.research_cli automate --mode score 2>&1 | Out-String)
-$exitCode = $LASTEXITCODE
-Write-Host $resultText
-Add-Content -LiteralPath $log -Value $resultText -Encoding UTF8
-if ($exitCode -ne 0) {
-    throw "NBA score check process failed (exit code $exitCode). See $log"
-}
 try {
-    $result = $resultText | ConvertFrom-Json -ErrorAction Stop
-} catch {
-    throw "NBA score check did not return valid JSON. See $log"
+    $resultText = (& $python -m basketball.research_cli automate --mode score 2>&1 |
+        Out-String)
+    $attemptExit = [int]$LASTEXITCODE
+    Write-Host $resultText
+    Add-Content -LiteralPath $log -Value $resultText -Encoding UTF8
+    if ($attemptExit -ne 0) {
+        throw "NBA score process failed (exit code $attemptExit). See $log"
+    }
+    try {
+        $result = $resultText | ConvertFrom-Json -ErrorAction Stop
+        $attemptStatus = [string]$result.status
+    } catch {
+        $attemptStatus = "unparsed_output"
+        throw "NBA score check did not return valid JSON. See $log"
+    }
+} finally {
+    Write-NbaScheduledAttempt -ResearchFolder $private -Mode score `
+        -StartedAt $attemptStart -Status $attemptStatus -ExitCode $attemptExit
 }
 if ($result.status -eq "idle") {
     Write-Host "NBA score checker idle: no unresolved games required a provider request."
