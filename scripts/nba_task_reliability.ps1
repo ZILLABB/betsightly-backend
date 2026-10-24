@@ -30,8 +30,8 @@ foreach ($name in $expected.Keys) {
         $expectedScriptPath, [StringComparison]::OrdinalIgnoreCase
     ) -ge 0
     if (-not $matchesExpected) {
-        throw "Task action points outside this NBA checkout: $name. " +
-              "Do not repair an unrecognized task. Expected $expectedScriptPath"
+        throw ("Task action points outside this NBA checkout: $name. " +
+               "Do not repair an unrecognized task. Expected $expectedScriptPath")
     }
     $before = Get-ScheduledTaskInfo -TaskName $name
     if ($Repair) {
