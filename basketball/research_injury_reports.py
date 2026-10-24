@@ -98,6 +98,74 @@ def _bounded(url:str,limit:int,*,opener=urlopen)->bytes:
     return raw
 
 
+TEAM_NAMES=frozenset({
+    "Atlanta Hawks","Boston Celtics","Brooklyn Nets","Charlotte Hornets",
+    "Chicago Bulls","Cleveland Cavaliers","Dallas Mavericks","Denver Nuggets",
+    "Detroit Pistons","Golden State Warriors","Houston Rockets","Indiana Pacers",
+    "LA Clippers","Los Angeles Clippers","Los Angeles Lakers","Memphis Grizzlies",
+    "Miami Heat","Milwaukee Bucks","Minnesota Timberwolves",
+    "New Orleans Pelicans","New York Knicks","Oklahoma City Thunder",
+    "Orlando Magic","Philadelphia 76ers","Phoenix Suns",
+    "Portland Trail Blazers","Sacramento Kings","San Antonio Spurs",
+    "Toronto Raptors","Utah Jazz","Washington Wizards",
+})
+
+
+def _word_rows(page) -> tuple[list[dict], int]:
+    """Recognize only exact text columns on the league's own PDF page.
+
+    Team/status/player column alignment is required; random line parsing
+    or names matched outside their proper column are not accepted.
+    """
+    words=page.extract_words(x_tolerance=2,y_tolerance=2)
+    headers={}
+    for word in words:
+        label=str(word["text"]).strip().lower()
+        if label in ("team","player","current","reason"):
+            headers.setdefault(label,word)
+    if not all(key in headers for key in ("team","player","current","reason")):
+        return [],0
+    team_x=float(headers["team"]["x0"])
+    player_x=float(headers["player"]["x0"])
+    status_x=float(headers["current"]["x0"])
+    reason_x=float(headers["reason"]["x0"])
+    title_y=max(float(headers[k]["top"]) for k in headers)
+    if not (team_x+25<player_x<status_x-25<reason_x-25):
+        return [],0
+    groups=[]
+    for word in sorted(words,key=lambda w:(float(w["top"]),float(w["x0"]))):
+        if float(word["top"])<=title_y+4:continue
+        if groups and abs(float(word["top"])-groups[-1][0])<=3:
+            groups[-1][1].append(word)
+        else:
+            groups.append((float(word["top"]),[word]))
+    last_team=None
+    entries=[]
+    not_submitted=0
+    for _,line in groups:
+        def col(a,b):
+            return " ".join(str(w["text"]) for w in sorted(
+                (w for w in line if a<=float(w["x0"])<b),
+                key=lambda w:float(w["x0"]))).strip()
+        team_text=col(team_x-12,player_x-6)
+        athlete=col(player_x-6,status_x-7)
+        status=col(status_x-7,reason_x-7)
+        if team_text in TEAM_NAMES:
+            last_team=team_text
+        if status.upper()=="NOT YET SUBMITTED":
+            not_submitted+=1
+            continue
+        # Only recognized canonical team names carried forward within a
+        # report table. No athlete or status inferred from reason text.
+        if last_team and athlete and status in ALLOWED and len(athlete)<=120:
+            if not any(c.isalpha() for c in athlete):continue
+            entries.append({
+                "team":last_team,"player":athlete,
+                "status":status,"as_reported":True,
+            })
+    return entries,not_submitted
+
+
 def parse_pdf_players(data:bytes)->tuple[list[dict],dict]:
     """Best-effort exact-column extraction; no guessed names or statuses.
 
@@ -143,6 +211,12 @@ def parse_pdf_players(data:bytes)->tuple[list[dict],dict]:
                             "status":status,
                             "as_reported":True,
                         })
+                # PDFs with unboxed columns do not yield extract_tables().
+                # Position-aware parsing is a separate explicit fallback.
+                if not entries:
+                    strict_rows,not_submitted=_word_rows(page)
+                    entries.extend(strict_rows)
+                    incomplete+=not_submitted
     except (ValueError,TypeError,AttributeError) as exc:
         return [],{"status":"unparsed","reason":"pdf_layout_not_verified",
                    "recognized_player_rows":0}
