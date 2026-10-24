@@ -60,6 +60,7 @@ def test_exact_nba_id_crosswalk_and_final_score_verification():
     assert verified[0]["status"] == "final"
     assert verified[0]["home_score"] == 111
     assert verified[0]["source"] == NBA_CDN_SOURCE
+    assert verified[0]["verification_provider_game_id"] == "0022600042"
 
 
 def test_no_crosswalk_on_wrong_team_or_fuzzy_team_names():
