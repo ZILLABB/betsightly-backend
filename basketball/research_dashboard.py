@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from basketball.research_readiness import readiness_from_home
 from basketball.research_prospective import prospective_report
 from basketball.research_operations import operations_from_home
+from basketball.research_automation import reliability_from_home
 from basketball.research_store import (
     DEFAULT_DB, latest_events, list_forecasts, open_ledger,
     performance_report,
@@ -31,7 +32,8 @@ def _percent(value: float | None) -> str:
 def render_dashboard(report: dict, forecasts: list[dict],
                      events: list[dict], readiness: dict | None = None,
                      prospective: dict | None = None,
-                     operations: dict | None = None) -> str:
+                     operations: dict | None = None,
+                     reliability: dict | None = None) -> str:
     """Server-rendered and escaped HTML, no tracking or external dependencies."""
     metric = lambda name, value, note: (
         '<div class="metric"><small>' + _safe(name) + '</small>'
@@ -173,6 +175,25 @@ def render_dashboard(report: dict, forecasts: list[dict],
                 _safe(item["start_utc"]) + "</td><td>" +
                 "Eligible, not yet recorded</td></tr>"
             )
+    reliability_metrics = ""
+    reliability_note = ("New Stage 2E scheduled-job health receipts not found. "
+                        "Run a private automated job before interpreting task health.")
+    if reliability is not None:
+        statuses = reliability.get("tasks") or {}
+        reliability_metrics = "".join(
+            metric("AUTOMATED " + mode.upper(),
+                   (statuses.get(mode) or {}).get("status", "not_observed").upper(),
+                   "Task health · last check: " +
+                   str((statuses.get(mode) or {}).get("last_seen_at") or "—"))
+            for mode in ("pregame", "score", "full")
+        )
+        issues = reliability.get("issues") or []
+        reliability_note = (
+            "Task failures/staleness: " +
+            (", ".join(issues) if issues else "none detected") +
+            ". An unobserved task is not a successful run; the Windows "
+            "computer must be awake for scheduled checks."
+        )
     # A prospective cohort uses only the privately settled pregame ledger.
     # Historical validation metrics are never mixed into this panel.
     evaluation_metrics = ""
@@ -302,6 +323,11 @@ still lack an accepted final score. They are never pregame candidates.</p>
     "".join(overdue_rows) if overdue_rows else
     "<tr><td colspan='6'>No started-but-unverified games in the last 72h.</td></tr>"
 ) + """</tbody></table></div>
+<h2>Stage 2E · automation reliability</h2>
+<p>Separate recorded outcomes for the pregame, score and daily jobs.
+A skipped overlapping run never changes a forecast or final score.</p>
+<section class="stats">""" + reliability_metrics + """</section>
+<div class="notice">""" + _safe(reliability_note) + """</div>
 <h2>First-forecast operations</h2>
 <p>Tracks the first genuine recorded NBA prediction through settlement,
 without backfilling or making synthetic picks. The 18:00 local Windows
@@ -351,7 +377,8 @@ def make_handler(db_path: Path):
                 return
             route = urlsplit(self.path).path
             if route not in {"/", "/api/summary", "/api/fixtures",
-                             "/api/readiness", "/api/prospective", "/api/operations"}:
+                             "/api/readiness", "/api/prospective", "/api/operations",
+                             "/api/reliability"}:
                 self.send_error(404)
                 return
             connection = open_ledger(db_path)
@@ -365,9 +392,10 @@ def make_handler(db_path: Path):
                 readiness = readiness_from_home(db_path.parent)
                 prospective = prospective_report(db_path)
                 operations = operations_from_home(db_path.parent)
+                reliability = reliability_from_home(db_path.parent)
                 payload = render_dashboard(
                     report, rows, events, readiness,
-                    prospective, operations).encode("utf-8")
+                    prospective, operations, reliability).encode("utf-8")
                 mime = "text/html; charset=utf-8"
             else:
                 if route == "/api/summary":
@@ -378,6 +406,8 @@ def make_handler(db_path: Path):
                     value = prospective_report(db_path)
                 elif route == "/api/operations":
                     value = operations_from_home(db_path.parent)
+                elif route == "/api/reliability":
+                    value = reliability_from_home(db_path.parent)
                 else:
                     value = {"fixtures": rows, "research_only": True}
                 payload = json.dumps(value).encode("utf-8")
