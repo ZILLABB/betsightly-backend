@@ -428,3 +428,88 @@ a cycle writes a real fixture before tipoff. A complete lifecycle then
 requires that same game ID to appear under verified final settlement.
 The operational suite uses **synthetic data for tests only**; no fake
 forecasts or returns are inserted into the user's private NBA ledger.
+
+## Stage 2E — automatic recovery, pregame monitoring and task receipts
+
+Stage 2E adds **no new model markets, betting publication, licence claim or
+cloud deployment**. It reuses the existing same-season five-completed-games
+gate and only the previously configured keyless score services and
+SportsDataverse current-season schedule release.
+
+### Local Windows verification
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+
+# Inspect any observed scheduled task receipts (read-only)
+.\.venv\Scripts\python.exe -m basketball.research_cli reliability
+
+# Manual bounded current-season pregame refresh, score reconciliation and
+# existing model evaluation (uses real source data, never invented games)
+.\.venv\Scripts\python.exe -m basketball.research_cli automate --mode pregame
+
+# Review task receipts, warnings and original paper ledger
+.\.venv\Scripts\python.exe -m basketball.research_cli reliability
+.\.venv\Scripts\python.exe -m basketball.research_cli operations
+.\.venv\Scripts\python.exe -m basketball.research_cli prospective
+```
+
+The `automate --mode pregame` command returns a **nonzero exit status**
+for failed/partial external work, a normal zero status for success or an
+overlap skip. It refreshes **only the current ESPN season file**, preserves
+previous real finals, checks exact-source score settlement, and invokes the
+existing local-only paper cycle in `--offline` mode. No retrain occurs
+unless the trusted local model is genuinely missing. A source fetch failure
+is retried only once after a short interval; invalid fixture identities
+and provider schema errors are *not* retried or accepted.
+
+All scheduled pregame, hourly-score and full-daily tasks use the **same
+kernel advisory lock** under the git-ignored private folder. Only one
+task can write the NBA snapshot/ledger at a time. An overlapping run
+reports `busy` and skips; it never writes a duplicate prediction or result.
+Manual legacy `cycle` and `settle` commands are not in that shared
+scheduler, so prefer `automate --mode ...` for manual checks going forward.
+
+The last result of each scheduled mode is recorded, atomically, in:
+`automation_pregame.json`, `automation_score.json` and
+`automation_full.json`. `reliability` and the localhost Atlantic
+`/api/reliability` endpoint report `succeeded`, `idle`, `degraded`,
+`failed`, `stale`, `clock_skew`, or `not_observed` (nothing has
+been recorded, **not** a successful task).
+
+### Opt in to hourly pregame checking
+
+**After the manual pregame command succeeds**, install the optional task
+in Task Scheduler:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    -File .\scripts\nba_pregame_check.ps1 -InstallSchedule
+
+Get-ScheduledTaskInfo -TaskName "BetSightly NBA Pregame Check" |
+    Select-Object LastRunTime, NextRunTime, LastTaskResult
+```
+
+This task checks hourly at **:05 Windows-local time**; the existing hourly
+score-only task checks at **:20**, and the 18:00 daily full cycle remains.
+The pregame task expires after 365 days and must be renewed. Windows needs
+network access, correct local time, and to be on. It does not guarantee
+capture within the last hour before tipoff or bypass slow data-provider
+updates. Every provider call remains free-to-access but unofficial and
+without an uptime SLA.
+
+Existing task actions point at the same script files, so after pulling this
+branch the daily/score scripts automatically use the updated shared-lock
+engine. To also update task-start-when-available and no-overlap settings,
+you can rerun the existing installer flags **only if desired**; this
+recreates their triggers but does not delete the SQLite ledger.
+
+To inspect the UI after an update, restart the existing localhost server;
+the dashboard adds **Stage 2E · automation reliability** with separated
+per-mode receipts. The `/api/reliability` endpoint is read-only.
+
+**Operational acceptance:** the code is tested against entirely synthetic
+inputs in CI; the first real pregame run must be verified on the user's
+Windows source/network, followed later by a real immutable before-tipoff
+forecast and a verified final. Models never publish to football production.
