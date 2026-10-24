@@ -7,6 +7,7 @@ kickoff match. The normal final-score validator must still confirm FT/90'.
 from __future__ import annotations
 
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import logging
 
@@ -59,9 +60,10 @@ def collect_verified_manual_links(
         ident = _identity(pick)
         if not ident:
             continue
-        # Linking is useful just before and shortly after play, not a full
-        # historical backfill scan of every ungraded ticket every minute.
-        if not (current - timedelta(hours=40) <= ident[2] <=
+        # Capture upcoming/in-play fixtures AND make bounded 14-day backfill
+        # attempts. Older saved tickets previously never obtained a provider
+        # ID because the collector stopped looking after 40 hours.
+        if not (current - timedelta(days=15) <= ident[2] <=
                 current + timedelta(hours=8)):
             continue
         slug = str(pick.get("league_slug") or "")
@@ -84,22 +86,48 @@ def collect_verified_manual_links(
 
     if not eligible:
         return {}
-    # Cap outbound reads, rather than letting huge/old manual tickets trigger
-    # unbounded requests. Later cycles will retry fixtures outside this slice.
-    wanted = set(sorted(wanted)[:30])
+    # Prioritize games near kickoff for prospective identity capture; rotate
+    # through older unique (league,date) combinations instead of repeatedly
+    # exhausting the quota on the same old unmatchable first entries.
+    recent = sorted(
+        (key for key in wanted
+         if datetime.strptime(key[1], "%Y%m%d").date() >=
+         (current - timedelta(days=2)).date()),
+        key=lambda key: (key[1], key[0]), reverse=True,
+    )
+    older = sorted(wanted.difference(recent))
+    # Six requests total, sent concurrently, rather than 30 serial 12-second
+    # requests causing 502s and tying up the settlement worker.
+    budget = 6
+    near = recent[:3]
+    # Reserve half the budget for old pending tickets. Rotate at each
+    # 15-minute recovery cycle so one unmatchable league cannot starve others.
+    remaining = budget - len(near)
+    offset = (int(current.timestamp()) // 900) * remaining
+    if older:
+        rotated = older[offset % len(older):] + older[:offset % len(older)]
+        selected = near + rotated[:remaining]
+    else:
+        selected = near + recent[len(near):budget]
     reader = score_reader or scores_for
     boards: dict[tuple[str, str], list[dict]] = {}
-    for slug, day in sorted(wanted):
+
+    def fetch(pair):
+        slug, day = pair
         try:
             board = reader([slug], day)
-            boards[(slug, day)] = [
+            return pair, [
                 row for row in (board or {}).values()
                 if isinstance(row, dict) and row.get("source") == "espn"
             ]
         except Exception as exc:
             LOG.warning("Manual ESPN identity lookup unavailable: %s",
                         type(exc).__name__)
-            boards[(slug, day)] = []
+            return pair, []
+
+    with ThreadPoolExecutor(max_workers=min(4, len(selected))) as pool:
+        for pair, rows in pool.map(fetch, selected):
+            boards[pair] = rows
 
     linked = {}
     for pick, slug, (home, away, kickoff) in eligible:
