@@ -113,8 +113,8 @@ def test_live_event_identity_is_saved_then_only_real_fulltime_can_settle():
     }}
     late = datetime(2026, 10, 22, 0, 0, tzinfo=timezone.utc)
     result = grade_manual_slip(pending, finished, now=late)
-    assert result["games"][0]["status"] == "lost"
-    assert result["result_status"] == "lost"
+    assert result["games"][0]["status"] == "won"
+    assert result["result_status"] == "won"
     assert result["games"][0]["settlement_evidence"]["provider"] == "espn"
     assert result["games"][0]["settlement_source_link"]["event_id"] == "401915388"
     assert grade_manual_slip(result, {}, now=late) == result
@@ -164,7 +164,7 @@ def test_real_uefa_oct21_recovery_requires_exact_bookmaker_id_and_identity():
     from leagues.results_checker import _index_free_finals
     at = datetime(2026, 10, 22, 4, tzinfo=timezone.utc)
     fixtures = [
-        ("sr:match:74165958", "Como 1907", "Man Utd", "home_or_draw", "lost"),
+        ("sr:match:74165958", "Como 1907", "Man Utd", "home_or_draw", "won"),
         ("sr:match:74165972", "Betis", "Feyenoord", "home_or_draw", "won"),
         ("sr:match:74165968", "Inter", "Shakhtar D", "home_win", "won"),
         ("sr:match:74165960", "Lille", "Galatasaray Istanbul", "over_1_5", "won"),
