@@ -596,3 +596,25 @@ assessment, **not** claimed authenticated, licensed or integrated today.
 
 All Stage 3A test fixtures are synthetic and separate from local paper
 research. The real-data comparison is run by the local benchmark command.
+
+### Stage 3A audit compatibility — legacy source manifests (October 24)
+
+Early local source manifests were written before per-fixture rejection
+reasons were added. On those older files, `audit-data` used to display
+`source_rejected_regular_rows: 0`, even though the preceding source
+refresh printed six excluded entries. This is now **fixed**.
+
+The audit reports `source_rejected_regular_rows: null` whenever the
+loaded seasons have incomplete source-audit provenance, plus:
+`source_rejected_regular_rows_known`,
+`source_audit_provenance`, `source_audited_seasons` and
+`source_unaudited_seasons`. Neither `null` nor a legacy `{}`
+can be interpreted as zero confirmed omissions.
+
+A successful **new** pregame source refresh populates the current 2027
+season's detailed audit in `current_season_refresh.json`, including
+`rejection_reasons` and the source identifiers/status of excluded
+placeholder records. The other ten historical seasons remain
+`unaudited` until their release files have been fetched again with the
+new parser; the known total is still visible separately. No historical
+dataset reset, model retrain or fixture fabrication is necessary.
