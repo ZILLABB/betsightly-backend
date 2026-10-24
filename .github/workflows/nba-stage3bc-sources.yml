@@ -103,6 +103,31 @@ jobs:
           assert r["deployable_to_public"] is False
           assert r["market_support"]["first_half"] is False
           PY
+      - name: Probe 2027 current-season advanced data without overriding historical models
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from basketball.research_public_data import fetch_public_seasons
+          from basketball.research_data import read_games, write_games
+          from basketball.research_current_advanced_v4 import refresh_current_advanced
+          from basketball.research_stage4_operations import stage4_report
+          root=Path("data/basketball/research")
+          try:
+              current,manifest=fetch_public_seasons([2027])
+              older=read_games(root/"nba_games.jsonl")
+              write_games(older+current,root/"nba_games.jsonl")
+              result=refresh_current_advanced(root,season=2027)
+              print("Current 2027 advanced status:",result["status"])
+              for kind,asset in result["assets"].items():
+                  print("2027",kind,asset["status"],asset.get("fixture_coverage"))
+              ready=stage4_report(root)
+              print("2027 missing verified kinds:",ready["current_2027_missing_assets"])
+              print("Injury model feature allowed:",ready["market_support"]["injury_adjusted_predictions"])
+              assert ready["deployable_to_public"] is False
+          except (RuntimeError,ValueError,OSError) as error:
+              # Never claim verified source availability when not checked.
+              print("Current 2027 source probe blocked:",type(error).__name__)
+          PY
       - name: Probe official injury PDF snapshot (advisory source availability)
         continue-on-error: true
         run: |
