@@ -18,9 +18,12 @@ if ($InstallSchedule) {
     $trigger = New-ScheduledTaskTrigger -Once -At $next `
         -RepetitionInterval (New-TimeSpan -Hours 1) `
         -RepetitionDuration (New-TimeSpan -Days 365)
+    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew `
+        -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
     Register-ScheduledTask -TaskName "BetSightly NBA Score Check" `
         -Description "Hourly private final-score verification; no bets, no training" `
-        -Action $action -Trigger $trigger -Force | Out-Null
+        -Action $action -Trigger $trigger -Settings $settings -Force |
+        Out-Null
     Write-Host "Registered private NBA SCORE-ONLY task every hour at :20 local."
     Write-Host "Runs when the Windows computer is available; expires after 365 days."
     Write-Host "Next task time: $next"
@@ -32,7 +35,7 @@ New-Item -ItemType Directory -Force -Path $private | Out-Null
 $log = Join-Path $private "score_check.log"
 # Capture the machine-readable output so Windows Task Scheduler does not
 # confuse "Python exited successfully" with "the data provider was healthy".
-$resultText = (& $python -m basketball.research_cli settle 2>&1 | Out-String)
+$resultText = (& $python -m basketball.research_cli automate --mode score 2>&1 | Out-String)
 $exitCode = $LASTEXITCODE
 Write-Host $resultText
 Add-Content -LiteralPath $log -Value $resultText -Encoding UTF8
@@ -44,17 +47,16 @@ try {
 } catch {
     throw "NBA score check did not return valid JSON. See $log"
 }
-if ($result.scoreboard.status -eq "idle" -and
-    $result.scoreboard.dates_requested -eq 0) {
-    Write-Host "NBA score checker idle: no overdue fixture date requires a request."
-    Write-Host "No provider verification was attempted. This is NOT a successful provider probe."
+if ($result.status -eq "idle") {
+    Write-Host "NBA score checker idle: no unresolved games required a provider request."
     exit 0
 }
-if ($result.scoreboard.status -ne "ok" -or
-    $result.scoreboard.dates_checked -lt 1) {
-    throw ("NBA provider verification incomplete: " +
-        "$($result.scoreboard.dates_checked)/$($result.scoreboard.dates_requested) " +
-        "dates checked; see $log. Scheduled task reports failure.")
+if ($result.status -eq "busy") {
+    Write-Host "NBA research already running. Skipped duplicate score check."
+    exit 0
 }
-Write-Host "NBA score verification cycle checked the requested dates successfully."
-
+if ($result.status -ne "succeeded") {
+    throw ("NBA score check incomplete: $($result.status). " +
+        "Review data/basketball/research/automation_score.json and $log")
+}
+Write-Host "NBA score verification successfully processed its scheduled work."
