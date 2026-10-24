@@ -18,8 +18,19 @@ def insert(db, index: int, prob: float = .6, *, settled=True,
            version="nba-moneyline-offline-v1", score_projection=True):
     ident = f"4018{index:06d}"
     day = "2026-10-25"
-    raw = json.dumps({"game_id": ident, "probability": prob},
-                     sort_keys=True, separators=(",", ":"))
+    payload = {
+        "game_id": ident, "date": day, "home_team_id": "1",
+        "away_team_id": "2", "home_team": f"Home {index}",
+        "away_team": f"Away {index}", "model_version": version,
+        "home_win_probability": prob, "away_win_probability": 1-prob,
+        "expected_total_points": 215. if score_projection else None,
+        "expected_home_margin": 6. if score_projection else None,
+        "start_utc": TIPOFF.isoformat(),
+        "generated_at": CREATE_TIME.isoformat(),
+        "research_only": True, "not_for_betting": True,
+        "bookmaker_odds_verified": False, "booking_code": None,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(raw.encode()).hexdigest()
     db.execute("""
         INSERT INTO forecasts(
@@ -134,6 +145,22 @@ def test_changed_predictions_in_sqlite_withhold_all_model_statistics(tmp_path):
     assert report["metrics_withheld"] is True
     assert report["issue_count"] == 1
     assert "brier" not in report
+
+
+
+
+def test_changed_probability_column_is_detected_against_hashed_original(tmp_path):
+    path = tmp_path / "nba_paper.sqlite"
+    with open_ledger(path) as db:
+        ident = insert(db, 1)
+        db.execute(
+            "UPDATE forecasts SET home_win_probability=? WHERE game_id=?",
+            (.99, ident),
+        )
+        db.commit()
+    report = prospective_report(path)
+    assert report["status"] == "integrity_failed"
+    assert "hashed probability mismatch" in report["issues"][0]
 
 
 def test_post_tipoff_insertion_and_bad_settlement_block_prospective_report(tmp_path):
