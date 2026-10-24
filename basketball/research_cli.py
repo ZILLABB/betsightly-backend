@@ -116,6 +116,40 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--home", type=Path,
                            default=Path("data/basketball/research"))
 
+    advanced_fetch = commands.add_parser(
+        "fetch-advanced", help="Validated current/historical ESPN NBA team/player box scores")
+    advanced_fetch.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+    advanced_fetch.add_argument("--seasons", nargs="+", type=int, required=True)
+    advanced_fetch.add_argument("--kinds", nargs="+",
+        choices=("team","player"), default=["team","player"])
+
+    advanced_report = commands.add_parser(
+        "advanced-report", help="Read-only verified advanced NBA data coverage")
+    advanced_report.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
+    advanced_model = commands.add_parser(
+        "advanced-build", help="Fit isolated advanced candidate; v1 remains immutable")
+    advanced_model.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
+    shadow = commands.add_parser(
+        "advanced-shadow", help="Record independent verified before-tipoff shadow forecasts")
+    shadow.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
+    injury = commands.add_parser(
+        "capture-injury", help="Archive official timestamped NBA injury PDF")
+    injury.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+    injury.add_argument("--date", help="Official publication date YYYY-MM-DD (ET)")
+
+    injury_state = commands.add_parser(
+        "injury-status", help="Read-only official injury archive completeness")
+    injury_state.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     operations = commands.add_parser(
         "operations", help="Read-only first forecast and settlement lifecycle status")
     operations.add_argument("--home", type=Path,
@@ -213,6 +247,28 @@ def main(argv: list[str] | None = None) -> int:
             read_games(root / "nba_games.jsonl"),
             root / "candidate_v2_benchmark.json"
         )
+    elif args.command == "fetch-advanced":
+        from basketball.research_advanced_data import fetch_advanced
+        result = fetch_advanced(home=args.home, seasons=args.seasons,
+                                kinds=tuple(args.kinds))
+    elif args.command == "advanced-report":
+        from basketball.research_advanced_data import advanced_coverage
+        from basketball.research_advanced_features import from_home
+        result = advanced_coverage(args.home)
+        _, features = from_home(args.home)
+        result["pregame_feature_readiness"] = features
+    elif args.command == "advanced-build":
+        from basketball.research_advanced_model import build_candidate
+        result = build_candidate(args.home)
+    elif args.command == "advanced-shadow":
+        from basketball.research_advanced_model import run_shadow
+        result = run_shadow(args.home)
+    elif args.command == "capture-injury":
+        from basketball.research_injury_reports import capture_injury
+        result = capture_injury(args.home, day=args.date)
+    elif args.command == "injury-status":
+        from basketball.research_injury_reports import injury_status
+        result = injury_status(args.home)
     elif args.command == "operations":
         from basketball.research_operations import operations_from_home
         result = operations_from_home(args.home)
