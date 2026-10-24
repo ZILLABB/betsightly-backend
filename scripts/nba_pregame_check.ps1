@@ -32,13 +32,40 @@ Set-Location $root
 $private = Join-Path $root "data\basketball\research"
 New-Item -ItemType Directory -Force -Path $private | Out-Null
 $log = Join-Path $private "pregame_check.log"
-$resultText = (& $python -m basketball.research_cli automate --mode pregame 2>&1 |
-    Out-String)
-$exitCode = $LASTEXITCODE
-Add-Content -LiteralPath $log -Value $resultText -Encoding UTF8
-Write-Host $resultText
-if ($exitCode -ne 0) {
-    throw "Pregame check failed. Inspect automation_pregame.json and $log"
+. (Join-Path $PSScriptRoot "nba_task_attempt.ps1")
+$attemptStart = [DateTime]::UtcNow.ToString("o")
+$attemptStatus = "failed"
+$attemptExit = 1
+try {
+    $resultText = (& $python -m basketball.research_cli automate --mode pregame 2>&1 |
+        Out-String)
+    $attemptExit = [int]$LASTEXITCODE
+    Add-Content -LiteralPath $log -Value $resultText -Encoding UTF8
+    Write-Host $resultText
+    if ($attemptExit -ne 0) {
+        throw "Pregame check failed (exit code $attemptExit). Inspect $log"
+    }
+    # The provider may print one source-quality exclusion notice before JSON.
+    $jsonStart = $resultText.IndexOf("{")
+    if ($jsonStart -ge 0) {
+        try {
+            $payload = $resultText.Substring($jsonStart) | ConvertFrom-Json -ErrorAction Stop
+            $attemptStatus = [string]$payload.status
+        } catch {
+            $attemptStatus = "unparsed_output"
+        }
+    } else {
+        $attemptStatus = "unparsed_output"
+    }
+    if ($attemptStatus -eq "failed" -or $attemptStatus -eq "degraded") {
+        throw "NBA pregame reported $attemptStatus; inspect $log"
+    }
+    if ($attemptStatus -eq "busy") {
+        Write-Host "NBA pregame skipped due to another active task; no new research receipt."
+    }
+} finally {
+    Write-NbaScheduledAttempt -ResearchFolder $private -Mode pregame `
+        -StartedAt $attemptStart -Status $attemptStatus -ExitCode $attemptExit
 }
 # The CSV validator may print a harmless source exclusion notice.
 # Trust the Python process exit code, not brittle parsing of mixed output.
