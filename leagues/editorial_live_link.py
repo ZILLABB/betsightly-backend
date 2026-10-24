@@ -24,8 +24,8 @@ def _datetime(raw: object) -> datetime | None:
 def _identity(game: dict) -> tuple[str, str, datetime] | None:
     from leagues.results_checker import _normalize_name
 
-    kickoff = _datetime(game.get("kickoff") or game.get("commence_time")
-                        or game.get("date"))
+    kickoff = _datetime(game.get("kickoff_utc") or game.get("kickoff")
+                        or game.get("commence_time") or game.get("date"))
     home = _normalize_name(game.get("home_team") or "")
     away = _normalize_name(game.get("away_team") or "")
     if kickoff is None or not home or not away or home == away:
