@@ -7,6 +7,8 @@ on:
       - "scripts/nba_paper_research.ps1"
       - "scripts/nba_score_check.ps1"
       - "scripts/nba_pregame_check.ps1"
+      - "basketball/research_injury_reports.py"
+      - "basketball/requirements-windows-research.txt"
       - ".github/workflows/nba-windows-task-syntax.yml"
   workflow_dispatch:
 
@@ -19,6 +21,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify IANA Eastern Time on native Windows Python
+        shell: powershell
+        run: |
+          python -m pip install -r basketball/requirements-windows-research.txt
+          python -c "from zoneinfo import ZoneInfo; from datetime import datetime; assert datetime(2026,7,1,tzinfo=ZoneInfo('America/New_York')).utcoffset().total_seconds() == -14400; assert datetime(2026,12,1,tzinfo=ZoneInfo('America/New_York')).utcoffset().total_seconds() == -18000; print('ET daylight saving and standard time supported')"
       - name: Parse all scheduled task scripts in Windows PowerShell
         shell: powershell
         run: |
