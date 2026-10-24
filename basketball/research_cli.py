@@ -106,6 +106,16 @@ def build_parser() -> argparse.ArgumentParser:
     reliability.add_argument("--home", type=Path,
                              default=Path("data/basketball/research"))
 
+    audit_v2 = commands.add_parser(
+        "audit-data", help="Read-only NBA source coverage and rejected rows audit")
+    audit_v2.add_argument("--home", type=Path,
+                          default=Path("data/basketball/research"))
+
+    benchmark = commands.add_parser(
+        "benchmark-v2", help="Offline equal-cohort candidate vs immutable v1")
+    benchmark.add_argument("--home", type=Path,
+                           default=Path("data/basketball/research"))
+
     operations = commands.add_parser(
         "operations", help="Read-only first forecast and settlement lifecycle status")
     operations.add_argument("--home", type=Path,
@@ -193,6 +203,16 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "reliability":
         from basketball.research_automation import reliability_from_home
         result = reliability_from_home(args.home)
+    elif args.command == "audit-data":
+        from basketball.research_quality_v2 import audit_home
+        result = audit_home(args.home)
+    elif args.command == "benchmark-v2":
+        from basketball.research_candidate_v2 import write_candidate_report
+        root = Path(args.home)
+        result = write_candidate_report(
+            read_games(root / "nba_games.jsonl"),
+            root / "candidate_v2_benchmark.json"
+        )
     elif args.command == "operations":
         from basketball.research_operations import operations_from_home
         result = operations_from_home(args.home)
