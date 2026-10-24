@@ -152,6 +152,10 @@ def _safe_error(exc: BaseException) -> str:
         return "NBA_TASK_ALREADY_RUNNING"
     if isinstance(exc, RuntimeError) and "refresh failed after bounded retry" in str(exc):
         return "NBA_SOURCE_UNAVAILABLE_AFTER_RETRY"
+    if isinstance(exc, RuntimeError) and str(exc).startswith(
+        "NBA injury archive needs the IANA timezone database"
+    ):
+        return "NBA_TZDATA_MISSING"
     return type(exc).__name__
 
 
