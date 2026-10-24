@@ -256,7 +256,8 @@ def test_missing_windows_timezone_never_stops_v1_pregame_sidecar(
 
     def unavailable(*_args, **_kwargs):
         raise RuntimeError(
-            "NBA injury archive needs IANA tzdata: python -m pip install tzdata"
+            "NBA injury archive needs the IANA timezone database. "
+            "Install into this project's venv: python -m pip install tzdata"
         )
 
     monkeypatch.setattr(reports, "capture_injury", unavailable)
@@ -264,5 +265,5 @@ def test_missing_windows_timezone_never_stops_v1_pregame_sidecar(
         tmp_path, datetime(2026, 10, 24, 20, tzinfo=UTC)
     )
     assert report["injury"]["status"] == "unavailable"
-    assert "tzdata" in report["injury"]["error"]
+    assert report["injury"]["error"] == "NBA_TZDATA_MISSING"
     assert report["shadow"]["status"] == "not_configured"
