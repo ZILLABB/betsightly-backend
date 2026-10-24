@@ -30,8 +30,24 @@ Set-Location $root
 $private = Join-Path $root "data\basketball\research"
 New-Item -ItemType Directory -Force -Path $private | Out-Null
 $log = Join-Path $private "score_check.log"
-& $python -m basketball.research_cli settle 2>&1 |
-    Tee-Object -FilePath $log -Append
-if ($LASTEXITCODE -ne 0) {
-    throw "NBA score check failed (exit code $LASTEXITCODE). See $log"
+# Capture the machine-readable output so Windows Task Scheduler does not
+# confuse "Python exited successfully" with "the data provider was healthy".
+$resultText = (& $python -m basketball.research_cli settle 2>&1 | Out-String)
+$exitCode = $LASTEXITCODE
+Write-Host $resultText
+Add-Content -LiteralPath $log -Value $resultText -Encoding UTF8
+if ($exitCode -ne 0) {
+    throw "NBA score check process failed (exit code $exitCode). See $log"
 }
+try {
+    $result = $resultText | ConvertFrom-Json -ErrorAction Stop
+} catch {
+    throw "NBA score check did not return valid JSON. See $log"
+}
+if ($result.scoreboard.status -ne "ok") {
+    throw ("NBA provider verification incomplete: " +
+        "$($result.scoreboard.dates_checked)/$($result.scoreboard.dates_requested) " +
+        "dates checked; see $log. Scheduled task reports failure.")
+}
+Write-Host "NBA score verification cycle completed successfully."
+
