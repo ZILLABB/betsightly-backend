@@ -193,3 +193,43 @@ def test_market_forward_evaluation_only_settled_immutable_forecasts(tmp_path):
     (root/"shadow_2027.jsonl").write_text(json.dumps(item)+"\n")
     with pytest.raises(ValueError,match="integrity mismatch"):
         market_report_from_home(tmp_path)
+
+
+def test_one_command_stage4_bootstrap_reports_partial_not_success_on_source_loss(tmp_path):
+    from basketball.research_stage4_setup import bootstrap_stage4
+    calls=[]
+    def fail_historical(*,home,seasons,kinds):
+        calls.append((seasons[0],kinds[0]))
+        raise RuntimeError("Public source unavailable")
+    def current(home,*,season,now):
+        assert season==2027
+        return {"status":"blocked","assets":{}}
+    def builder(home):
+        pytest.fail("Never train without validated training sources")
+    def injury(home,*,now):
+        raise RuntimeError("Injury report unavailable")
+    report=bootstrap_stage4(
+        tmp_path,now=NOW,historical_fetcher=fail_historical,
+        current_fetcher=current,builder=builder,injury_fetcher=injury)
+    assert report["status"]=="partial"
+    assert len(calls)==6
+    assert report["historical_source_errors"]==6
+    assert report["advanced_model"]["status"]=="blocked"
+    assert report["official_injury_archive"]["status"]=="unavailable"
+    assert report["existing_v1_modified"] is False
+    assert not (tmp_path/"nba_paper.sqlite").exists()
+    assert not (tmp_path/"advanced"/"shadow_model.joblib").exists()
+
+
+def test_source_refresh_unknown_2027_data_not_a_paper_prediction(tmp_path):
+    from basketball.research_current_advanced_v4 import refresh_current_advanced
+    calls=[]
+    def source(*,home,seasons,kinds):
+        calls.append(kinds[0])
+        raise RuntimeError("2027 box score unavailable")
+    first=refresh_current_advanced(tmp_path,season=2027,now=NOW,fetcher=source)
+    second=refresh_current_advanced(tmp_path,season=2027,now=NOW,fetcher=source)
+    assert first==second
+    assert calls==["team","player","team","player"]
+    assert first["status"]=="blocked"
+    assert not (tmp_path/"advanced").exists()
