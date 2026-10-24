@@ -13,6 +13,7 @@ from pathlib import Path
 
 from basketball.research_data import read_games, write_games
 from basketball.research_model import paper_forecasts, train_offline
+from basketball.research_readiness import _model_cutoff, build_readiness
 from basketball.research_public_data import fetch_public_seasons
 from basketball.research_score_only import write_scoreboard_health
 from basketball.research_scoreboard import (
@@ -111,6 +112,20 @@ def run_cycle(
             json.dumps(score_metrics, indent=2) + "\n", encoding="utf-8")
         score_trained = True
 
+    # Actual private forecast publication is independently gated by the
+    # same readiness rules as the read-only UI. A stale fixture snapshot,
+    # missing local model/cutoff, future/started game, postseason, or <5
+    # earlier same-season games may NEVER become a new paper ledger row.
+    model_present, model_cutoff = _model_cutoff(root)
+    readiness = build_readiness(
+        games, now=timestamp, days_ahead=14,
+        model_exists=model_present, model_cutoff=model_cutoff,
+    )
+    eligible_ids = {
+        str(item["game_id"]) for item in readiness["fixtures"]
+        if item["eligible"]
+    }
+
     db = open_ledger(root / "nba_paper.sqlite")
     try:
         # A transaction protects writes. Forecasts saved on prior runs are
@@ -121,12 +136,22 @@ def run_cycle(
         }
         inserted = 0
         candidates = 0
+        guarded_out = 0
+        blocked_examples = []
         eligible_dates = []
         from basketball.research_market_models import private_score_estimates
         for offset in range(days_ahead):
             forecast_day = (first_date + timedelta(days=offset)).isoformat()
             forecasts = paper_forecasts(games, model_path, forecast_day,
                                         as_of=timestamp)
+            # Never allow the forecasting model to bypass read-only
+            # eligibility gates merely because feature vectors exist.
+            disallowed = [f for f in forecasts
+                          if str(f["game_id"]) not in eligible_ids]
+            guarded_out += len(disallowed)
+            blocked_examples.extend(str(f["game_id"]) for f in disallowed[:5])
+            forecasts = [f for f in forecasts
+                         if str(f["game_id"]) in eligible_ids]
             score_list = private_score_estimates(games, score_model_path,
                                                  forecast_day, as_of=timestamp)
             by_game = {entry["game_id"]: entry for entry in score_list}
@@ -155,7 +180,8 @@ def run_cycle(
         log_event(
             db, "cycle", f"research_only train={trained} "
             f"fixtures={len(games)} eligible={candidates} "
-            f"new_picks={inserted} new_results={settled['newly_settled']}"
+            f"new_picks={inserted} guard_blocked={guarded_out} "
+            f"new_results={settled['newly_settled']}"
         )
         result = {
             "status": "research_only", "date": first_date.isoformat(),
@@ -164,6 +190,12 @@ def run_cycle(
             "score_models_retrained": score_trained,
             "eligible_forecasts": candidates,
             "new_forecasts": inserted, "new_dates": eligible_dates,
+            "readiness": {
+                "snapshot_health": readiness["snapshot"]["status"],
+                "eligible_next_14_days": readiness["eligible_forecasts"],
+                "readiness_guard_rejected": guarded_out,
+                "guarded_fixture_ids": blocked_examples[:5],
+            },
             "scoreboard": score_health,
             "restored_historical_finals": restored_historical_finals,
             "settlement": settled, "performance": performance_report(db),
