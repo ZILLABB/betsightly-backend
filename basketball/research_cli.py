@@ -79,6 +79,12 @@ def build_parser() -> argparse.ArgumentParser:
                            default=Path("data/basketball/research"))
     readiness.add_argument("--days-ahead", type=int, default=7)
 
+    settlement = commands.add_parser(
+        "settle", help="Lightweight verified final-score refresh; no retraining")
+    settlement.add_argument("--home", type=Path,
+                            default=Path("data/basketball/research"))
+    settlement.add_argument("--offline", action="store_true")
+
     ledger = commands.add_parser("ledger", help="Local research ledger performance")
     ledger.add_argument("--home", type=Path,
                         default=Path("data/basketball/research"))
@@ -139,6 +145,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "readiness":
         from basketball.research_readiness import readiness_from_home
         result = readiness_from_home(args.home, days_ahead=args.days_ahead)
+    elif args.command == "settle":
+        from basketball.research_score_only import settle_once
+        result = settle_once(home=args.home, offline=args.offline)
     elif args.command == "ledger":
         from basketball.research_cycle import ledger_report
         result = ledger_report(home=args.home)
