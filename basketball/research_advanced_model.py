@@ -104,6 +104,7 @@ def build_candidate(home:Path|str)->dict:
     from sklearn.linear_model import Ridge
     score_results={}
     score_fits={}
+    validation_residuals={}
     historical=[r for r in rows if r["status"]=="final" and r["season"]<=2026]
     for target in ("total_points","home_margin"):
         score_results[target]={}
@@ -124,6 +125,8 @@ def build_candidate(home:Path|str)->dict:
                     alpha,reg))
             _,selected,chosen=min(candidates,key=lambda r:(r[0],r[1]))
             difference=chosen.predict(Xv)-target_valid
+            if name=="advanced_candidate":
+                validation_residuals[target]=(target_valid-chosen.predict(Xv)).tolist()
             score_results[target][name]={
                 "selected_alpha":selected,
                 "historical_validation_2026":{
@@ -147,6 +150,9 @@ def build_candidate(home:Path|str)->dict:
         "matched_feature_count":len(FEATURE_COLUMNS),
         "matched_model_comparison":results,
         "score_projection_comparison":score_results,
+        "market_residual_calibration_games":len(valid),
+        "market_residuals_source":"2026 development validation; frozen prior to 2027",
+        "market_residual_calibration_not_fresh_test":True,
         "bookmaker_lines_or_spreads_validated":False,
         "first_half_splits_available":False,
         "validation_2026_is_not_new_unseen_holdout":True,
@@ -158,6 +164,12 @@ def build_candidate(home:Path|str)->dict:
         "coverage":coverage,
     }
     target=root/"advanced"/"shadow_model.joblib"
+    immutable_ledger=root/"advanced"/"shadow_2027.jsonl"
+    if immutable_ledger.exists() and immutable_ledger.stat().st_size>0:
+        raise ValueError(
+            "Shadow model is frozen after its first pregame forecast; "
+            "cannot change evaluation cohort or saved model version"
+        )
     staged=target.with_name(target.name+".tmp")
     try:
         joblib.dump({
@@ -167,6 +179,13 @@ def build_candidate(home:Path|str)->dict:
             "candidate":fits["advanced_candidate"],
             "matched_v1":fits["matched_v1_features"],
             "score_models":score_fits,
+            "market_residuals":[
+                {
+                    "total_points":round(validation_residuals["total_points"][i],5),
+                    "home_margin":round(validation_residuals["home_margin"][i],5)
+                }
+                for i in range(len(valid))
+            ],
             "report":report,"research_only":True,
         },staged)
         os.replace(staged,target)
@@ -252,6 +271,12 @@ def run_shadow(home:Path|str,*,now:datetime|None=None)->dict:
             if m is None:return None
             features=x[:,:14] if variant=="matched_v1_features" else x
             return round(float(m.predict(features)[0]),3)
+        from basketball.research_markets_v4 import market_grid
+        research_markets=market_grid(
+            expected_total=expected("total_points","advanced_candidate"),
+            expected_margin=expected("home_margin","advanced_candidate"),
+            residuals=bundle.get("market_residuals"),
+        )
         item={
             "game_id":gid,"season":2027,"fixture_date":game["date"],
             "home_id":str(game["home_id"]),"away_id":str(game["away_id"]),
@@ -260,6 +285,7 @@ def run_shadow(home:Path|str,*,now:datetime|None=None)->dict:
             "candidate_home_win_probability":round(prob,5),
             "matched_v1_home_win_probability":round(reference,5),
             "source_feature_schema":VERSION,
+            "market_probabilities":research_markets,
             "candidate_total_points":expected("total_points","advanced_candidate"),
             "candidate_home_margin":expected("home_margin","advanced_candidate"),
             "matched_v1_total_points":expected("total_points","matched_v1_features"),
