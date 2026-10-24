@@ -192,7 +192,7 @@ def _advanced_sidecar(root: Path, now: datetime) -> dict:
         # Refresh the current season at most every eight hours. The
         # advance data is optional and unavailable historical snapshots
         # do not modify previous v1/private research data.
-        from basketball.research_advanced_data import fetch_advanced
+        from basketball.research_current_advanced_v4 import refresh_current_advanced
         year = _current_season(now)
         manifest = root / "advanced" / f"team_{year}.manifest.json"
         stale = True
@@ -205,14 +205,16 @@ def _advanced_sidecar(root: Path, now: datetime) -> dict:
                 stale = True
         if stale:
             try:
-                fetched = fetch_advanced(home=root, seasons=[year])
+                fetched = refresh_current_advanced(home=root, season=year, now=now)
                 outcome["advanced_refresh"] = {
-                    "status": "succeeded", "files": fetched["files_written"],
+                    "status": fetched["status"], "assets": fetched["assets"],
                 }
             except (RuntimeError, ValueError, OSError) as exc:
                 outcome["advanced_refresh"] = {
                     "status": "unavailable", "error": _safe_error(exc),
                 }
+        from basketball.research_injury_identity_v4 import injury_crosswalk
+        outcome["injury_identity"] = injury_crosswalk(root, as_of=now)
         shadow = run_shadow(root, now=now)
         outcome["shadow"] = {
             "status": shadow["status"],
