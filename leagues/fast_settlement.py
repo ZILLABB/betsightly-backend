@@ -103,6 +103,11 @@ def collect_recent_verified_finals(
         slug = {"sau.1": "ksa.1"}.get(slug, slug)
         # Use the provider kickoff's UTC date, not an inferred local day.
         wanted.add((slug, kickoff.date().isoformat()))
+        # ESPN may index an early-UTC fixture under the preceding US
+        # scoreboard day. Read that day too, but still match only the
+        # event's actual UTC kickoff date when verifying the final.
+        if kickoff.hour < 6:
+            wanted.add((slug, (kickoff.date() - timedelta(days=1)).isoformat()))
 
     if not wanted:
         return {}, "espn-rapid"
@@ -155,20 +160,61 @@ def collect_recent_verified_finals(
 def collect_rapid_verified_finals(
     picks: list[dict], *, now: datetime | None = None,
 ) -> tuple[dict, str]:
-    """Verified ESPN first; optionally add only licensed LiveScore FT evidence.
+    """Use completed ESPN finals, then free German finals for missing matches.
 
-    A conflict stays explicitly ambiguous. Consumer CDN display observations
-    are never automatically promoted into official grading.
+    Only recent, explicitly completed, 90-minute results can enter the fast
+    lane. Consumer-CDN observations need a separate licence and never become
+    official outcomes by default. Broader recovery runs independently.
     """
     from leagues.licensed_livescore_settlement import (
         licensed_for_settlement, licensed_livescore_finals,
     )
-    from leagues.results_checker import _index_free_finals
+    from leagues.results_checker import _index_free_finals, _lookup_score
 
     scores, source = collect_recent_verified_finals(picks, now=now)
+    current = now or datetime.now(timezone.utc)
+    german_unresolved = []
+    for pick in picks:
+        if pick.get("status") in {"won", "lost", "void"}:
+            continue
+        kickoff = _utc_datetime(
+            pick.get("commence_time") or pick.get("kickoff") or pick.get("date")
+        )
+        if (kickoff is None or current < kickoff + timedelta(minutes=80)
+                or kickoff < current - timedelta(hours=_RECENT_HOURS)):
+            continue
+        date = kickoff.date().isoformat()
+        if _lookup_score(scores, pick.get("home_team", ""),
+                         pick.get("away_team", ""), date):
+            continue
+        slug = str(pick.get("league_slug") or "")
+        if not slug:
+            # Exact registered competition labels only; this also covers
+            # SportyBet manual tickets without a stored ESPN league slug.
+            from leagues.live_scores import infer_published_competition_slugs
+            slugs, unresolved = infer_published_competition_slugs([pick])
+            if unresolved == 0 and len(slugs) == 1:
+                slug = next(iter(slugs))
+        if slug in {"ger.1", "ger.2", "ger.3"}:
+            german_unresolved.append({**pick, "league_slug": slug})
+
+    if german_unresolved:
+        from services.openligadb_score_source import openligadb_finals
+        german = _index_free_finals(openligadb_finals(german_unresolved))
+        if german:
+            for key, observation in german.items():
+                old = scores.get(key)
+                if old and old.get("ambiguous"):
+                    continue
+                if old and (old.get("home_score"), old.get("away_score")) != (
+                        observation.get("home_score"), observation.get("away_score")):
+                    scores[key] = {"ambiguous": True}
+                elif not old:
+                    scores[key] = observation
+            source += "+openligadb-rapid"
+
     if not licensed_for_settlement():
         return scores, source
-    from leagues.results_checker import _lookup_score
     unresolved = [
         p for p in picks if not _lookup_score(
             scores, p.get("home_team", ""), p.get("away_team", ""),
