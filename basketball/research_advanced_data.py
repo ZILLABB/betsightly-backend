@@ -177,8 +177,24 @@ def _process(*, kind:str, season:int, fixtures:dict, loader=None,
     accepted, matched, rejected=[],set(),Counter()
     unique=set()
     for original in data:
-        normalized=(normalize_team if kind=="team" else normalize_player)(original,season=season)
-        if normalized is None:continue
+        try:
+            normalized=(normalize_team if kind=="team" else normalize_player)(
+                original,season=season)
+        except ValueError as exc:
+            # Source assets can contain invalid/incomplete numeric rows even
+            # for previously finalized fixtures. Exclude those rows, log the
+            # data-quality reason, and enforce minimum *paired* game coverage.
+            # Never guess possessions or scores to rescue an invalid row.
+            if "Unreasonable NBA possessions estimate" in str(exc):
+                rejected["unreasonable_possessions_estimate"]+=1
+                continue
+            if "Impossible NBA team shooting" in str(exc):
+                rejected["impossible_team_stat_line"]+=1
+                continue
+            raise
+        if normalized is None:
+            rejected["missing_playing_time_or_stat_fields"]+=1
+            continue
         fixture=fixtures.get(normalized["game_id"])
         if fixture is None or fixture["season"]!=season or fixture["status"]!="final":
             rejected["nonfinal_or_unmatched_fixture"]+=1
