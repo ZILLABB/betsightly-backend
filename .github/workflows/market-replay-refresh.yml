@@ -1,0 +1,51 @@
+name: Refresh football market replay evidence
+
+# Runs once on the reviewed workflow's introduction to this PR branch.
+# It generates immutable evidence artifacts for code review, without
+# changing the public production engine or any settled predictions.
+on:
+  push:
+    branches: [fix/market-replay-readiness-20261021]
+    paths: [.github/workflows/market-replay-refresh.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate-reviewed-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install historical replay dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas numpy scipy scikit-learn joblib
+      - name: Reproduce market probabilities from historical scored fixtures
+        run: python scripts/replay_market_evidence.py
+      - name: Verify all currently active markets have measured replay evidence
+        run: python scripts/check_market_replay.py
+      - name: Commit evidence to review branch only
+        shell: bash
+        run: |
+          git add data/replay/market_summary.json \
+            data/replay/calibration_buckets.json \
+            data/replay/league_market_summary.json \
+            data/replay/season_market_summary.json \
+            data/replay/recency_market_summary.json \
+            data/replay/replay_metadata.json
+          if git diff --cached --quiet; then
+            echo "Replay artifacts already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "data(replay): regenerate measured market evidence including Over 0.5"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

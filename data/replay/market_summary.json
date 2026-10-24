@@ -77,6 +77,58 @@
     "skill_vs_base_rate": 0.0543,
     "skill_vs_bookmaker": null
   },
+  "away_under_0_5": {
+    "actual": 0.3266,
+    "actual_95pct_ci": [
+      0.3247,
+      0.3284
+    ],
+    "base_rate": 0.3266,
+    "bookmaker_brier": null,
+    "bookmaker_n": 0,
+    "brier": 0.2114,
+    "calibration_error": -0.0049,
+    "derived_replay_sample_size": 93629,
+    "ece": 0.0091,
+    "fidelity": "MARKET_REPLAY+DERIVED_REPLAY",
+    "full_replay_sample_size": 0,
+    "log_loss": 0.6114,
+    "market_replay_sample_size": 154285,
+    "mce": 0.401,
+    "mean_bookmaker_overround": null,
+    "n": 247914,
+    "predicted": 0.3216,
+    "recent_2_seasons_n": 10500,
+    "recommended_state": "PROVISIONAL",
+    "skill_vs_base_rate": 0.0387,
+    "skill_vs_bookmaker": null
+  },
+  "away_under_1_5": {
+    "actual": 0.6825,
+    "actual_95pct_ci": [
+      0.6806,
+      0.6843
+    ],
+    "base_rate": 0.6825,
+    "bookmaker_brier": null,
+    "bookmaker_n": 0,
+    "brier": 0.205,
+    "calibration_error": -0.0115,
+    "derived_replay_sample_size": 93629,
+    "ece": 0.0155,
+    "fidelity": "MARKET_REPLAY+DERIVED_REPLAY",
+    "full_replay_sample_size": 0,
+    "log_loss": 0.5983,
+    "market_replay_sample_size": 154285,
+    "mce": 0.0405,
+    "mean_bookmaker_overround": null,
+    "n": 247914,
+    "predicted": 0.6709,
+    "recent_2_seasons_n": 10500,
+    "recommended_state": "PROVISIONAL",
+    "skill_vs_base_rate": 0.0543,
+    "skill_vs_bookmaker": null
+  },
   "away_win": {
     "actual": 0.2894,
     "actual_95pct_ci": [
@@ -337,6 +389,58 @@
     "skill_vs_base_rate": 0.0666,
     "skill_vs_bookmaker": null
   },
+  "home_under_0_5": {
+    "actual": 0.2336,
+    "actual_95pct_ci": [
+      0.2319,
+      0.2353
+    ],
+    "base_rate": 0.2336,
+    "bookmaker_brier": null,
+    "bookmaker_n": 0,
+    "brier": 0.1714,
+    "calibration_error": 0.0111,
+    "derived_replay_sample_size": 93629,
+    "ece": 0.0111,
+    "fidelity": "MARKET_REPLAY+DERIVED_REPLAY",
+    "full_replay_sample_size": 0,
+    "log_loss": 0.5217,
+    "market_replay_sample_size": 154285,
+    "mce": 0.3117,
+    "mean_bookmaker_overround": null,
+    "n": 247914,
+    "predicted": 0.2447,
+    "recent_2_seasons_n": 10500,
+    "recommended_state": "PROVISIONAL",
+    "skill_vs_base_rate": 0.0427,
+    "skill_vs_bookmaker": null
+  },
+  "home_under_1_5": {
+    "actual": 0.5673,
+    "actual_95pct_ci": [
+      0.5653,
+      0.5692
+    ],
+    "base_rate": 0.5673,
+    "bookmaker_brier": null,
+    "bookmaker_n": 0,
+    "brier": 0.2291,
+    "calibration_error": 0.0079,
+    "derived_replay_sample_size": 93629,
+    "ece": 0.0112,
+    "fidelity": "MARKET_REPLAY+DERIVED_REPLAY",
+    "full_replay_sample_size": 0,
+    "log_loss": 0.6498,
+    "market_replay_sample_size": 154285,
+    "mce": 0.0335,
+    "mean_bookmaker_overround": null,
+    "n": 247914,
+    "predicted": 0.5752,
+    "recent_2_seasons_n": 10500,
+    "recommended_state": "PROVISIONAL",
+    "skill_vs_base_rate": 0.0666,
+    "skill_vs_bookmaker": null
+  },
   "home_win": {
     "actual": 0.4453,
     "actual_95pct_ci": [
@@ -362,6 +466,32 @@
     "recommended_state": "PROVISIONAL",
     "skill_vs_base_rate": 0.0979,
     "skill_vs_bookmaker": -0.0
+  },
+  "over_0_5": {
+    "actual": 0.9209,
+    "actual_95pct_ci": [
+      0.9198,
+      0.922
+    ],
+    "base_rate": 0.9209,
+    "bookmaker_brier": null,
+    "bookmaker_n": 0,
+    "brier": 0.0724,
+    "calibration_error": 0.0065,
+    "derived_replay_sample_size": 93629,
+    "ece": 0.0065,
+    "fidelity": "MARKET_REPLAY+DERIVED_REPLAY",
+    "full_replay_sample_size": 0,
+    "log_loss": 0.2737,
+    "market_replay_sample_size": 154285,
+    "mce": 0.2722,
+    "mean_bookmaker_overround": null,
+    "n": 247914,
+    "predicted": 0.9274,
+    "recent_2_seasons_n": 10500,
+    "recommended_state": "PROVISIONAL",
+    "skill_vs_base_rate": 0.0055,
+    "skill_vs_bookmaker": null
   },
   "over_1_5": {
     "actual": 0.7384,
@@ -439,6 +569,58 @@
     "recent_2_seasons_n": 10500,
     "recommended_state": "PROVISIONAL",
     "skill_vs_base_rate": 0.0187,
+    "skill_vs_bookmaker": null
+  },
+  "over_4_5": {
+    "actual": 0.1323,
+    "actual_95pct_ci": [
+      0.131,
+      0.1337
+    ],
+    "base_rate": 0.1323,
+    "bookmaker_brier": null,
+    "bookmaker_n": 0,
+    "brier": 0.113,
+    "calibration_error": 0.0006,
+    "derived_replay_sample_size": 93629,
+    "ece": 0.0006,
+    "fidelity": "MARKET_REPLAY+DERIVED_REPLAY",
+    "full_replay_sample_size": 0,
+    "log_loss": 0.3832,
+    "market_replay_sample_size": 154285,
+    "mce": 0.0006,
+    "mean_bookmaker_overround": null,
+    "n": 247914,
+    "predicted": 0.1329,
+    "recent_2_seasons_n": 10500,
+    "recommended_state": "PROVISIONAL",
+    "skill_vs_base_rate": 0.016,
+    "skill_vs_bookmaker": null
+  },
+  "under_0_5": {
+    "actual": 0.0791,
+    "actual_95pct_ci": [
+      0.078,
+      0.0802
+    ],
+    "base_rate": 0.0791,
+    "bookmaker_brier": null,
+    "bookmaker_n": 0,
+    "brier": 0.0724,
+    "calibration_error": -0.0065,
+    "derived_replay_sample_size": 93629,
+    "ece": 0.0065,
+    "fidelity": "MARKET_REPLAY+DERIVED_REPLAY",
+    "full_replay_sample_size": 0,
+    "log_loss": 0.2737,
+    "market_replay_sample_size": 154285,
+    "mce": 0.0065,
+    "mean_bookmaker_overround": null,
+    "n": 247914,
+    "predicted": 0.0726,
+    "recent_2_seasons_n": 10500,
+    "recommended_state": "PROVISIONAL",
+    "skill_vs_base_rate": 0.0055,
     "skill_vs_bookmaker": null
   },
   "under_1_5": {
