@@ -67,3 +67,93 @@ def test_unknown_manual_market_stays_pending_even_with_verified_final():
     graded = grade_manual_slip(record, score, now=now)
     assert graded["result_status"] == "pending"
     assert graded["games"][0]["settlement_pending_reason"] == "UNSUPPORTED_MARKET"
+
+
+def test_live_event_identity_is_saved_then_only_real_fulltime_can_settle():
+    from leagues.editorial_live_link import collect_verified_manual_links
+
+    kickoff = "2026-10-21T16:45:00+00:00"
+    game = {
+        "match_id": "sportybet:sr:match:74165958",
+        "sportybet_event_id": "sr:match:74165958",
+        "league": "UEFA Champions League",
+        "home_team": "Como 1907", "away_team": "Man Utd",
+        "kickoff": kickoff, "market": "home_or_draw",
+    }
+    live = {
+        "espn-live": {
+            "source": "espn", "provider_event_id": "401915388",
+            "home_team": "Como", "away_team": "Manchester United",
+            "kickoff_utc": kickoff, "state": "in",
+            "home_score": 1, "away_score": 0,
+        }
+    }
+    calls = []
+    def read(slugs, day):
+        calls.append((slugs, day))
+        return live
+    now = datetime(2026, 10, 21, 17, 30, tzinfo=timezone.utc)
+    links = collect_verified_manual_links([game], now=now,
+                                          score_reader=read)
+    assert calls == [(["uefa.champions"], "20261021")]
+    assert links[game["match_id"]]["event_id"] == "401915388"
+    assert links[game["match_id"]]["score_verified"] is False
+
+    pending = grade_manual_slip({"games": [game]}, {}, now=now,
+                                observed_links=links)
+    assert pending["result_status"] == "pending"
+    assert pending["games"][0]["settlement_source_link"]["event_id"] == "401915388"
+
+    finished = {"espn:event:401915388": {
+        "home": "Como", "away": "Manchester United",
+        "home_score": 4, "away_score": 1, "date": "2026-10-21",
+        "league_slug": "uefa.champions", "provider": "espn",
+        "provider_event_id": "401915388",
+        "completed": True, "match_status": "STATUS_FULL_TIME",
+    }}
+    late = datetime(2026, 10, 22, 0, 0, tzinfo=timezone.utc)
+    result = grade_manual_slip(pending, finished, now=late)
+    assert result["games"][0]["status"] == "lost"
+    assert result["result_status"] == "lost"
+    assert result["games"][0]["settlement_evidence"]["provider"] == "espn"
+    assert result["games"][0]["settlement_source_link"]["event_id"] == "401915388"
+    assert grade_manual_slip(result, {}, now=late) == result
+
+
+def test_live_fixture_link_blocks_wrong_kickoff_and_wrong_team():
+    from leagues.editorial_live_link import collect_verified_manual_links
+    at = datetime(2026, 10, 21, 17, tzinfo=timezone.utc)
+    game = {
+        "match_id": "sportybet:sr:match:74165958",
+        "league": "UEFA Champions League",
+        "home_team": "Como 1907", "away_team": "Man Utd",
+        "kickoff": "2026-10-21T16:45:00Z", "market": "home_or_draw",
+    }
+    original = {
+        "provider_event_id": "401915388", "source": "espn",
+        "home_team": "Como", "away_team": "Manchester United",
+        "kickoff_utc": "2026-10-21T16:45:00Z", "state": "pre",
+    }
+    for wrong in [
+        {**original, "home_team": "Manchester United", "away_team": "Como"},
+        {**original, "home_team": "Como Women"},
+        {**original, "kickoff_utc": "2026-10-22T16:45:00Z"},
+    ]:
+        assert collect_verified_manual_links(
+            [game], now=at, score_reader=lambda *a: {"one": wrong}
+        ) == {}
+    correct = collect_verified_manual_links(
+        [game], now=at, score_reader=lambda *a: {"one": original}
+    )
+    pending = grade_manual_slip({"games": [game]}, {}, now=at,
+                                observed_links=correct)
+    conflicting = {"espn:event:401915388": {
+        "home": "Como", "away": "Manchester United",
+        "date": "2026-10-22", "league_slug": "uefa.champions",
+        "home_score": 4, "away_score": 1,
+    }}
+    result = grade_manual_slip(pending, conflicting,
+                               now=datetime(2026, 10, 22, 2,
+                                            tzinfo=timezone.utc))
+    assert result["result_status"] == "pending"
+    assert result["games"][0]["settlement_pending_reason"] == "AMBIGUOUS_FIXTURE"
