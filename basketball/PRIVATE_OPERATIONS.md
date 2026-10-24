@@ -320,3 +320,53 @@ snapshot, SQLite, forecasts, scores or model artifacts.
 Do not re-enable the hourly task based only on an idle result. Inspect
 `probe-scores` first. After a real exact-match probe, hourly checks can
 safely be enabled again; they will stay idle until another game starts.
+
+## Stage 2C — prospective calibration and sample-size controls (private)
+
+The independent read-only `prospective` command measures ONLY immutable
+pre-tipoff forecasts which have been settled by an exact-ID verified NBA
+final. It never mixes historical backtest predictions with the prospective
+cohort and does not require bookmaker prices, a key, subscription, stake or
+any extra Python package.
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+
+# Strictly read-only; inspect the local ledger without retraining
+.\.venv\Scripts\python.exe -m basketball.research_cli prospective
+
+# Compare score-source health, private predictions, and readiness
+.\.venv\Scripts\python.exe -m basketball.research_cli ledger
+.\.venv\Scripts\python.exe -m basketball.research_cli readiness
+```
+
+Restart the local dashboard after updating so it displays
+`Prospective research evaluation`. The read-only JSON API is
+`http://127.0.0.1:8767/api/prospective`. The original daily 18:00 WAT
+cycle and separate optional hourly score-only task remain unchanged.
+
+This report includes:
+- Settled and pending prospective forecasts, first/last paper times, and
+  real score-projector coverage.
+- Moneyline accuracy and descriptive Wilson 95% interval; Brier and log
+  loss. An **explicit constant 50% home-win forecast baseline** gives Brier
+  0.25000. Brier skill = `1 - Brier / 0.25`, positive is better than this
+  naïve baseline, not better than bookmaker odds.
+- Five *fixed, prespecified* calibration buckets, and empirical observed
+  home-win frequencies. ECE is hidden until **at least 100** settlements;
+  buckets with fewer than 20 observations are marked too small.
+- Rolling windows of latest 30 and 100 **settled** results, separate model
+  versions and total-points/home-margin errors and bias.
+- Integrity checks on original forecast SHA256, immutable JSON vs stored
+  fields, original creation and physical insertion timestamps relative
+  to tipoff, final score provenance, and recorded outcome.
+
+A failing integrity check yields `integrity_failed` and **withholds all
+model statistics** instead of silently excluding or editing compromised rows.
+
+The `review_ready` status after 100 settled games is an **early descriptive
+review checkpoint only**, not statistical proof, endorsement, bookmaker edge
+or monetization readiness. A genuine first prospective pregame forecast and
+its later verified score are still needed before nonempty real-world
+metrics can exist. Current five-game same-season warm-up gates remain.
