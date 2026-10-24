@@ -127,8 +127,8 @@ def test_bounded_recent_dates_and_partial_provider_errors():
 def test_score_only_updates_snapshot_and_settles_immutable_forecast(tmp_path):
     # Choose actual past times to satisfy immutable forecast validation.
     now = datetime.now(timezone.utc)
-    tipoff = now - timedelta(hours=1)
-    created = now - timedelta(hours=3)
+    tipoff = now + timedelta(minutes=30)
+    created = now - timedelta(minutes=1)
     day = tipoff.date().isoformat()
     source = {**scheduled(day=day), "start_utc": tipoff.isoformat(),
               "retrieved_at": now.isoformat()}
@@ -153,14 +153,15 @@ def test_score_only_updates_snapshot_and_settles_immutable_forecast(tmp_path):
         event["date"] = tipoff.isoformat()
         return {"events": [event]}
 
-    result = settle_once(home=tmp_path, now=now,
+    evaluation_time = now + timedelta(hours=4)
+    result = settle_once(home=tmp_path, now=evaluation_time,
                          loader=loader)
     assert result["scoreboard"]["verified_new_finals"] == 1
     assert result["settlement"]["newly_settled"] == 1
     assert result["performance"]["settled"] == 1
     assert result["models_retrained"] is False
     assert read_games(tmp_path / "nba_games.jsonl")[0]["status"] == "final"
-    again = settle_once(home=tmp_path, now=now, offline=True)
+    again = settle_once(home=tmp_path, now=evaluation_time, offline=True)
     assert again["settlement"]["newly_settled"] == 0
     assert again["performance"]["settled"] == 1
     assert (tmp_path / "scoreboard_health.json").is_file()
