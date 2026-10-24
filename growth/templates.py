@@ -736,7 +736,7 @@ def results(
             ]
             if manual_record.get("pending"):
                 lines.append(
-                    f"⏳ Pending: *{int(manual_record['pending'])}*"
+                    f"⏳ Unverified results: *{int(manual_record['pending'])}*"
                 )
             if manual_yesterday:
                 lines += ["", "*Yesterday's manual tickets*"]

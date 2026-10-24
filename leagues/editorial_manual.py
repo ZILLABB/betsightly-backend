@@ -216,6 +216,16 @@ def _current_bookable_games(requested: list[tuple[str, str]], board: dict,
             "model_probability_available": False,
             "model_sources": ["Admin curated · bookmaker verified"],
         }
+        # Record the supported ESPN competition at publication, when the
+        # bookmaker's league label resolves to exactly one VERIFIED slug.
+        # Unknown/ambiguous competitions are flagged, never guessed.
+        from leagues.live_scores import infer_published_competition_slugs
+        matched, unmapped = infer_published_competition_slugs([game])
+        if unmapped == 0 and len(matched) == 1:
+            game["league_slug"] = next(iter(matched))
+            game["score_competition_mapped"] = True
+        else:
+            game["score_competition_mapped"] = False
         games.append(game)
     return games
 
@@ -358,6 +368,22 @@ def preview(tier: str, lines: str, *, board=None, now=None,
     cross_tier_warnings = _check_exposure(
         games, card, bookings_for(day), manual, tier=tier,
     )
+    # Preview must be honest about score coverage. A verified *booking*
+    # code does not mean we can automatically verify a finished result.
+    settlement_warnings = [
+        {
+            "sportybet_event_id": g["sportybet_event_id"],
+            "fixture": f"{g['home_team']} vs {g['away_team']}",
+            "league": g["league"],
+            "reason": "NO_VERIFIED_SETTLEMENT_COMPETITION",
+            "message": (
+                "No unique verified ESPN scoreboard competition mapping. "
+                "This selection may remain pending until a licensed or "
+                "independently verified 90-minute final is available."
+            ),
+        }
+        for g in games if not g.get("score_competition_mapped")
+    ]
     total = round(prod(g["odds"] for g in games), 3)
     check_tier_target(tier, total, len(games))
     return {
@@ -370,6 +396,12 @@ def preview(tier: str, lines: str, *, board=None, now=None,
         "replaces_official_display": bool(replacement) if not inspection_only else False,
         "original_official_record_preserved": True,
         "cross_tier_warnings": cross_tier_warnings,
+        "settlement_source_warnings": settlement_warnings,
+        "settlement_source_coverage": {
+            "mapped": len(games) - len(settlement_warnings),
+            "unmapped": len(settlement_warnings),
+            "total": len(games),
+        },
     }
 
 def publish(tier: str, lines: str, *,
@@ -435,6 +467,8 @@ def publish(tier: str, lines: str, *,
         "replaces_official_display": bool(replacement),
         "original_official_record_preserved": True,
         "cross_tier_warnings": cross_tier_warnings,
+        "settlement_source_warnings": inspected.get("settlement_source_warnings") or [],
+        "settlement_source_coverage": inspected.get("settlement_source_coverage") or {},
     }
     with _engine().begin() as conn:
         _ensure(conn)

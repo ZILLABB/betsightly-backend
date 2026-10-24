@@ -1,0 +1,33 @@
+name: Admin Web Typecheck and Build
+
+on:
+  pull_request:
+    branches: [devil]
+    paths:
+      - "admin-web/**"
+      - ".github/workflows/admin-preview-ci.yml"
+  push:
+    branches: [devil]
+    paths:
+      - "admin-web/**"
+      - ".github/workflows/admin-preview-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-admin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: admin-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install admin dependencies without production credentials
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run admin contract tests and strict TypeScript build
+        run: npm run build

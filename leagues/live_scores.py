@@ -88,6 +88,7 @@ def _parse(event: dict) -> dict | None:
         "match_id": _match_id(home_name, away_name, commence),
         "kickoff_utc": _normalise_commence(commence),
         "source": "espn",
+        "provider_event_id": str(event.get("id") or ""),
         "home_team": home_name,
         "away_team": away_name,
         "home_score": score(home),

@@ -82,6 +82,30 @@ _VERIFIED_FINALS = (
         "date": "2026-10-16", "home_score": 0, "away_score": 0,
         "evidence_url": "https://ekstraklasa.org/en/schedule/2026-2027/round-11/",
     },
+    # Wednesday 21 October 2026 — UEFA official matchday 3 regulation-time
+    # finals. Bookmaker IDs and teams are from immutable production editorial
+    # records; official competition's results table corroborates each score.
+    # This is a ONE-TIME recovery for already-published slips, not a substitute
+    # for the continuous live fixture identity + FT reconciliation pipeline.
+    # The source URL is evidence, not an assertion of automated API rights.
+    *(
+        {
+            "sportybet_event_id": event, "home": home, "away": away,
+            "date": "2026-10-21", "home_score": hs, "away_score": vs,
+            "evidence_url": (
+                "https://www.uefa.com/uefachampionsleague/news/"
+                "02a8-2174c9e9019d-f909a77bd77a-1000--2026-27-champions-"
+                "league-all-the-league-phase-fixtures-a/"
+            ),
+        }
+        for event, home, away, hs, vs in (
+            ("sr:match:74165958", "Como 1907", "Man Utd", 4, 1),
+            ("sr:match:74165972", "Betis", "Feyenoord", 1, 0),
+            ("sr:match:74165968", "Inter", "Shakhtar D", 1, 0),
+            ("sr:match:74165960", "Lille", "Galatasaray Istanbul", 2, 4),
+            ("sr:match:74165974", "Sporting", "LASK Linz", 2, 3),
+        )
+    ),
     # Monday 19 October 2026 — existing admin-curated fixtures.
     # Exact immutable SportyBet IDs from editorial_tier_slips in production.
     # Independent league/club match reports confirm FT regulation scores.

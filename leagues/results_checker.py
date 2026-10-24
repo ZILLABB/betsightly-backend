@@ -468,8 +468,10 @@ def _collect_espn_scores_ranged(
                 if not score:
                     continue
                 hs, as_ = score["home_score"], score["away_score"]
-                payload = {"home": home, "away": away, "home_score": hs,
-                           "away_score": as_, "completed": True,
+                payload = {"home": home, "away": away,
+                           "date": (event.get("date") or "")[:10],
+                           "home_score": hs, "away_score": as_,
+                           "completed": True,
                            "provider": "espn", "provider_event_id": event.get("id"),
                            "league_slug": slug,
                            **{key: score.get(key) for key in (
@@ -477,6 +479,23 @@ def _collect_espn_scores_ranged(
                                "qualified_team", "match_status",
                            )}}
                 date = (event.get("date") or "")[:10]
+                # The permanent bookmaker->scoreboard bridge can resolve by
+                # a *verified* ESPN event ID even after provider display names
+                # change. Never grade from an in-play score; this index only
+                # contains explicitly completed FT/regulation observations.
+                event_id = str(event.get("id") or "")
+                if event_id.isdecimal() and len(event_id) <= 20:
+                    event_key = f"espn:event:{event_id}"
+                    old_event = finished.get(event_key)
+                    if old_event and (
+                        old_event.get("home_score") != hs
+                        or old_event.get("away_score") != as_
+                        or old_event.get("date") != date
+                        or old_event.get("league_slug") != slug
+                    ):
+                        finished[event_key] = {"ambiguous": True}
+                    elif not old_event:
+                        finished[event_key] = payload
                 dated_key = f"{_normalize_name(home)}|{_normalize_name(away)}|{date}"
                 prior = finished.get(dated_key)
                 if prior and prior.get("provider_event_id") != event.get("id"):
@@ -497,10 +516,22 @@ def _collect_espn_scores_ranged(
 
 
 def _known_score_slugs(picks: list[dict]) -> set[str] | None:
-    """Limit requests to published leagues only when every slug is known."""
+    """Resolve manual SportyBet competition labels via verified ESPN metadata.
+
+    Manual bookmaker receipts use a human league name, not an ESPN slug.
+    Previously one missing league_slug forced a 90+ competition sweep every
+    pass and left ordinary manual fixtures unmatched. Reuse the existing
+    strict, unique-name competition resolver rather than guessing by country.
+
+    If ANY competition cannot be unambiguously mapped, preserve the wider
+    fallback sweep for that batch: never omit a potential verified final.
+    """
+    from leagues.live_scores import infer_published_competition_slugs
+
     known = set(ESPN_LEAGUE_SLUGS.values())
-    slugs = {str(pick.get("league_slug") or "") for pick in picks}
-    return slugs if slugs and slugs <= known else None
+    inferred, unresolved = infer_published_competition_slugs(picks)
+    usable = inferred & known
+    return usable if usable and unresolved == 0 else None
 
 
 
@@ -854,6 +885,30 @@ _SETTLEMENT_TEAM_ALIASES = {
     "bodoe glimt": "bodo glimt",
     "al nassr club": "al nassr",
     "al ittihad club": "al ittihad",
+    # Independently corroborated SportyBet-vs-official scoreboard spellings.
+    # Never drop a women's/youth/reserve suffix or use fuzzy substring scores.
+    "man utd": "manchester united",
+    "man united": "manchester united",
+    "como 1907": "como",
+    "galatasaray istanbul": "galatasaray",
+    "1 union berlin": "union berlin",
+    "real betis": "betis",
+    "sporting cp": "sporting",
+    "shakhtar d": "shakhtar donetsk",
+    "losc lille": "lille",
+    "jong ajax amsterdam": "jong ajax",
+    "jong psv eindhoven": "jong psv",
+    "al hilal sfc": "al hilal",
+    "tottenham hotspur": "tottenham",
+    "sc telstar": "telstar",
+    "swansea city": "swansea",
+    "fc schalke 04": "schalke",
+    "schalke 04": "schalke",
+    "feyenoord rotterdam": "feyenoord",
+    "internazionale": "inter",
+    "internazionale milano": "inter",
+    "inter milan": "inter",
+    "real betis balompie": "betis",
 }
 
 
