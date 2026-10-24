@@ -236,7 +236,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "automate":
         from basketball.research_automation import run_automation
         result = run_automation(home=args.home, mode=args.mode,
-                                with_advanced=args.advanced)
+                                with_advanced=(args.advanced or
+                                               args.mode == "pregame"))
         print(json.dumps(result, indent=2, default=str))
         return 2 if result["status"] in ("degraded", "failed") else 0
     elif args.command == "reliability":
