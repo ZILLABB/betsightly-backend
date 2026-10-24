@@ -19,8 +19,24 @@ def write_scoreboard_health(home: str | Path, status: dict,
                             when: datetime) -> None:
     root = Path(home)
     path = root / "scoreboard_health.json"
+    # Retain evidence from the last actual network check across idle runs.
+    previous = {}
+    if path.is_file():
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(previous, dict):
+                previous = {}
+        except (ValueError, OSError):
+            previous = {}
+    last_checked = previous.get("last_actual_check_at")
+    last_check_status = previous.get("last_actual_check_status")
+    if status.get("dates_checked", 0) > 0:
+        last_checked = when.astimezone(timezone.utc).isoformat()
+        last_check_status = status.get("status")
     data = {
         **status, "checked_at": when.astimezone(timezone.utc).isoformat(),
+        "last_actual_check_at": last_checked,
+        "last_actual_check_status": last_check_status,
         "research_only": True,
     }
     temp = path.with_name(path.name + ".tmp")
@@ -70,10 +86,19 @@ def settle_once(*, home: str | Path = DEFAULT_HOME,
                   f"new_settlements={settled['newly_settled']} "
                   f"failures={len(health['failed_dates'])}")
         report = performance_report(db)
+    from basketball.research_score_diagnostics import inspect_recent
+    recent = inspect_recent(games, now=timestamp)
     return {
         "status": "research_only",
         "generated_at": timestamp.isoformat(),
         "scoreboard": health,
+        "recent_fixtures": {
+            "started_games": recent["started_games"],
+            "completed_finals": recent["completed_finals"],
+            "started_without_final": recent["started_without_final"],
+            "finals_by_source": recent["finals_by_source"],
+            "dates_awaiting_result": recent["dates_awaiting_result"],
+        },
         "settlement": settled, "performance": report,
         "models_retrained": False,
         "public_publishing_enabled": False,
