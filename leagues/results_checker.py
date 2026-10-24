@@ -497,10 +497,22 @@ def _collect_espn_scores_ranged(
 
 
 def _known_score_slugs(picks: list[dict]) -> set[str] | None:
-    """Limit requests to published leagues only when every slug is known."""
+    """Resolve manual SportyBet competition labels via verified ESPN metadata.
+
+    Manual bookmaker receipts use a human league name, not an ESPN slug.
+    Previously one missing league_slug forced a 90+ competition sweep every
+    pass and left ordinary manual fixtures unmatched. Reuse the existing
+    strict, unique-name competition resolver rather than guessing by country.
+
+    If ANY competition cannot be unambiguously mapped, preserve the wider
+    fallback sweep for that batch: never omit a potential verified final.
+    """
+    from leagues.live_scores import infer_published_competition_slugs
+
     known = set(ESPN_LEAGUE_SLUGS.values())
-    slugs = {str(pick.get("league_slug") or "") for pick in picks}
-    return slugs if slugs and slugs <= known else None
+    inferred, unresolved = infer_published_competition_slugs(picks)
+    usable = inferred & known
+    return usable if usable and unresolved == 0 else None
 
 
 
@@ -854,6 +866,25 @@ _SETTLEMENT_TEAM_ALIASES = {
     "bodoe glimt": "bodo glimt",
     "al nassr club": "al nassr",
     "al ittihad club": "al ittihad",
+    # Independently corroborated SportyBet-vs-official scoreboard spellings.
+    # Never drop a women's/youth/reserve suffix or use fuzzy substring scores.
+    "man utd": "manchester united",
+    "man united": "manchester united",
+    "como 1907": "como",
+    "galatasaray istanbul": "galatasaray",
+    "1 union berlin": "union berlin",
+    "real betis": "betis",
+    "sporting cp": "sporting",
+    "shakhtar d": "shakhtar donetsk",
+    "losc lille": "lille",
+    "jong ajax amsterdam": "jong ajax",
+    "jong psv eindhoven": "jong psv",
+    "al hilal sfc": "al hilal",
+    "tottenham hotspur": "tottenham",
+    "sc telstar": "telstar",
+    "swansea city": "swansea",
+    "fc schalke 04": "schalke",
+    "schalke 04": "schalke",
 }
 
 
