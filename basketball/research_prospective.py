@@ -120,7 +120,8 @@ def _score_errors(rows: list[dict]) -> dict:
 def _read_cohort(connection: sqlite3.Connection) -> tuple[list[dict], list[str]]:
     rows = connection.execute("""
         SELECT f.game_id, f.fixture_date, f.start_utc, f.created_at,
-               f.inserted_at, f.home_team, f.away_team, f.model_version,
+               f.inserted_at, f.home_team, f.away_team,
+               f.home_team_id, f.away_team_id, f.model_version,
                f.home_win_probability, f.expected_total_points,
                f.expected_home_margin, f.raw_json, f.sha256,
                s.home_score, s.away_score, s.home_won, s.recorded_at, s.source
