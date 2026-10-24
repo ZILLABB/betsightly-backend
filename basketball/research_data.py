@@ -20,6 +20,7 @@ SOURCE = "balldontlie:nba:v1"
 APPROVED_RESEARCH_SOURCES = frozenset({
     SOURCE, "sportsdataverse:espn_nba_schedules:v1",
     "espn:nba:scoreboard:v1",
+    "nba:official_live_cdn:scoreboard:v1",
 })
 FIELDS = (
     "game_id", "date", "season", "status", "home_id", "away_id",
