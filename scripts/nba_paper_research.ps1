@@ -10,7 +10,10 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $root
 $venvPython = Join-Path $root ".venv/Scripts/python.exe"
-$python = if (Test-Path $venvPython) { $venvPython } else { "python" }
+if (-not (Test-Path $venvPython)) {
+    throw "The isolated NBA Python environment is missing at $venvPython"
+}
+$python = $venvPython
 $repoMarker = Join-Path $root "basketball/research_cycle.py"
 if (-not (Test-Path $repoMarker)) {
     throw "Not an NBA research checkout. Use the isolated research branch."
@@ -22,7 +25,12 @@ if ($InstallSchedule) {
     $actionArgs = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '"'
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $actionArgs
     $trigger = New-ScheduledTaskTrigger -Daily -At $LocalTime
-    Register-ScheduledTask -TaskName "BetSightly NBA Paper Research" -Description "Private local NBA research: no bets or publishing" -Action $action -Trigger $trigger -Force | Out-Null
+    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew `
+        -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+    Register-ScheduledTask -TaskName "BetSightly NBA Paper Research" `
+        -Description "Private local NBA research: no bets or publishing" `
+        -Action $action -Trigger $trigger -Settings $settings -Force |
+        Out-Null
     Write-Host "Registered a LOCAL-only daily task for $LocalTime computer time."
     Write-Host "This task runs only when this Windows computer is available."
     exit 0
@@ -30,7 +38,8 @@ if ($InstallSchedule) {
 if ($ShowDashboard) {
     & $python -m basketball.research_cli dashboard
 } else {
-    & $python -m basketball.research_cli cycle --days-ahead 2
+    # Stage 2E serializes writes with hourly scoreboard and pregame jobs.
+    & $python -m basketball.research_cli automate --mode full
 }
 if ($LASTEXITCODE -ne 0) {
     throw "NBA research command failed (exit code $LASTEXITCODE)."
