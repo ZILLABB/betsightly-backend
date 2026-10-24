@@ -256,3 +256,51 @@ def test_dashboard_renders_sanitized_stage2e_job_health():
     assert "score:failed" in html
     assert "&lt;script&gt;x&lt;/script&gt;" in html
     assert "<script>x</script>" not in html
+
+
+def test_scheduled_failure_does_not_hide_behind_later_manual_success(tmp_path):
+    import json
+    run_automation(home=tmp_path, mode="pregame", now=NOW,
+                   season_fetcher=lambda years: ([], []),
+                   score_runner=fake_score,
+                   cycle_runner=fake_cycle)
+    # The manual receipt is not proof that Task Scheduler worked.
+    (tmp_path / "scheduled_pregame_attempt.json").write_text(
+        json.dumps({
+            "mode": "pregame", "scheduling": "windows_task_runner",
+            "started_at": (NOW-timedelta(minutes=10)).isoformat(),
+            "finished_at": (NOW-timedelta(minutes=9)).isoformat(),
+            "process_exit_code": 1, "status": "failed",
+            "local_only": True,
+        }), encoding="utf-8"
+    )
+    report=reliability_from_home(tmp_path,now=NOW)
+    assert "pregame:scheduled_failed" in report["issues"]
+    assert report["tasks"]["pregame"]["scheduled_attempt"]["exit_code"]==1
+
+
+def test_scheduled_score_busy_is_not_falsely_counted_as_settlement(tmp_path):
+    import json
+    (tmp_path / "scheduled_score_attempt.json").write_text(
+        json.dumps({
+            "mode": "score", "scheduling": "windows_task_runner",
+            "started_at": (NOW-timedelta(minutes=1)).isoformat(),
+            "finished_at": NOW.isoformat(),
+            "process_exit_code": 0, "status": "busy",
+            "local_only": True,
+        }), encoding="utf-8"
+    )
+    report=reliability_from_home(tmp_path,now=NOW)
+    assert report["tasks"]["score"]["status"]=="not_observed"
+    assert report["tasks"]["score"]["scheduled_attempt"]["status"]=="busy"
+    assert report["tasks"]["score"]["scheduled_attempt"]["performed_research"] is False
+    assert report["issues"]==[]
+
+
+def test_corrupted_scheduled_attempt_reports_issue_without_changing_main_receipt(
+    tmp_path
+):
+    (tmp_path / "scheduled_score_attempt.json").write_text("{broken")
+    report=reliability_from_home(tmp_path,now=NOW)
+    assert "score:scheduled_invalid" in report["issues"]
+    assert report["tasks"]["score"]["status"]=="not_observed"
