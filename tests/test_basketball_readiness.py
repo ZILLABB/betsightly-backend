@@ -158,3 +158,36 @@ def test_readiness_html_escapes_fixture_names_and_is_non_bookable():
 def test_horizon_rejects_outside_bounds(days):
     with pytest.raises(ValueError, match="horizon"):
         build_readiness(sample(), now=NOW, days_ahead=days)
+
+
+def test_started_fixture_is_not_counted_as_upcoming():
+    data = sample() + [
+        game(105, "2026-10-24", status="scheduled",
+             start="2026-10-24T08:00:00+00:00")
+    ]
+    report = build_readiness(data, now=NOW, model_cutoff="2026-10-23")
+    assert report["upcoming_fixtures"] == 2
+    assert report["started_unverified"] == 1
+    past = find(report, 105)
+    assert past["fixture_state"] == "started_unverified"
+    assert "started" in past["reasons"]
+    page = render_dashboard(
+        {"forecast_count": 0, "settled": 0, "pending": 0},
+        [], [], report,
+    )
+    assert "Started, awaiting verified final" in page
+    assert "STARTED · UNVERIFIED" in page
+
+
+def test_readiness_reads_latest_scoreboard_health(tmp_path):
+    write_games(sample(), tmp_path / "nba_games.jsonl")
+    status = {"status": "partial", "failed_dates": [{"date": "2026-10-24"}],
+              "research_only": True, "checked_at": NOW.isoformat()}
+    (tmp_path / "scoreboard_health.json").write_text(json.dumps(status))
+    report = readiness_from_home(tmp_path, now=NOW)
+    assert report["scoreboard"]["status"] == "partial"
+    page = render_dashboard(
+        {"forecast_count": 0, "settled": 0, "pending": 0},
+        [], [], report,
+    )
+    assert "Failed dates: 1" in page
