@@ -7,6 +7,7 @@ republication, gambling use or redistribution of raw provider data.
 from __future__ import annotations
 
 import csv
+from collections import Counter
 import hashlib
 import io
 from datetime import date, datetime, timezone
@@ -99,7 +100,29 @@ def normalize_schedule_row(raw: dict, requested_season: int,
     return game
 
 
-def read_release_csv(data: bytes, season: int, retrieved_at: str | None = None) -> list[dict]:
+def _excluded_regular_row(raw: dict) -> dict:
+    """Describe exactly why a source regular-season fixture was excluded.
+
+    Never substitute invented IDs, team names, or a guessed tipoff. Samples
+    include only published primitive identifiers/status and no private data.
+    """
+    invalid = [
+        key for key in ("game_id", "home_id", "away_id")
+        if not str(raw.get(key) or "").strip().isdecimal() or
+        int(str(raw.get(key) or "0").strip()) <= 0
+    ]
+    return {
+        "reason": "invalid_" + "_".join(invalid) if invalid else "unknown_rejection",
+        "game_date": str(raw.get("game_date") or "")[:10],
+        "game_id": str(raw.get("game_id") or "")[:32],
+        "home_id": str(raw.get("home_id") or "")[:32],
+        "away_id": str(raw.get("away_id") or "")[:32],
+        "source_status": str(raw.get("status_type_name") or "")[:40],
+    }
+
+
+def read_release_csv(data: bytes, season: int, retrieved_at: str | None = None,
+                     audit: dict | None = None) -> list[dict]:
     """Validate CSV header, provenance fields and schedule identities."""
     if len(data) > MAX_SEASON_BYTES:
         raise ValueError("NBA season CSV exceeds safety limit")
@@ -111,12 +134,18 @@ def read_release_csv(data: bytes, season: int, retrieved_at: str | None = None) 
     games = {}
     row_count = 0
     rejected_regular = 0
+    rejection_reasons = Counter()
+    rejected_examples = []
     for row in reader:
         row_count += 1
         parsed = normalize_schedule_row(row, season, timestamp)
         if parsed is None:
             if str(row.get("season_type", "")).strip() == "2":
                 rejected_regular += 1
+                detail = _excluded_regular_row(row)
+                rejection_reasons[detail["reason"]] += 1
+                if len(rejected_examples) < 20:
+                    rejected_examples.append(detail)
             continue
         before = games.get(parsed["game_id"])
         if before is not None:
@@ -137,6 +166,16 @@ def read_release_csv(data: bytes, season: int, retrieved_at: str | None = None) 
         raise ValueError(
             f"NBA season {season} has {rejected_regular} invalid regular-season "
             f"fixtures; exceeds 1% identity coverage budget")
+    if audit is not None:
+        audit.update({
+            "season": season,
+            "raw_rows": row_count,
+            "accepted_regular_fixtures": len(games),
+            "rejected_regular_rows": rejected_regular,
+            "rejection_reasons": dict(sorted(rejection_reasons.items())),
+            "excluded_examples": rejected_examples,
+            "not_a_complete_provider_schedule": rejected_regular > 0,
+        })
     if rejected_regular:
         print(f"NBA season {season}: excluded {rejected_regular} unidentifiable "
               "regular-season rows (no invented identities)", flush=True)
@@ -165,7 +204,8 @@ def fetch_public_seasons(seasons: list[int], timeout: int = 90) -> tuple[list[di
                 raw = response.read(MAX_SEASON_BYTES + 1)
         except (HTTPError, URLError, TimeoutError) as exc:
             raise RuntimeError(f"Public NBA season {season} unavailable: {exc}") from exc
-        games = read_release_csv(raw, season)
+        source_audit = {}
+        games = read_release_csv(raw, season, audit=source_audit)
         for g in games:
             prior = merged.get(g["game_id"])
             if prior and (prior["date"], prior["home_id"], prior["away_id"]) != (
@@ -177,5 +217,6 @@ def fetch_public_seasons(seasons: list[int], timeout: int = 90) -> tuple[list[di
             "sha256": hashlib.sha256(raw).hexdigest(),
             "bytes": len(raw), "regular_season_games": len(games),
             "final_games": sum(g["status"] == "final" for g in games),
+            "quality": source_audit,
         })
     return list(merged.values()), provenance
