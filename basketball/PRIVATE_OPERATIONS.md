@@ -724,3 +724,91 @@ pulling for these views. No public API or user traffic changes.
   benchmark may be limited by data reliability and survivorship.
 - SportsDataverse and NBA use terms/licenses requiring legal review for
   commercial gambling applications; keyless does not equal sublicensed.
+
+## Stage 4A–4C: source resilience, probabilistic market research, operations
+
+**This is a development batch, not public basketball launch approval.**
+The existing v1 football backend, locked v1 NBA prospective model and
+original NBA paper ledger remain independent and unmodified.
+
+### Windows one-pass operational acceptance
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+.\.venv\Scripts\python.exe -m pip install pyarrow pdfplumber
+# Real pregame and verified free score collection; no historical reset:
+.\.venv\Scripts\python.exe -m basketball.research_cli automate --mode pregame
+# Strictly accept every 2027 source independently, tolerate release absence:
+.\.venv\Scripts\python.exe -m basketball.research_cli refresh-current-advanced
+# If not done already, fetch complete historical training years, then build
+# separate 2027 shadow model. This CANNOT be refitted after shadow forecasts:
+.\.venv\Scripts\python.exe -m basketball.research_cli fetch-advanced --seasons 2024 2025 2026
+.\.venv\Scripts\python.exe -m basketball.research_cli advanced-build
+# Current injury identity status, market forward metrics and overall readiness:
+.\.venv\Scripts\python.exe -m basketball.research_cli injury-identity
+.\.venv\Scripts\python.exe -m basketball.research_cli market-evaluation
+.\.venv\Scripts\python.exe -m basketball.research_cli stage4-report
+```
+
+**Do not run** `advanced-build` again after a genuine 2027 pregame
+shadow record is saved. A fail-closed guard now blocks replacing that
+model's weights/paired error calibrator after the first forecast. The
+hourly pregame task continues recording eligible new shadow samples and
+settling final results separately; no direct public publishing or staking.
+
+### Market-probability research now available
+
+Full-game score total, home handicap margin, home team points and away
+team points are converted from advanced model **expected total and
+margin** to empirical probabilities using **paired 2026 validation
+residuals**. This preserves important dependence among totals, margins
+and each team's scores rather than independently inventing team scores.
+For illustration, full-game totals can be evaluated against 220.5,
+225.5 and 230.5; handicaps use -5.5, -2.5, 2.5 and 5.5; team totals
+use 107.5, 112.5 and 117.5. These are **fixed arbitrary research lines,
+NOT bookmaker markets or live odds**; probability buckets record
+above/below/push explicitly. Bookmaker edge and ROI are unknown.
+
+The 2026 validation residuals have already been inspected during
+development: **this is a frozen calibration input, not a fresh 2027
+out-of-time test**. Only new SHA-256-backed original 2027 pregame shadow
+records with later provider-verified finals appear in
+`market-evaluation` metrics. No claim of performance is allowed on
+fewer than 100 genuine nonpush forward samples.
+
+**First-half totals/spreads are intentionally BLOCKED.** The trusted
+score-source archive has no verified by-period pregame labels or
+cross-matched historical quarter-by-quarter score partitions. Player
+props and injury-adjusted odds also remain blocked without specific
+provider data/rights and dated bookmaker price or closing-line records.
+
+### Data and identity checks
+
+- `refresh-current-advanced` validates 2027 team and player assets
+  individually, reports `ready` only if both accepted, otherwise
+  `partial` or `blocked`. It refuses to substitute a different
+  season for a missing current file. Each accepted asset is staged
+  atomically, and failed downloads do not destroy existing data.
+- `injury-identity` attempts a **strict identical-team-name plus athlete
+  ID association**, with only unambiguous deterministic reordering of
+  official `Surname, Given` to ESPN `Given Surname`. It requires
+  2027 player files, a report actually downloaded before the requested
+  time and at most 12 hours old. Fuzzy, guessed and cross-team matches
+  are never accepted. Even successful exact ID matches are **NOT
+  sufficient** to claim complete official report/roster coverage; the
+  player-injury model feature remains disabled.
+- Stage 4 failures are visible in `stage4-report`, the read-only
+  localhost Atlantic dashboard `http://127.0.0.1:8767` and
+  `/api/stage4`, `/api/markets`. Restart the dashboard process after
+  pulling the code; no public endpoint or URL has been introduced.
+- Research source availability and no-API-key access are NOT clearance
+  for commercial redistribution or sportsbook publishing. Terms
+  review is required for ESPN/SportsDataverse and NBA reports.
+
+**Success criteria before Stage 5:** real 2027 advanced source
+availability, first genuinely pre-tipoff 2027 shadow market forecast,
+later verified exact fixture settlement, intact forecast SHA256, at least
+100 forward settlements for initial model review, no unresolved
+leakage/source corruption, and licensing + price data review for any
+eventual public product.
