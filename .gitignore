@@ -81,3 +81,7 @@ leagues/data/odds_budget.json
 data/historical/raw/
 data/historical/normalized/
 leagues/data/history_months/
+
+# NBA Stage 1 — private research data, trained models and immutable forecasts.
+# Keep this entire workspace out of public GitHub and production deploy images.
+data/basketball/research/
