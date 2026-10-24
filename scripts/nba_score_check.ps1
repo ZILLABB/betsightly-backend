@@ -11,8 +11,8 @@ if (-not (Test-Path $python) -or -not (Test-Path $marker)) {
     throw "NBA research environment not installed. Update the isolated research checkout."
 }
 if ($InstallSchedule) {
-    $args = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '"'
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $args
+    $actionArgs = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '"'
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $actionArgs
     $next = (Get-Date).Date.AddHours((Get-Date).Hour).AddMinutes(20)
     if ($next -le (Get-Date)) { $next = $next.AddHours(1) }
     $trigger = New-ScheduledTaskTrigger -Once -At $next `
