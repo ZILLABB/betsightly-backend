@@ -8,6 +8,7 @@ on:
     paths:
       - "basketball/research_*.py"
       - "tests/test_basketball_research.py"
+      - "tests/test_basketball_readiness.py"
       - ".github/workflows/nba-data-backtest.yml"
   workflow_dispatch:
 
@@ -85,6 +86,22 @@ jobs:
           assert result["new_forecasts"] <= result["eligible_forecasts"]
           assert Path("data/basketball/research/nba_paper.sqlite").exists()
           print("NBA paper cycle smoke check passed; no private forecasts were uploaded.")
+          PY
+      - name: Verify real future fixture readiness and source freshness
+        run: |
+          python -m basketball.research_cli readiness --days-ahead 7 > /tmp/nba-readiness.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("/tmp/nba-readiness.json").read_text())
+          assert report["status"] == "research_only"
+          assert report["snapshot"]["status"] == "fresh"
+          assert report["source_games"] > 6000
+          assert report["eligible_forecasts"] <= report["scheduled_fixtures"]
+          assert report["model"]["present"] is True
+          assert report["public_publishing_enabled"] is False
+          assert report["bookmaker_booking_enabled"] is False
+          print("NBA private fixture readiness smoke check passed.")
           PY
       - name: Save metrics and source hashes only (NO RAW DATA OR MODEL)
         uses: actions/upload-artifact@v4
