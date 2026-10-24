@@ -120,10 +120,9 @@ def build_readiness(
                 if not instant.date() <= match_day <= expiry.date():
                     continue
             elif not instant <= kickoff <= expiry:
-                # Already-started fixtures of the current UTC date are useful
-                # diagnostics, not valid forecasts; include today's fixtures.
-                if not (kickoff < instant and
-                        kickoff.date() == instant.date()):
+                # Keep the last 72h of started-but-unverified games visible
+                # for settlement health, but NEVER count them as upcoming.
+                if not (instant - timedelta(hours=72) <= kickoff < instant):
                     continue
 
             home = history[(game["season"], str(game["home_id"]))]
@@ -162,6 +161,10 @@ def build_readiness(
                 "home_prior_games": h_count, "away_prior_games": a_count,
                 "home_games_remaining": max(0, 5 - h_count),
                 "away_games_remaining": max(0, 5 - a_count),
+                "fixture_state": (
+                    "unknown_tipoff" if kickoff is None else
+                    "started_unverified" if kickoff <= instant else "upcoming"
+                ),
                 "feature_ready": not ({"home_warmup", "away_warmup", "postseason"}
                                      & set(reasons)),
                 "eligible": not reasons,
@@ -184,6 +187,12 @@ def build_readiness(
         "days_ahead": days_ahead, "snapshot": source,
         "source_games": len(games),
         "scheduled_fixtures": len(fixtures),
+        "upcoming_fixtures": sum(
+            f["fixture_state"] == "upcoming" for f in fixtures),
+        "started_unverified": sum(
+            f["fixture_state"] == "started_unverified" for f in fixtures),
+        "unknown_tipoff": sum(
+            f["fixture_state"] == "unknown_tipoff" for f in fixtures),
         "feature_ready": sum(f["feature_ready"] for f in fixtures),
         "eligible_forecasts": sum(f["eligible"] for f in fixtures),
         "blockers": dict(sorted(reasons.items())),
@@ -213,5 +222,14 @@ def readiness_from_home(home: str | Path, *, days_ahead: int = 7,
                                  model_exists=model_exists, model_cutoff=cutoff)
         report["snapshot"]["status"] = "invalid"
         return report
-    return build_readiness(games, now=now, days_ahead=days_ahead,
-                           model_exists=model_exists, model_cutoff=cutoff)
+    report = build_readiness(games, now=now, days_ahead=days_ahead,
+                             model_exists=model_exists, model_cutoff=cutoff)
+    score_file = path / "scoreboard_health.json"
+    if score_file.is_file():
+        try:
+            health = json.loads(score_file.read_text(encoding="utf-8"))
+            if isinstance(health, dict) and health.get("research_only") is True:
+                report["scoreboard"] = health
+        except (OSError, ValueError, TypeError):
+            report["scoreboard"] = {"status": "invalid"}
+    return report
