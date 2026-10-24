@@ -107,6 +107,27 @@ def grade_manual_slip(payload: dict, scores: dict, *, now=None,
     return updated
 
 
+def _pending_manual_query(dialect_name: str) -> str:
+    """Include historical unresolved legs: no silent 14-day settlement expiry.
+
+    Recent tickets are always included to preserve previous behavior. Older
+    terminal slips are skipped, but older *individual* pending legs must remain
+    eligible even if the accumulator already has a losing leg.
+    """
+    select = "SELECT publish_date,tier,detail FROM editorial_tier_slips "
+    if dialect_name == "postgresql":
+        return (
+            select +
+            "WHERE publish_date >= :earliest OR EXISTS ("
+            "SELECT 1 FROM jsonb_array_elements("
+            "COALESCE(detail::jsonb->'games', '[]'::jsonb)) AS g "
+            "WHERE COALESCE(g->>'status','pending')='pending'"
+            ") ORDER BY publish_date,tier"
+        )
+    # The local SQLite test database does not implement jsonb_array_elements.
+    return select + "ORDER BY publish_date,tier"
+
+
 def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None) -> dict:
     """Called from the background results cycle; never a public GET."""
     from database import engine
@@ -120,14 +141,14 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
         "due_legs": 0, "verified_final_matches": 0,
         "overdue_48h": 0, "unmapped_competitions": 0,
         "pending_reasons": {}, "score_source": "none",
-        "new_fixture_links": 0,
+        "new_fixture_links": 0, "historical_recovery_day": None,
     }
     try:
         with engine.connect() as conn:
-            rows = conn.execute(text(
-                "SELECT publish_date,tier,detail FROM editorial_tier_slips "
-                "WHERE publish_date >= :earliest ORDER BY publish_date,tier"
-            ), {"earliest": earliest}).all()
+            rows = conn.execute(
+                text(_pending_manual_query(conn.dialect.name)),
+                {"earliest": earliest},
+            ).all()
     except Exception as exc:
         # On a new deployment the table may not exist until the first manual
         # publication. Absence is not a reason to fail all settlement jobs.
@@ -135,8 +156,29 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
             return summary
         raise
 
+    # A vast historical backlog must never stretch each one-minute recent
+    # settlement run into a months-wide ESPN scoreboard request. Keep current
+    # 14-day work on every cycle; rotate through ONE older publish day once
+    # per 15 minutes as a separate verified-score collector batch.
+    older_days = sorted({
+        str(day) for day, _, raw in rows
+        if str(day) < earliest and any(
+            g.get("status") not in TERMINAL
+            for g in (json.loads(raw).get("games") or [])
+        )
+    })
+    archive_day = None
+    if older_days and current.astimezone(timezone.utc).minute % 15 == 0:
+        slot = int(current.timestamp()) // (15 * 60)
+        archive_day = older_days[slot % len(older_days)]
+    rows = [
+        item for item in rows
+        if str(item[0]) >= earliest or str(item[0]) == archive_day
+    ]
     queued = []
     checkable = []
+    checkable_recent = []
+    checkable_archive = []
     linkable = []
     for day, tier, raw in rows:
         record = json.loads(raw)
@@ -151,10 +193,16 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
             if kickoff and not game.get("settlement_source_link"):
                 linkable.append({**game, "date": game.get("date") or day})
             if kickoff and kickoff + timedelta(minutes=90) <= current:
-                checkable.append({**game, "date": game.get("date") or day})
+                candidate = {**game, "date": game.get("date") or day}
+                checkable.append(candidate)
+                if str(day) < earliest:
+                    checkable_archive.append(candidate)
+                else:
+                    checkable_recent.append(candidate)
 
     if not queued:
         return summary
+    summary["historical_recovery_day"] = archive_day
     scores = {}
     if checkable:
         from leagues.live_scores import infer_published_competition_slugs
@@ -166,10 +214,23 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
             1 for g in checkable
             if _kickoff(g) and _kickoff(g) + timedelta(hours=48) <= current
         )
-        scores, summary["score_source"] = (
-            score_collector(checkable) if score_collector is not None
-            else _collect_scores_for_picks(checkable, allow_fallback=allow_fallback)
-        )
+        sources = []
+        for batch in (checkable_recent, checkable_archive):
+            if not batch:
+                continue
+            observed, source = (
+                score_collector(batch) if score_collector is not None
+                else _collect_scores_for_picks(
+                    batch, allow_fallback=allow_fallback)
+            )
+            sources.append(source)
+            for key, evidence in observed.items():
+                prior = scores.get(key)
+                if prior and prior != evidence:
+                    scores[key] = {"ambiguous": True}
+                elif not prior:
+                    scores[key] = evidence
+        summary["score_source"] = "+".join(sources) if sources else "none"
         for g in checkable:
             found = _lookup_settlement_score(
                 scores, g.get("home_team", ""), g.get("away_team", ""),

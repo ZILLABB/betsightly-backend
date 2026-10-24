@@ -751,8 +751,25 @@ def results(
                         "over_1_5": "Mixed Overs", "rollover": "Rollover",
                     }.get(str(slip.get("tier") or ""), "Manual slip")
                     odds = float(slip.get("total_odds") or 0)
+                    # A manual ticket's status is the aggregate of its
+                    # independently graded selections. For older finished
+                    # fixtures, Pending means SCORE UNVERIFIED, not live.
+                    detail = ""
+                    if slip.get("status") == "pending":
+                        games = slip.get("games") or []
+                        verified = sum(
+                            g.get("status") in {"won", "lost", "void"}
+                            for g in games if isinstance(g, dict)
+                        )
+                        if games:
+                            detail = f" — {verified}/{len(games)} legs verified"
+                        if slip.get("score_verification_delayed"):
+                            mark = "⚠️"
+                            detail += " · final-score verification delayed"
+                        else:
+                            detail += " · awaiting verified finals"
                     lines.append(
-                        f"{mark} {label} ({odds:.2f}x)"
+                        f"{mark} {label} ({odds:.2f}x){detail}"
                     )
             lines.append(
                 "_Manual outcomes are tracked, but never train or "
