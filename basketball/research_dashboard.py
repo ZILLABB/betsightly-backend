@@ -70,18 +70,22 @@ def render_dashboard(report: dict, forecasts: list[dict],
     # All provider-supplied names/reasons are HTML-escaped before rendering.
     readiness_metrics = ""
     ready_rows = []
+    overdue_rows = []
+    scoreboard_note = "No scoreboard verification cycle has run yet."
     ready_note = "No verified fixture snapshot loaded; run the NBA research cycle."
     if readiness is not None:
         snapshot = readiness["snapshot"]
         age = snapshot.get("age_hours")
         age_label = "—" if age is None else f"{age:.1f}h ago"
         readiness_metrics = "".join([
-            metric("UPCOMING FIXTURES", readiness["scheduled_fixtures"],
+            metric("UPCOMING FIXTURES", readiness["upcoming_fixtures"],
                    f"Next {readiness['days_ahead']} days"),
             metric("FEATURE-READY", readiness["feature_ready"],
                    "Both teams have >=5 earlier finals"),
             metric("READY FOR PAPER", readiness["eligible_forecasts"],
                    "Pregame, fresh source and local model"),
+            metric("STARTED · UNVERIFIED", readiness["started_unverified"],
+                   "Past 72h, no confirmed final in local snapshot"),
             metric("SOURCE HEALTH", snapshot["status"].upper(), age_label),
         ])
         ready_note = (
@@ -91,13 +95,29 @@ def render_dashboard(report: dict, forecasts: list[dict],
             ". A stale/invalid snapshot blocks readiness; refresh using the "
             "local cycle. No bookmaker prices or betting signals are used."
         )
-        for game in readiness["fixtures"][:40]:
+        scoreboard = readiness.get("scoreboard")
+        if scoreboard:
+            scoreboard_note = (
+                "Recent score checks: " + str(scoreboard.get("status", "unknown")) +
+                " · Last checked: " + str(scoreboard.get("checked_at", "—")) +
+                " · Verified new finals: " +
+                str(scoreboard.get("verified_new_finals", 0)) +
+                " · Failed dates: " +
+                str(len(scoreboard.get("failed_dates") or [])) +
+                ". ESPN's scoreboard feed is unofficial and may be unavailable."
+            )
+        for game in readiness["fixtures"]:
+
             codes = game["reasons"]
             reason = ("Eligible for private paper forecasting" if not codes
                       else "; ".join(
                           readiness["reason_labels"].get(code, code)
                           for code in codes))
-            ready_rows.append(
+            target = (overdue_rows if game["fixture_state"] ==
+                      "started_unverified" else ready_rows)
+            if len(target) >= (20 if target is overdue_rows else 40):
+                continue
+            target.append(
                 "<tr><td><strong>" + _safe(game["home_team"]) +
                 "</strong> <span class='muted'>vs</span> " +
                 _safe(game["away_team"]) + "<small>" +
@@ -166,12 +186,22 @@ return. The public BetSightly app remains separate.</div>
 Only earlier completed regular-season games in the same season count.</p>
 <section class="stats">""" + readiness_metrics + """</section>
 <div class="notice">""" + _safe(ready_note) + """</div>
+<div class="notice">""" + _safe(scoreboard_note) + """</div>
 <div class="panel"><table>
 <thead><tr><th>NBA fixture</th><th>Start (UTC)</th><th>Home prior</th>
 <th>Away prior</th><th>Readiness</th><th>Why</th></tr></thead><tbody>""" + (
     "".join(ready_rows) if ready_rows else
     "<tr><td colspan='6'>No upcoming scheduled fixtures in the selected "
     "horizon. Inspect source health and the next data refresh.</td></tr>"
+) + """</tbody></table></div>
+<h2>Started, awaiting verified final</h2>
+<p>Games that have passed their scheduled tipoff in the past 72 hours but
+still lack an accepted final score. They are never pregame candidates.</p>
+<div class="panel"><table>
+<thead><tr><th>NBA fixture</th><th>Tipoff (UTC)</th><th>Home prior</th>
+<th>Away prior</th><th>Status</th><th>Why</th></tr></thead><tbody>""" + (
+    "".join(overdue_rows) if overdue_rows else
+    "<tr><td colspan='6'>No started-but-unverified games in the last 72h.</td></tr>"
 ) + """</tbody></table></div>
 <h2>Paper prediction ledger</h2><div class="panel"><table>
 <thead><tr><th>NBA fixture</th><th>Home ML probability</th>
