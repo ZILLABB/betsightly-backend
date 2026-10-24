@@ -29,10 +29,11 @@ def _kickoff(game: dict):
         return None
 
 
-def grade_manual_slip(payload: dict, scores: dict, *, now=None) -> dict:
+def grade_manual_slip(payload: dict, scores: dict, *, now=None,
+                      observed_links: dict | None = None) -> dict:
     """Pure and idempotent, with the official evaluator but separate storage."""
     from leagues.results_checker import (
-        _settlement_detail, _lookup_settlement_score,
+        _settlement_detail, _lookup_settlement_score, _normalize_name,
         _proposed_published_slip_status,
     )
 
@@ -46,11 +47,38 @@ def grade_manual_slip(payload: dict, scores: dict, *, now=None) -> dict:
             outcomes.append(game["status"])
             games.append(game)
             continue
-        match = _lookup_settlement_score(
-            scores, game.get("home_team", ""), game.get("away_team", ""),
-            str(game.get("commence_time") or game.get("kickoff") or
-                game.get("date") or "")[:10],
-        )
+        # This mapping comes from a separate, STRICT match of scoreboard
+        # home + away + kickoff + competition. Record its immutable event ID
+        # early; NEVER grade its live score or accept a changed claim.
+        match_id = str(game.get("match_id") or "")
+        if (not game.get("settlement_source_link") and observed_links
+                and match_id in observed_links):
+            game["settlement_source_link"] = observed_links[match_id]
+        link = game.get("settlement_source_link")
+        match = None
+        if isinstance(link, dict) and link.get("provider") == "espn":
+            final = scores.get(f"espn:event:{link.get('event_id')}")
+            if final:
+                kickoff = _kickoff(game)
+                # A linked final cannot settle a different fixture/date/league
+                # even if a provider reused or changed a fixture label.
+                valid = (
+                    not final.get("ambiguous")
+                    and kickoff is not None
+                    and final.get("date") == kickoff.date().isoformat()
+                    and final.get("league_slug") == link.get("source_competition")
+                    and _normalize_name(final.get("home") or "") ==
+                    _normalize_name(game.get("home_team") or "")
+                    and _normalize_name(final.get("away") or "") ==
+                    _normalize_name(game.get("away_team") or "")
+                )
+                match = final if valid else {"ambiguous": True}
+        if match is None:
+            match = _lookup_settlement_score(
+                scores, game.get("home_team", ""), game.get("away_team", ""),
+                str(game.get("commence_time") or game.get("kickoff") or
+                    game.get("date") or "")[:10],
+            )
         outcome, detail = _settlement_detail(game, match, now=current)
         game["status"] = outcome
         if outcome == "pending":
@@ -92,6 +120,7 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
         "due_legs": 0, "verified_final_matches": 0,
         "overdue_48h": 0, "unmapped_competitions": 0,
         "pending_reasons": {}, "score_source": "none",
+        "new_fixture_links": 0,
     }
     try:
         with engine.connect() as conn:
@@ -146,6 +175,16 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
             )
             if found and not found.get("ambiguous"):
                 summary["verified_final_matches"] += 1
+    # Save the scoreboard's stable event identity for future final-score
+    # reconciliation. Live-score observations cannot themselves win a leg.
+    links = {}
+    if checkable and score_collector is None:
+        try:
+            from leagues.editorial_live_link import collect_verified_manual_links
+            links = collect_verified_manual_links(checkable, now=current)
+        except Exception as exc:
+            LOG.warning("Manual live identity probe unavailable: %s",
+                        type(exc).__name__)
     reasons = Counter()
     for day, tier in queued:
         with engine.begin() as conn:
@@ -161,7 +200,8 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
             previous = json.loads(row)
             if not previous.get("games"):
                 continue
-            graded = grade_manual_slip(previous, scores, now=current)
+            graded = grade_manual_slip(previous, scores, now=current,
+                                       observed_links=links)
             if graded != previous:
                 conn.execute(text(
                     "UPDATE editorial_tier_slips SET detail=:payload "
@@ -169,6 +209,11 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
                 ), {"payload": json.dumps(graded), "d": day, "t": tier})
                 summary["legs_updated"] += sum(
                     a.get("status") != b.get("status")
+                    for a, b in zip(previous["games"], graded["games"])
+                )
+                summary["new_fixture_links"] += sum(
+                    not a.get("settlement_source_link")
+                    and bool(b.get("settlement_source_link"))
                     for a, b in zip(previous["games"], graded["games"])
                 )
         summary["slips_checked"] += 1
