@@ -107,6 +107,6 @@ def make_rows_v2(games: list[dict], min_prior: int = 5) -> list[dict]:
             })
     if len(enhanced) != len(baseline):
         raise ValueError("Candidate features lost previously eligible fixtures")
-    if len(FEATURE_COLUMNS) != len(baseline[0]["features"])+len(EXTRA_FEATURES) if baseline else False:
+    if baseline and len(FEATURE_COLUMNS) != len(baseline[0]["features"])+len(EXTRA_FEATURES):
         raise ValueError("Unexpected candidate feature schema")
     return [enhanced[str(row["game_id"])] for row in baseline]
