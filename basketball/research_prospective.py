@@ -65,11 +65,9 @@ def _calibration(rows: list[dict]) -> dict:
     for i in range(len(BUCKET_EDGES)-1):
         lo, hi = BUCKET_EDGES[i:i+2]
         sample = [
-            r for r in rows
-            if lo <= r["p"] <= hi if False
-        ] if False else [
-            r for r in rows if lo <= r["p"] < hi or
-            (i == len(BUCKET_EDGES)-2 and r["p"] == hi)
+            r for r in rows if
+            (lo <= r["p"] < hi or
+             (i == len(BUCKET_EDGES)-2 and r["p"] == hi))
         ]
         n = len(sample)
         avg_p = sum(r["p"] for r in sample)/n if n else None
@@ -142,6 +140,8 @@ def _read_cohort(connection: sqlite3.Connection) -> tuple[list[dict], list[str]]
             tipoff = _utc(r["start_utc"])
             if created >= tipoff or inserted >= tipoff:
                 raise ValueError("record created or inserted after tipoff")
+            if created > inserted:
+                raise ValueError("forecast created after insertion")
             if not math.isfinite(float(r["home_win_probability"])) or not (
                     0 <= float(r["home_win_probability"]) <= 1):
                 raise ValueError("invalid probability")
