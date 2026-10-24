@@ -7,6 +7,7 @@ Requires neither sportsbook odds nor a public deployment.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import sqlite3
 from collections import defaultdict
@@ -136,6 +137,42 @@ def _read_cohort(connection: sqlite3.Connection) -> tuple[list[dict], list[str]]
             digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
             if digest != r["sha256"]:
                 raise ValueError("raw payload SHA256 mismatch")
+            original = json.loads(content)
+            if not isinstance(original, dict):
+                raise ValueError("raw forecast is not an object")
+            for key, column in (
+                ("game_id", "game_id"),
+                ("date", "fixture_date"),
+                ("model_version", "model_version"),
+                ("home_team", "home_team"),
+                ("away_team", "away_team"),
+                ("home_team_id", "home_team_id"),
+                ("away_team_id", "away_team_id"),
+            ):
+                if str(original.get(key)) != str(r[column]):
+                    raise ValueError("hashed forecast field mismatch: " + key)
+            if _utc(original.get("start_utc")) != _utc(r["start_utc"]):
+                raise ValueError("hashed forecast tipoff mismatch")
+            if _utc(original.get("generated_at")) != _utc(r["created_at"]):
+                raise ValueError("hashed forecast creation mismatch")
+            if abs(float(original.get("home_win_probability")) -
+                   float(r["home_win_probability"])) > 0.000001:
+                raise ValueError("hashed probability mismatch")
+            for key, column in (
+                ("expected_total_points", "expected_total_points"),
+                ("expected_home_margin", "expected_home_margin"),
+            ):
+                a = original.get(key)
+                b = r[column]
+                if (a is None) != (b is None):
+                    raise ValueError("hashed score projection mismatch")
+                if a is not None and abs(float(a)-float(b)) > 0.000001:
+                    raise ValueError("hashed score projection mismatch")
+            if (original.get("research_only") is not True or
+                    original.get("not_for_betting") is not True or
+                    original.get("bookmaker_odds_verified") is not False or
+                    original.get("booking_code") is not None):
+                raise ValueError("hashed record violates private paper policy")
             created = _utc(r["created_at"])
             inserted = _utc(r["inserted_at"])
             tipoff = _utc(r["start_utc"])
