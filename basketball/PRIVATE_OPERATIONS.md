@@ -278,3 +278,45 @@ After `git pull`, run the usual
 all routes (ESPN site, ESPN CDN, NBA CDN). Do not interpret `status=ok`
 as a promise that every overdue game has been verified: always inspect
 `verified_new_finals` and the dashboard's started/unverified count.
+
+### Stage 2B follow-up — "ok" with 0 dates is not provider verification
+
+The user's 2026-10-24 local run reported `status=ok` with
+`dates_requested=0`, `dates_checked=0`, then left the hourly task disabled.
+The source selector asks only about **started games that are not already final**
+(or have unsettled forecasts). A previous run may have saved all recent finals.
+No network request on a subsequent cycle is normal; it does **not** prove
+that the ESPN/NBA providers are reachable or broken.
+
+Now `settle` clearly returns `status=idle`,
+`verification_performed=false` when there was nothing to check, and adds a
+brief `recent_fixtures` summary. The PowerShell task prints an explicit
+no-work message and returns success for idle (not a provider success claim).
+A `partial` provider check still fails loudly. Local
+`scoreboard_health.json` preserves last actual non-idle check timestamp.
+
+Two new, **read-only, no-write** commands explain this without retraining:
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+
+# Read saved final scores, source provenance and unresolved started fixtures
+.\.venv\Scripts\python.exe -m basketball.research_cli diagnose-scores
+
+# Independently request the latest locally finalized game's scoreboard day.
+# Accept success only when a provider final matches exact fixture identity.
+.\.venv\Scripts\python.exe -m basketball.research_cli probe-scores
+```
+
+For a known recent provider-local game date, append `--date 2026-10-23`
+(or another genuine date from `diagnose-scores`). The probe is limited to
+the past 14 days. A successful HTTP response with no exact final event is
+`no_exact_final_match`, **not** provider verification. The NBA CDN only
+supports its current live-scoreboard day, so its noncurrent date mismatch is
+expected, not evidence of an ESPN failure. The probe never mutates the local
+snapshot, SQLite, forecasts, scores or model artifacts.
+
+Do not re-enable the hourly task based only on an idle result. Inspect
+`probe-scores` first. After a real exact-match probe, hourly checks can
+safely be enabled again; they will stay idle until another game starts.
