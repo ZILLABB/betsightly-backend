@@ -185,6 +185,18 @@ def openligadb_finals(picks: list[dict]) -> list[dict]:
     targets: set[tuple[str, int, str]] = set()
     for pick in picks:
         slug = str(pick.get("league_slug") or "")
+        if not slug:
+            # SportyBet editorial cards usually store only the competition
+            # label; the whole pending production backlog lacks league_slug.
+            # Reuse the project's verified unique ESPN league-name mapping.
+            # Ambiguous labels (e.g. bare "Premier League") MUST NOT resolve.
+            try:
+                from leagues.live_scores import infer_published_competition_slugs
+                found, unresolved = infer_published_competition_slugs([pick])
+                if unresolved == 0 and len(found) == 1:
+                    slug = next(iter(found))
+            except (ValueError, TypeError, ImportError):
+                pass
         shortcut = LEAGUE_SHORTCUTS.get(slug)
         if shortcut is None:
             continue
