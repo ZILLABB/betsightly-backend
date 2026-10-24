@@ -256,7 +256,7 @@ def verify_finals(games: list[dict], finals: dict[str, dict]) -> tuple[list[dict
             **game, "status": "final",
             "home_score": result["home_score"],
             "away_score": result["away_score"],
-            "source": SCOREBOARD_SOURCE,
+            "source": result.get("source", SCOREBOARD_SOURCE),
             "retrieved_at": result["retrieved_at"],
         }
         _verify_game(by_id[ident])
@@ -305,11 +305,13 @@ def refresh_recent_finals(games: list[dict], *,
     Provider errors are explicit but do not erase an otherwise verified
     historical snapshot. Invalid identities/conflicting scores DO fail closed.
     """
+    injected_loader = loader is not None
     loader = loader or download_scoreboard
     dates = selected_dates(games, as_of, pending_dates=pending_dates)
     recovered = {}
     errors = []
     checked = 0
+    fallback_days = []
     for day in dates:
         try:
             raw = loader(day)
@@ -317,9 +319,38 @@ def refresh_recent_finals(games: list[dict], *,
                 raw, retrieved_at=as_of.astimezone(timezone.utc).isoformat())
         except (RuntimeError, HTTPError, URLError, TimeoutError, OSError,
                 ValueError, KeyError, TypeError) as exc:
+            # Real network fallback ONLY, not injected unit-test loaders.
+            # The NBA CDN is a DIFFERENT organization but uses different
+            # game/team IDs. Match by unique teams, date and near-equal UTC
+            # tipoff; never replace ESPN identities by assumed names alone.
+            if not injected_loader:
+                try:
+                    from basketball.research_nba_cdn import (
+                        download_nba_cdn, match_nba_cdn_finals,
+                    )
+                    official = download_nba_cdn(day)
+                    finals = match_nba_cdn_finals(
+                        official, day, games,
+                        retrieved_at=as_of.astimezone(timezone.utc).isoformat(),
+                    )
+                    fallback_days.append(day)
+                    checked += 1
+                    for ident, final in finals.items():
+                        if ident in recovered and recovered[ident] != final:
+                            raise ValueError("Conflicting recovered NBA finals")
+                        recovered[ident] = final
+                    continue
+                except (RuntimeError, HTTPError, URLError, TimeoutError,
+                        OSError, ValueError, KeyError, TypeError) as cdn_exc:
+                    detail = (
+                        str(exc)[:110] + "; nba_cdn:" +
+                        (str(cdn_exc)[:50] if isinstance(cdn_exc, RuntimeError)
+                         else type(cdn_exc).__name__)
+                    )
+            else:
+                detail = str(exc)[:160] if isinstance(exc, RuntimeError) else type(exc).__name__
             errors.append({"date": day, "error": type(exc).__name__,
-                           "detail": str(exc)[:160] if isinstance(exc, RuntimeError)
-                           else type(exc).__name__})
+                           "detail": detail[:180]})
             continue
         checked += 1
         for ident, final in finals.items():
@@ -332,9 +363,12 @@ def refresh_recent_finals(games: list[dict], *,
         "source": SCOREBOARD_SOURCE,
         "dates_requested": len(dates),
         "dates_checked": checked,
+        "official_nba_fallback_dates": fallback_days,
         "failed_dates": errors,
         **stats,
-        "verified_provider": "ESPN scoreboard (unofficial, keyless)",
+        "verified_provider": (
+            "ESPN scoreboard (unofficial) or official NBA live CDN"
+        ),
         "commercial_use_cleared": False,
     }
     return merged, summary
