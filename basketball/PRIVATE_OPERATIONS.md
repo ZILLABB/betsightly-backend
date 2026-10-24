@@ -513,3 +513,86 @@ per-mode receipts. The `/api/reliability` endpoint is read-only.
 inputs in CI; the first real pregame run must be verified on the user's
 Windows source/network, followed later by a real immutable before-tipoff
 forecast and a verified final. Models never publish to football production.
+
+## Stage 3A — larger batch: source audit + richer features + candidate comparisons
+
+This stage adds **several components in one isolated research batch** while
+leaving the immutable live paper ledger and locked v1 model unchanged.
+
+### Run both Stage 3A tasks together
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+
+# A: Source coverage, fixture IDs, rejected source placeholders
+.\.venv\Scripts\python.exe -m basketball.research_cli audit-data
+
+# B: Equal-cohort v1 vs experimental v2, including score projections
+.\.venv\Scripts\python.exe -m basketball.research_cli benchmark-v2
+```
+
+The benchmark saves only research metrics to
+`data/basketball/research/candidate_v2_benchmark.json`.
+It **does not** overwrite `nba_moneyline.joblib`, `nba_scores.joblib`,
+any forecast or settlement record; nor does it generate bookmaker codes.
+No new scheduled job is added. The comparison uses the same time-ordered
+training/validation/test fixture IDs and real labels for both models,
+selects regularization on validation only, evaluates the later test data
+once, and includes totals/home-margin regression error comparisons.
+
+Additional candidate-only score-derived features (each team separately):
+last-three-game point margin, recent scored+allowed totals, scoring and
+conceding variability, games played over four and six calendar days,
+back-to-back frequency, and recent-vs-previous margin trend. None reads
+the current game's final score or another game completed on the same
+date. The established **five earlier same-season completed games** gate
+remains.
+
+The report includes a preliminary research review threshold: candidate
+improves test Brier by at least `0.003`, has no worse log loss, and
+accuracy not down by more than one percentage point, on at least 500
+later test games. **Even a passing result does NOT promote the candidate**:
+out-of-season and prospective evaluation and data-rights review remain
+necessary. Historical accuracy remains distinct from wagering ROI.
+
+### Source exclusions and quality
+
+The importer now includes `quality` in each downloaded season's source
+manifest: raw rows, accepted regular-season fixture count, invalid-ID
+categories and up to 20 source-identifier/status examples. This explains
+cases like the six excluded rows in the 2027 file without manufacturing
+IDs or teams. The next successful pregame refresh updates
+`current_season_refresh.json`; `audit-data` reads that manifest and
+summarizes coverage by season, number of distinct observed team IDs,
+valid tipoff timestamps and source provenance.
+
+A CSV record excluded for missing team ID is **not automatically evidence
+that an actual scheduled NBA fixture was missed**. It may be a placeholder.
+Identities must be resolved through a trustworthy source before accepting
+additional fixtures.
+
+### Still blocked pending separate validated data and usage rights
+
+- **True pace and possessions:** cannot be computed from final scores alone.
+  Validated box-score FGA, FTA, offensive rebounds and turnovers, or
+  provider-documented possession counts, are needed before we may use
+  pace, offensive or defensive ratings.
+- **Injuries and player availability:** require a reliable report time,
+  athlete and team identity crosswalks, and pre-tipoff snapshots. Do not
+  train on injury statuses captured after a game's result.
+- **Travel distances:** require verified home/away venue addresses,
+  neutral-site classification, and actual travel chronology. Home-team
+  names alone do not prove physical location.
+- **Odds, lines, expected betting return:** no licensed historical pregame
+  bookmaker prices or timestamped markets exist in this stage.
+- **Commercial use:** SportsDataverse and ESPN availability does not grant
+  permission to republish or operate a gambling-facing data product.
+
+Research-source candidates include SportsDataverse's separate NBA team/
+player boxscore releases, its roster data and official NBA injury-report
+publication. These sources are leads for a separate provenance/licence
+assessment, **not** claimed authenticated, licensed or integrated today.
+
+All Stage 3A test fixtures are synthetic and separate from local paper
+research. The real-data comparison is run by the local benchmark command.
