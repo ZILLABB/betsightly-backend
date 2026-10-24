@@ -50,7 +50,14 @@ def _clock(now: datetime | None) -> datetime:
 
 
 def _snapshot_health(games: list[dict], now: datetime) -> dict:
-    stamps = [_timestamp(g.get("retrieved_at")) for g in games]
+    # The recent-score checker updates retrieval timestamps for final games.
+    # That must NOT disguise an old season-wide schedule as a fresh snapshot.
+    schedules = [
+        g for g in games
+        if g.get("source") == "sportsdataverse:espn_nba_schedules:v1"
+    ]
+    stamps = [_timestamp(g.get("retrieved_at"))
+              for g in (schedules if schedules else games)]
     valid = [stamp for stamp in stamps if stamp is not None]
     if not valid:
         return {"status": "unknown", "last_retrieved_at": None,
