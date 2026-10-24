@@ -133,3 +133,30 @@ def test_oct19_official_id_scoped_jong_psv_settles_ten_goal_ticket_loss():
     wrong_day = {**losing, "kickoff": "2026-10-18T18:00:00+00:00"}
     wrong_club = {**losing, "away_team": "Roda JC Kerkrade"}
     assert incident_finals([wrong_id, wrong_day, wrong_club]) == []
+
+
+def test_historical_pending_legs_are_not_dropped_from_settlement_queue():
+    from leagues.editorial_settlement import _pending_manual_query
+    postgres = _pending_manual_query("postgresql")
+    assert "publish_date >= :earliest OR EXISTS" in postgres
+    assert "COALESCE(g->>'status','pending')='pending'" in postgres
+    assert "ORDER BY publish_date,tier" in postgres
+
+    # SQLite local/test paths must remain executable.
+    from sqlalchemy import create_engine, text
+    db = create_engine("sqlite:///:memory:")
+    with db.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE editorial_tier_slips "
+            "(publish_date TEXT, tier TEXT, detail TEXT)"
+        ))
+        conn.execute(text(
+            "INSERT INTO editorial_tier_slips VALUES "
+            "('2026-09-01','5_odds','{\"games\":[{\"status\":\"pending\"}]}')"
+        ))
+        rows = conn.execute(
+            text(_pending_manual_query("sqlite")),
+            {"earliest": "2026-10-10"},
+        ).all()
+    assert len(rows) == 1
+    assert rows[0][0] == "2026-09-01"
