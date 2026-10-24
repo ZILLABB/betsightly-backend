@@ -14,6 +14,7 @@ from pathlib import Path
 from basketball.research_data import read_games, write_games
 from basketball.research_model import paper_forecasts, train_offline
 from basketball.research_public_data import fetch_public_seasons
+from basketball.research_score_only import write_scoreboard_health
 from basketball.research_scoreboard import (
     preserve_older_verified_finals, refresh_recent_finals,
 )
@@ -88,6 +89,7 @@ def run_cycle(
         # The snapshot remains atomic and validated. Provider failures
         # produce an explicit partial status, never a fabricated result.
         write_games(games, data_path)
+        write_scoreboard_health(root, score_health, timestamp)
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n",
                                  encoding="utf-8")
     score_model_path = root / "nba_scores.joblib"
