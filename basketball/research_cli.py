@@ -73,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
     cycle.add_argument("--retrain", action="store_true",
                        help="Explicitly refresh the prospective model only")
 
+    readiness = commands.add_parser(
+        "readiness", help="Read-only source health and upcoming fixture blockers")
+    readiness.add_argument("--home", type=Path,
+                           default=Path("data/basketball/research"))
+    readiness.add_argument("--days-ahead", type=int, default=7)
+
     ledger = commands.add_parser("ledger", help="Local research ledger performance")
     ledger.add_argument("--home", type=Path,
                         default=Path("data/basketball/research"))
@@ -130,6 +136,9 @@ def main(argv: list[str] | None = None) -> int:
         result = run_cycle(home=args.home, start_date=args.date,
                            days_ahead=args.days_ahead, seasons=args.seasons,
                            offline=args.offline, retrain=args.retrain)
+    elif args.command == "readiness":
+        from basketball.research_readiness import readiness_from_home
+        result = readiness_from_home(args.home, days_ahead=args.days_ahead)
     elif args.command == "ledger":
         from basketball.research_cycle import ledger_report
         result = ledger_report(home=args.home)
