@@ -61,7 +61,7 @@ def fake_cycle(*, home, now, offline=False, days_ahead=2):
 
 def test_local_lock_blocks_overlapping_research_jobs(tmp_path):
     with exclusive_local_run(tmp_path):
-        with pytest.raises(BlockingIOError, match="already active"):
+        with pytest.raises(BlockingIOError, match="task is active"):
             with exclusive_local_run(tmp_path):
                 pass
     with exclusive_local_run(tmp_path):
