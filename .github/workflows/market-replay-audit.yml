@@ -1,0 +1,57 @@
+name: Review football market replay evidence
+
+on:
+  pull_request:
+    branches: [devil]
+    paths:
+      - "scripts/replay_market_evidence.py"
+      - "leagues/historical_replay.py"
+      - "leagues/market_registry.py"
+      - "leagues/predictor.py"
+      - "tests/test_market_readiness_report.py"
+      - ".github/workflows/market-replay-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  replay-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install historical model dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Generate independent, chronological replay evidence
+        run: |
+          python scripts/replay_market_evidence.py \
+            --output data/replay-candidate --require-over05
+      - name: Display market coverage and missing benchmark warnings
+        if: always()
+        run: |
+          if test -f data/replay-candidate/market_readiness_report.json; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          j=json.loads(Path("data/replay-candidate/market_readiness_report.json").read_text())
+          for market,row in j["market_evidence"].items():
+              print(f"{market}: n={row['observations']} ECE(pp)={row['ece_pp']} benchmark={row['benchmark_coverage']}")
+          print("Missing replay:", j["missing_replay_markets"])
+          print("Evidence cannot authorize production promotion:", j["production_promotion_authorized"])
+          PY
+          fi
+      - name: Save evidence for manual comparison, NOT production publication
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: football-market-replay-candidate
+          path: data/replay-candidate/
+          if-no-files-found: warn
+          retention-days: 7
