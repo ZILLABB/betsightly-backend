@@ -140,3 +140,23 @@ not prospective performance, ROI or bookmaker-beating evidence.
 - A CI research cycle may run on an ephemeral GitHub-hosted runner for **smoke validation only**; its SQLite paper ledger is discarded and does **not** count as persistent prospective tracking.
 - To start *durable* prospective paper testing, run the script locally once and use `-InstallSchedule` only on the Windows PC where data/model files will persist. A computer that is powered off will miss its local scheduled run.
 - Until a private persistent machine has actually executed and retained a cycle, operational status is **READY FOR LOCAL ACTIVATION**, not actively running.
+
+## Stage 2A readiness diagnostics (private; code only)
+
+The local dashboard at http://127.0.0.1:8767 now displays upcoming scheduled NBA fixtures, same-season prior-final counts for both teams, explicit blocking reasons, and source age. Read-only JSON is at http://127.0.0.1:8767/api/readiness; neither endpoint downloads data, scores matches or creates bookmaker codes. The source is refreshed by the scheduled cycle, not by refreshing the browser.
+
+When your research checkout is updated, run:
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+.\.venv\Scripts\python.exe -m basketball.research_cli readiness --days-ahead 7
+```
+
+If the old dashboard is open, stop it with Ctrl+C, then restart:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\nba_paper_research.ps1 -ShowDashboard
+```
+
+The dashboard's READY label is **only pregame research eligibility**, never a recommendation to bet. Readiness uses a 36-hour maximum age for the snapshot and explicitly reports missing or invalid local snapshots. Existing immutable forecast rows and historical model results are not changed by diagnostics.
