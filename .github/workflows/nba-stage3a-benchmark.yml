@@ -1,0 +1,70 @@
+name: NBA Stage 3A Candidate Benchmark (private, no deployment)
+
+# Downloads only keyless publicly accessible schedules to an ephemeral runner.
+# Never publishes candidate predictions, creates bookmaker codes, or archives data.
+on:
+  pull_request:
+    paths:
+      - "basketball/research_features_v2.py"
+      - "basketball/research_candidate_v2.py"
+      - "basketball/research_quality_v2.py"
+      - "basketball/research_public_data.py"
+      - "basketball/research_features.py"
+      - "basketball/research_model.py"
+      - ".github/workflows/nba-stage3a-benchmark.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  head-to-head-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated research dependencies
+        run: python -m pip install scikit-learn==1.8.0 joblib
+      - name: Download authentic 2017-2027 NBA history (keyless)
+        run: |
+          python -m basketball.research_cli fetch-public \
+            --seasons 2017 2018 2019 2020 2021 2022 2023 2024 2025 2026 2027
+      - name: Audit source completeness and excluded records
+        run: |
+          python -m basketball.research_cli audit-data > /tmp/nba-stage3a-audit.json
+          python - <<'PY'
+          import json
+          data=json.load(open("/tmp/nba-stage3a-audit.json",encoding="utf-8"))
+          print("Authentic schedule games:",data["games"])
+          print("Completed regular games:",data["completed_regular_games"])
+          print("Rejected provider regular-season placeholders:",data["source_rejected_regular_rows"])
+          print("Season coverage:",sorted(data["seasons"]))
+          PY
+      - name: Compare locked v1 vs experimental v2 on identical chronological finals
+        run: |
+          python -m basketball.research_cli benchmark-v2 > /tmp/nba-stage3a-benchmark.json
+          python - <<'PY'
+          import json
+          m=json.load(open("/tmp/nba-stage3a-benchmark.json",encoding="utf-8"))
+          print("Status:",m["status"])
+          print("Test games:",m["untouched_test_games"])
+          print("Test period:",m["test_period"])
+          print("Baseline Brier:",m["incumbent_moneyline"]["test"]["brier"])
+          print("Candidate Brier:",m["candidate_moneyline"]["test"]["brier"])
+          print("Baseline accuracy:",m["incumbent_moneyline"]["test"]["accuracy"])
+          print("Candidate accuracy:",m["candidate_moneyline"]["test"]["accuracy"])
+          print("Paired Brier improvement:",m["paired_test_brier_improvement"])
+          print("Descriptive review gate:",m["review_gate"]["passes_descriptive_research_gate"])
+          assert m["promoted_to_live"] is False
+          assert m["prospective_predictions_created"] == 0
+          PY
+      - name: Cleanup ephemeral provider data and model outputs
+        if: always()
+        run: rm -rf data/basketball/research /tmp/nba-stage3a-*.json
