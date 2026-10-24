@@ -95,6 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
                        default=Path("data/basketball/research"))
     probe.add_argument("--date", help="Local provider game date; last 14 days")
 
+    prospective = commands.add_parser(
+        "prospective", help="Read-only real pregame NBA paper evaluation")
+    prospective.add_argument("--db", type=Path,
+                             default=Path("data/basketball/research/nba_paper.sqlite"))
+
     ledger = commands.add_parser("ledger", help="Local research ledger performance")
     ledger.add_argument("--home", type=Path,
                         default=Path("data/basketball/research"))
@@ -164,6 +169,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "probe-scores":
         from basketball.research_score_diagnostics import probe_source
         result = probe_source(args.home, day=args.date)
+    elif args.command == "prospective":
+        from basketball.research_prospective import prospective_report
+        result = prospective_report(args.db)
     elif args.command == "ledger":
         from basketball.research_cycle import ledger_report
         result = ledger_report(home=args.home)
