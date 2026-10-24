@@ -7,12 +7,16 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from basketball.research_data import read_games, write_games
 from basketball.research_model import paper_forecasts, train_offline
 from basketball.research_public_data import fetch_public_seasons
+from basketball.research_scoreboard import (
+    preserve_older_verified_finals, refresh_recent_finals,
+)
 from basketball.research_store import (
     DEFAULT_DB, latest_events, log_event, open_ledger, performance_report,
     save_forecasts, settle_forecasts,
@@ -52,10 +56,37 @@ def run_cycle(
     if first_date < timestamp.date() or first_date > timestamp.date() + timedelta(days=7):
         raise ValueError("Cannot construct a backdated or distant paper forecast")
     season_years = seasons or list(range(2017, timestamp.year + 2))
+    score_health = {
+        "status": "offline", "verified_new_finals": 0,
+        "dates_checked": 0, "failed_dates": [],
+    }
+    restored_historical_finals = 0
     if offline:
         games = read_games(data_path)
     else:
+        # Preserve already-verified finals: a delayed GitHub schedule update
+        # must not revert them to scheduled or silently change settled scores.
+        previous = read_games(data_path) if data_path.is_file() else []
         games, manifest = fetch_public_seasons(season_years)
+        games, restored_historical_finals = preserve_older_verified_finals(
+            games, previous)
+        # Recover unresolved private paper predictions, without creating
+        # a new SQLite database before the cycle's normal first-time setup.
+        pending_dates = []
+        ledger_path = root / "nba_paper.sqlite"
+        if ledger_path.is_file():
+            with sqlite3.connect(str(ledger_path), timeout=15) as old_db:
+                pending_dates = [
+                    r[0] for r in old_db.execute(
+                        "SELECT DISTINCT f.fixture_date FROM forecasts f "
+                        "LEFT JOIN settlements s ON s.game_id=f.game_id "
+                        "WHERE s.game_id IS NULL"
+                    ).fetchall()
+                ]
+        games, score_health = refresh_recent_finals(
+            games, as_of=timestamp, pending_dates=pending_dates)
+        # The snapshot remains atomic and validated. Provider failures
+        # produce an explicit partial status, never a fabricated result.
         write_games(games, data_path)
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n",
                                  encoding="utf-8")
@@ -110,6 +141,15 @@ def run_cycle(
                 eligible_dates.append(forecast_day)
                 existing.update(p["game_id"] for p in new_forecasts)
         settled = settle_forecasts(db, games)
+        if not offline:
+            log_event(
+                db, "scoreboard",
+                f"source={score_health['status']} "
+                f"checked={score_health['dates_checked']} "
+                f"new_finals={score_health['verified_new_finals']} "
+                f"restored={restored_historical_finals} "
+                f"failures={len(score_health['failed_dates'])}",
+            )
         log_event(
             db, "cycle", f"research_only train={trained} "
             f"fixtures={len(games)} eligible={candidates} "
@@ -122,6 +162,8 @@ def run_cycle(
             "score_models_retrained": score_trained,
             "eligible_forecasts": candidates,
             "new_forecasts": inserted, "new_dates": eligible_dates,
+            "scoreboard": score_health,
+            "restored_historical_finals": restored_historical_finals,
             "settlement": settled, "performance": performance_report(db),
             "next_action": ("Wait for enough earlier same-season games and "
                             "pregame fixtures; no synthetic picks."
