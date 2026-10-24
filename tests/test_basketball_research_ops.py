@@ -181,3 +181,23 @@ def test_private_nba_forecasts_are_excluded_from_public_git():
     root = Path(__file__).resolve().parents[1]
     ignore = (root / ".gitignore").read_text(encoding="utf-8")
     assert "data/basketball/research/" in ignore
+
+
+def test_cannot_backfill_paper_prediction_after_real_tipoff(tmp_path):
+    connection = open_ledger(tmp_path / "private.sqlite")
+    try:
+        now = datetime.now(timezone.utc)
+        past = now - timedelta(hours=2)
+        forged = valid_prediction()
+        forged["start_utc"] = past.isoformat()
+        forged["date"] = past.date().isoformat()
+        forged["generated_at"] = (now - timedelta(hours=3)).isoformat()
+        with pytest.raises(ValueError, match="after tipoff"):
+            save_forecasts(connection, [forged])
+        stale = valid_prediction()
+        stale["generated_at"] = (now - timedelta(hours=3)).isoformat()
+        with pytest.raises(ValueError, match="stale/backdated"):
+            save_forecasts(connection, [stale])
+        assert performance_report(connection)["forecast_count"] == 0
+    finally:
+        connection.close()
