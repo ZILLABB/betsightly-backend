@@ -194,6 +194,14 @@ def _process(*, kind:str, season:int, fixtures:dict, loader=None,
             if str(exc).startswith("Invalid NBA box score "):
                 rejected["incomplete_or_invalid_provider_stats"]+=1
                 continue
+            if kind=="player" and str(exc) in (
+                "Invalid NBA athlete ID","Invalid NBA team ID",
+                "Missing NBA athlete name"
+            ):
+                # Published player releases may carry unnamed/non-rostered
+                # placeholders; never create fake athlete identifiers.
+                rejected["invalid_player_identity"]+=1
+                continue
             raise
         if normalized is None:
             rejected["missing_playing_time_or_stat_fields"]+=1
