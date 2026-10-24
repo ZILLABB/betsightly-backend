@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from basketball.research_readiness import readiness_from_home
 from basketball.research_store import (
     DEFAULT_DB, latest_events, list_forecasts, open_ledger,
     performance_report,
@@ -26,7 +27,7 @@ def _percent(value: float | None) -> str:
 
 
 def render_dashboard(report: dict, forecasts: list[dict],
-                     events: list[dict]) -> str:
+                     events: list[dict], readiness: dict | None = None) -> str:
     """Server-rendered and escaped HTML, no tracking or external dependencies."""
     metric = lambda name, value, note: (
         '<div class="metric"><small>' + _safe(name) + '</small>'
@@ -65,6 +66,49 @@ def render_dashboard(report: dict, forecasts: list[dict],
             _safe(score) + "</td><td>" + _safe(correct) + "</td><td>" +
             _safe(label) + "</td></tr>"
         )
+    # The readiness panel examines source fixtures, not just saved forecasts.
+    # All provider-supplied names/reasons are HTML-escaped before rendering.
+    readiness_metrics = ""
+    ready_rows = []
+    ready_note = "No verified fixture snapshot loaded; run the NBA research cycle."
+    if readiness is not None:
+        snapshot = readiness["snapshot"]
+        age = snapshot.get("age_hours")
+        age_label = "—" if age is None else f"{age:.1f}h ago"
+        readiness_metrics = "".join([
+            metric("UPCOMING FIXTURES", readiness["scheduled_fixtures"],
+                   f"Next {readiness['days_ahead']} days"),
+            metric("FEATURE-READY", readiness["feature_ready"],
+                   "Both teams have >=5 earlier finals"),
+            metric("READY FOR PAPER", readiness["eligible_forecasts"],
+                   "Pregame, fresh source and local model"),
+            metric("SOURCE HEALTH", snapshot["status"].upper(), age_label),
+        ])
+        ready_note = (
+            "Last data retrieval: " +
+            str(snapshot.get("last_retrieved_at") or "not available") +
+            ". Source: " + ", ".join(snapshot.get("source") or ["not available"]) +
+            ". A stale/invalid snapshot blocks readiness; refresh using the "
+            "local cycle. No bookmaker prices or betting signals are used."
+        )
+        for game in readiness["fixtures"][:40]:
+            codes = game["reasons"]
+            reason = ("Eligible for private paper forecasting" if not codes
+                      else "; ".join(
+                          readiness["reason_labels"].get(code, code)
+                          for code in codes))
+            ready_rows.append(
+                "<tr><td><strong>" + _safe(game["home_team"]) +
+                "</strong> <span class='muted'>vs</span> " +
+                _safe(game["away_team"]) + "<small>" +
+                _safe(game["date"]) + " · " +
+                _safe(game["game_id"]) + "</small></td><td>" +
+                _safe(game["start_utc"]) + "</td><td>" +
+                _safe(game["home_prior_games"]) + " / 5</td><td>" +
+                _safe(game["away_prior_games"]) + " / 5</td><td>" +
+                _safe("READY" if game["eligible"] else "BLOCKED") +
+                "</td><td>" + _safe(reason) + "</td></tr>"
+            )
     history_rows = "".join(
         "<li><time>" + _safe(event["occurred_at"]) + "</time> " +
         _safe(event["kind"]) + ": " + _safe(event["message"]) + "</li>"
@@ -117,6 +161,18 @@ No actual bookmaker prices, codes or stakes are accepted.</p>
 evidence of profitable betting. Historical model accuracy is not a wagering
 return. The public BetSightly app remains separate.</div>
 <section class="stats">""" + metrics + """</section>
+<h2>Upcoming NBA readiness</h2>
+<p>Fixtures are scored for eligibility without generating or editing a forecast.
+Only earlier completed regular-season games in the same season count.</p>
+<section class="stats">""" + readiness_metrics + """</section>
+<div class="notice">""" + _safe(ready_note) + """</div>
+<div class="panel"><table>
+<thead><tr><th>NBA fixture</th><th>Start (UTC)</th><th>Home prior</th>
+<th>Away prior</th><th>Readiness</th><th>Why</th></tr></thead><tbody>""" + (
+    "".join(ready_rows) if ready_rows else
+    "<tr><td colspan='6'>No upcoming scheduled fixtures in the selected "
+    "horizon. Inspect source health and the next data refresh.</td></tr>"
+) + """</tbody></table></div>
 <h2>Paper prediction ledger</h2><div class="panel"><table>
 <thead><tr><th>NBA fixture</th><th>Home ML probability</th>
 <th>Expected total</th><th>Expected home margin</th><th>Verified score</th><th>Correct</th><th>Status</th></tr></thead><tbody>""" + (
@@ -141,7 +197,8 @@ def make_handler(db_path: Path):
                 self.send_error(403, "Loopback Host only")
                 return
             route = urlsplit(self.path).path
-            if route not in {"/", "/api/summary", "/api/fixtures"}:
+            if route not in {"/", "/api/summary", "/api/fixtures",
+                             "/api/readiness"}:
                 self.send_error(404)
                 return
             connection = open_ledger(db_path)
@@ -152,12 +209,17 @@ def make_handler(db_path: Path):
             finally:
                 connection.close()
             if route == "/":
-                payload = render_dashboard(report, rows, events).encode("utf-8")
+                readiness = readiness_from_home(db_path.parent)
+                payload = render_dashboard(
+                    report, rows, events, readiness).encode("utf-8")
                 mime = "text/html; charset=utf-8"
             else:
-                value = ({"performance": report, "research_only": True}
-                         if route == "/api/summary"
-                         else {"fixtures": rows, "research_only": True})
+                if route == "/api/summary":
+                    value = {"performance": report, "research_only": True}
+                elif route == "/api/readiness":
+                    value = readiness_from_home(db_path.parent)
+                else:
+                    value = {"fixtures": rows, "research_only": True}
                 payload = json.dumps(value).encode("utf-8")
                 mime = "application/json; charset=utf-8"
             self.send_response(200)
