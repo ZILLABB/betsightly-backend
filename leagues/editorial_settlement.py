@@ -207,8 +207,22 @@ def editorial_result_history(*, limit=30) -> dict:
     slips = []
     for day, tier, raw in rows:
         item = json.loads(raw)
+        outstanding = [g for g in (item.get("games") or [])
+                       if g.get("status") not in TERMINAL]
+        now = datetime.now(timezone.utc)
+        old_unverified = sum(
+            1 for g in outstanding if _kickoff(g)
+            and _kickoff(g) + timedelta(hours=6) < now
+        )
+        reasons = Counter(
+            g.get("settlement_pending_reason") or "FINAL_SCORE_UNVERIFIED"
+            for g in outstanding
+        )
         slips.append({
             "date": day, "tier": tier,
+            "score_verification_delayed": old_unverified > 0,
+            "overdue_unverified_legs": old_unverified,
+            "pending_reason_counts": dict(reasons),
             "status": item.get("result_status") or "pending",
             "settled_at": item.get("settled_at"),
             "games": [
