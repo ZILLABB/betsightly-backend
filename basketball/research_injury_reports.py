@@ -225,7 +225,8 @@ def parse_pdf_players(data:bytes)->tuple[list[dict],dict]:
         "status":"parsed" if de_duped else "unparsed",
         "reason":None if de_duped else "no_exact_column_rows",
         "recognized_player_rows":len(de_duped),
-        "teams_not_yet_submitted":incomplete,
+        "teams_not_yet_submitted":incomplete if incomplete else None,
+        "submission_completeness_verified":False,
         "partial_report_possible":True,
     }
 
