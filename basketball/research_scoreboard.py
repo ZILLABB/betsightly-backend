@@ -258,6 +258,7 @@ def verify_finals(games: list[dict], finals: dict[str, dict]) -> tuple[list[dict
             "away_score": result["away_score"],
             "source": result.get("source", SCOREBOARD_SOURCE),
             "retrieved_at": result["retrieved_at"],
+            "verification_provider_game_id": result.get("provider_game_id"),
         }
         _verify_game(by_id[ident])
         changed += 1
