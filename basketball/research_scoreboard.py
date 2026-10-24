@@ -9,12 +9,14 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from basketball.research_data import _verify_game
 
 SCOREBOARD_SOURCE = "espn:nba:scoreboard:v1"
 BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+CDN_URL = "https://cdn.espn.com/core/nba/scoreboard"
 MAX_RESPONSE_BYTES = 4_000_000
 MAX_DATES = 12
 MAX_GAME_AGE_DAYS = 14
@@ -138,28 +140,84 @@ def parse_scoreboard(payload: dict, *, retrieved_at: str) -> dict[str, dict]:
     return result
 
 
-def download_scoreboard(day: str, *, timeout: int = 15) -> dict:
-    date.fromisoformat(day)
-    if not 1 <= timeout <= 60:
-        raise ValueError("Invalid NBA scoreboard timeout")
-    # Fixed HTTPS authority and path, controlled YYYYMMDD query only.
-    url = BASE_URL + "?dates=" + day.replace("-", "") + "&seasontype=2&limit=100"
+def _fetch_json(url: str, *, expected_host: str, timeout: int) -> dict:
+    """Only fixed, HTTPS NBA score hosts; bounded and URL-safe diagnostics."""
     request = Request(url, headers={
-        "User-Agent": "BetSightlyNBAPrivateResearch/1.0",
+        "User-Agent": "Mozilla/5.0 (compatible; BetSightlyPrivateNBAResearch/1.0)",
         "Accept": "application/json",
     })
     try:
         with urlopen(request, timeout=timeout) as response:
-            if response.url.split("?")[0] != BASE_URL:
-                raise ValueError("Unexpected ESPN scoreboard redirect")
+            arrived = urlsplit(response.geturl())
+            if arrived.scheme != "https" or arrived.hostname != expected_host:
+                raise ValueError("UNEXPECTED_REDIRECT_HOST")
             if int(response.headers.get("Content-Length") or 0) > MAX_RESPONSE_BYTES:
-                raise ValueError("ESPN scoreboard response size exceeded")
+                raise ValueError("RESPONSE_TOO_LARGE")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
         if len(raw) > MAX_RESPONSE_BYTES:
-            raise ValueError("ESPN scoreboard response size exceeded")
-        return json.loads(raw)
-    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError("NBA scoreboard unavailable for " + day) from exc
+            raise ValueError("RESPONSE_TOO_LARGE")
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError("NON_OBJECT_JSON")
+        return payload
+    except HTTPError as exc:
+        raise RuntimeError(f"HTTP_{exc.code}") from exc
+    except URLError as exc:
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, TimeoutError):
+            error = "TIMEOUT"
+        elif isinstance(reason, OSError) and getattr(reason, "errno", None) in (
+                11001, -2, -3):
+            error = "DNS_ERROR"
+        else:
+            error = "NETWORK_ERROR"
+        raise RuntimeError(error) from exc
+    except (TimeoutError, OSError) as exc:
+        raise RuntimeError("TRANSPORT_ERROR") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("INVALID_JSON") from exc
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def _cdn_scoreboard(payload: dict) -> dict:
+    # ESPN's CDN exposes the site-scoreboard shape under sbData; accept
+    # either a dict or a JSON-encoded dict, never infer score fields.
+    body = payload.get("sbData")
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("CDN_INVALID_SBDATA") from exc
+    if not isinstance(body, dict) or not isinstance(body.get("events"), list):
+        raise RuntimeError("CDN_MISSING_EVENTS")
+    return body
+
+
+def download_scoreboard(day: str, *, timeout: int = 15) -> dict:
+    """Try site API then CDN. Both are ESPN; neither is a second provider."""
+    date.fromisoformat(day)
+    if not 1 <= timeout <= 60:
+        raise ValueError("Invalid NBA scoreboard timeout")
+    day_arg = day.replace("-", "")
+    primary = BASE_URL + "?dates=" + day_arg + "&seasontype=2&limit=100"
+    cdn = CDN_URL + "?xhr=1&date=" + day_arg + "&seasontype=2"
+    errors = []
+    for transport, url, host in (
+            ("site", primary, "site.api.espn.com"),
+            ("cdn", cdn, "cdn.espn.com")):
+        try:
+            payload = _fetch_json(url, expected_host=host, timeout=timeout)
+            if transport == "cdn":
+                payload = _cdn_scoreboard(payload)
+            if not isinstance(payload.get("events"), list):
+                raise RuntimeError("MISSING_EVENTS")
+            return payload
+        except RuntimeError as exc:
+            # Status and failure category are safe to log. Do NOT log raw
+            # responses, query strings or any provider-controlled HTML.
+            errors.append(f"{transport}:{str(exc)[:50]}")
+    raise RuntimeError("SCOREBOARD_UNAVAILABLE " + "; ".join(errors))
 
 
 def verify_finals(games: list[dict], finals: dict[str, dict]) -> tuple[list[dict], dict]:
@@ -259,7 +317,9 @@ def refresh_recent_finals(games: list[dict], *,
                 raw, retrieved_at=as_of.astimezone(timezone.utc).isoformat())
         except (RuntimeError, HTTPError, URLError, TimeoutError, OSError,
                 ValueError, KeyError, TypeError) as exc:
-            errors.append({"date": day, "error": type(exc).__name__})
+            errors.append({"date": day, "error": type(exc).__name__,
+                           "detail": str(exc)[:160] if isinstance(exc, RuntimeError)
+                           else type(exc).__name__})
             continue
         checked += 1
         for ident, final in finals.items():
