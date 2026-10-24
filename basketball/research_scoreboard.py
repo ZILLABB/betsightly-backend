@@ -360,7 +360,9 @@ def refresh_recent_finals(games: list[dict], *,
             recovered[ident] = final
     merged, stats = verify_finals(games, recovered)
     summary = {
-        "status": "partial" if errors else "ok",
+        # No date to fetch is healthy inactivity, NOT proof a provider works.
+        "status": "idle" if not dates else ("partial" if errors else "ok"),
+        "verification_performed": checked > 0,
         "source": SCOREBOARD_SOURCE,
         "dates_requested": len(dates),
         "dates_checked": checked,
