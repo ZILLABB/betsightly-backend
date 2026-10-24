@@ -358,6 +358,51 @@ def reliability_from_home(home: str | Path, *,
             }
         except (ValueError, TypeError, KeyError, OSError, OverflowError):
             tasks[mode] = {"status": "invalid", "age_hours": None}
+    # Windows wrappers have their own receipts. A task can return exit 0
+    # because a shared lock was busy; in that case automation_score.json
+    # correctly remains unchanged. Also, a later manual success must NOT
+    # hide an earlier scheduled failure. These separate facts are needed.
+    scheduled_issues = []
+    for mode in ("pregame", "score"):
+        attempt_path = root / f"scheduled_{mode}_attempt.json"
+        if not attempt_path.is_file():
+            tasks[mode]["scheduled_attempt"] = {"status": "not_observed"}
+            continue
+        try:
+            attempt = json.loads(attempt_path.read_text(encoding="utf-8-sig"))
+            if (not isinstance(attempt, dict) or
+                    attempt.get("mode") != mode or
+                    attempt.get("scheduling") != "windows_task_runner" or
+                    attempt.get("local_only") is not True):
+                raise ValueError("Invalid scheduled task attempt")
+            started = datetime.fromisoformat(attempt["started_at"])
+            finished = datetime.fromisoformat(attempt["finished_at"])
+            if (started.tzinfo is None or finished.tzinfo is None or
+                    started > finished or finished > instant + timedelta(minutes=5)):
+                raise ValueError("Invalid scheduler attempt clock")
+            elapsed = (instant - finished.astimezone(timezone.utc)).total_seconds()/3600
+            raw_status = str(attempt["status"])
+            exit_code = int(attempt["process_exit_code"])
+            if raw_status not in ("succeeded", "idle", "busy", "degraded",
+                                  "failed", "unparsed_output"):
+                raise ValueError("Unexpected scheduler attempt result")
+            tasks[mode]["scheduled_attempt"] = {
+                "status": raw_status,
+                "finished_at": finished.astimezone(timezone.utc).isoformat(),
+                "age_hours": round(elapsed, 2),
+                "exit_code": exit_code,
+                "performed_research": raw_status not in ("busy", "failed",
+                                                         "unparsed_output"),
+            }
+            if exit_code != 0 or raw_status in ("failed", "degraded", "unparsed_output"):
+                scheduled_issues.append(f"{mode}:scheduled_{raw_status}")
+            elif raw_status == "busy":
+                tasks[mode]["scheduled_attempt"]["note"] = (
+                    "Skipped due to active NBA job; regular research receipt unchanged"
+                )
+        except (ValueError, TypeError, KeyError, OSError, OverflowError):
+            tasks[mode]["scheduled_attempt"] = {"status": "invalid"}
+            scheduled_issues.append(f"{mode}:scheduled_invalid")
     return {
         "status": "research_only",
         "generated_at": instant.isoformat(),
@@ -367,7 +412,7 @@ def reliability_from_home(home: str | Path, *,
             for mode in MODES
             if tasks[mode]["status"] in ("degraded", "failed",
                                          "stale", "clock_skew", "invalid")
-        ],
+        ] + scheduled_issues,
         "local_only": True, "no_writes": True,
         "public_publishing_enabled": False,
     }
