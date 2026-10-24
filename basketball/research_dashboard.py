@@ -213,6 +213,12 @@ def render_dashboard(report: dict, forecasts: list[dict],
             metric("INJURY PLAYER ROWS",
                    (injuries or {}).get("player_rows",0),
                    "Never backfilled to past match outcomes"),
+            metric("ADVANCED SHADOW FORECASTS",
+                   advanced.get("shadow_forecasts",0),
+                   "Independent, pre-tipoff only"),
+            metric("ADVANCED VERIFIED FINALS",
+                   advanced.get("shadow_verified_settlements",0),
+                   "No sportsbook odds used"),
         ])
         advanced_note = (
             "Season assets are research-only; genuine possession estimates "
