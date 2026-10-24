@@ -25,9 +25,13 @@ foreach ($name in $expected.Keys) {
         [string]$_.Execute + " " + [string]$_.Arguments
     }) -join " "
     $scriptName = $expected[$name]
-    $matchesExpected = $actionText -like ("*" + $scriptName + "*")
+    $expectedScriptPath = Join-Path (Join-Path $root "scripts") $scriptName
+    $matchesExpected = $actionText.IndexOf(
+        $expectedScriptPath, [StringComparison]::OrdinalIgnoreCase
+    ) -ge 0
     if (-not $matchesExpected) {
-        throw "Task action mismatch for $name. Do not repair an unrecognized task."
+        throw "Task action points outside this NBA checkout: $name. " +
+              "Do not repair an unrecognized task. Expected $expectedScriptPath"
     }
     $before = Get-ScheduledTaskInfo -TaskName $name
     if ($Repair) {
