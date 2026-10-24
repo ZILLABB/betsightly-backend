@@ -3,7 +3,8 @@
 OpenLigaDB is free, keyless, community-maintained (ODbL 1.0).
 Use only *finished* fixtures with an explicit 90-minute full-time result.
 Never synthesize odds, create prediction candidates, or grade cup/tie scores.
-Provider: https://api.openligadb.de/ (60 req/min/IP; cached here for 30 min).
+Provider: https://api.openligadb.de/ (bounded requests; cached for 5 min).
+The shorter cache makes a newly reported full-time result visible in rapid settlement.
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ LEAGUE_SHORTCUTS = {
     # Kept for forward compatibility if ger.3 is added to the competition registry.
     "ger.3": "bl3",
 }
-_CACHE_TTL = 30 * 60
+_CACHE_TTL = 5 * 60
 _FAILURE_TTL = 2 * 60
 _CACHE: dict[tuple[str, int], tuple[float, list[dict]]] = {}
 _LOCK = threading.Lock()
@@ -185,6 +186,14 @@ def openligadb_finals(picks: list[dict]) -> list[dict]:
     targets: set[tuple[str, int, str]] = set()
     for pick in picks:
         slug = str(pick.get("league_slug") or "")
+        if not slug:
+            # Editorial SportyBet slips often retain only the league label.
+            # Resolve an exact, unique registered competition name; never
+            # infer a country or division from a team name.
+            from leagues.live_scores import infer_published_competition_slugs
+            inferred, unresolved = infer_published_competition_slugs([pick])
+            if unresolved == 0 and len(inferred) == 1:
+                slug = next(iter(inferred))
         shortcut = LEAGUE_SHORTCUTS.get(slug)
         if shortcut is None:
             continue
