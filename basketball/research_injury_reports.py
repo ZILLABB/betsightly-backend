@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.error import URLError,HTTPError
 from urllib.parse import urljoin,urlsplit
 from urllib.request import Request,urlopen
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 REPORT_PAGE="https://official.nba.com/nba-injury-report-2026-27-season/"
 PDF_PREFIX="https://ak-static.cms.nba.com/referee/injury/"
@@ -52,8 +52,18 @@ def _datetime_from_name(url:str)->datetime|None:
     if not 1<=h<=12 or int(mm)>59:return None
     hour=h%12+(12 if ampm.upper()=="PM" else 0)
     try:
+        # On Windows, Python's zoneinfo usually needs the separately
+        # installed IANA tzdata wheel. Never guess a UTC offset: NBA PDF
+        # filenames are in Eastern Time and DST rules can change.
+        eastern = ZoneInfo("America/New_York")
+    except ZoneInfoNotFoundError as exc:
+        raise RuntimeError(
+            "NBA injury archive needs the IANA timezone database. "
+            "Install into this project's venv: python -m pip install tzdata"
+        ) from exc
+    try:
         local=datetime.fromisoformat(f"{day}T{hour:02d}:{mm}:00").replace(
-            tzinfo=ZoneInfo("America/New_York"))
+            tzinfo=eastern)
         return local.astimezone(timezone.utc)
     except ValueError:
         return None
