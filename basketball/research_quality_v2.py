@@ -41,21 +41,50 @@ def audit_games(games: list[dict], manifest: list[dict] | None = None) -> dict:
         }
         for year,data in sorted(seasons.items())
     }
-    manifest=manifest or []
-    excluded={
-        str(entry["season"]):entry.get("quality",{})
-        for entry in manifest if isinstance(entry,dict) and "season" in entry
+    manifest = manifest or []
+    excluded = {}
+    for entry in manifest:
+        if not isinstance(entry, dict) or "season" not in entry:
+            continue
+        quality = entry.get("quality")
+        excluded[str(entry["season"])] = (
+            quality if isinstance(quality, dict) and
+            isinstance(quality.get("rejected_regular_rows"), int) and
+            quality["rejected_regular_rows"] >= 0 else None
+        )
+    # Older manifests predate the exclusion audit. Never turn missing
+    # provenance into a false measurement of zero rejected fixtures.
+    audited = {
+        season: record for season, record in excluded.items()
+        if record is not None
     }
+    missing = [
+        season for season in sorted(seasons)
+        if str(season) not in audited
+    ]
     return {
         "status":"research_only","phase":"stage_3a_dataset_audit",
         "games":base["games"],
         "completed_regular_games":base["completed_regular_games"],
         "v1_eligible_training_rows":base["eligible_model_rows"],
         "seasons":summary,
-        "season_source_audits":excluded,
-        "source_rejected_regular_rows":sum(
-            item.get("rejected_regular_rows",0)
-            for item in excluded.values()
+        "season_source_audits": excluded,
+        "source_audit_provenance": (
+            "complete" if not missing else
+            "partial" if audited else "not_recorded"
+        ),
+        "source_audited_seasons": sorted(audited),
+        "source_unaudited_seasons": missing,
+        "source_rejected_regular_rows_known": sum(
+            item["rejected_regular_rows"] for item in audited.values()
+        ),
+        "source_rejected_regular_rows": (
+            sum(item["rejected_regular_rows"] for item in audited.values())
+            if len(audited) == len(seasons) else None
+        ),
+        "source_rejected_regular_rows_note": (
+            "null means one or more season source manifests predate the "
+            "exclusion audit; it does not establish zero rejected rows"
         ),
         "unavailable_inputs":{
             "true_possessions_and_pace":"requires validated box-score possessions",
@@ -85,9 +114,22 @@ def audit_home(home:str|Path) -> dict:
         if isinstance(payload,dict):
             recent=payload.get("source_manifest") or []
             if isinstance(recent,list):
-                by_season={m.get("season"):m for m in manifests
-                           if isinstance(m,dict)}
-                by_season.update({m.get("season"):m for m in recent
-                                  if isinstance(m,dict)})
-                manifests=list(by_season.values())
+                by_season = {
+                    m.get("season"): m for m in manifests
+                    if isinstance(m, dict) and "season" in m
+                }
+                for record in recent:
+                    if not isinstance(record, dict) or "season" not in record:
+                        continue
+                    prior = by_season.get(record["season"])
+                    # Prefer latest source metadata once it includes the new
+                    # audit; retain older validated quality if the latest
+                    # local record still predates that feature.
+                    prior_quality = ((prior or {}).get("quality") or {})
+                    current_quality = record.get("quality") or {}
+                    if (not isinstance(current_quality.get("rejected_regular_rows"), int)
+                            and isinstance(prior_quality.get("rejected_regular_rows"), int)):
+                        record = {**record, "quality": prior_quality}
+                    by_season[record["season"]] = record
+                manifests = list(by_season.values())
     return audit_games(games, manifests)
