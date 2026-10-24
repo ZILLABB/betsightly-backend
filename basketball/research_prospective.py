@@ -10,6 +10,7 @@ import hashlib
 import math
 import sqlite3
 from collections import defaultdict
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -179,7 +180,7 @@ def prospective_report(db_path: str | Path) -> dict:
             "bookmaker_odds_verified": False, "betting_roi": None,
         }
     uri = path.resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=5) as db:
+    with closing(sqlite3.connect(uri, uri=True, timeout=5)) as db:
         db.row_factory = sqlite3.Row
         # Never call open_ledger; that performs DDL and schema upgrades.
         rows, errors = _read_cohort(db)
