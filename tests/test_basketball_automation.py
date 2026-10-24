@@ -260,11 +260,14 @@ def test_dashboard_renders_sanitized_stage2e_job_health():
 
 def test_scheduled_failure_does_not_hide_behind_later_manual_success(tmp_path):
     import json
-    run_automation(home=tmp_path, mode="pregame", now=NOW,
-                   season_fetcher=lambda years: ([], []),
-                   score_runner=fake_score,
-                   cycle_runner=fake_cycle)
-    # The manual receipt is not proof that Task Scheduler worked.
+    (tmp_path / "automation_pregame.json").write_text(
+        json.dumps({
+            "mode": "pregame", "research_only": True,
+            "status": "succeeded", "checked_at": NOW.isoformat(),
+            "details": {"source_attempts": 1},
+        }), encoding="utf-8"
+    )
+    # The manual success receipt is not proof that Task Scheduler worked.
     (tmp_path / "scheduled_pregame_attempt.json").write_text(
         json.dumps({
             "mode": "pregame", "scheduling": "windows_task_runner",
@@ -275,6 +278,7 @@ def test_scheduled_failure_does_not_hide_behind_later_manual_success(tmp_path):
         }), encoding="utf-8"
     )
     report=reliability_from_home(tmp_path,now=NOW)
+    assert report["tasks"]["pregame"]["status"]=="succeeded"
     assert "pregame:scheduled_failed" in report["issues"]
     assert report["tasks"]["pregame"]["scheduled_attempt"]["exit_code"]==1
 
