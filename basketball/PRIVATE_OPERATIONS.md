@@ -890,3 +890,64 @@ For 24/7 verification regardless of whether the laptop is on, a
 separate always-on host is required, with an isolated private research
 data store and schedule/credential protections. Do not reuse or expose
 the public football production SQLite or prediction endpoints.
+
+## Oct 24 evening Windows zoneinfo/TZDB repair (real user run)
+
+A Windows PowerShell integration run confirmed all of the following:
+
+- The three existing Task Scheduler registrations were updated with
+  `StartWhenAvailable=True` and `WakeToRun=True` and task XML backups
+  persisted under the local gitignored research folder.
+- All 2024/2025/2026/2027 team and player advanced assets were fetched
+  and accepted locally; the 2027 assets matched all **28** then-final
+  season games. Separate advanced shadow model installed with 1,152
+  paired historical score calibration residuals.
+- No genuine pre-tipoff paper forecasts yet, since no eligible upcoming
+  fixtures with five preceding same-season finals per team were present.
+- Hourly score automation returned `idle` normally: 28 finalized games,
+  no unmatched, overdue or newly pending results.
+- **Windows pregame and the final injury capture step failed with**
+  `ZoneInfoNotFoundError: No time zone found with key
+  America/New_York`, caused by the Python Windows environment lacking
+  the separately provided IANA `tzdata` timezone database.
+
+This is a **dependency gap**, not corrupted sports data. The source
+fix avoids arbitrary fixed Eastern UTC offsets, which would be wrong
+across daylight-saving transitions. Missing timezone data raises a
+clear actionable `RuntimeError`, which the optional injury sidecar and
+Stage 4 bootstrap already catch. It cannot prevent an otherwise healthy
+v1 pregame forecast from running after this update.
+
+**Windows repair — do NOT clear private data, retrain or reinstall jobs:**
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+
+# Installs optional NBA parquet, injury PDF and Windows IANA timezone data.
+.\.venv\Scripts\python.exe -m pip install -r basketball/requirements-windows-research.txt
+
+# Explicit timezone functionality check in this exact private venv.
+.\.venv\Scripts\python.exe -c "from zoneinfo import ZoneInfo; print(ZoneInfo('America/New_York'))"
+
+# Capture latest official report; no retroactive historical injury labels.
+.\.venv\Scripts\python.exe -m basketball.research_cli capture-injury
+
+# Resume verified current-season pregame cycle and inspect latest receipts.
+.\.venv\Scripts\python.exe -m basketball.research_cli automate --mode pregame
+.\.venv\Scripts\python.exe -m basketball.research_cli reliability
+.\.venv\Scripts\python.exe -m basketball.research_cli stage4-report
+```
+
+The dashboard's `shadow_model_installed=True` means this model is
+already installed. **Do not rerun `advanced-build`** after any genuine
+2027 shadow record is saved: this experiment must remain frozen.
+
+Even after the tzdata repair, model forecasts may legitimately remain
+zero until **both** clubs reach the five-previous-current-season-game
+readiness gate. Capturing injuries does not authorize using their
+statuses as model features without verified team submissions and player
+identity crosswalks. Task Scheduler wake-on-sleep requires Windows wake
+timer support; the registered `Interactive` principal still needs
+an active Windows sign-in session. All installed task battery settings
+currently refuse tasks when on battery, by owner choice.
