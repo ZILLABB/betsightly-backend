@@ -191,6 +191,9 @@ def _process(*, kind:str, season:int, fixtures:dict, loader=None,
             if "Impossible NBA team shooting" in str(exc):
                 rejected["impossible_team_stat_line"]+=1
                 continue
+            if str(exc).startswith("Invalid NBA box score "):
+                rejected["incomplete_or_invalid_provider_stats"]+=1
+                continue
             raise
         if normalized is None:
             rejected["missing_playing_time_or_stat_fields"]+=1
