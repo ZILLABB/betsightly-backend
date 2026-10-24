@@ -254,3 +254,27 @@ poll or attempt to evade provider blocks: stop the optional hourly task
 and retain the safe historical snapshot while a distinct authorized
 no-cost provider is evaluated. A successful Windows script or hourly
 schedule does not prove that a final was obtained.
+
+### Additional no-cost official NBA fallback
+
+When ESPN site API **and** ESPN CDN are unreachable, the scoreboard checker
+now attempts the NBA's own keyless live scoreboard from
+`cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json`.
+This is a genuinely separate league-owned feed, but it only covers the
+NBA server's **current scoreboard day**, not arbitrary historical dates.
+
+The NBA's event IDs and team IDs are unrelated to ESPN game IDs. To avoid
+fabricating matches, a final is credited only after **all** of these:
+official NBA `gameStatus=3` with `Final` label; valid non-tied integer
+scores; NBA scoreboard's `gameDate` equals the requested season game date;
+exact home/away team tricodes mapped from known NBA names; within **30
+minutes** of the ESPN fixture's known UTC start; and exactly one ESPN
+fixture matches. The original NBA provider event ID is preserved in the
+verification metadata, and an unmatched game is ignored.
+
+After `git pull`, run the usual
+`python -m basketball.research_cli settle` command. The result reports
+`official_nba_fallback_dates` and includes sanitized failure causes from
+all routes (ESPN site, ESPN CDN, NBA CDN). Do not interpret `status=ok`
+as a promise that every overdue game has been verified: always inspect
+`verified_new_finals` and the dashboard's started/unverified count.
