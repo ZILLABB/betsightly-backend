@@ -251,3 +251,13 @@ def test_rapid_german_fallback_does_not_guess_unmapped_league(monkeypatch):
     ], now=NOW)
     assert scores == {}
     assert source == "espn-rapid"
+
+
+
+def test_render_blueprint_runs_rapid_settlement_every_minute():
+    """Production blueprint must not disable the 60-second fast lane."""
+    from pathlib import Path
+
+    blueprint = (Path(__file__).resolve().parents[1] / "render.yaml").read_text()
+    assert '- key: SETTLEMENT_POLL_SECONDS\n        value: "60"' in blueprint
+    assert '- key: SETTLEMENT_FULL_POLL_SECONDS\n        value: "900"' in blueprint
