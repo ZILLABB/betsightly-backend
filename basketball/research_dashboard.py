@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from basketball.research_readiness import readiness_from_home
+from basketball.research_prospective import prospective_report
 from basketball.research_store import (
     DEFAULT_DB, latest_events, list_forecasts, open_ledger,
     performance_report,
@@ -27,7 +28,8 @@ def _percent(value: float | None) -> str:
 
 
 def render_dashboard(report: dict, forecasts: list[dict],
-                     events: list[dict], readiness: dict | None = None) -> str:
+                     events: list[dict], readiness: dict | None = None,
+                     prospective: dict | None = None) -> str:
     """Server-rendered and escaped HTML, no tracking or external dependencies."""
     metric = lambda name, value, note: (
         '<div class="metric"><small>' + _safe(name) + '</small>'
@@ -129,6 +131,61 @@ def render_dashboard(report: dict, forecasts: list[dict],
                 _safe("READY" if game["eligible"] else "BLOCKED") +
                 "</td><td>" + _safe(reason) + "</td></tr>"
             )
+    # A prospective cohort uses only the privately settled pregame ledger.
+    # Historical validation metrics are never mixed into this panel.
+    evaluation_metrics = ""
+    evaluation_note = (
+        "No saved prospective evaluation yet. Once the five-game warm-up "
+        "finishes, the private 18:00 WAT cycle can record real pregame forecasts."
+    )
+    calibration_rows = []
+    if prospective is not None:
+        status = prospective["status"]
+        if status == "integrity_failed":
+            evaluation_note = (
+                "Integrity warning: stored prediction hashes/timing/scores "
+                "failed validation. Prospective metrics are withheld. " +
+                str(prospective.get("issue_count", 0)) +
+                " records need investigation. Do not publish performance claims."
+            )
+        elif status != "awaiting_first_forecast":
+            count = prospective.get("settled_count", 0)
+            overall = prospective.get("overall") or {}
+            score = prospective.get("score_projection_errors") or {}
+            review = prospective.get("sample_size_gate_met", False)
+            evaluation_metrics = "".join([
+                metric("SETTLED PAPER GAMES", count, "Real prospective results only"),
+                metric("FIXED 50/50 BRIER", "0.2500",
+                       "Predeclared probability baseline"),
+                metric("MODEL BRIER", overall.get("brier", "—"),
+                       "Lower is better; sample gated"),
+                metric("BRIER SKILL", overall.get("brier_skill_vs_50_50", "—"),
+                       "Positive beats fixed 50/50 baseline"),
+                metric("TOTAL POINTS MAE", score.get("total_points_mae", "—"),
+                       "Mean absolute error in points"),
+                metric("HOME MARGIN MAE", score.get("home_margin_mae", "—"),
+                       "Mean absolute error in points"),
+            ])
+            evaluation_note = (
+                f"{count}/{prospective['review_minimum_settled']} settled "
+                "prospective forecasts for the first descriptive review. " +
+                ("Review threshold met; this is NOT proof of profitability."
+                 if review else
+                 "Early results are unstable and do not establish quality.") +
+                " No verified bookmaker odds or betting ROI."
+            )
+            for bucket in prospective["calibration"]["bins"]:
+                label = f"{bucket['lower']:.0%}–{bucket['upper']:.0%}"
+                calibration_rows.append(
+                    "<tr><td>" + _safe(label) + "</td><td>" +
+                    _safe(bucket["count"]) + "</td><td>" +
+                    _safe(_percent(bucket["average_forecast"])) +
+                    "</td><td>" +
+                    _safe(_percent(bucket["observed_home_win"])) +
+                    "</td><td>" +
+                    _safe("Too small to interpret" if bucket["descriptive_only"]
+                          else "Descriptive") + "</td></tr>"
+                )
     history_rows = "".join(
         "<li><time>" + _safe(event["occurred_at"]) + "</time> " +
         _safe(event["kind"]) + ": " + _safe(event["message"]) + "</li>"
@@ -203,6 +260,18 @@ still lack an accepted final score. They are never pregame candidates.</p>
     "".join(overdue_rows) if overdue_rows else
     "<tr><td colspan='6'>No started-but-unverified games in the last 72h.</td></tr>"
 ) + """</tbody></table></div>
+<h2>Prospective research evaluation</h2>
+<p>Only forecasts originally saved before tipoff and subsequently settled.
+No historical backtests, bookmaker odds, or after-the-fact picks.</p>
+<section class="stats">""" + evaluation_metrics + """</section>
+<div class="notice">""" + _safe(evaluation_note) + """</div>
+<div class="panel"><table>
+<thead><tr><th>Home win probability</th><th>Games</th>
+<th>Average forecast</th><th>Observed home wins</th><th>Interpretation</th>
+</tr></thead><tbody>""" + (
+    "".join(calibration_rows) if calibration_rows else
+    "<tr><td colspan='5'>No settled prospective calibration data.</td></tr>"
+) + """</tbody></table></div>
 <h2>Paper prediction ledger</h2><div class="panel"><table>
 <thead><tr><th>NBA fixture</th><th>Home ML probability</th>
 <th>Expected total</th><th>Expected home margin</th><th>Verified score</th><th>Correct</th><th>Status</th></tr></thead><tbody>""" + (
@@ -228,7 +297,7 @@ def make_handler(db_path: Path):
                 return
             route = urlsplit(self.path).path
             if route not in {"/", "/api/summary", "/api/fixtures",
-                             "/api/readiness"}:
+                             "/api/readiness", "/api/prospective"}:
                 self.send_error(404)
                 return
             connection = open_ledger(db_path)
@@ -240,14 +309,18 @@ def make_handler(db_path: Path):
                 connection.close()
             if route == "/":
                 readiness = readiness_from_home(db_path.parent)
+                prospective = prospective_report(db_path)
                 payload = render_dashboard(
-                    report, rows, events, readiness).encode("utf-8")
+                    report, rows, events, readiness,
+                    prospective).encode("utf-8")
                 mime = "text/html; charset=utf-8"
             else:
                 if route == "/api/summary":
                     value = {"performance": report, "research_only": True}
                 elif route == "/api/readiness":
                     value = readiness_from_home(db_path.parent)
+                elif route == "/api/prospective":
+                    value = prospective_report(db_path)
                 else:
                     value = {"fixtures": rows, "research_only": True}
                 payload = json.dumps(value).encode("utf-8")
