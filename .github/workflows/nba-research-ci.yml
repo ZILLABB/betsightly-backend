@@ -14,6 +14,7 @@ on:
       - "tests/test_basketball_prospective.py"
       - "tests/test_basketball_operations.py"
       - "tests/test_basketball_automation.py"
+      - "tests/test_basketball_stage3a.py"
       - ".github/workflows/nba-research-ci.yml"
   workflow_dispatch:
 
@@ -32,6 +33,6 @@ jobs:
       - name: Install only offline research dependencies
         run: python -m pip install pytest scikit-learn==1.8.0 joblib
       - name: Compile research modules
-        run: python -m compileall -q basketball/research_data.py basketball/research_features.py basketball/research_model.py basketball/research_tracking.py basketball/research_cli.py basketball/research_store.py basketball/research_cycle.py basketball/research_dashboard.py basketball/research_readiness.py basketball/research_scoreboard.py basketball/research_score_only.py basketball/research_nba_cdn.py basketball/research_score_diagnostics.py basketball/research_prospective.py basketball/research_operations.py basketball/research_automation.py
+        run: python -m compileall -q basketball/research_data.py basketball/research_features.py basketball/research_model.py basketball/research_tracking.py basketball/research_cli.py basketball/research_store.py basketball/research_cycle.py basketball/research_dashboard.py basketball/research_readiness.py basketball/research_scoreboard.py basketball/research_score_only.py basketball/research_nba_cdn.py basketball/research_score_diagnostics.py basketball/research_prospective.py basketball/research_operations.py basketball/research_automation.py basketball/research_features_v2.py basketball/research_candidate_v2.py basketball/research_quality_v2.py
       - name: Run offline NBA regression tests
-        run: python -m pytest --noconftest tests/test_basketball_research.py tests/test_basketball_research_ops.py tests/test_basketball_readiness.py tests/test_basketball_settlement.py tests/test_basketball_nba_cdn.py tests/test_basketball_score_diagnostics.py tests/test_basketball_prospective.py tests/test_basketball_operations.py tests/test_basketball_automation.py -q
+        run: python -m pytest --noconftest tests/test_basketball_research.py tests/test_basketball_research_ops.py tests/test_basketball_readiness.py tests/test_basketball_settlement.py tests/test_basketball_nba_cdn.py tests/test_basketball_score_diagnostics.py tests/test_basketball_prospective.py tests/test_basketball_operations.py tests/test_basketball_automation.py tests/test_basketball_stage3a.py -q
