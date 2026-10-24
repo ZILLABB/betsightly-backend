@@ -370,3 +370,61 @@ review checkpoint only**, not statistical proof, endorsement, bookmaker edge
 or monetization readiness. A genuine first prospective pregame forecast and
 its later verified score are still needed before nonempty real-world
 metrics can exist. Current five-game same-season warm-up gates remain.
+
+## Stage 2D — first genuine forecast and automatic settlement monitoring
+
+Stage 2D does **not** bypass the five-game same-season minimum, invent
+a forecast, run a paid bookmaker endpoint, or deploy basketball publicly.
+It adds a separate read-only `operations` command and the
+`/api/operations` localhost endpoint. These compare the current real
+source snapshot against the private immutable SQLite ledger.
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+.\.venv\Scripts\python.exe -m basketball.research_cli operations
+.\.venv\Scripts\python.exe -m basketball.research_cli readiness
+.\.venv\Scripts\python.exe -m basketball.research_cli prospective
+```
+
+The Atlantic dashboard displays **First-forecast operations** after a
+dashboard restart. It shows whether the last research cycle was seen,
+schedule snapshot freshness, whether the current two-provider-date
+window contains any eligible games, how many original forecasts are
+already saved, and whether any pending forecast remains unsettled more
+than **four hours** after tipoff. Four hours is a diagnostic threshold,
+not a guaranteed score-provider delay or a deadline for finality.
+
+States include `warming_up`, `eligible_for_first_forecast`,
+`forecast_pending_settlement`, `first_settlement_verified`, and
+`attention_required`. Eligibility uses only results completed on
+earlier fixture dates and the same season. A missing forecast is **not**
+scored as a loss or backfilled after tipoff. Warnings distinguish an
+eligible fixture missed by a cycle which saw the current snapshot from a
+cycle that ran before newer data arrived.
+
+**New actual forecast safety guard:** even if the probability model
+generates a candidate, the daily cycle writes it only if the separate
+readiness gate also approves the exact fixture ID, source snapshot is
+fresh, model/training cutoff is recorded, team histories each have at
+least five earlier regular-season finals, and tipoff has not occurred.
+Filtered candidates appear in `readiness_guard_rejected`. Prior
+immutable forecasts and verified settlements are not modified.
+
+For repeatable daily operation, the PC must be awake and in the correct
+Windows timezone when the **18:00 COMPUTER LOCAL TIME** scheduled task
+runs. Confirm it is actually registered and succeeded, rather than
+assuming the existence of the task proves model execution:
+
+```powershell
+Get-ScheduledTaskInfo -TaskName "BetSightly NBA Paper Research" |
+    Select-Object LastRunTime, NextRunTime, LastTaskResult
+Get-ScheduledTaskInfo -TaskName "BetSightly NBA Score Check" |
+    Select-Object LastRunTime, NextRunTime, LastTaskResult
+```
+
+Stage 2D's first genuine prospective prediction cannot be accepted until
+a cycle writes a real fixture before tipoff. A complete lifecycle then
+requires that same game ID to appear under verified final settlement.
+The operational suite uses **synthetic data for tests only**; no fake
+forecasts or returns are inserted into the user's private NBA ledger.
