@@ -306,9 +306,27 @@ def advanced_coverage(home:Path|str)->dict:
                 })
         except (ValueError,KeyError,TypeError,OSError):
             continue
+    model=(root/"shadow_model.joblib").is_file()
+    ledger=root/"shadow_2027.jsonl"
+    results=root/"shadow_settlements_2027.json"
+    forecast_count=0
+    if ledger.is_file():
+        with ledger.open(encoding="utf-8") as stream:
+            forecast_count=sum(bool(line.strip()) for line in stream)
+    settlement_count=0
+    if results.is_file():
+        try:
+            parsed=json.loads(results.read_text(encoding="utf-8"))
+            settlement_count=len(parsed) if isinstance(parsed,dict) else 0
+        except (ValueError,OSError):
+            settlement_count=0
     return {
         "status":"research_only","assets":rows,
         "team_seasons":sum(r["kind"]=="team" for r in rows),
         "player_seasons":sum(r["kind"]=="player" for r in rows),
+        "shadow_model_installed":model,
+        "shadow_forecasts":forecast_count,
+        "shadow_verified_settlements":settlement_count,
+        "candidate_publication_enabled":False,
         "no_writes":True,"public_publishing_enabled":False,
     }
