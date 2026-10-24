@@ -468,8 +468,10 @@ def _collect_espn_scores_ranged(
                 if not score:
                     continue
                 hs, as_ = score["home_score"], score["away_score"]
-                payload = {"home": home, "away": away, "home_score": hs,
-                           "away_score": as_, "completed": True,
+                payload = {"home": home, "away": away,
+                           "date": (event.get("date") or "")[:10],
+                           "home_score": hs, "away_score": as_,
+                           "completed": True,
                            "provider": "espn", "provider_event_id": event.get("id"),
                            "league_slug": slug,
                            **{key: score.get(key) for key in (
@@ -477,6 +479,23 @@ def _collect_espn_scores_ranged(
                                "qualified_team", "match_status",
                            )}}
                 date = (event.get("date") or "")[:10]
+                # The permanent bookmaker->scoreboard bridge can resolve by
+                # a *verified* ESPN event ID even after provider display names
+                # change. Never grade from an in-play score; this index only
+                # contains explicitly completed FT/regulation observations.
+                event_id = str(event.get("id") or "")
+                if event_id.isdecimal() and len(event_id) <= 20:
+                    event_key = f"espn:event:{event_id}"
+                    old_event = finished.get(event_key)
+                    if old_event and (
+                        old_event.get("home_score") != hs
+                        or old_event.get("away_score") != as_
+                        or old_event.get("date") != date
+                        or old_event.get("league_slug") != slug
+                    ):
+                        finished[event_key] = {"ambiguous": True}
+                    elif not old_event:
+                        finished[event_key] = payload
                 dated_key = f"{_normalize_name(home)}|{_normalize_name(away)}|{date}"
                 prior = finished.get(dated_key)
                 if prior and prior.get("provider_event_id") != event.get("id"):
