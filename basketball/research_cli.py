@@ -101,6 +101,10 @@ def build_parser() -> argparse.ArgumentParser:
                           choices=("score", "pregame", "full"))
     automate.add_argument("--home", type=Path,
                           default=Path("data/basketball/research"))
+    automate.add_argument(
+        "--advanced", action="store_true",
+        help="Optional official injury and boxscore shadow sidecar; does not block v1"
+    )
     reliability = commands.add_parser(
         "reliability", help="Read-only local scheduled run receipts and age")
     reliability.add_argument("--home", type=Path,
@@ -231,7 +235,8 @@ def main(argv: list[str] | None = None) -> int:
         result = probe_source(args.home, day=args.date)
     elif args.command == "automate":
         from basketball.research_automation import run_automation
-        result = run_automation(home=args.home, mode=args.mode)
+        result = run_automation(home=args.home, mode=args.mode,
+                                with_advanced=args.advanced)
         print(json.dumps(result, indent=2, default=str))
         return 2 if result["status"] in ("degraded", "failed") else 0
     elif args.command == "reliability":
