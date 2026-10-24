@@ -7,6 +7,7 @@ on:
       - "scripts/nba_paper_research.ps1"
       - "scripts/nba_score_check.ps1"
       - "scripts/nba_pregame_check.ps1"
+      - "scripts/nba_task_attempt.ps1"
       - "basketball/research_injury_reports.py"
       - "basketball/requirements-windows-research.txt"
       - ".github/workflows/nba-windows-task-syntax.yml"
@@ -36,7 +37,8 @@ jobs:
               "scripts/nba_task_reliability.ps1",
               "scripts/nba_paper_research.ps1",
               "scripts/nba_score_check.ps1",
-              "scripts/nba_pregame_check.ps1"
+              "scripts/nba_pregame_check.ps1",
+              "scripts/nba_task_attempt.ps1"
           )
           foreach ($path in $paths) {
               $tokens = $null
@@ -49,6 +51,28 @@ jobs:
                   throw "Invalid scheduled task PowerShell: $path"
               }
               Write-Host "PowerShell syntax OK: $path"
+          }
+      - name: Test durable structured busy/failure Windows receipts
+        shell: powershell
+        run: |
+          . .\scripts\nba_task_attempt.ps1
+          $temp = Join-Path $env:RUNNER_TEMP "private-nba-scheduled-attempt"
+          New-Item -ItemType Directory -Force -Path $temp | Out-Null
+          Write-NbaScheduledAttempt -ResearchFolder $temp -Mode score `
+            -StartedAt ([DateTime]::UtcNow.AddMinutes(-1).ToString("o")) `
+            -Status busy -ExitCode 0
+          $receipt = Get-Content (Join-Path $temp "scheduled_score_attempt.json") -Raw |
+            ConvertFrom-Json
+          if ($receipt.status -ne "busy" -or $receipt.process_exit_code -ne 0) {
+              throw "Task busy status was falsely marked as completed work"
+          }
+          Write-NbaScheduledAttempt -ResearchFolder $temp -Mode pregame `
+            -StartedAt ([DateTime]::UtcNow.AddMinutes(-1).ToString("o")) `
+            -Status failed -ExitCode 1
+          $failed = Get-Content (Join-Path $temp "scheduled_pregame_attempt.json") -Raw |
+            ConvertFrom-Json
+          if ($failed.status -ne "failed" -or $failed.process_exit_code -ne 1) {
+              throw "Real scheduled pregame failure not captured"
           }
       - name: Assert opt-in repair has no default task mutations
         shell: powershell
