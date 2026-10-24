@@ -168,3 +168,50 @@ def test_espn_already_verified_german_result_does_not_call_openligadb(
     scores, provider = results_checker._collect_scores_for_picks(picks)
     assert provider == "espn"
     assert len(scores) == 1
+
+
+
+def test_manual_exact_bundesliga_label_resolves_without_stored_slug(monkeypatch):
+    """Manual SportyBet slips need not carry the internal ESPN league slug."""
+    seen = []
+    monkeypatch.setenv("OPENLIGADB_ENABLED", "true")
+    monkeypatch.setattr(source, "_season_finals",
+                        lambda league, season: seen.append((league, season)) or [
+                            source._normalize_fixture(
+                                _match(), league, season,
+                            )
+                        ])
+    result = source.openligadb_finals([{
+        "league": "Bundesliga",
+        "home_team": "Bayern Munich", "away_team": "Borussia Dortmund",
+        "kickoff": "2026-10-10T13:30:00Z",
+    }])
+    assert seen == [("bl1", 2026)]
+    assert len(result) == 1
+    assert result[0]["score_90"] == {"home": 2, "away": 1}
+
+
+def test_german_final_cache_refreshes_within_five_minutes(monkeypatch):
+    """A recently completed German game must not stay invisible for 30 minutes."""
+    source._CACHE.clear()
+    clock = [1000.0]
+    calls = []
+    monkeypatch.setattr(source.time, "monotonic", lambda: clock[0])
+
+    class Response:
+        status_code = 200
+        headers = {}
+
+        def json(self):
+            return [_match()]
+
+    monkeypatch.setattr(source.requests, "get",
+                        lambda *args, **kwargs: calls.append(1) or Response())
+    assert source._season_finals("bl1", 2026)
+    clock[0] += 60
+    assert source._season_finals("bl1", 2026)
+    assert len(calls) == 1
+    clock[0] += 241
+    assert source._season_finals("bl1", 2026)
+    assert len(calls) == 2
+    source._CACHE.clear()

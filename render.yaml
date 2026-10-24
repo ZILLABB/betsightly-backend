@@ -15,7 +15,11 @@ services:
         value: "true"
       - key: BETSIGHTLY_PROCESS_ROLE
         value: "all"
+      # Fast score confirmation every minute; the comprehensive/free-source
+      # recovery pass remains on the 15-minute cadence below.
       - key: SETTLEMENT_POLL_SECONDS
+        value: "60"
+      - key: SETTLEMENT_FULL_POLL_SECONDS
         value: "900"
       - key: SETTLEMENT_FALLBACK_SECONDS
         value: "3600"
