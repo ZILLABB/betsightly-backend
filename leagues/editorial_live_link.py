@@ -10,8 +10,13 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import logging
+import threading
+import time
 
 LOG = logging.getLogger(__name__)
+_IDENTITY_PROBE_LOCK = threading.Lock()
+_LAST_IDENTITY_PROBE = 0.0
+_IDENTITY_PROBE_INTERVAL = 8 * 60
 
 
 def _datetime(raw: object) -> datetime | None:
@@ -86,6 +91,18 @@ def collect_verified_manual_links(
 
     if not eligible:
         return {}
+    # Six ESPN scoreboard reads every minute can become thousands of requests
+    # per day and block the score-settlement worker. The already-persisted
+    # identity remains on the ticket, so new discovery needs only 8-minute
+    # retries. Explicit injected test readers never touch the shared throttle.
+    global _LAST_IDENTITY_PROBE
+    if score_reader is None:
+        with _IDENTITY_PROBE_LOCK:
+            tick = time.monotonic()
+            if (_LAST_IDENTITY_PROBE and
+                    tick - _LAST_IDENTITY_PROBE < _IDENTITY_PROBE_INTERVAL):
+                return {}
+            _LAST_IDENTITY_PROBE = tick
     # Prioritize games near kickoff for prospective identity capture; rotate
     # through older unique (league,date) combinations instead of repeatedly
     # exhausting the quota on the same old unmatchable first entries.
