@@ -163,6 +163,43 @@ def private_jackpot_book(body: PrivateJackpotBookRequest):
         raise HTTPException(422, str(exc))
 
 
+# Basketball Private Jackpot is intentionally isolated from football and public
+# predictions. All actions require the existing signed admin session.
+class BasketballJackpotRequest(BaseModel):
+    selections: list[dict] = Field(min_length=1, max_length=50)
+    target_odds: float = Field(default=2, ge=2, le=100_000)
+
+
+@router.get("/basketball-jackpot/board", dependencies=[Depends(require_admin)])
+def basketball_jackpot_board():
+    from growth.basketball_jackpot import board_status
+    return board_status()
+
+
+@router.post("/basketball-jackpot/refresh", dependencies=[Depends(require_admin)])
+def basketball_jackpot_refresh():
+    from growth.basketball_jackpot import refresh_board
+    return refresh_board()
+
+
+@router.post("/basketball-jackpot/preview", dependencies=[Depends(require_admin)])
+def basketball_jackpot_preview(body: BasketballJackpotRequest):
+    from growth.basketball_jackpot import preview
+    try:
+        return preview(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/basketball-jackpot/book", dependencies=[Depends(require_admin)])
+def basketball_jackpot_book(body: BasketballJackpotRequest):
+    from growth.basketball_jackpot import book
+    try:
+        return book(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 class ManualCodeImportRequest(BaseModel):
     tier: str = Field(min_length=3, max_length=20)
     code: str = Field(min_length=4, max_length=32)
