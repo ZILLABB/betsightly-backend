@@ -99,7 +99,7 @@ export default async function handler(req, res) {
         upstreamResponse = await fetch(upstream, {
           method: req.method, headers,
           ...(req.method === 'POST' ? {body: JSON.stringify(payload)} : {}),
-          redirect:'manual', signal: AbortSignal.timeout(45000)
+          redirect:'manual', signal: AbortSignal.timeout(safeBoardRead ? 25000 : 110000)
         });
       } catch (error) {
         if (!safeBoardRead || attempt === 2) throw error;
