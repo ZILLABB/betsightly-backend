@@ -192,3 +192,8 @@
 .bj-workspace,.bj-ticket{color-scheme:dark}
 .bj-hero,.bj-stats,.bj-columns{isolation:isolate}
 @media(max-width:600px){.bj-stats>div{min-width:0}.bj-stats strong{overflow-wrap:anywhere;white-space:normal}.bj-hero-side{width:100%}}
+
+.bj-alert{flex-wrap:wrap;gap:12px}
+.bj-alert span{flex:1;min-width:200px}
+.bj-alert button{display:inline-flex;align-items:center;gap:7px;border:1px solid #b58a52;border-radius:8px;padding:8px 12px;background:#563a1d;color:#fff0d2;font-size:12px;font-weight:750}
+.bj-alert button:hover:not(:disabled){background:#6b4c26}
