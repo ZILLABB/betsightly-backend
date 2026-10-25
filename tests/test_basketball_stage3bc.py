@@ -267,3 +267,47 @@ def test_missing_windows_timezone_never_stops_v1_pregame_sidecar(
     assert report["injury"]["status"] == "unavailable"
     assert report["injury"]["error"] == "NBA_TZDATA_MISSING"
     assert report["shadow"]["status"] == "not_configured"
+
+
+def test_lagging_current_player_parquet_cannot_replace_last_good_snapshot(tmp_path):
+    """28 published box-score games / 36 finalized games must fail closed."""
+    completed=[fixture(i=i,season=2027,day="2026-10-25") for i in range(1,37)]
+    write_games(completed,tmp_path/"nba_games.jsonl")
+    advanced=tmp_path/"advanced"
+    advanced.mkdir()
+    previous=advanced/"player_2027.json"
+    previous.write_text('{"last_verified_snapshot":"preserved"}',encoding="utf-8")
+    old=previous.read_bytes()
+    class Response:
+        headers={}
+        def read(self,n):return b"PAR1"+b"x"*120
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+    rows=[
+        raw_player(g,side,1)
+        for g in completed[:28] for side in ("home","away")
+    ]
+    with pytest.raises(ValueError,match="current NBA player box-score coverage"):
+        fetch_advanced(
+            home=tmp_path,seasons=[2027],kinds=("player",),
+            loader=lambda data,required:rows,opener=lambda *a,**kw:Response()
+        )
+    assert previous.read_bytes()==old
+    assert not (advanced/"player_2027.manifest.json").exists()
+
+
+def test_current_player_coverage_requires_both_sides_and_does_not_forge_matches():
+    """Rows from one club alone cannot mark a current fixture complete."""
+    games=[fixture(i=i,season=2027,day="2026-10-25") for i in range(1,11)]
+    class Response:
+        headers={}
+        def read(self,n):return b"PAR1"+b"x"*120
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+    rows=[raw_player(g,"home",1) for g in games]
+    with pytest.raises(ValueError,match="current NBA player box-score coverage"):
+        _process(
+            kind="player",season=2027,
+            fixtures={g["game_id"]:g for g in games},
+            loader=lambda data,required:rows,opener=lambda *a,**kw:Response()
+        )
