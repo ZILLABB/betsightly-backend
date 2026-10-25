@@ -328,3 +328,65 @@ def test_optional_advanced_source_lag_is_visible_without_failing_baseline(tmp_pa
     assert report["tasks"]["pregame"]["status"]=="succeeded"
     assert report["issues"]==[]
     assert report["advisories"]==["pregame:advanced_source_partial"]
+
+
+def test_all_three_score_graders_visible_and_verified_idle_is_not_failure(tmp_path):
+    result = run_automation(
+        home=tmp_path, mode="score", now=NOW, score_runner=fake_score)
+    assert result["status"] == "idle"
+    assert result["run"]["independent_settlement_statuses"] == {
+        "moneyline": "research_only",
+        "opening_score": "research_only",
+        "early_advanced": "research_only",
+    }
+    assert result["health"]["details"][
+        "independent_settlement_statuses"] == (
+            result["run"]["independent_settlement_statuses"])
+
+
+def test_corrupt_advanced_ledger_never_reports_successful_hourly_check(
+    tmp_path, monkeypatch
+):
+    from basketball import research_early_advanced_ops
+    monkeypatch.setattr(
+        research_early_advanced_ops, "settle",
+        lambda home, now: {"status": "integrity_failed",
+                           "new_settlements": 0})
+    result = run_automation(
+        home=tmp_path, mode="score", now=NOW, score_runner=fake_score)
+    assert result["status"] == "failed"
+    assert result["run"]["independent_settlement_statuses"][
+        "early_advanced"] == "integrity_failed"
+    assert reliability_from_home(tmp_path, now=NOW)["issues"] == [
+        "score:failed"]
+
+
+def test_unavailable_original_scoring_grader_is_degraded_not_succeeded(
+    tmp_path, monkeypatch
+):
+    from basketball import research_opening_score
+    def unavailable(home, now):
+        raise RuntimeError("Independent score audit temporarily unavailable")
+    monkeypatch.setattr(research_opening_score, "settle", unavailable)
+    report = run_automation(
+        home=tmp_path, mode="score", now=NOW, score_runner=fake_score)
+    assert report["status"] == "degraded"
+    assert report["run"]["independent_settlement_statuses"][
+        "opening_score"] == "unavailable"
+    assert reliability_from_home(tmp_path, now=NOW)["issues"] == [
+        "score:degraded"]
+
+
+def test_pregame_optional_advanced_unavailable_is_explicit_advisory(tmp_path):
+    import json
+    (tmp_path / "automation_pregame.json").write_text(json.dumps({
+        "mode": "pregame", "research_only": True, "status": "succeeded",
+        "checked_at": NOW.isoformat(),
+        "details": {"advanced_sidecar": {
+            "early_advanced": {"status": "unavailable", "created": 0},
+        }},
+    }), encoding="utf-8")
+    report = reliability_from_home(tmp_path, now=NOW)
+    assert report["tasks"]["pregame"]["status"] == "succeeded"
+    assert report["issues"] == []
+    assert report["advisories"] == ["pregame:early_advanced_unavailable"]

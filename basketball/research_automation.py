@@ -312,9 +312,26 @@ def run_automation(*, home: str | Path = Path("data/basketball/research"),
                             "status": "unavailable", "error": _safe_error(exc),
                             "new_settlements": 0,
                         }
+                    # Scoreboard transport success is NOT successful private
+                    # settlement if an archived forecast failed integrity or
+                    # one of the three independent graders was unavailable.
+                    independent = {
+                        "moneyline": result["coldstart_settlement"].get("status"),
+                        "opening_score": result["opening_score_settlement"].get(
+                            "status"),
+                        "early_advanced": result["early_advanced_settlement"].get(
+                            "status"),
+                    }
+                    result["independent_settlement_statuses"] = independent
                     score = result["scoreboard"]
                     status = "degraded" if score["status"] == "partial" else (
                         "idle" if score["status"] == "idle" else "succeeded")
+                    if any(value == "integrity_failed" for value in
+                           independent.values()):
+                        status = "failed"
+                    elif any(value in ("unavailable", "source_not_fresh") for
+                             value in independent.values()):
+                        status = "degraded"
                 elif mode == "full":
                     result, retries = _retried(
                         lambda: cycle_runner(home=root, now=timestamp,
@@ -363,6 +380,8 @@ def run_automation(*, home: str | Path = Path("data/basketball/research"),
                     "scoreboard_status": result.get("scoreboard", {}).get(
                         "status"),
                     "advanced_sidecar": result.get("advanced_sidecar"),
+                    "independent_settlement_statuses": result.get(
+                        "independent_settlement_statuses"),
                 })
                 _atomic_json(_mode_file(root, mode), health)
                 return {"status": status, "mode": mode, "run": result,
@@ -472,6 +491,11 @@ def reliability_from_home(home: str | Path, *,
     current_feed=pregame_sidecar.get("advanced_refresh") or {}
     if current_feed.get("status") in ("partial","blocked"):
         advisories.append("pregame:advanced_source_"+current_feed["status"])
+    early = pregame_sidecar.get("early_advanced") or {}
+    if early.get("status") in (
+        "unavailable", "source_not_fresh", "integrity_failed"
+    ):
+        advisories.append("pregame:early_advanced_"+early["status"])
     return {
         "status": "research_only",
         "generated_at": instant.isoformat(),
