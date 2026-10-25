@@ -185,6 +185,11 @@ def build_parser() -> argparse.ArgumentParser:
     operations.add_argument("--home", type=Path,
                             default=Path("data/basketball/research"))
 
+    wave1 = commands.add_parser(
+        "wave1-report", help="One read-only NBA data, pregame and settlement health report")
+    wave1.add_argument("--home", type=Path,
+                       default=Path("data/basketball/research"))
+
     prospective = commands.add_parser(
         "prospective", help="Read-only real pregame NBA paper evaluation")
     prospective.add_argument("--db", type=Path,
@@ -319,6 +324,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "operations":
         from basketball.research_operations import operations_from_home
         result = operations_from_home(args.home)
+    elif args.command == "wave1-report":
+        from basketball.research_wave1_report import wave1_report
+        result = wave1_report(args.home)
     elif args.command == "prospective":
         from basketball.research_prospective import prospective_report
         result = prospective_report(args.db)
