@@ -305,3 +305,27 @@ test('private jackpot network failures never trigger automatic POST retries',asy
   assert.match((typeof out.body==='string'?JSON.parse(out.body):out.body).detail,/Do not repeat Generate Code/i);
  }finally{globalThis.fetch=oldFetch;console.error=oldLog}
 });
+
+test('basketball paste routes forward exact picks with signed admin session only',async()=>{
+ const source='Boston Celtics vs New York Knicks | Over 221.5';
+ let seen;let calls=0;
+ globalThis.fetch=async(url,opts)=>{
+   calls++;seen={url:String(url),opts};
+   return new Response(JSON.stringify({status:'PROPOSED_NOT_BOOKED',full_ticket_complete:true}),{status:200,headers:{'content-type':'application/json'}});
+ };
+ try{
+   const invalid=response();await handler(req('basketball-jackpot/paste-book','GET'),invalid);
+   assert.equal(invalid.code,404);
+   const foreign=response();await handler(req('basketball-jackpot/paste-book','POST',{fixtures_text:source},'https://evil.example'),foreign);
+   assert.equal(foreign.code,403);
+   assert.equal(calls,0);
+   const out=response();
+   await handler(req('basketball-jackpot/paste-preview','POST',{fixtures_text:source,target_odds:2},'https://'+HOST),out);
+   assert.equal(out.code,200);
+   assert.equal(calls,1);
+   assert.equal(seen.url,BACKEND+'/api/growth/basketball-jackpot/paste-preview');
+   assert.equal(seen.opts.headers.cookie,'bs_admin=signed-test');
+   assert.equal(JSON.parse(seen.opts.body).fixtures_text,source);
+   assert.equal(JSON.parse(seen.opts.body).target_odds,2);
+ }finally{globalThis.fetch=originalFetch}
+});
