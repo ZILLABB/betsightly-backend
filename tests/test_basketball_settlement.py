@@ -217,3 +217,19 @@ def test_malformed_cdn_does_not_fake_a_final(monkeypatch):
     monkeypatch.setattr(module, "_fetch_json", probe)
     with pytest.raises(RuntimeError, match="CDN_INVALID_SBDATA"):
         download_scoreboard("2026-10-24")
+
+
+def test_historical_source_omission_keeps_previously_verified_final_only():
+    """A truncated replacement must not discard old independently verified scores."""
+    prior = scheduled("401910002", "2026-10-23")
+    verified = {**prior,"status":"final","home_score":114,"away_score":108,
+                "source":"espn:nba:scoreboard:v1"}
+    future = scheduled("401910003", "2026-10-25")
+    old_future = scheduled("401910004", "2026-10-26")
+    merged, kept = preserve_older_verified_finals(
+        [future],[verified,old_future])
+    assert kept == 1
+    assert {item["game_id"] for item in merged} == {
+        "401910002","401910003"}
+    assert next(row for row in merged if row["game_id"]=="401910002") == verified
+    assert "401910004" not in {item["game_id"] for item in merged}
