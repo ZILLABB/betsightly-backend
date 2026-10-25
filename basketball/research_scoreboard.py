@@ -54,17 +54,23 @@ def selected_dates(games: list[dict], as_of: datetime,
             continue
         recent[game["date"]] = max(recent.get(game["date"], 0),
                                     start.timestamp())
-    # Score pending forecasts that remain unresolved beyond the default
-    # recent window only when their date stays within the 14-day safety cap.
+    # Previously forecast but unsettled fixtures take precedence over
+    # general recent games, so a busy schedule cannot starve the older
+    # legitimate pending cohort. Keep the 14-day/12-date request limits.
+    pending = set()
     for value in pending_dates or []:
         try:
             game_day = date.fromisoformat(value)
-        except ValueError:
+        except (ValueError, TypeError):
             continue
         if earliest.date() <= game_day <= now.date():
+            pending.add(value)
             recent.setdefault(value, 0)
-    # Priority: newest dates first; at most 12 bounded no-key requests.
-    return sorted(recent, reverse=True)[:MAX_DATES]
+    prioritized=sorted(pending)[:MAX_DATES]
+    return prioritized + [
+        day for day in sorted(recent, reverse=True)
+        if day not in pending
+    ][:MAX_DATES-len(prioritized)]
 
 
 def _score(raw: object) -> int:
@@ -309,7 +315,7 @@ def preserve_older_verified_finals(fresh: list[dict],
 def refresh_recent_finals(games: list[dict], *,
                           as_of: datetime,
                           pending_dates: list[str] | None = None,
-                          loader=None) -> tuple[list[dict], dict]:
+                          loader=None, official_loader=None) -> tuple[list[dict], dict]:
     """Bounded best-effort scoreboard refresh; never invent a final score.
 
     Provider errors are explicit but do not erase an otherwise verified
@@ -322,6 +328,9 @@ def refresh_recent_finals(games: list[dict], *,
     errors = []
     checked = 0
     fallback_days = []
+    probed_empty_espn_days = []
+    verified_at=as_of.astimezone(timezone.utc).isoformat()
+    overdue_cutoff=as_of.astimezone(timezone.utc)-timedelta(hours=4)
     for day in dates:
         try:
             raw = loader(day)
@@ -363,11 +372,59 @@ def refresh_recent_finals(games: list[dict], *,
                            "detail": detail[:180]})
             continue
         checked += 1
+        # ESPN sometimes replies 200 with a valid but empty/nonfinal board
+        # while another verified NBA source has a final. An overdue, still-
+        # scheduled local fixture merits a bounded independent NBA CDN probe,
+        # even when ESPN did not raise a transport error. Never probe based
+        # solely on an unrelated final on the same provider date.
+        overdue = {
+            str(g["game_id"]) for g in games
+            if g["date"] == day and g["status"] != "final"
+            and not g.get("postseason")
+            and (start := _utc(g.get("start_utc"))) is not None
+            and start <= overdue_cutoff
+        }
+        unresolved=overdue-set(finals)
+        if unresolved and (not injected_loader or official_loader is not None):
+            probed_empty_espn_days.append(day)
+            try:
+                if official_loader is None:
+                    from basketball.research_nba_cdn import download_nba_cdn
+                    official=download_nba_cdn(day)
+                else:
+                    official=official_loader(day)
+                from basketball.research_nba_cdn import match_nba_cdn_finals
+                alternate=match_nba_cdn_finals(
+                    official,day,games,retrieved_at=verified_at
+                )
+                fallback_days.append(day)
+                for ident, final in alternate.items():
+                    if ident in finals and (
+                        finals[ident]["home_score"],finals[ident]["away_score"]
+                    ) != (final["home_score"],final["away_score"]):
+                        raise ValueError("Conflicting ESPN and official NBA final")
+                    if ident not in finals:
+                        finals[ident]=final
+            except (RuntimeError, HTTPError, URLError, TimeoutError,
+                    OSError, ValueError, KeyError, TypeError) as exc:
+                errors.append({
+                    "date":day,"error":type(exc).__name__,
+                    "detail":("official_nba_probe:"+(
+                        str(exc)[:100] if isinstance(exc,RuntimeError)
+                        else type(exc).__name__
+                    ))[:180],
+                })
         for ident, final in finals.items():
             if ident in recovered and recovered[ident] != final:
-                raise ValueError("Conflicting ESPN final across days")
+                raise ValueError("Conflicting verified NBA final across days")
             recovered[ident] = final
     merged, stats = verify_finals(games, recovered)
+    remaining_overdue = sorted(
+        str(g["game_id"]) for g in merged
+        if g["status"] != "final" and not g.get("postseason")
+        and (tip := _utc(g.get("start_utc"))) is not None
+        and tip <= overdue_cutoff and tip >= overdue_cutoff-timedelta(days=MAX_GAME_AGE_DAYS)
+    )
     summary = {
         # No date to fetch is healthy inactivity, NOT proof a provider works.
         "status": "idle" if not dates else ("partial" if errors else "ok"),
@@ -376,6 +433,9 @@ def refresh_recent_finals(games: list[dict], *,
         "dates_requested": len(dates),
         "dates_checked": checked,
         "official_nba_fallback_dates": fallback_days,
+        "overdue_espn_probe_dates": probed_empty_espn_days,
+        "overdue_unverified_game_ids": remaining_overdue[:40],
+        "overdue_unverified_count": len(remaining_overdue),
         "failed_dates": errors,
         **stats,
         "verified_provider": (
