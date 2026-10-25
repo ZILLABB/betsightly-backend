@@ -2,7 +2,7 @@
 // The browser NEVER receives the Render origin or a backend credential.
 const GET = new Set([
  'admin/config','admin/me','analytics','status','market-readiness','daily',
- 'manual-tiers','homepage-campaign','content','publications','settings','referrals'
+ 'manual-tiers','basketball-jackpot/board','homepage-campaign','content','publications','settings','referrals'
 ]);
 const POST = new Set([
  'admin/login','admin/logout','generate','retry','manual-tiers/import-code',
@@ -10,7 +10,8 @@ const POST = new Set([
  'homepage-campaign','settings','referrals',
  'private-jackpot/candidates','private-jackpot/book',
  'private-jackpot/optimize','private-jackpot/auto-book',
- 'private-jackpot/paste-preview','private-jackpot/paste-book','private-jackpot/market-catalog'
+ 'private-jackpot/paste-preview','private-jackpot/paste-book','private-jackpot/market-catalog',
+ 'basketball-jackpot/refresh','basketball-jackpot/preview','basketball-jackpot/book'
 ]);
 function allowed(method, route) {
  return method === 'GET' ? GET.has(route) :
