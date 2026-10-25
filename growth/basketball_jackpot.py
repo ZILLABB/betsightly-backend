@@ -45,7 +45,7 @@ def _parse_event(raw: dict, league: str) -> dict | None:
             continue
         spec = str(market.get("specifier") or "")
         # Basketball point lines must be exact, never inferred or substituted.
-        if mid == "225" and not re.fullmatch(r"total=\\d+(?:\\.\\d+)?", spec):
+        if mid == "225" and not re.fullmatch(r"total=\d+(?:\.\d+)?", spec):
             continue
         if mid == "219" and spec:
             continue
