@@ -355,3 +355,27 @@ test('basketball booking POST is never retried on 502',async()=>{
    assert.match(result.body.detail,/unavailable/i);
  }finally{globalThis.fetch=originalFetch}
 });
+
+test('basketball history routes require same-origin signed admin',async()=>{
+ let requests=[];
+ globalThis.fetch=async(url,opts)=>{
+  requests.push({url:String(url),method:opts.method});
+  return new Response(JSON.stringify({status:'success',tickets:[],count:0}),{
+    status:200,headers:{'content-type':'application/json'}
+  });
+ };
+ try {
+  const read=response();
+  await handler(req('basketball-jackpot/history'),read);
+  assert.equal(read.code,200);
+  assert.equal(requests[0].url,BACKEND+'/api/growth/basketball-jackpot/history');
+  const forged=response();
+  await handler(req('basketball-jackpot/settle','POST',{},'https://evil.example'),forged);
+  assert.equal(forged.code,403);
+  assert.equal(requests.length,1);
+  const authorized=response();
+  await handler(req('basketball-jackpot/settle','POST',{},'https://'+HOST),authorized);
+  assert.equal(authorized.code,200);
+  assert.equal(requests[1].method,'POST');
+ } finally {globalThis.fetch=originalFetch;}
+});
