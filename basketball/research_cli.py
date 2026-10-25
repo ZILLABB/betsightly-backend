@@ -195,6 +195,12 @@ def build_parser() -> argparse.ArgumentParser:
     wave2.add_argument("--home", type=Path,
                        default=Path("data/basketball/research"))
 
+    challenger = commands.add_parser(
+        "opening-score-challenge",
+        help="Read-only 2025 development score hypotheses and 2026 comparison")
+    challenger.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     scores_benchmark = commands.add_parser(
         "opening-score-backtest",
         help="Historical opening-week points/margin/team-score paired MAE benchmarks")
@@ -397,6 +403,9 @@ def main(argv: list[str] | None = None) -> int:
         result = wave2_report(args.home)
         print(json.dumps(result, indent=2, default=str))
         return 2 if result["status"] == "integrity_failed" else 0
+    elif args.command == "opening-score-challenge":
+        from basketball.research_score_challenger import challenge
+        result = challenge(read_games(args.home / "nba_games.jsonl"))
     elif args.command == "opening-score-backtest":
         from basketball.research_opening_score import benchmark
         result = benchmark(read_games(args.home / "nba_games.jsonl"))
