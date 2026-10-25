@@ -190,6 +190,11 @@ def build_parser() -> argparse.ArgumentParser:
     wave1.add_argument("--home", type=Path,
                        default=Path("data/basketball/research"))
 
+    wave2 = commands.add_parser(
+        "wave2-report", help="Read-only NBA advanced and market forward audit")
+    wave2.add_argument("--home", type=Path,
+                       default=Path("data/basketball/research"))
+
     prospective = commands.add_parser(
         "prospective", help="Read-only real pregame NBA paper evaluation")
     prospective.add_argument("--db", type=Path,
@@ -327,6 +332,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "wave1-report":
         from basketball.research_wave1_report import wave1_report
         result = wave1_report(args.home)
+    elif args.command == "wave2-report":
+        from basketball.research_wave2_report import wave2_report
+        result = wave2_report(args.home)
+        print(json.dumps(result, indent=2, default=str))
+        return 2 if result["status"] == "integrity_failed" else 0
     elif args.command == "prospective":
         from basketball.research_prospective import prospective_report
         result = prospective_report(args.db)
