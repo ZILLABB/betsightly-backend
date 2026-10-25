@@ -224,6 +224,7 @@ def _select(request: dict, board: dict) -> dict:
         total *= outcome["odds"]
         validated.append({"event_id": eid, "home_team": event["home_team"],
                           "away_team": event["away_team"],
+                          "competition": event["competition"],
                           "market_id": mid, "specifier": spec,
                           "outcome_id": oid, "selection": outcome["label"],
                           "odds": outcome["odds"], "kickoff_ms": event["kickoff_ms"]})
@@ -249,8 +250,10 @@ def preview(request: dict) -> dict:
     return _select(request, board)
 
 
+
 def book(request: dict) -> dict:
-    """Anonymous code reservation only. Never place a stake or release partial slips."""
+    """Claim intent before one bookmaker POST; never silently repeat a code request."""
+    from growth import basketball_history as history
     board = cached_board()
     if not board:
         return {"status": "BOARD_REFRESH_REQUIRED", "share_code": None,
@@ -262,75 +265,126 @@ def book(request: dict) -> dict:
                    "outcomeId": leg["outcome_id"], "specifier": leg["specifier"]}
                   for leg in checked["matched"]]
     try:
+        own, record = history.claim(selections, checked["matched"],
+                                    checked["target_odds"], checked["snapshot_id"])
+    except Exception:
+        return {**checked, "status": "BOOKING_HISTORY_UNAVAILABLE",
+                "share_code": None, "reason": (
+                    "Could not save an idempotent booking intent. No SportyBet "
+                    "code request was made.")}
+    fp = record["fingerprint"]
+    if not own:
+        expires = record.get("expires_at")
+        try:
+            valid_expiry = (expires and
+                            datetime.fromisoformat(expires.replace("Z", "+00:00")) >
+                            datetime.now(timezone.utc))
+        except (ValueError, TypeError):
+            valid_expiry = False
+        if (record["status"] in {"active", "won", "lost", "void"}
+                and record.get("share_code") and valid_expiry):
+            return {**checked, "status": "success",
+                    "share_code": record["share_code"],
+                    "verified_odds": record.get("verified_odds"),
+                    "verified_odds_source": record.get("verified_odds_source"),
+                    "expires_at": expires, "legs": len(selections),
+                    "readback_status": "PASSED", "history_saved": True,
+                    "reused_existing_code": True}
+        return {**checked, "status": "BOOKING_PREVIOUS_ATTEMPT",
+                "share_code": None, "readback_status": "NOT_RETRIED",
+                "history_saved": True,
+                "reason": ("This exact ticket already has a recorded booking "
+                           "attempt. Inspect Booking History before requesting "
+                           "another code; no additional share POST was sent.")}
+    def hold(status, reason, **extra):
+        try:
+            history.mark(fp, status="needs_review",
+                         detail_update={"failure_stage": status, "reason": reason})
+        except Exception:
+            logger.exception("Basketball booking ledger could not be updated")
+        return {**checked, "status": status, "share_code": None,
+                "history_saved": True, "reason": reason, **extra}
+
+    try:
         receipt = booking._post_share(selections)
     except Exception:
-        return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
-                "reason": "SportyBet share request failed; do not blindly retry"}
+        return hold("BOOKING_UNAVAILABLE",
+                    "SportyBet share request outcome is uncertain. Review "
+                    "booking history; do not repeat Generate blindly.")
     if receipt.get("bizCode") != 10000:
-        return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
-                "reason": "SportyBet did not accept the requested ticket"}
+        return hold("BOOKING_UNAVAILABLE", "SportyBet did not accept the ticket.")
     data = receipt.get("data") or {}
     code = str(data.get("shareCode") or "")
     if not re.fullmatch(r"[A-Za-z0-9]{4,32}", code):
-        return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
-                "reason": "No valid code in bookmaker response"}
-    valid, why, actual = booking.validate_code_details(code, selections)
+        return hold("BOOKING_UNAVAILABLE", "No valid share code was returned.")
+    try:
+        history.mark(fp, status="verifying", share_code=code)
+    except Exception:
+        return {**checked, "status": "BOOKING_HISTORY_UNAVAILABLE",
+                "share_code": None, "history_saved": False,
+                "reason": "Code created but its private audit record could not be stored."}
+
+    try:
+        valid, why, actual = booking.validate_code_details(code, selections)
+    except Exception:
+        return hold("BOOKING_UNAVAILABLE", "Code readback did not complete.",
+                    readback_status="FAILED")
     if not valid:
-        return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
-                "readback_status": "FAILED", "reason": why}
+        return hold("BOOKING_UNAVAILABLE", why, readback_status="FAILED")
     odds_source = "sportybet_code_readback"
     if actual is None:
-        # SportyBet sometimes verifies every returned leg but omits all odds.
-        # Refresh the complete bookmaker board *after* readback and require
-        # every event, market, specifier and outcome to remain independently
-        # available. Never substitute the old preview quote or generate a
-        # second share-code request.
         fresh = refresh_board()
         if fresh.get("status") != "success":
-            return {**checked, "status": "BOOKING_UNAVAILABLE",
-                    "share_code": None, "readback_status": "ODDS_UNAVAILABLE",
-                    "reason": ("Code legs matched, but readback omitted odds and "
-                               "a complete fresh bookmaker price check failed. "
-                               "Do not retry Generate Code blindly.")}
+            return hold("BOOKING_UNAVAILABLE",
+                        "Code legs match, but a complete fresh bookmaker price "
+                        "check failed. See history; do not create another code.",
+                        readback_status="ODDS_UNAVAILABLE")
         current_board = cached_board()
         if current_board is None:
-            return {**checked, "status": "BOOKING_UNAVAILABLE",
-                    "share_code": None, "readback_status": "ODDS_UNAVAILABLE",
-                    "reason": "The freshly fetched bookmaker prices were not available."}
+            return hold("BOOKING_UNAVAILABLE",
+                        "Fresh bookmaker prices could not be persisted.",
+                        readback_status="ODDS_UNAVAILABLE")
         refreshed = _select(request, current_board)
         if not refreshed["full_ticket_complete"]:
-            return {**checked, "status": "BOOKING_UNAVAILABLE",
-                    "share_code": None, "readback_status": "ODDS_UNAVAILABLE",
-                    "unmatched": refreshed["unmatched"],
-                    "reason": ("The share-code legs matched but one or more exact "
-                               "markets are no longer active at current prices.")}
+            return hold("BOOKING_UNAVAILABLE",
+                        "One or more exact markets are no longer active.",
+                        readback_status="ODDS_UNAVAILABLE",
+                        unmatched=refreshed["unmatched"])
         actual = math.prod(float(leg["odds"]) for leg in refreshed["matched"])
         odds_source = "fresh_complete_sportybet_board"
     if not math.isfinite(float(actual)) or actual <= 1:
-        return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
-                "readback_status": "ODDS_UNAVAILABLE",
-                "reason": "Current bookmaker odds cannot be verified."}
+        return hold("BOOKING_UNAVAILABLE",
+                    "Current bookmaker odds cannot be verified.",
+                    readback_status="ODDS_UNAVAILABLE")
     if actual < checked["target_odds"]:
-        return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
-                "readback_status": "BELOW_TARGET",
-                "verified_odds": round(actual, 3),
-                "verified_odds_source": odds_source,
-                "reason": (f"Current bookmaker total {actual:.3f}x is below "
-                           f"your {checked['target_odds']:g}x target. "
-                           "No code was released; re-preview the ticket.")}
+        return hold("BOOKING_UNAVAILABLE",
+                    f"Current total {actual:.3f}x is below target "
+                    f"{checked['target_odds']:g}x.",
+                    readback_status="BELOW_TARGET",
+                    verified_odds=round(actual, 3),
+                    verified_odds_source=odds_source)
     try:
-        expiry = datetime.fromtimestamp(float(data["deadline"]) / 1000, tz=timezone.utc)
+        expiry = datetime.fromtimestamp(float(data["deadline"]) / 1000,
+                                        tz=timezone.utc)
         if expiry <= datetime.now(timezone.utc):
             raise ValueError("expired")
     except (KeyError, TypeError, ValueError, OSError):
-        return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
-                "readback_status": "FAILED",
-                "reason": "SportyBet did not provide a verifiable, future code expiry."}
+        return hold("BOOKING_UNAVAILABLE",
+                    "SportyBet did not provide a verifiable future code expiry.",
+                    readback_status="FAILED")
+    try:
+        history.mark(fp, status="active", share_code=code,
+                     verified_odds=round(actual, 3), odds_source=odds_source,
+                     expires_at=expiry.isoformat(),
+                     detail_update={"ticket_status": "pending"})
+    except Exception:
+        return {**checked, "status": "BOOKING_HISTORY_UNAVAILABLE",
+                "share_code": None, "history_saved": False,
+                "reason": "Verified code could not be archived. Inspect history."}
     return {**checked, "status": "success", "share_code": code,
             "share_url": data.get("shareURL"),
             "expires_at": expiry.isoformat(),
             "verified_odds": round(actual, 3),
-            "verified_odds_source": odds_source,
+            "verified_odds_source": odds_source, "history_saved": True,
             "readback_status": "PASSED", "legs": len(selections),
-            "note": ("Exact code legs confirmed by SportyBet. Odds verified from "
-                     "the source indicated; no stake placed.")}
+            "note": "No stake placed; the verified basketball ticket is archived."}
