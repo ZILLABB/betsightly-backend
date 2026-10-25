@@ -13,6 +13,7 @@ from basketball.research_readiness import readiness_from_home
 from basketball.research_operations import operations_from_home
 from basketball.research_automation import reliability_from_home
 from basketball.research_stage4_operations import stage4_report
+from basketball.research_coldstart_ops import closeout
 
 
 def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
@@ -25,6 +26,7 @@ def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
     ops = operations_from_home(root, now=instant)
     tasks = reliability_from_home(root, now=instant)
     advanced = stage4_report(root, now=instant)
+    coldstart = closeout(root, now=instant)
     upcoming = [
         item for item in readiness["fixtures"]
         if item["fixture_state"] == "upcoming"
@@ -118,6 +120,17 @@ def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
                 "start_utc": upcoming[0]["start_utc"],
                 "reasons": upcoming[0]["reasons"],
             } if upcoming else None),
+        },
+        "separate_early_season_experiment": {
+            "status": coldstart["status"],
+            "forecast_count": coldstart["forecast_count"],
+            "settled": coldstart["verified_settlements"],
+            "pending": coldstart["pending"],
+            "verified_directional_correct": coldstart["verified_directional_correct"],
+            "verified_directional_incorrect": coldstart["verified_directional_incorrect"],
+            "integrity_errors": coldstart["integrity_errors"],
+            "not_official_v1_calibration": True,
+            "research_only": True,
         },
         "settlement": {
             "total_paper_forecasts": ops.get("total_recorded_paper_forecasts", 0),

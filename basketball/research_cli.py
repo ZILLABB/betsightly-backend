@@ -201,6 +201,12 @@ def build_parser() -> argparse.ArgumentParser:
     cold_benchmark.add_argument("--home", type=Path,
         default=Path("data/basketball/research"))
 
+    cold_closeout = commands.add_parser(
+        "coldstart-closeout",
+        help="Read-only pregame/settlement queue and NBA source calendar anomalies")
+    cold_closeout.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     cold_ready = commands.add_parser(
         "coldstart-readiness",
         help="Read-only upcoming 48h eligibility for early-season shadow")
@@ -370,6 +376,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "coldstart-backtest":
         from basketball.research_coldstart import benchmark
         result = benchmark(read_games(args.home / "nba_games.jsonl"))
+    elif args.command == "coldstart-closeout":
+        from basketball.research_coldstart_ops import closeout
+        result = closeout(args.home)
+        print(json.dumps(result, indent=2, default=str))
+        return 2 if result["status"] == "integrity_failed" else 0
     elif args.command == "coldstart-readiness":
         from basketball.research_coldstart import readiness
         result = readiness(args.home)
