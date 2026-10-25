@@ -197,3 +197,28 @@
 .bj-alert span{flex:1;min-width:200px}
 .bj-alert button{display:inline-flex;align-items:center;gap:7px;border:1px solid #b58a52;border-radius:8px;padding:8px 12px;background:#563a1d;color:#fff0d2;font-size:12px;font-weight:750}
 .bj-alert button:hover:not(:disabled){background:#6b4c26}
+
+/* Dark basketball jackpot saved-bookings desk */
+.bj-history{margin-top:21px;border:1px solid #29485f;border-radius:17px;background:linear-gradient(125deg,#11293c,#091d2e);color:#d9edf5;padding:24px;box-shadow:0 12px 38px rgba(3,20,31,.11)}
+.bj-history-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px}
+.bj-history-head h2{font-size:21px;color:#f5fdff;letter-spacing:-.035em;margin:7px 0}
+.bj-history-head p{font-size:12px;color:#a4c2d1;max-width:680px;line-height:1.6;margin:0}
+.bj-history-actions{display:flex;gap:8px;flex-wrap:wrap}
+.bj-history-actions button,.bj-history-copy{display:flex;gap:7px;align-items:center;border:1px solid #3b677a;border-radius:9px;background:#173b50;color:#d7f3f5;padding:10px 12px;font-size:12px;font-weight:700}
+.bj-history-actions button:hover:not(:disabled),.bj-history-copy:hover{background:#1b5062}
+.bj-history-list{display:grid;gap:10px}
+.bj-history-ticket{border:1px solid #325366;background:#0d2334;border-radius:11px;overflow:hidden}
+.bj-history-ticket summary{cursor:pointer;display:grid;grid-template-columns:1.2fr .6fr .6fr .7fr;gap:10px;align-items:center;padding:16px 18px;color:#bdcede;font-size:12px;list-style-position:inside}
+.bj-history-ticket summary:hover{background:#16334a}
+.bj-history-ticket summary .bj-history-code{font-size:16px;color:#eafffd;letter-spacing:.05em;font-weight:800}
+.bj-history-ticket summary strong{text-transform:capitalize;color:#8ee7d5}
+.bj-history-ticket summary strong.bj-h-lost{color:#ffa999}
+.bj-history-ticket summary strong.bj-h-won{color:#78e7b2}
+.bj-history-detail{padding:8px 18px 19px;border-top:1px solid #2c4a5d}
+.bj-history-detail>p,.bj-history-note{color:#a1bac9;font-size:11px;line-height:1.7}
+.bj-history-detail .bj-history-error{color:#fac68f}
+.bj-history-leg{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #264459;font-size:12px;color:#dcecf5}
+.bj-history-leg small{display:block;font-size:11px;color:#8fabbc;margin-top:5px}
+.bj-history-leg strong{text-transform:capitalize;color:#9ae4d8;white-space:nowrap}
+.bj-history-note{margin:15px 0 0}
+@media(max-width:800px){.bj-history-head{flex-direction:column}.bj-history-ticket summary{grid-template-columns:1fr 1fr;font-size:11px}.bj-history{padding:16px}}
