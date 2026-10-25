@@ -121,6 +121,17 @@ def refresh_board() -> dict:
                 break
             pages = page
             for tournament in tournaments:
+                # Pre-match basketball only; reject simulated, cyber and e-sport feeds.
+                identity = (str(tournament.get("name") or "") + " " +
+                            str(tournament.get("categoryName") or ""))
+                if re.search("ebasketball|e-basketball|virtual|cyber|esport|simulated", identity, re.I):
+                    # Filter only the presentation, not the pagination count.
+                    for item in tournament.get("events") or []:
+                        counted += 1
+                        if not item.get("eventId"):
+                            raise ValueError("Basketball feed contains an unidentified event")
+                        seen.add(str(item["eventId"]))
+                    continue
                 for item in tournament.get("events") or []:
                     counted += 1
                     entry = _parse_event(item, str(tournament.get("name") or "Basketball"))
