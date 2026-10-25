@@ -188,6 +188,16 @@ def _advanced_sidecar(root: Path, now: datetime) -> dict:
         }
     except (RuntimeError, ValueError, OSError, ImportError) as exc:
         outcome["injury"] = {"status": "unavailable", "error": _safe_error(exc)}
+    # Collect truly forward opening-week shadow evidence even if advanced
+    # parquet releases lag. Kept separate from trusted v1 and its calibration.
+    try:
+        from basketball.research_coldstart import cycle as coldstart_cycle
+        outcome["coldstart"] = coldstart_cycle(root, now=now)
+    except (ValueError, TypeError, OSError, RuntimeError) as exc:
+        outcome["coldstart"] = {
+            "status": "unavailable", "error": _safe_error(exc),
+            "created": 0, "new_settlements": 0,
+        }
     candidate = root / "advanced" / "shadow_model.joblib"
     if not candidate.is_file():
         outcome["shadow"] = {"status": "not_configured"}
@@ -253,6 +263,17 @@ def run_automation(*, home: str | Path = Path("data/basketball/research"),
             try:
                 if mode == "score":
                     result = score_runner(home=root, now=timestamp)
+                    # Hourly verification can settle a separate already
+                    # captured cold-start shadow without fabricating forecasts.
+                    try:
+                        from basketball.research_coldstart import settle as settle_coldstart
+                        result["coldstart_settlement"] = settle_coldstart(
+                            root, now=timestamp)
+                    except (ValueError, TypeError, OSError, RuntimeError) as exc:
+                        result["coldstart_settlement"] = {
+                            "status": "unavailable", "error": _safe_error(exc),
+                            "new_settlements": 0,
+                        }
                     score = result["scoreboard"]
                     status = "degraded" if score["status"] == "partial" else (
                         "idle" if score["status"] == "idle" else "succeeded")

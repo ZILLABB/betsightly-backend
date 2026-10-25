@@ -195,6 +195,30 @@ def build_parser() -> argparse.ArgumentParser:
     wave2.add_argument("--home", type=Path,
                        default=Path("data/basketball/research"))
 
+    cold_benchmark = commands.add_parser(
+        "coldstart-backtest",
+        help="Retrospective opening-week moneyline candidate vs naive home baseline")
+    cold_benchmark.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
+    cold_status = commands.add_parser(
+        "coldstart-report",
+        help="Read-only hashed early-season forward observations (never official v1)")
+    cold_status.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
+    cold_cycle = commands.add_parser(
+        "coldstart-cycle",
+        help="Lock and record before-tipoff opening-week shadow forecasts/settlements")
+    cold_cycle.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
+    advanced_gaps = commands.add_parser(
+        "advanced-gaps",
+        help="Read-only game-ID diagnostic for delayed current NBA team/player data")
+    advanced_gaps.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     prospective = commands.add_parser(
         "prospective", help="Read-only real pregame NBA paper evaluation")
     prospective.add_argument("--db", type=Path,
@@ -337,6 +361,24 @@ def main(argv: list[str] | None = None) -> int:
         result = wave2_report(args.home)
         print(json.dumps(result, indent=2, default=str))
         return 2 if result["status"] == "integrity_failed" else 0
+    elif args.command == "coldstart-backtest":
+        from basketball.research_coldstart import benchmark
+        result = benchmark(read_games(args.home / "nba_games.jsonl"))
+    elif args.command == "coldstart-report":
+        from basketball.research_coldstart import audit
+        result = audit(args.home)
+        print(json.dumps(result, indent=2, default=str))
+        return 2 if result["status"] == "integrity_failed" else 0
+    elif args.command == "coldstart-cycle":
+        from basketball.research_automation import exclusive_local_run
+        from basketball.research_coldstart import cycle
+        with exclusive_local_run(args.home):
+            result = cycle(args.home)
+        print(json.dumps(result, indent=2, default=str))
+        return 2 if result["status"] in ("integrity_failed", "source_not_fresh") else 0
+    elif args.command == "advanced-gaps":
+        from basketball.research_advanced_gaps import report
+        result = report(args.home)
     elif args.command == "prospective":
         from basketball.research_prospective import prospective_report
         result = prospective_report(args.db)
