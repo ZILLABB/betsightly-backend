@@ -195,6 +195,12 @@ def build_parser() -> argparse.ArgumentParser:
     wave2.add_argument("--home", type=Path,
                        default=Path("data/basketball/research"))
 
+    early_advanced = commands.add_parser(
+        "early-advanced-compare",
+        help="Read-only opening-week last-season team pace/efficiency vs original score model")
+    early_advanced.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     advanced_compare = commands.add_parser(
         "advanced-score-compare",
         help="Historical 2024-trained NBA pace/efficiency vs same-game basic scoring features")
@@ -415,6 +421,9 @@ def main(argv: list[str] | None = None) -> int:
         result = wave2_report(args.home)
         print(json.dumps(result, indent=2, default=str))
         return 2 if result["status"] == "integrity_failed" else 0
+    elif args.command == "early-advanced-compare":
+        from basketball.research_early_advanced import benchmark
+        result = benchmark(args.home)
     elif args.command == "advanced-score-compare":
         from basketball.research_advanced_score_compare import compare_home
         result = compare_home(args.home)
