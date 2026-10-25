@@ -11,7 +11,10 @@ def synthetic():
         game(10000+i, season=2024, date="2023-11-01", home="1", away="2")
         for i in range(240)]
     games += [
-        game(20000+i, season=2025, date="2024-11-01", home="1", away="2")
+        {**game(20000+i, season=2025, date="2024-11-01",
+                home="1", away="2"),
+         "home_score": 112 if i % 2 else 106,
+         "away_score": 103 if i % 3 else 99}
         for i in range(220)]
     games += [
         game(30000+i, season=2026, date=f"2025-11-{i+1:02}",
