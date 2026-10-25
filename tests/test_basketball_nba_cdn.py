@@ -116,3 +116,49 @@ def test_three_unavailable_sources_report_partial_without_any_scores(monkeypatch
     assert health["status"] == "partial"
     assert "nba_cdn:HTTP_403" in health["failed_dates"][0]["detail"]
     assert health["dates_checked"] == 0
+
+
+def test_valid_but_empty_espn_board_probes_official_final_when_overdue():
+    """A 200/events=[] response must not strand a finished paper fixture."""
+    calls=[]
+    merged,health=refresh_recent_finals(
+        [fixture()],as_of=NOW,
+        loader=lambda day:{"events":[]},
+        official_loader=lambda day:(calls.append(day) or official(day)),
+    )
+    assert calls == ["2026-10-23"]
+    assert health["verified_new_finals"]==1
+    assert health["official_nba_fallback_dates"]==["2026-10-23"]
+    assert health["overdue_espn_probe_dates"]==["2026-10-23"]
+    assert health["overdue_unverified_count"]==0
+    assert health["status"]=="ok"
+    assert merged[0]["source"]==NBA_CDN_SOURCE
+
+
+def test_not_yet_overdue_empty_espn_board_does_not_trigger_extra_probe():
+    current={**fixture(day="2026-10-24"),
+             "start_utc":(NOW-timedelta(hours=1)).isoformat()}
+    probed=[]
+    merged,health=refresh_recent_finals(
+        [current],as_of=NOW,
+        loader=lambda day:{"events":[]},
+        official_loader=lambda day:probed.append(day),
+    )
+    assert not probed
+    assert health["status"]=="ok"
+    assert health["verified_new_finals"]==0
+    assert health["overdue_espn_probe_dates"]==[]
+    assert merged[0]["status"]=="scheduled"
+
+
+def test_failed_official_probe_is_reported_not_silently_successful():
+    def unavailable(day):
+        raise RuntimeError("HTTP_503")
+    merged,health=refresh_recent_finals(
+        [fixture()],as_of=NOW,
+        loader=lambda day:{"events":[]},official_loader=unavailable,
+    )
+    assert merged[0]["status"]=="scheduled"
+    assert health["status"]=="partial"
+    assert health["overdue_unverified_count"]==1
+    assert health["failed_dates"][0]["detail"]=="official_nba_probe:HTTP_503"
