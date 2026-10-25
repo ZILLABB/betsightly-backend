@@ -9,6 +9,12 @@ type Fixture={event_id:string;home_team:string;away_team:string;competition:stri
 type Pick={event_id:string;market_id:string;outcome_id:string;specifier:string;label:string;fixture:string;odds:number};
 type Board={status:string;reason?:string;fixtures:Fixture[];fetched_at?:number;metadata?:{snapshot_id?:string}};
 type Unmatched={line:number;reason:string;detail?:string};
+type HistoricalLeg={event_id:string;home_team:string;away_team:string;competition?:string;selection:string;odds:number;
+  result?:string;score?:{home:number;away:number}|null;score_source?:string|null;};
+type HistoricalTicket={fingerprint:string;share_code?:string|null;status:string;created_at:string;expires_at?:string|null;
+  target_odds:number;verified_odds?:number|null;verified_odds_source?:string;legs:HistoricalLeg[];
+  leg_count:number;detail?:{ticket_status?:string;reason?:string};last_checked_at?:string|null;};
+type HistoryList={status:string;tickets:HistoricalTicket[];count:number;};
 type Quote={status:string;reason?:string;indicative_odds?:number;verified_odds?:number;matched_fixture_count?:number;
   pasted_fixture_count?:number;full_ticket_complete?:boolean;share_code?:string|null;readback_status?:string;
   verified_odds_source?:string;
@@ -37,6 +43,9 @@ export default function BasketballJackpot(){
  const [notice,setNotice]=useState('');
  const [busy,setBusy]=useState<'load'|'refresh'|'preview'|'book'|null>(null);
  const [confirm,setConfirm]=useState(false);
+ const [historyRows,setHistoryRows]=useState<HistoricalTicket[]>([]);
+ const [historyBusy,setHistoryBusy]=useState<'loading'|'settling'|null>(null);
+ const [historyError,setHistoryError]=useState('');
  const lock=useRef(false);
  const load=async()=>{
    if(lock.current)return;
@@ -48,7 +57,23 @@ export default function BasketballJackpot(){
      setNotice(errorText(e));
    }finally{lock.current=false;setBusy(null);}
  };
- useEffect(()=>{void load();},[]);
+ const loadHistory=async()=>{
+   setHistoryBusy('loading');setHistoryError('');
+   try{const saved=await api<HistoryList>('basketball-jackpot/history');setHistoryRows(saved.tickets);}
+   catch(e){setHistoryError(errorText(e));}
+   finally{setHistoryBusy(null);}
+ };
+ const settleHistory=async()=>{
+   if(historyBusy)return;
+   setHistoryBusy('settling');setHistoryError('');
+   try{
+     const result=await api<{status:string;failures?:string[]}>('basketball-jackpot/settle',{},'POST');
+     if(result.status!=='success')setHistoryError('Result source incomplete. Unverified games remain pending.');
+     const saved=await api<HistoryList>('basketball-jackpot/history');setHistoryRows(saved.tickets);
+   }catch(e){setHistoryError(errorText(e));}
+   finally{setHistoryBusy(null);}
+ };
+ useEffect(()=>{void load();void loadHistory();},[]);
  const reset=()=>{setQuote(null);setReceipt(null);setNotice('');setConfirm(false);};
  const refresh=async()=>{
    if(lock.current)return;
@@ -104,6 +129,7 @@ export default function BasketballJackpot(){
    try{
      const result=await api<Quote>(mode==='paste'?'basketball-jackpot/paste-book':'basketball-jackpot/book',payload(),'POST');
      setReceipt(result);
+     void loadHistory();
      if(result.status!=='success'||!result.share_code||result.readback_status!=='PASSED')
        setNotice(result.reason||'SportyBet did not confirm a complete share code.');
    }catch(e){setNotice(errorText(e)+' Do not repeat an uncertain share-code request before checking SportyBet.');}
@@ -232,5 +258,44 @@ export default function BasketballJackpot(){
        <div className="bj-disclaimer"><Activity size={16}/><p>Bookmaker-only manual experiment. Price availability is not a prediction of success. No bets or stakes are placed here.</p></div>
      </aside>
    </div>
+   <section className="bj-history" aria-label="Saved basketball jackpot codes and results">
+     <div className="bj-history-head">
+       <div><span className="bj-overline">03 / DURABLE RECORDS</span>
+         <h2>Basketball booking history</h2>
+         <p>Saved SportyBet codes, exact markets and verified results. NBA finals are checked automatically; other leagues stay pending until supported.</p></div>
+       <div className="bj-history-actions">
+         <button type="button" disabled={historyBusy!==null} onClick={()=>void loadHistory()}>
+           <RefreshCcw size={15}/> Refresh history</button>
+         <button type="button" disabled={historyBusy!==null} onClick={()=>void settleHistory()}>
+           {historyBusy==='settling'?<Loader2 size={15} className="spin"/>:<ShieldCheck size={15}/>} Verify NBA finals</button>
+       </div>
+     </div>
+     {historyBusy&&<div className="bj-progress" role="status">
+       <Loader2 size={16} className="spin"/>{historyBusy==='settling'?'Checking confirmed NBA final scores…':'Loading saved codes…'}</div>}
+     {historyError&&<div className="bj-inline-warning" role="alert">{historyError}</div>}
+     {!historyRows.length&&!historyBusy&&<div className="bj-empty">
+       <Database size={23}/><p>No basketball jackpot codes saved by this ledger yet. Newly verified tickets will appear here.</p></div>}
+     <div className="bj-history-list">{historyRows.map(ticket=><details key={ticket.fingerprint} className="bj-history-ticket">
+       <summary><span className="bj-history-code">{ticket.share_code||'Attempt recorded'}</span>
+         <span>{ticket.leg_count} games</span>
+         <span>{ticket.verified_odds!=null?odds(ticket.verified_odds)+'x':'Price pending'}</span>
+         <strong className={ticket.status==='won'?'bj-h-won':ticket.status==='lost'?'bj-h-lost':''}>{ticket.detail?.ticket_status&&ticket.status==='active'
+             ?ticket.detail.ticket_status.replaceAll('_',' '):ticket.status.replaceAll('_',' ')}</strong></summary>
+       <div className="bj-history-detail">
+         <p>Created {new Date(ticket.created_at).toLocaleString('en-NG',{timeZone:'Africa/Lagos'})}
+         {ticket.expires_at?' · Code expiry '+new Date(ticket.expires_at).toLocaleString('en-NG',{timeZone:'Africa/Lagos'}):''}
+         {ticket.last_checked_at?' · Score check '+new Date(ticket.last_checked_at).toLocaleString('en-NG',{timeZone:'Africa/Lagos'}):''}</p>
+         {ticket.share_code&&<button type="button" className="bj-history-copy" onClick={()=>navigator.clipboard.writeText(ticket.share_code||'')}>
+           <Clipboard size={14}/> Copy saved code</button>}
+         {ticket.detail?.reason&&<p className="bj-history-error">{ticket.detail.reason}</p>}
+         {ticket.legs.map((leg,i)=><div className="bj-history-leg" key={i}>
+           <span>{i+1}. {leg.home_team} vs {leg.away_team}
+             <small>{leg.competition||'Basketball'} · {leg.selection} @{odds(leg.odds)}</small></span>
+           <strong>{leg.result||'pending'}{leg.score?' · '+leg.score.home+'–'+leg.score.away:''}</strong>
+         </div>)}
+       </div>
+     </details>)}</div>
+     <p className="bj-history-note">Only results supported by uniquely matched, completed games can settle a leg. This history begins with bookings recorded after the ledger was introduced; earlier codes are not automatically imported.</p>
+   </section>
  </div>;
 }
