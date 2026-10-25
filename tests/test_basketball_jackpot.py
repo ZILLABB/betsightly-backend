@@ -112,7 +112,8 @@ def test_booking_verified_readback_can_release_code(monkeypatch):
     expected = []
     def post(selections):
         expected.extend(selections)
-        return {"bizCode": 10000, "data": {"shareCode": "NBA123"}}
+        return {"bizCode": 10000, "data": {"shareCode": "NBA123",
+                "deadline": int((time.time() + 3600) * 1000)}}
     monkeypatch.setattr(bj.booking, "_post_share", post)
     monkeypatch.setattr(bj.booking, "validate_code_details",
                         lambda code, selections: (selections == expected, "ok", 2.2))
@@ -135,3 +136,14 @@ def test_basketball_cache_freshness_limit():
     cached = _board()
     cached["fetched_at"] = time.time() - bj.CACHE_AGE - 10
     assert bj._valid_cached(cached) is False
+
+
+def test_basketball_code_requires_future_expiry(monkeypatch):
+    monkeypatch.setattr(bj, "cached_board", _board)
+    monkeypatch.setattr(bj.booking, "_post_share", lambda selections: {
+        "bizCode": 10000, "data": {"shareCode": "GOOD12", "deadline": 0}})
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "ok", 2.3))
+    result = bj.book(_request())
+    assert result["share_code"] is None
+    assert result["readback_status"] == "FAILED"
