@@ -98,6 +98,9 @@ def hosted_board():
         if saved is None:
             return None
         # Rerun the original 3 archive integrity audits on EVERY admin read.
-        return report_from_bundle(saved)
+        return {**report_from_bundle(saved),
+                "archive_digest": hashlib.sha256(
+                    _json(saved).encode("utf-8")).hexdigest(),
+                "hosted_source": "private_database_snapshot"}
     finally:
         db.close()
