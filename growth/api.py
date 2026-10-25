@@ -703,3 +703,31 @@ async def growth_add_referral(admin: str = Depends(require_admin),
                                   campaign="creator", ref=code)}
     finally:
         db.close()
+
+
+@router.get("/admin/nba-research", dependencies=[Depends(require_admin)])
+def nba_admin_research(response: Response):
+    """Signed NBA forecast evidence only; disabled without explicit server flag."""
+    import os
+    from pathlib import Path
+
+    if os.getenv("NBA_ADMIN_RESEARCH_ENABLED", "").lower() not in (
+        "1", "true", "yes", "on"
+    ):
+        raise HTTPException(404, "Private NBA research is disabled.")
+    home = os.getenv("NBA_RESEARCH_HOME", "").strip()
+    if not home:
+        raise HTTPException(503, "Private NBA research storage is unavailable.")
+    from basketball.research_admin_board import board_from_home
+    try:
+        result = board_from_home(Path(home))
+    except (ValueError, KeyError, OSError, TypeError) as exc:
+        logger.warning("NBA research admin read failed: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA research integrity could not be verified.") from exc
+    if result["status"] == "data_not_configured":
+        raise HTTPException(503, "NBA research data is not available on this host.")
+    if result["status"] == "integrity_failed":
+        raise HTTPException(409, "NBA research ledger integrity check failed.")
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result

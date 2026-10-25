@@ -96,12 +96,11 @@ def board_from_home(home, *, now=None):
         settled_models = {
             k: gid in val for k, val in closed.items()
         }
-        if g["status"] == "final" and all(
-            not bool(v) for v in settled_models.values()
+        if g["status"] == "final" and any(
+            gid in archive[k] and not settled_models[k] for k in archive
         ):
             state = "final_pending_grade"
-        elif all(gid in archive[k] and settled_models[k]
-                 for k in archive if gid in archive[k]):
+        elif g["status"] == "final" and any(settled_models.values()):
             state = "verified_settled"
         elif tip > instant:
             state = "upcoming"
