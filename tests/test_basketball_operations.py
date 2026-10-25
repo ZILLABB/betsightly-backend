@@ -258,3 +258,53 @@ def test_daily_cycle_wont_create_new_picks_from_stale_fixture_snapshot(
     assert report["readiness"]["readiness_guard_rejected"] == 1
     with open_ledger(tmp_path/"nba_paper.sqlite") as db:
         assert performance_report(db)["forecast_count"] == 0
+
+
+def test_cycle_uses_utc_tipoff_not_american_provider_date(tmp_path, monkeypatch):
+    """A future NBA kickoff may carry yesterday's Eastern provider date."""
+    from basketball import research_cycle as cycle
+    from basketball import research_market_models
+    now=datetime.now(UTC)
+    provider_day=(now-timedelta(days=1)).date().isoformat()
+    tipoff=now+timedelta(hours=2)
+    past=historical_games(5,now=now)
+    upcoming={**scheduled("overnight",now=now,kickoff=tipoff),
+              "date":provider_day}
+    write_games(past+[upcoming],tmp_path/"nba_games.jsonl")
+    (tmp_path/"nba_moneyline.joblib").write_bytes(b"local-model-placeholder")
+    (tmp_path/"nba_scores.joblib").write_bytes(b"local-score-placeholder")
+    (tmp_path/"training_metrics.json").write_text(json.dumps({
+        "prospective_refit":{
+            "through":(now-timedelta(days=3)).date().isoformat()
+        }
+    }))
+    seen=[]
+    def forecast(games,model,day,as_of):
+        seen.append(day)
+        if day!=provider_day:
+            return []
+        return [{
+            "game_id":"overnight","date":provider_day,
+            "home_team_id":"1","away_team_id":"2",
+            "home_team":"Home","away_team":"Away",
+            "start_utc":tipoff.isoformat(),
+            "generated_at":datetime.now(UTC).isoformat(),
+            "home_win_probability":0.61,"away_win_probability":0.39,
+            "model_version":"nba-moneyline-offline-v1",
+            "feature_schema":"nba-pregame-v1",
+            "research_only":True,"not_for_betting":True,
+            "bookmaker_odds_verified":False,"booking_code":None,
+        }]
+    monkeypatch.setattr(cycle,"paper_forecasts",forecast)
+    monkeypatch.setattr(research_market_models,
+                        "private_score_estimates",lambda *a,**kw:[])
+    result=cycle.run_cycle(home=tmp_path,offline=True,now=now)
+    assert seen == [provider_day]
+    assert result["new_forecasts"]==1
+    assert result["readiness"]["forecast_provider_dates"]==[provider_day]
+    with open_ledger(tmp_path/"nba_paper.sqlite") as db:
+        assert [row["game_id"] for row in list_forecasts(db)]==["overnight"]
+    ops=operations_from_home(tmp_path,now=now)
+    assert ops["eligible_in_daily_cycle_window"]==1
+    assert ops["already_recorded_in_daily_window"]==1
+    assert ops["daily_cycle"]["expected_window"]=="Next 48 hours by verified UTC tipoff"
