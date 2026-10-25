@@ -329,3 +329,29 @@ test('basketball paste routes forward exact picks with signed admin session only
    assert.equal(JSON.parse(seen.opts.body).target_odds,2);
  }finally{globalThis.fetch=originalFetch}
 });
+
+test('read-only basketball board may retry after deployment 502',async()=>{
+ let calls=0;globalThis.fetch=async()=>{
+   calls++;
+   return new Response(JSON.stringify(calls===1?{detail:'worker restarting'}:{status:'success',fixtures:[{event_id:'NBA1'}]}),{
+     status:calls===1?502:200,headers:{'content-type':'application/json'}
+   });
+ };
+ try{
+   const result=response();await handler(req('basketball-jackpot/board'),result);
+   assert.equal(result.code,200);assert.equal(calls,2);
+   assert.equal(JSON.parse(result.body).fixtures.length,1);
+ }finally{globalThis.fetch=originalFetch}
+});
+test('basketball booking POST is never retried on 502',async()=>{
+ let calls=0;globalThis.fetch=async()=>{
+   calls++;return new Response('<html>unavailable</html>',{status:502,headers:{'content-type':'text/html'}});
+ };
+ try{
+   const result=response();
+   await handler(req('basketball-jackpot/paste-book','POST',{fixtures_text:'Home vs Away | Over 220.5',target_odds:2},'https://'+HOST),result);
+   assert.equal(result.code,502);
+   assert.equal(calls,1);
+   assert.match(result.body.detail,/unavailable/i);
+ }finally{globalThis.fetch=originalFetch}
+});
