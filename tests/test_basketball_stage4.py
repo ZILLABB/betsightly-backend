@@ -233,3 +233,26 @@ def test_source_refresh_unknown_2027_data_not_a_paper_prediction(tmp_path):
     assert calls==["team","player","team","player"]
     assert first["status"]=="blocked"
     assert not (tmp_path/"advanced").exists()
+
+
+def test_current_source_lag_explained_without_claiming_fresh_asset(tmp_path):
+    folder=tmp_path/"advanced"
+    folder.mkdir()
+    (folder/"team_2027.manifest.json").write_text(json.dumps({
+        "season":2027,"kind":"team","covered_final_games":28,
+        "fixture_coverage":1.0,"provenance_checked_at":NOW.isoformat(),
+    }),encoding="utf-8")
+    def delayed(*,home,seasons,kinds):
+        if kinds==("team",):
+            raise ValueError("Insufficient two-sided NBA team box-score coverage")
+        raise ValueError("Insufficient current NBA player box-score coverage")
+    report=refresh_current_advanced(
+        tmp_path,season=2027,now=NOW,fetcher=delayed)
+    assert report["status"]=="blocked"
+    assert report["assets"]["team"]["status"]=="unavailable"
+    assert report["assets"]["team"]["reason"]=="insufficient_current_fixture_coverage"
+    assert report["assets"]["player"]["reason"]=="insufficient_current_fixture_coverage"
+    assert report["assets"]["team"]["minimum_fixture_coverage"]==0.85
+    assert report["assets"]["team"]["last_accepted_snapshot"]["covered_final_games"]==28
+    assert "last_accepted_snapshot" not in report["assets"]["player"]
+    assert report["model_retrained"] is False
