@@ -138,3 +138,60 @@ def test_coldstart_cli_keeps_public_v1_unchanged(tmp_path):
         assert build_parser().parse_args([name]).command == name
     assert audit(tmp_path, now=NOW)["status"] == "awaiting_first_forecast"
     assert not list(tmp_path.iterdir())
+
+def test_readiness_reports_actual_shadow_eligible_and_stays_readonly(tmp_path):
+    from basketball.research_coldstart import readiness
+    write_games(sample(), tmp_path/"nba_games.jsonl")
+    before = (tmp_path/"nba_games.jsonl").read_bytes()
+    report = readiness(tmp_path, now=NOW)
+    assert report["status"] == "ready_for_shadow_capture"
+    assert report["eligible_next_48h"] == 1
+    assert report["eligible_samples"][0]["game_id"] == "9000"
+    assert report["capture_is_a_separate_write"] is True
+    assert report["no_writes"] is True
+    assert before == (tmp_path/"nba_games.jsonl").read_bytes()
+    assert not (tmp_path/"coldstart_forecasts.jsonl").exists()
+
+
+def test_readiness_missing_data_explicit(tmp_path):
+    from basketball.research_coldstart import readiness
+    report = readiness(tmp_path, now=NOW)
+    assert report["status"] == "source_missing"
+    assert report["eligible_next_48h"] == 0
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_historical_paired_calibration_and_metric_disclosure():
+    from basketball.research_coldstart import _paired_metrics
+    rows = [{
+        "actual_home_win": 1, "probability_home_win": .6,
+        "previous_season_home_baseline": .5,
+    }, {
+        "actual_home_win": 0, "probability_home_win": .4,
+        "previous_season_home_baseline": .5,
+    }]
+    result = _paired_metrics(rows)
+    assert result["games"] == 2
+    assert result["candidate_brier"] == .16
+    assert result["prior_home_baseline_brier"] == .25
+    assert result["paired_brier_improvement"] == .09
+    assert result["candidate_accuracy"] == 1.0
+    assert sum(b["games"] for b in result["candidate_calibration"]) == 2
+    assert result["candidate_log_loss"] is not None
+
+
+def test_forward_paired_metrics_use_only_actual_verification(tmp_path):
+    write_games(sample(), tmp_path/"nba_games.jsonl")
+    assert capture(tmp_path, now=NOW)["created"] == 1
+    initial = audit(tmp_path, now=NOW)
+    assert initial["prospective_baseline_brier"] is None
+    games = sample()
+    games[-1] = {**games[-1], "status": "final",
+                 "home_score": 105, "away_score": 111}
+    write_games(games, tmp_path/"nba_games.jsonl")
+    assert settle(tmp_path, now=datetime(2026, 10, 26, 23,
+                                        tzinfo=timezone.utc))["new_settlements"] == 1
+    result = audit(tmp_path)
+    assert result["prospective_paired_metrics"]["games"] == 1
+    assert result["prospective_baseline_brier"] is not None
+    assert result["last_30_verified"]["games"] == 1

@@ -151,30 +151,125 @@ def candidates(games, *, now=None, historical=False, seasons=(2025, 2026)):
     return sorted(rows, key=lambda r: (r["start_utc"], r["game_id"]))
 
 
+def _paired_metrics(rows):
+    """Equal-cohort probabilistic diagnostics; no realized betting returns."""
+    n = len(rows)
+    if n == 0:
+        return {"games": 0, "candidate_brier": None,
+                "prior_home_baseline_brier": None, "paired_brier_improvement": None,
+                "candidate_log_loss": None, "baseline_log_loss": None,
+                "candidate_accuracy": None, "observed_home_win_rate": None,
+                "candidate_mean_probability": None,
+                "candidate_calibration": []}
+    def brier(key):
+        return sum((r[key] - r["actual_home_win"]) ** 2 for r in rows) / n
+    def logloss(key):
+        return -sum(
+            r["actual_home_win"] * math.log(max(1e-12, min(1-1e-12, r[key]))) +
+            (1-r["actual_home_win"]) *
+            math.log(max(1e-12, min(1-1e-12, 1-r[key])))
+            for r in rows
+        ) / n
+    cand = brier("probability_home_win")
+    baseline = brier("previous_season_home_baseline")
+    bins = []
+    for i in range(5):
+        lower, upper = i/5, (i+1)/5
+        selected = [r for r in rows
+                    if lower <= r["probability_home_win"] < upper or
+                    (i == 4 and r["probability_home_win"] == 1)]
+        bins.append({
+            "lower": lower, "upper": upper, "games": len(selected),
+            "mean_forecast": (round(sum(r["probability_home_win"] for r in selected)
+                             /len(selected), 6) if selected else None),
+            "observed_home_wins": (round(sum(r["actual_home_win"] for r in selected)
+                                   /len(selected), 6) if selected else None),
+            "small_sample": len(selected) < 30,
+        })
+    return {
+        "games": n,
+        "candidate_brier": round(cand, 6),
+        "prior_home_baseline_brier": round(baseline, 6),
+        "paired_brier_improvement": round(baseline - cand, 6),
+        "candidate_log_loss": round(logloss("probability_home_win"), 6),
+        "baseline_log_loss": round(logloss("previous_season_home_baseline"), 6),
+        "candidate_accuracy": round(sum(
+            (r["probability_home_win"] >= .5) == bool(r["actual_home_win"])
+            for r in rows) / n, 6),
+        "observed_home_win_rate": round(sum(
+            r["actual_home_win"] for r in rows) / n, 6),
+        "candidate_mean_probability": round(sum(
+            r["probability_home_win"] for r in rows) / n, 6),
+        "candidate_calibration": bins,
+    }
+
+
 def benchmark(games):
     rows = candidates(games, historical=True)
-    folds = {}
-    for year in (2025, 2026):
-        cohort = [r for r in rows if r["season"] == year]
-        count = len(cohort)
-        folds[str(year)] = {
-            "games": count,
-            "candidate_brier": (round(sum(
-                (r["probability_home_win"] - r["actual_home_win"]) ** 2
-                for r in cohort) / count, 6) if count else None),
-            "prior_home_baseline_brier": (round(sum(
-                (r["previous_season_home_baseline"] - r["actual_home_win"]) ** 2
-                for r in cohort) / count, 6) if count else None),
-        }
+    folds = {str(year): _paired_metrics(
+        [r for r in rows if r["season"] == year])
+             for year in (2025, 2026)}
     return {
         "status": "research_only", "method": VERSION,
         "strictly_earlier_date_history": True,
         "same_season_games_required": "at least one club has fewer than five",
         "walkforward_folds": folds,
-        "historical_tuning_disclosure": "Fixed heuristic; historical tests are retrospective, not live validation",
+        "pooled": _paired_metrics(rows),
+        "historical_tuning_disclosure": (
+            "Heuristic fixed before this analysis but retrospective tests "
+            "are not untouched prospective validation; smaller bins are noisy."
+        ),
         "model_retrained": False, "trusted_v1_changed": False,
         "commercial_use_cleared": False, "no_writes": True,
         "bookmaker_odds_verified": False,
+    }
+
+
+def readiness(home, *, now=None):
+    """No writes: explain whether opening-week real capture is possible now."""
+    instant = _now(now)
+    path = Path(home) / "nba_games.jsonl"
+    if not path.is_file():
+        return {"status": "source_missing", "eligible_next_48h": 0,
+                "upcoming_next_48h": 0, "research_only": True, "no_writes": True}
+    try:
+        games = read_games(path)
+    except (OSError, ValueError, TypeError) as exc:
+        return {"status": "source_invalid", "error_type": type(exc).__name__,
+                "eligible_next_48h": 0, "upcoming_next_48h": 0,
+                "research_only": True, "no_writes": True}
+    snapshot = _snapshot_health(games, instant)
+    end = instant + timedelta(hours=48)
+    fixtures = [
+        g for g in games if g["status"] == "scheduled"
+        and not g["postseason"]
+        and (stamp := _timestamp(g.get("start_utc"))) is not None
+        and instant + timedelta(minutes=PREGAME_BUFFER_MINUTES) < stamp <= end
+    ]
+    # An open shadow forecast requires the exact same eligible conditions as
+    # capture, but the report never records or scores a prediction.
+    eligible = candidates(games, now=instant) if snapshot["status"] == "fresh" else []
+    return {
+        "status": ("ready_for_shadow_capture" if eligible else
+                   "source_not_fresh" if snapshot["status"] != "fresh" else
+                   "no_eligible_opening_week_fixtures"),
+        "snapshot_status": snapshot["status"],
+        "snapshot_retrieved_at": snapshot["last_retrieved_at"],
+        "upcoming_next_48h": len(fixtures),
+        "eligible_next_48h": len(eligible),
+        "eligible_samples": [{
+            "game_id": r["game_id"], "start_utc": r["start_utc"],
+            "home": r["home_team"], "away": r["away_team"],
+            "home_previous_season_games": r["prior_home_games"],
+            "away_previous_season_games": r["prior_away_games"],
+            "home_current_games": r["current_home_games"],
+            "away_current_games": r["current_away_games"],
+        } for r in eligible[:8]],
+        "capture_is_a_separate_write": True,
+        "minimum_pregame_minutes": PREGAME_BUFFER_MINUTES,
+        "baseline_prediction_unchanged": True,
+        "research_only": True, "no_writes": True,
+        "not_bookable": True,
     }
 
 
@@ -257,15 +352,32 @@ def audit(home, *, now=None):
     won = {str(g["game_id"]): int(g["home_score"] > g["away_score"])
            for g in games.values() if g["status"] == "final"}
     done = [r for r in forecasts if str(r["game_id"]) in settled]
-    brier = (sum((r["probability_home_win"] - won[str(r["game_id"])]) ** 2
-                 for r in done) / len(done)) if done else None
+    # Only genuinely prospective and verified finals enter paired evaluation.
+    # A failed audit withholds every metric rather than exposing a false score.
+    scores = []
+    for r in done:
+        if str(r["game_id"]) in won:
+            scores.append({
+                "game_id": r["game_id"],
+                "actual_home_win": won[str(r["game_id"])],
+                "probability_home_win": r["probability_home_win"],
+                "previous_season_home_baseline": r["previous_season_home_baseline"],
+            })
+    paired = _paired_metrics(scores) if not errors else None
+    last30 = _paired_metrics(scores[-30:]) if not errors else None
     return {
         "status": "integrity_failed" if errors else (
             "awaiting_first_forecast" if not forecasts else
             "awaiting_first_final" if not done else "forward_observations"),
         "research_only": True, "method": VERSION, "forecast_count": len(forecasts),
         "verified_settlements": len(done), "pending": len(forecasts) - len(done),
-        "prospective_brier": round(brier, 6) if brier is not None and not errors else None,
+        "prospective_brier": paired["candidate_brier"] if paired else None,
+        "prospective_baseline_brier": (
+            paired["prior_home_baseline_brier"] if paired else None),
+        "prospective_paired_brier_improvement": (
+            paired["paired_brier_improvement"] if paired else None),
+        "prospective_paired_metrics": paired,
+        "last_30_verified": last30,
         "integrity_errors": sorted(set(errors)),
         "generated_at": instant.isoformat(), "no_writes": True,
         "not_bookable": True, "trusted_v1_changed": False,

@@ -201,6 +201,12 @@ def build_parser() -> argparse.ArgumentParser:
     cold_benchmark.add_argument("--home", type=Path,
         default=Path("data/basketball/research"))
 
+    cold_ready = commands.add_parser(
+        "coldstart-readiness",
+        help="Read-only upcoming 48h eligibility for early-season shadow")
+    cold_ready.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     cold_status = commands.add_parser(
         "coldstart-report",
         help="Read-only hashed early-season forward observations (never official v1)")
@@ -364,6 +370,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "coldstart-backtest":
         from basketball.research_coldstart import benchmark
         result = benchmark(read_games(args.home / "nba_games.jsonl"))
+    elif args.command == "coldstart-readiness":
+        from basketball.research_coldstart import readiness
+        result = readiness(args.home)
     elif args.command == "coldstart-report":
         from basketball.research_coldstart import audit
         result = audit(args.home)
