@@ -9,7 +9,8 @@ import json
 from datetime import datetime,timezone
 from pathlib import Path
 
-from basketball.research_advanced_data import advanced_coverage
+from basketball.research_advanced_data import (advanced_coverage, MIN_TEAM_COMPLETE_COVERAGE)
+from basketball.research_data import read_games
 from basketball.research_injury_reports import injury_status
 from basketball.research_injury_identity_v4 import injury_crosswalk
 from basketball.research_markets_v4 import market_report_from_home
@@ -23,13 +24,50 @@ def stage4_report(home:str|Path,*,now:datetime|None=None)->dict:
     injuries=injury_status(root)
     crosswalk=injury_crosswalk(root,as_of=instant)
     markets=market_report_from_home(root)
-    # Health doesn't turn absent data into zeros or invented 2027 releases.
-    current={str(record["kind"]):record for record in coverage["assets"]
-             if record["season"]==2027}
-    missing=[kind for kind in ("team","player") if kind not in current]
-    reports=list((root/"advanced").glob("*.manifest.json"))
+    # Previously accepted manifests describe the fixture count WHEN the
+    # asset was captured, not its completeness relative to today's schedule.
+    # Without this comparison a cached 28/28=100% team snapshot is misleading
+    # when the verified 2027 schedule has already reached 36 finals.
+    cached={str(record["kind"]):record for record in coverage["assets"]
+            if record["season"]==2027}
+    verified_final_count=sum(
+        game["season"]==2027 and game["status"]=="final"
+        for game in read_games(root/"nba_games.jsonl")
+    )
+    health={}
+    for kind in ("team","player"):
+        snap=cached.get(kind)
+        if snap is None:
+            health[kind]={"status":"missing","covered_final_games":0}
+            continue
+        count=int(snap["covered_final_games"])
+        ratio=(count/verified_final_count if verified_final_count else None)
+        good=(ratio is not None and count<=verified_final_count
+              and ratio>=MIN_TEAM_COMPLETE_COVERAGE)
+        health[kind]={
+            "status":("current_coverage_acceptable" if good else
+                      "no_current_finals" if verified_final_count==0 else
+                      "stale_coverage"),
+            "covered_final_games":count,
+            "current_final_games":verified_final_count,
+            "coverage_against_current_finals":(
+                round(ratio,4) if ratio is not None else None
+            ),
+            "coverage_at_last_acceptance":snap["fixture_coverage"],
+            "last_accepted_at":snap["source_checked_at"],
+            "minimum_coverage":MIN_TEAM_COMPLETE_COVERAGE,
+        }
+    # Keep existing existence semantics for missing_assets. Separate lagging
+    # cached assets instead of claiming they are absent or current.
+    current={kind:cached[kind] for kind in ("team","player")
+             if kind in cached and
+             health[kind]["status"]=="current_coverage_acceptable"}
+    missing=[kind for kind in ("team","player") if kind not in cached]
+    lagging=[kind for kind in ("team","player")
+             if kind in cached and kind not in current]
     blocked=[]
     if missing:blocked.append("missing_2027_"+ "_".join(missing)+"_boxscores")
+    if lagging:blocked.append("stale_2027_"+ "_".join(lagging)+"_boxscore_coverage")
     if not coverage["shadow_model_installed"]:
         blocked.append("advanced_shadow_model_not_installed")
     if injuries["status"] not in ("parsed",):
@@ -65,6 +103,10 @@ def stage4_report(home:str|Path,*,now:datetime|None=None)->dict:
         "phase":"stage4_integrated",
         "generated_at":instant.astimezone(timezone.utc).isoformat(),
         "current_2027_verified_assets":current,
+        "current_2027_cached_assets":cached,
+        "current_2027_asset_health":health,
+        "current_2027_final_fixture_count":verified_final_count,
+        "current_2027_lagging_assets":lagging,
         "current_2027_missing_assets":missing,
         "advanced":coverage,
         "injury_report":injuries,
