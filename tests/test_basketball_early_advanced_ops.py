@@ -95,7 +95,7 @@ def test_historical_small_sample_uncertainty_is_not_invented():
     assert results["not_a_promotion_gate"] is True
     rows = [{
         "date": f"2026-10-{d:02}", "predicted_total":200,
-        "reference_predicted_total":205, "actual_total":204,
+        "reference_predicted_total":198, "actual_total":204,
         "predicted_home_margin":5, "reference_predicted_home_margin":6,
         "actual_home_margin":5,
         "predicted_home_points":102.5,"reference_predicted_home_points":105.5,
