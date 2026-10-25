@@ -308,3 +308,23 @@ def test_corrupted_scheduled_attempt_reports_issue_without_changing_main_receipt
     report=reliability_from_home(tmp_path,now=NOW)
     assert "score:scheduled_invalid" in report["issues"]
     assert report["tasks"]["score"]["status"]=="not_observed"
+
+
+def test_optional_advanced_source_lag_is_visible_without_failing_baseline(tmp_path):
+    import json
+    (tmp_path/"automation_pregame.json").write_text(json.dumps({
+        "mode":"pregame","research_only":True,"status":"succeeded",
+        "checked_at":NOW.isoformat(),"details":{
+            "advanced_sidecar":{"advanced_refresh":{
+                "status":"partial",
+                "assets":{"team":{"status":"unavailable",
+                                  "reason":"insufficient_current_fixture_coverage"},
+                          "player":{"status":"verified",
+                                    "fixture_coverage":0.7778}}
+            }}
+        }
+    }),encoding="utf-8")
+    report=reliability_from_home(tmp_path,now=NOW)
+    assert report["tasks"]["pregame"]["status"]=="succeeded"
+    assert report["issues"]==[]
+    assert report["advisories"]==["pregame:advanced_source_partial"]
