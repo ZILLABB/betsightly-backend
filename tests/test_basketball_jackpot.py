@@ -1,0 +1,137 @@
+"""Fail-closed basketball code creation and independent bookmaker caching."""
+import time
+
+from growth import basketball_jackpot as bj
+
+
+def _event(when=None, eid="sr:match:9876"):
+    return {
+        "eventId": eid,
+        "homeTeamName": "Boston Celtics",
+        "awayTeamName": "New York Knicks",
+        "estimateStartTime": when or int((time.time() + 7200) * 1000),
+        "markets": [
+            {"id": "219", "specifier": "", "outcomes": [
+                {"id": "4", "desc": "Boston Celtics", "odds": "1.70", "isActive": True},
+                {"id": "5", "desc": "New York Knicks", "odds": "2.20", "isActive": True},
+            ]},
+            {"id": "225", "specifier": "total=221.5", "outcomes": [
+                {"id": "12", "desc": "Over", "odds": "1.95", "isActive": True},
+                {"id": "13", "desc": "Under", "odds": "1.85", "isActive": False},
+            ]},
+        ],
+    }
+
+
+def _board():
+    return {"fetched_at": time.time(), "metadata": {
+        "is_complete": True, "schema": bj.SCHEMA, "snapshot_id": "test-1",
+    }, "fixtures": [bj._parse_event(_event(), "NBA")]}
+
+
+def _request():
+    return {"target_odds": 2, "selections": [
+        {"event_id": "sr:match:9876", "market_id": "219",
+         "specifier": "", "outcome_id": "5"}]}
+
+
+def test_exact_basketball_market_mapping_and_suspensions():
+    event = bj._parse_event(_event(), "NBA")
+    assert event["home_team"] == "Boston Celtics"
+    assert len(event["markets"]) == 2
+    assert [o["outcome_id"] for o in event["markets"][0]["outcomes"]] == ["4", "5"]
+    assert [o["label"] for o in event["markets"][1]["outcomes"]] == ["Over 221.5"]
+    assert bj._parse_event({**_event(), "markets": [{
+        "id": "225", "specifier": "total=two hundred",
+        "outcomes": [{"id": "12", "odds": "1.9"}],
+    }]}, "NBA")["markets"] == []
+
+
+def test_partial_basketball_refresh_preserves_previous_complete_board(monkeypatch):
+    stored = _board()
+    changes = []
+    monkeypatch.setattr(bj.sportybet, "_db_get",
+                        lambda key: stored if key == bj.CACHE_KEY else None)
+    monkeypatch.setattr(bj.sportybet, "_db_set",
+                        lambda key, value: changes.append((key, value)))
+    monkeypatch.setattr(bj.sportybet, "_get_json", lambda url, timeout=20: {
+        "bizCode": 10000, "data": {"totalNum": 3, "tournaments": [
+            {"name": "NBA", "events": [_event()]}] if "pageNum=1" in url else []},
+    })
+    res = bj.refresh_board()
+    assert res["status"] == "REFRESH_INCOMPLETE"
+    assert res["board_preserved"] is True
+    assert all(key != bj.CACHE_KEY for key, _ in changes)
+    assert bj.cached_board() is stored
+
+
+def test_full_basketball_refresh_is_promoted(monkeypatch):
+    changes = []
+    monkeypatch.setattr(bj.sportybet, "_db_set",
+                        lambda key, value: changes.append((key, value)))
+    monkeypatch.setattr(bj.sportybet, "_get_json", lambda url, timeout=20: {
+        "bizCode": 10000, "data": {"totalNum": 1, "tournaments": [
+            {"name": "NBA", "events": [_event()]}]},
+    })
+    result = bj.refresh_board()
+    assert result["status"] == "success"
+    assert len(changes) == 1 and changes[0][0] == bj.CACHE_KEY
+    assert changes[0][1]["metadata"]["sport"] == "basketball"
+
+
+def test_preview_keeps_exact_market_and_never_substitutes(monkeypatch):
+    monkeypatch.setattr(bj, "cached_board", _board)
+    ok = bj.preview(_request())
+    assert ok["status"] == "PROPOSED_NOT_BOOKED"
+    assert ok["matched_fixture_count"] == 1
+    assert ok["matched"][0]["outcome_id"] == "5"
+    assert ok["indicative_odds"] == 2.2
+    bad = _request()
+    bad["selections"][0]["outcome_id"] = "13"
+    bad["selections"][0]["market_id"] = "225"
+    bad["selections"][0]["specifier"] = "total=221.5"
+    result = bj.preview(bad)
+    assert result["status"] == "EXACT_MARKETS_UNAVAILABLE"
+    assert result["share_code"] is None
+
+
+def test_booking_never_exposes_failed_readback_code(monkeypatch):
+    monkeypatch.setattr(bj, "cached_board", _board)
+    monkeypatch.setattr(bj.booking, "_post_share", lambda selections: {
+        "bizCode": 10000, "data": {"shareCode": "ABC123"}})
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (False, "wrong selection", None))
+    result = bj.book(_request())
+    assert result["status"] == "BOOKING_UNAVAILABLE"
+    assert result["share_code"] is None
+    assert result["readback_status"] == "FAILED"
+
+
+def test_booking_verified_readback_can_release_code(monkeypatch):
+    monkeypatch.setattr(bj, "cached_board", _board)
+    expected = []
+    def post(selections):
+        expected.extend(selections)
+        return {"bizCode": 10000, "data": {"shareCode": "NBA123"}}
+    monkeypatch.setattr(bj.booking, "_post_share", post)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, selections: (selections == expected, "ok", 2.2))
+    result = bj.book(_request())
+    assert result["status"] == "success"
+    assert result["readback_status"] == "PASSED"
+    assert result["share_code"] == "NBA123"
+
+
+def test_incomplete_readback_odds_must_not_release_code(monkeypatch):
+    monkeypatch.setattr(bj, "cached_board", _board)
+    monkeypatch.setattr(bj.booking, "_post_share", lambda selections: {
+        "bizCode": 10000, "data": {"shareCode": "ABC123"}})
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "ok", None))
+    assert bj.book(_request())["share_code"] is None
+
+
+def test_basketball_cache_freshness_limit():
+    cached = _board()
+    cached["fetched_at"] = time.time() - bj.CACHE_AGE - 10
+    assert bj._valid_cached(cached) is False
