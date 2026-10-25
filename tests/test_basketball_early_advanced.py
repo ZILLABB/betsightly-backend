@@ -65,7 +65,7 @@ def test_historical_and_upcoming_cohorts_match_existing_early_model(tmp_path):
     for year in (2024,2025,2026,2027):
         (folder/f"team_{year}.json").write_text(json.dumps(
             [x for x in team if int(x["game_id"])//1000==year
-             or (year==2027 and int(x["game_id"])>=27000)]))
+             or (year==2027 and 27000<=int(x["game_id"])<28000)]))
     before={p.name:p.read_bytes() for p in
             [tmp_path/"nba_games.jsonl",*folder.glob("team_*.json")]}
     report=benchmark(tmp_path,now=NOW)
