@@ -610,8 +610,11 @@ def fetch_board(max_pages: int = _MAX_PAGES, force: bool = False) -> dict:
     is_complete = bool(metadata.get("is_complete"))
 
     if fixtures:
-        _db_set(_CACHE_KEY, {"fetched_at": fetched_at, "fixtures": fixtures,
-                             "metadata": metadata})
+        # Only a complete crawl can replace the last verified board.
+        # Partial results remain available to this caller for diagnostics.
+        if is_complete:
+            _db_set(_CACHE_KEY, {"fetched_at": fetched_at, "fixtures": fixtures,
+                                 "metadata": metadata})
         board = _snapshot(fixtures, metadata)
     else:
         stale = cached or {}
