@@ -403,6 +403,16 @@ def reliability_from_home(home: str | Path, *,
         except (ValueError, TypeError, KeyError, OSError, OverflowError):
             tasks[mode]["scheduled_attempt"] = {"status": "invalid"}
             scheduled_issues.append(f"{mode}:scheduled_invalid")
+    # Optional advanced feeds must never make the base paper task failed,
+    # but a partially published box-score release deserves explicit
+    # operator visibility rather than disappearing behind 'issues': [].
+    advisories = []
+    pregame_sidecar=(tasks.get("pregame") or {}).get("details",{}).get(
+        "advanced_sidecar"
+    ) or {}
+    current_feed=pregame_sidecar.get("advanced_refresh") or {}
+    if current_feed.get("status") in ("partial","blocked"):
+        advisories.append("pregame:advanced_source_"+current_feed["status"])
     return {
         "status": "research_only",
         "generated_at": instant.isoformat(),
@@ -413,6 +423,7 @@ def reliability_from_home(home: str | Path, *,
             if tasks[mode]["status"] in ("degraded", "failed",
                                          "stale", "clock_skew", "invalid")
         ] + scheduled_issues,
+        "advisories": advisories,
         "local_only": True, "no_writes": True,
         "public_publishing_enabled": False,
     }
