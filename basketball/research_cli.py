@@ -195,6 +195,12 @@ def build_parser() -> argparse.ArgumentParser:
     wave2.add_argument("--home", type=Path,
                        default=Path("data/basketball/research"))
 
+    regime = commands.add_parser(
+        "opening-score-regime",
+        help="Read-only scoring-level drift hypotheses; 2025 selection, 2026 diagnostic")
+    regime.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     challenger = commands.add_parser(
         "opening-score-challenge",
         help="Read-only 2025 development score hypotheses and 2026 comparison")
@@ -403,6 +409,9 @@ def main(argv: list[str] | None = None) -> int:
         result = wave2_report(args.home)
         print(json.dumps(result, indent=2, default=str))
         return 2 if result["status"] == "integrity_failed" else 0
+    elif args.command == "opening-score-regime":
+        from basketball.research_score_regime import examine
+        result = examine(read_games(args.home / "nba_games.jsonl"))
     elif args.command == "opening-score-challenge":
         from basketball.research_score_challenger import challenge
         result = challenge(read_games(args.home / "nba_games.jsonl"))
