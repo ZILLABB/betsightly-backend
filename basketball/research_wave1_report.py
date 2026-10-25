@@ -14,6 +14,7 @@ from basketball.research_operations import operations_from_home
 from basketball.research_automation import reliability_from_home
 from basketball.research_stage4_operations import stage4_report
 from basketball.research_coldstart_ops import closeout
+from basketball.research_cup_classification import from_home as cup_source_audit
 
 
 def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
@@ -27,6 +28,7 @@ def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
     tasks = reliability_from_home(root, now=instant)
     advanced = stage4_report(root, now=instant)
     coldstart = closeout(root, now=instant)
+    cup = cup_source_audit(root, now=instant)
     upcoming = [
         item for item in readiness["fixtures"]
         if item["fixture_state"] == "upcoming"
@@ -120,6 +122,15 @@ def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
                 "start_utc": upcoming[0]["start_utc"],
                 "reasons": upcoming[0]["reasons"],
             } if upcoming else None),
+        },
+        "historical_cup_classification_review": {
+            "status": cup["status"],
+            "match_status": cup.get("cup_fixture_identification"),
+            "source_game_id": cup.get("cup_final_source_game_id"),
+            "regular_season_inflation_review": (
+                cup.get("raw_season_calendar", {}).get("teams_over_standard_count")),
+            "no_source_mutation": True,
+            "prospective_model_scores_replaced": False,
         },
         "separate_early_season_experiment": {
             "status": coldstart["status"],

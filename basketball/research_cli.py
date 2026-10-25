@@ -201,6 +201,12 @@ def build_parser() -> argparse.ArgumentParser:
     cold_benchmark.add_argument("--home", type=Path,
         default=Path("data/basketball/research"))
 
+    cup = commands.add_parser(
+        "cup-source-audit",
+        help="Read-only official nonstandings Cup classification and upcoming forecast sensitivity")
+    cup.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     cold_closeout = commands.add_parser(
         "coldstart-closeout",
         help="Read-only pregame/settlement queue and NBA source calendar anomalies")
@@ -376,6 +382,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "coldstart-backtest":
         from basketball.research_coldstart import benchmark
         result = benchmark(read_games(args.home / "nba_games.jsonl"))
+    elif args.command == "cup-source-audit":
+        from basketball.research_cup_classification import from_home
+        result = from_home(args.home)
+        print(json.dumps(result, indent=2, default=str))
+        return 2 if result["status"] in ("integrity_blocked", "source_missing") else 0
     elif args.command == "coldstart-closeout":
         from basketball.research_coldstart_ops import closeout
         result = closeout(args.home)
