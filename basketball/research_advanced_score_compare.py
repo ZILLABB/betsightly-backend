@@ -2,7 +2,7 @@
 
 This tests a DIFFERENT information set: past-team possessions/efficiency,
 past-player rotation and past shooting, not another home-edge adjustment.
-201? 2024 train -> 2025 tune -> 2026 retrospective evaluation. No external
+2024 train -> 2025 tune -> 2026 retrospective evaluation. No external
 blind test claim: 2026 has been investigated in previous BetSightly work.
 No models or paper forecasts are saved. No betting prices or game picks.
 """
@@ -14,7 +14,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from basketball.research_advanced_features import (
-    FEATURE_COLUMNS, VERSION as FEATURE_VERSION, from_home,
+    FEATURE_COLUMNS, VERSION as FEATURE_VERSION, make_advanced_rows, _load_json,
 )
 from basketball.research_features import FEATURE_COLUMNS as BASIC_FEATURES
 
@@ -204,12 +204,38 @@ def compare_rows(rows):
 
 
 def compare_home(home):
-    rows, coverage = from_home(Path(home))
-    if coverage.get("status") == "not_ready":
+    """Reconstruct paired features from accepted assets, excluding Cup final.
+
+    Excluding the officially confirmed non-standings NYK/SAS Cup final *before*
+    feature construction also prevents its score from entering subsequent
+    team's five-game trailing possessions/efficiency history. Source files
+    and the existing trained advanced model remain completely untouched.
+    """
+    from basketball.research_data import read_games
+    from basketball.research_opening_score import _corrected
+
+    root = Path(home)
+    stored = read_games(root / "nba_games.jsonl")
+    games = _corrected(stored)
+    teams, players, available = [], [], []
+    for season in sorted({g["season"] for g in games}):
+        folder = root / "advanced"
+        team_file = folder / f"team_{season}.json"
+        player_file = folder / f"player_{season}.json"
+        if team_file.is_file() and player_file.is_file():
+            teams.extend(_load_json(team_file))
+            players.extend(_load_json(player_file))
+            available.append(season)
+    if not available:
         return {"status": "blocked",
-                "reason": coverage.get("reason"),
-                "source_coverage": coverage,
+                "reason": "no_both_sides_verified_advanced_assets",
+                "source_coverage": {"available_seasons": []},
                 "research_only": True, "no_writes": True,
                 "model_promoted": False}
+    rows, coverage = make_advanced_rows(games, teams, players)
+    coverage["available_seasons"] = available
+    coverage["in_memory_nonstandings_finals_excluded"] = (
+        len(stored) - len(games))
+    coverage["original_provider_fixtures_untouched"] = True
     result = compare_rows(rows)
     return {**result, "source_coverage": coverage}
