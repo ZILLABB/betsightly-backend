@@ -6,6 +6,7 @@ Never return a booking code until the complete ticket passes share-code readback
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import re
 import time
@@ -13,6 +14,8 @@ from datetime import datetime, timezone
 
 from leagues import sportybet
 from leagues import booking
+
+logger = logging.getLogger(__name__)
 
 CACHE_KEY = "sportybet_basketball_board"
 SCHEMA = 1
