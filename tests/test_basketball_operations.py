@@ -255,7 +255,10 @@ def test_daily_cycle_wont_create_new_picks_from_stale_fixture_snapshot(
     report = cycle.run_cycle(home=tmp_path, offline=True, now=now)
     assert report["new_forecasts"] == 0
     assert report["readiness"]["snapshot_health"] == "stale"
-    assert report["readiness"]["readiness_guard_rejected"] == 1
+    # A stale source never enters the model scoring loop, avoiding even
+    # proposing a rejected pick; the prior guard still applies if called.
+    assert report["readiness"]["readiness_guard_rejected"] == 0
+    assert report["readiness"]["forecast_provider_dates"] == []
     with open_ledger(tmp_path/"nba_paper.sqlite") as db:
         assert performance_report(db)["forecast_count"] == 0
 
