@@ -204,9 +204,23 @@ def audit(home, *, now=None):
     instant = _now(now)
     root = Path(home)
     fixture_path = root / "nba_games.jsonl"
-    forecasts = _read_ledger(root / FILENAME)
-    settlements = _read_ledger(root / RESULTS)
-    games = {str(g["game_id"]): g for g in read_games(fixture_path)} if fixture_path.is_file() else {}
+    try:
+        forecasts = _read_ledger(root / FILENAME)
+        settlements = _read_ledger(root / RESULTS)
+        games = ({str(g["game_id"]): g for g in read_games(fixture_path)}
+                 if fixture_path.is_file() else {})
+    except (ValueError, TypeError, OSError, UnicodeError) as exc:
+        return {
+            "status": "integrity_failed", "research_only": True,
+            "method": VERSION, "forecast_count": None,
+            "verified_settlements": None, "pending": None,
+            "prospective_brier": None,
+            "integrity_errors": ["private_ledger_or_verified_fixture_invalid"],
+            "error_type": type(exc).__name__,
+            "generated_at": instant.isoformat(), "no_writes": True,
+            "not_bookable": True, "trusted_v1_changed": False,
+            "model_promotion_approved": False, "commercial_use_cleared": False,
+        }
     errors = []
     seen, settled = set(), set()
     for row in forecasts:
