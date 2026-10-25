@@ -5,7 +5,7 @@ import time
 from growth import basketball_jackpot as bj
 from leagues import sportybet
 
-_PAIR = re.compile(r"^\s*(?:\d{1,2}[\.\)]\s*)?(.+?)\s+[vV](?:s\.?)?\s+(.+?)\s*\|\s*(.+?)\s*$")
+_PAIR = re.compile(r"^\s*(?:\d{1,2}[\.\)]\s*)?(.+?)\s+[vV](?:s\.?)?\s+(.+?)\s*\|\s*(.+?)\s*$", re.I)
 _TOTAL = re.compile(r"^(over|under)\s*(\d+(?:\.\d+)?)\s*(?:points?|pts?)?$", re.I)
 _ODDS = re.compile(r"\s*@\s*\d+(?:\.\d+)?\s*$")
 
