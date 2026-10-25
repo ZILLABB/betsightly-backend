@@ -279,7 +279,16 @@ def book(request: dict) -> dict:
         return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
                 "readback_status": "FAILED", "reason": (
                     why if not valid else "Readback odds missing or below target")}
+    try:
+        expiry = datetime.fromtimestamp(float(data["deadline"]) / 1000, tz=timezone.utc)
+        if expiry <= datetime.now(timezone.utc):
+            raise ValueError("expired")
+    except (KeyError, TypeError, ValueError, OSError):
+        return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
+                "readback_status": "FAILED",
+                "reason": "SportyBet did not provide a verifiable, future code expiry."}
     return {**checked, "status": "success", "share_code": code,
-            "share_url": data.get("shareURL"), "verified_odds": actual,
+            "share_url": data.get("shareURL"),
+            "expires_at": expiry.isoformat(), "verified_odds": actual,
             "readback_status": "PASSED", "legs": len(selections),
             "note": "Basketball bookmaker-only experimental slip; no stake placed"}
