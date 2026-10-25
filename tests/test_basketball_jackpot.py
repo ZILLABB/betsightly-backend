@@ -125,11 +125,15 @@ def test_booking_verified_readback_can_release_code(monkeypatch):
 
 def test_incomplete_readback_odds_must_not_release_code(monkeypatch):
     monkeypatch.setattr(bj, "cached_board", _board)
+    monkeypatch.setattr(bj, "refresh_board",
+                        lambda: {"status": "REFRESH_INCOMPLETE"})
     monkeypatch.setattr(bj.booking, "_post_share", lambda selections: {
         "bizCode": 10000, "data": {"shareCode": "ABC123"}})
     monkeypatch.setattr(bj.booking, "validate_code_details",
                         lambda code, expected: (True, "ok", None))
-    assert bj.book(_request())["share_code"] is None
+    report = bj.book(_request())
+    assert report["share_code"] is None
+    assert report["readback_status"] == "ODDS_UNAVAILABLE"
 
 
 def test_basketball_cache_freshness_limit():
@@ -147,3 +151,89 @@ def test_basketball_code_requires_future_expiry(monkeypatch):
     result = bj.book(_request())
     assert result["share_code"] is None
     assert result["readback_status"] == "FAILED"
+
+
+
+def test_basketball_readback_without_total_uses_fresh_exact_board(monkeypatch):
+    from time import time
+    monkeypatch.setattr(bj, "cached_board", _board)
+    refreshed = []
+    monkeypatch.setattr(bj, "refresh_board",
+                        lambda: refreshed.append(True) or {"status": "success"})
+    posts = []
+    def share(selected):
+        posts.append(selected)
+        return {"bizCode": 10000, "data": {"shareCode": "YES123",
+                "deadline": int((time() + 3600) * 1000)}}
+    monkeypatch.setattr(bj.booking, "_post_share", share)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, selected: (True, "ok", None))
+    result = bj.book(_request())
+    assert len(posts) == 1  # No duplicate create on fallback.
+    assert len(refreshed) == 1
+    assert result["status"] == "success"
+    assert result["share_code"] == "YES123"
+    assert result["verified_odds"] == 2.2
+    assert result["verified_odds_source"] == "fresh_complete_sportybet_board"
+
+
+def test_basketball_fresh_total_below_target_never_releases_code(monkeypatch):
+    from time import time
+    initial = _board()
+    newer = _board()
+    newer["fixtures"][0]["markets"][0]["outcomes"][1]["odds"] = 1.7
+    attempts = []
+    def refresh():
+        attempts.append(True)
+        return {"status": "success"}
+    monkeypatch.setattr(bj, "cached_board",
+                        lambda: newer if attempts else initial)
+    monkeypatch.setattr(bj, "refresh_board", refresh)
+    monkeypatch.setattr(bj.booking, "_post_share", lambda selected: {
+        "bizCode": 10000, "data": {"shareCode": "PRICED",
+                "deadline": int((time() + 3600) * 1000)}})
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, selected: (True, "ok", None))
+    result = bj.book(_request())
+    assert result["status"] == "BOOKING_UNAVAILABLE"
+    assert result["readback_status"] == "BELOW_TARGET"
+    assert result["share_code"] is None
+    assert result["verified_odds"] == 1.7
+    assert "below" in result["reason"].lower()
+
+
+def test_basketball_refreshed_missing_exact_market_stays_unavailable(monkeypatch):
+    from time import time
+    initial = _board()
+    newer = _board()
+    newer["fixtures"][0]["markets"] = []
+    attempted = []
+    monkeypatch.setattr(bj, "cached_board",
+                        lambda: newer if attempted else initial)
+    monkeypatch.setattr(bj, "refresh_board",
+                        lambda: attempted.append(True) or {"status": "success"})
+    monkeypatch.setattr(bj.booking, "_post_share", lambda selected: {
+        "bizCode": 10000, "data": {"shareCode": "NOMKT",
+                "deadline": int((time() + 3600) * 1000)}})
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, selected: (True, "ok", None))
+    result = bj.book(_request())
+    assert result["share_code"] is None
+    assert result["unmatched"][0]["reason"] == "EXACT_MARKET_NOT_ACTIVE"
+
+
+def test_basketball_authoritative_readback_price_below_target_is_respected(monkeypatch):
+    from time import time
+    monkeypatch.setattr(bj, "cached_board", _board)
+    monkeypatch.setattr(bj, "refresh_board",
+                        lambda: (_ for _ in ()).throw(AssertionError(
+                            "Must not override actual code readback with board")))
+    monkeypatch.setattr(bj.booking, "_post_share", lambda selected: {
+        "bizCode": 10000, "data": {"shareCode": "NOTENOUGH",
+                "deadline": int((time() + 3600) * 1000)}})
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, selected: (True, "ok", 1.9))
+    result = bj.book(_request())
+    assert result["share_code"] is None
+    assert result["readback_status"] == "BELOW_TARGET"
+    assert result["verified_odds_source"] == "sportybet_code_readback"
