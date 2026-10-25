@@ -2,6 +2,17 @@
 import time
 
 from growth import basketball_jackpot as bj
+from growth import basketball_history as bh
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolated_booking_ledger(monkeypatch):
+    """Existing code tests isolate DB while exercising booking/readback."""
+    monkeypatch.setattr(bh, "claim", lambda selections, legs, target, snapshot: (
+        True, {"fingerprint": "unit-test-claim", "status": "creating"}))
+    monkeypatch.setattr(bh, "mark", lambda fingerprint, **kwargs: None)
+
 
 
 def _event(when=None, eid="sr:match:9876"):
@@ -237,3 +248,46 @@ def test_basketball_authoritative_readback_price_below_target_is_respected(monke
     assert result["share_code"] is None
     assert result["readback_status"] == "BELOW_TARGET"
     assert result["verified_odds_source"] == "sportybet_code_readback"
+
+
+def test_duplicate_basketball_request_never_calls_sportybet(monkeypatch):
+    monkeypatch.setattr(bj, "cached_board", _board)
+    monkeypatch.setattr(bh, "claim", lambda *args: (
+        False, {"fingerprint": "previous-claim", "status": "needs_review",
+                "expires_at": None, "share_code": None}))
+    called = []
+    monkeypatch.setattr(bj.booking, "_post_share",
+                        lambda picks: called.append(picks))
+    report = bj.book(_request())
+    assert report["status"] == "BOOKING_PREVIOUS_ATTEMPT"
+    assert report["share_code"] is None
+    assert called == []
+
+
+def test_basketball_db_failure_never_requests_sportybet_code(monkeypatch):
+    monkeypatch.setattr(bj, "cached_board", _board)
+    def raise_unavailable(*args):
+        raise RuntimeError("database down")
+    monkeypatch.setattr(bh, "claim", raise_unavailable)
+    called = []
+    monkeypatch.setattr(bj.booking, "_post_share",
+                        lambda picks: called.append(picks))
+    report = bj.book(_request())
+    assert report["status"] == "BOOKING_HISTORY_UNAVAILABLE"
+    assert called == []
+
+
+def test_basketball_verified_ticket_is_archived(monkeypatch):
+    monkeypatch.setattr(bj, "cached_board", _board)
+    steps = []
+    monkeypatch.setattr(bh, "mark",
+                        lambda fingerprint, **kwargs: steps.append(kwargs))
+    monkeypatch.setattr(bj.booking, "_post_share", lambda selections: {
+        "bizCode": 10000, "data": {"shareCode": "PAID22",
+        "deadline": int((time.time() + 3600) * 1000)}})
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "ok", 2.2))
+    result = bj.book(_request())
+    assert result["history_saved"] is True
+    assert result["share_code"] == "PAID22"
+    assert [item["status"] for item in steps] == ["verifying", "active"]
