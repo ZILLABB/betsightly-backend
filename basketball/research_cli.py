@@ -195,6 +195,12 @@ def build_parser() -> argparse.ArgumentParser:
     wave2.add_argument("--home", type=Path,
                        default=Path("data/basketball/research"))
 
+    advanced_compare = commands.add_parser(
+        "advanced-score-compare",
+        help="Historical 2024-trained NBA pace/efficiency vs same-game basic scoring features")
+    advanced_compare.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     regime = commands.add_parser(
         "opening-score-regime",
         help="Read-only scoring-level drift hypotheses; 2025 selection, 2026 diagnostic")
@@ -409,6 +415,9 @@ def main(argv: list[str] | None = None) -> int:
         result = wave2_report(args.home)
         print(json.dumps(result, indent=2, default=str))
         return 2 if result["status"] == "integrity_failed" else 0
+    elif args.command == "advanced-score-compare":
+        from basketball.research_advanced_score_compare import compare_home
+        result = compare_home(args.home)
     elif args.command == "opening-score-regime":
         from basketball.research_score_regime import examine
         result = examine(read_games(args.home / "nba_games.jsonl"))
