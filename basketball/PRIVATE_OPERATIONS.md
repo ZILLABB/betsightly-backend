@@ -1089,3 +1089,58 @@ Important: the new 85% player-ingestion gate was pulled locally
 *after* a 77.78% manifest had already been accepted. It cannot
 retroactively undo that manifest; `stage4-report` now explicitly
 reveals its incompleteness. The old model remains isolated.
+
+
+## Wave 1 heavy repair: data integrity, real pregame tipoffs, settlement fallback
+
+The following are private NBA research-only changes on the draft branch,
+not a production feature launch.
+
+**Batch 01: preserve verified historical finals across incomplete source
+releases.** `preserve_older_verified_finals` retains an old exact verified
+final if the *entire* fixture is absent from a newly published schedule,
+not just when a delayed source reverts an observed final to scheduled.
+Omitted old unverified fixtures are **not** invented or retained by this
+specific safeguard. The hourly current-season refresher separately
+fails closed on missing fixture IDs; all score conflicts still raise.
+
+**Batch 02: predict by actual UTC kickoff rather than US-local date label.**
+For an automatic cycle (no explicit `--date`) the next 48h UTC pregame
+window determines which provider dates to request. This includes games
+labelled with the previous NBA US-local calendar day despite a future
+UTC kickoff. The existing 5 real earlier-team-games rule, source
+freshness, model cutoff, and before-tipoff database insert remain
+mandatory. The read-only operations screen uses the same 48h UTC window.
+
+**Batch 03: avoid stranded pending final scores.** The score checker
+prioritizes previously published but unsettled provider dates ahead of
+unpublished recent games under the existing 12-date, 14-day cap.
+When ESPN returns a successful HTTP payload with no final for a
+fixture at least four hours past verified tipoff, an independently
+verified NBA official CDN crosswalk is attempted. It requires exact
+club/date/tipoff matching, rejects ambiguous IDs or conflicting
+scores, and reports missing/broken sources explicitly. Research
+`scoreboard` output adds `overdue_espn_probe_dates`,
+`overdue_unverified_count`, and `overdue_unverified_game_ids`.
+These fields do not represent a guarantee of live provider availability
+or 100% timely settlement.
+
+**One read-only operator command** consolidates the three batches:
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+.\.venv\Scripts\python.exe -m basketball.research_cli wave1-report
+```
+
+It prints current source coverage, eligible verified pregame fixtures,
+what is blocking the next prediction, actual paper settlements, stale
+tasks and known source warnings. It never downloads data, retrains,
+runs predictions, creates a database or publishes to football. Genuine
+new NBA game results remain a prerequisite for an end-to-end observed
+forecast/settlement and 100-game forward-evaluation checkpoint.
+
+Keep `nba_paper.sqlite`, the saved forecast hashes, trained model,
+historical snapshots, and current-season cached manifests intact.
+Do not merge this branch into production until the separate release
+and data-rights review has passed.
