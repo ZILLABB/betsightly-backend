@@ -294,6 +294,15 @@ def preserve_older_verified_finals(fresh: list[dict],
         else:
             result.append(before)
             restored += 1
+    # Some public schedule releases can temporarily omit *entire* older
+    # fixtures. Previously verified finals must not disappear from the
+    # historical research database simply because their ID is absent from
+    # a newer incomplete release. Retain only actual prior verified finals;
+    # never invent missing games or revive unverified old schedules.
+    received={str(game["game_id"]) for game in fresh}
+    for ident in sorted(set(old)-received):
+        result.append(old[ident])
+        restored += 1
     return result, restored
 
 
