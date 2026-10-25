@@ -1053,3 +1053,39 @@ git pull --ff-only origin stage1/nba-private-research-20261024
 .\.venv\Scripts\python.exe -m basketball.research_cli reliability
 .\.venv\Scripts\python.exe -m basketball.research_cli stage4-report
 ```
+
+
+## Oct 25 noon — Stage 4 report distinguishes cached 2027 assets from current ones
+
+An operator `stage4-report` after the automatic 12:05 PM WAT
+pregame run showed `current_2027_verified_assets` with 28 games
+for both team and player, while `player.fixture_coverage=0.7778`
+relative to 36 finalized games. The team manifest still said 1.0
+because that asset had been validated when *only 28 games had
+finished*. The archived manifest is real; its original coverage
+denominator is now historical, not a claim of present-day freshness.
+
+The read-only Stage 4 report now adds:
+
+- `current_2027_final_fixture_count`: number of current-season
+  verified final fixtures in the local schedule.
+- `current_2027_cached_assets`: previously accepted data, even if
+  incomplete today, with the original metadata retained.
+- `current_2027_asset_health`: current denominator, covered games,
+  current coverage, original acceptance coverage, and threshold.
+- `current_2027_lagging_assets`: datasets below 85% completeness
+  relative to the latest verified schedule.
+- `current_2027_verified_assets`: only those present and currently
+  meeting the >=85% coverage threshold. Missing manifests remain
+  separately listed under `current_2027_missing_assets`.
+
+Lagging data adds a Stage 4 **public readiness blocker**, not a false
+`automation.pregame.status=failed`. This is informational only:
+no model refit, dataset deletion, changed predictions, or public
+publishing. Past archives are preserved. Source-provider lag can clear
+when later parquet files pass the same validation rules.
+
+Important: the new 85% player-ingestion gate was pulled locally
+*after* a 77.78% manifest had already been accepted. It cannot
+retroactively undo that manifest; `stage4-report` now explicitly
+reveals its incompleteness. The old model remains isolated.
