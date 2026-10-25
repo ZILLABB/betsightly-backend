@@ -311,3 +311,42 @@ def test_cycle_uses_utc_tipoff_not_american_provider_date(tmp_path, monkeypatch)
     assert ops["eligible_in_daily_cycle_window"]==1
     assert ops["already_recorded_in_daily_window"]==1
     assert ops["daily_cycle"]["expected_window"]=="Next 48 hours by verified UTC tipoff"
+
+
+def test_wave1_readonly_combined_report_explains_first_forecast(tmp_path):
+    from basketball.research_wave1_report import wave1_report
+    now=NOW
+    games=historical_games(5,now=now)+[scheduled("555",now=now)]
+    write_games(games,tmp_path/"nba_games.jsonl")
+    (tmp_path/"nba_moneyline.joblib").write_bytes(b"trusted-local-model-placeholder")
+    (tmp_path/"training_metrics.json").write_text(json.dumps({
+        "prospective_refit":{"through":(now-timedelta(days=1)).date().isoformat()}
+    }))
+    before={str(p.relative_to(tmp_path)):p.read_bytes()
+            for p in tmp_path.rglob("*") if p.is_file()}
+    status=wave1_report(tmp_path,now=now)
+    after={str(p.relative_to(tmp_path)):p.read_bytes()
+           for p in tmp_path.rglob("*") if p.is_file()}
+    assert before==after
+    assert status["phase"]=="wave1_sources_forecast_settlement"
+    assert status["pregame"]["eligible_next_7_days"]==1
+    assert status["pregame"]["eligible_in_next_48h"]==1
+    assert status["pregame"]["next_eligible"]["game_id"]=="555"
+    assert status["settlement"]["total_paper_forecasts"]==0
+    assert status["source"]["team_advanced_coverage"]["status"]=="missing"
+    assert status["release_gate"]["deployable_to_public"] is False
+    assert status["no_writes"] is True
+    assert not (tmp_path/"nba_paper.sqlite").exists()
+
+
+def test_wave1_report_on_blank_research_directory_is_readonly(tmp_path):
+    from basketball.research_wave1_report import wave1_report
+    from basketball.research_cli import build_parser
+    assert build_parser().parse_args(["wave1-report"]).command=="wave1-report"
+    result=wave1_report(tmp_path,now=NOW)
+    assert result["source"]["snapshot_status"]=="missing"
+    assert result["primary_next_step"]=="research_snapshot_missing"
+    assert result["pregame"]["eligible_next_7_days"]==0
+    assert result["settlement"]["verified_settlements"]==0
+    assert result["public_publishing_enabled"] is False
+    assert not list(tmp_path.iterdir())
