@@ -1386,6 +1386,8 @@ def _run_rapid_settlement_cycle():
             score_collector=collect_rapid_verified_finals)),
         ("builder", lambda: settle_builder_predictions(
             score_collector=collect_rapid_verified_finals)),
+        ("basketball_private", lambda: __import__(
+            "growth.basketball_settlement", fromlist=["settle_due"]).settle_due()),
     )
     for component, runner in runners:
         try:
