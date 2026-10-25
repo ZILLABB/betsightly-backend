@@ -200,6 +200,29 @@ def basketball_jackpot_book(body: BasketballJackpotRequest):
         raise HTTPException(422, str(exc))
 
 
+class BasketballJackpotPasteRequest(BaseModel):
+    fixtures_text: str = Field(min_length=5, max_length=9000)
+    target_odds: float = Field(default=2, ge=2, le=100_000)
+
+
+@router.post("/basketball-jackpot/paste-preview", dependencies=[Depends(require_admin)])
+def basketball_jackpot_paste_preview(body: BasketballJackpotPasteRequest):
+    from growth.basketball_paste import preview
+    try:
+        return preview(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/basketball-jackpot/paste-book", dependencies=[Depends(require_admin)])
+def basketball_jackpot_paste_book(body: BasketballJackpotPasteRequest):
+    from growth.basketball_paste import book
+    try:
+        return book(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 class ManualCodeImportRequest(BaseModel):
     tier: str = Field(min_length=3, max_length=20)
     code: str = Field(min_length=4, max_length=32)
