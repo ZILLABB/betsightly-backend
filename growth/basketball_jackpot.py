@@ -43,6 +43,10 @@ def _parse_event(raw: dict, league: str) -> dict | None:
         mid = str(market.get("id") or "")
         if mid not in MARKET_IDS:
             continue
+        if not _active(market.get("isActive", True)):
+            continue
+        if str(market.get("status") or "").upper() in {"SUSPENDED", "CLOSED", "INACTIVE"}:
+            continue
         spec = str(market.get("specifier") or "")
         # Basketball point lines must be exact, never inferred or substituted.
         if mid == "225" and not re.fullmatch(r"total=\d+(?:\.\d+)?", spec):
@@ -150,6 +154,9 @@ def refresh_board() -> dict:
         error = str(exc)[:180]
         complete = False
 
+    if complete and not any(entry.get("markets") for entry in fixtures):
+        complete = False
+        error = "SportyBet basketball board has no verified 219/225 markets"
     now = time.time()
     metadata = {"schema": SCHEMA, "sport": "basketball",
                 "is_complete": complete, "declared_total": declared,
