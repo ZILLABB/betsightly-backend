@@ -1004,3 +1004,52 @@ unattended success; daily 6 PM next day needs separate acceptance.
 No scheduled task needs reinstalling; its existing action points to
 the scripts in this checkout. Source rights and forecast market gates
 are unchanged.
+
+## Oct 25 11:59 AM local restart — verified scheduler and advanced-source lag
+
+Actual Task Scheduler *manual launches* succeeded for both private
+hourly programs:
+
+- Pregame: Windows exit 0 at 11:59 AM WAT, Python `succeeded`;
+  structured `scheduled_attempt.status=succeeded`.
+- Score: Windows exit 0 at 12:01 PM WAT; Python `idle` with zero
+  pending score verifications; structured `scheduled_attempt.status=idle`.
+- `reliability.issues=[]`; real hourly unattended execution still
+  requires the laptop to be powered on or a separate always-on host.
+- Latest official injury report archived and parsed; **6 of 14**
+  entries matched exact 2027 ESPN player IDs, 8 unresolved. Injury
+  model features remain disabled.
+- Advanced 2027 refresh was `partial`: team source threw
+  `ValueError`; player release had 775 accepted rows and
+  **0.7778 fixture coverage**, while the prior local full-coverage
+  snapshot covered 28 finals. This is consistent with the external
+  box-score release lagging the newer schedule (28/36=0.7778).
+  The exact team error was previously type-redacted and cannot be
+  conclusively identified without a specific category.
+
+**Protection added (research branch only):** independent 2027+ player
+parquet validation now requires both clubs and >=85% verified finalized
+fixture coverage *before replacing any prior player asset/manifest*.
+The existing team two-sided 85% guard remains unchanged. A known
+coverage shortfall is now identified as
+`insufficient_current_fixture_coverage`, with the last accepted
+manifest summary if available. No missing box scores are invented and
+the private shadow model is not retrained. The base research pipeline
+continues to run and reports an `advisories` item for optional
+advanced refresh `partial` or `blocked`, independently of fatal
+`issues` values.
+
+The upstream source may catch up without further user action. Until
+then, keep the last accepted snapshot; never weaken the 85% validation
+threshold to make a dashboard indicator turn green. Zero NBA forward
+predictions at season start remain expected until the distinct
+five-previous-games-per-team readiness gate is satisfied.
+
+Local check (do **not** delete 2027 datasets or rebuild the model):
+
+```powershell
+Set-Location "$HOME\Desktop\betsightly-nba-lab"
+git pull --ff-only origin stage1/nba-private-research-20261024
+.\.venv\Scripts\python.exe -m basketball.research_cli reliability
+.\.venv\Scripts\python.exe -m basketball.research_cli stage4-report
+```
