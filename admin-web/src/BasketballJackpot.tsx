@@ -11,6 +11,7 @@ type Board={status:string;reason?:string;fixtures:Fixture[];fetched_at?:number;m
 type Unmatched={line:number;reason:string;detail?:string};
 type Quote={status:string;reason?:string;indicative_odds?:number;verified_odds?:number;matched_fixture_count?:number;
   pasted_fixture_count?:number;full_ticket_complete?:boolean;share_code?:string|null;readback_status?:string;
+  verified_odds_source?:string;
   unmatched?:Unmatched[];share_url?:string;legs?:number};
 
 const errorText=(e:unknown)=>e instanceof Error?e.message:'Unexpected problem contacting the server';
@@ -83,6 +84,7 @@ export default function BasketballJackpot(){
  const ready=allowedTarget&&legCount>=1&&legCount<=50;
  const complete=quote?.status==='PROPOSED_NOT_BOOKED'&&quote.full_ticket_complete===true;
  const success=receipt?.status==='success'&&!!receipt.share_code&&receipt.readback_status==='PASSED';
+ const bookingRejected=!!receipt&&!success;
  const payload=()=>mode==='paste'
    ?{fixtures_text:paste,target_odds:Number(target)}
    :{selections:selected.map(({event_id,market_id,specifier,outcome_id})=>({event_id,market_id,specifier,outcome_id})),target_odds:Number(target)};
@@ -96,7 +98,7 @@ export default function BasketballJackpot(){
    }catch(e){setNotice(errorText(e));}finally{lock.current=false;setBusy(null);}
  };
  const generate=async()=>{
-   if(lock.current||!complete||success)return;
+   if(lock.current||!complete||receipt)return;
    if(!confirm){setConfirm(true);return;}
    lock.current=true;setBusy('book');setNotice('');setReceipt(null);
    try{
@@ -127,12 +129,12 @@ export default function BasketballJackpot(){
    <div className="bj-stats">
      <div><span>SELECTIONS</span><strong>{legCount}<small> / 50</small></strong></div>
      <div><span>TARGET ODDS</span><strong>{allowedTarget?odds(target)+'x':'—'}</strong></div>
-     <div><span>BOOKMAKER CHECK</span><strong className={complete?'bj-green':''}>{complete?'Ready to confirm':quote?'Needs attention':'Not checked'}</strong></div>
-     <div><span>CODE STATUS</span><strong className={success?'bj-green':''}>{success?'Verified':'Not generated'}</strong></div>
+     <div><span>BOOKMAKER CHECK</span><strong className={complete&&!bookingRejected?'bj-green':''}>{bookingRejected?'Re-preview required':complete?'Ready to confirm':quote?'Needs attention':'Not checked'}</strong></div>
+     <div><span>CODE STATUS</span><strong className={success?'bj-green':''}>{success?'Verified':bookingRejected?'Not released':'Not verified'}</strong></div>
    </div>
 
    {busy&&<div className="bj-progress" role="status"><Loader2 size={17} className="spin"/>{busyCopy[busy]}</div>}
-   {board?.status!=='success'&&busy!=='load'&&<div className="bj-alert" role="alert">
+   {board?.status!=='success'&&busy!=='load'&&!complete&&!success&&<div className="bj-alert" role="alert">
      <AlertCircle size={18}/><span>{board?.reason||'No complete basketball snapshot. Refresh the bookmaker board first.'}</span>
      {board?.status==='SERVICE_UNAVAILABLE'&&<button type="button" disabled={busy!==null} onClick={()=>void load()}>
        <RefreshCcw size={15}/> Retry connection</button>}
@@ -203,7 +205,7 @@ export default function BasketballJackpot(){
        <div className="bj-actions">
          <button type="button" className="bj-button bj-button-outline" disabled={!ready||busy!==null} onClick={inspect}>
            {busy==='preview'?<Loader2 className="spin" size={17}/>:<ShieldCheck size={17}/>} Preview exact picks</button>
-         <button type="button" className="bj-button bj-button-primary" disabled={!complete||busy!==null||!!success} onClick={generate}>
+         <button type="button" className="bj-button bj-button-primary" disabled={!complete||busy!==null||!!receipt} onClick={generate}>
            {busy==='book'?<Loader2 className="spin" size={17}/>:<ArrowRight size={17}/>}
            {confirm?'Confirm code request':'Generate SportyBet code'}</button>
        </div>
@@ -214,9 +216,17 @@ export default function BasketballJackpot(){
           {quote.indicative_odds?' Reference '+odds(quote.indicative_odds)+'x.':''}</p>
          {quote.unmatched?.map(x=><p className="bj-quote-error" key={x.line}>Line {x.line}: {x.reason.replaceAll('_',' ').toLowerCase()}{x.detail?' — '+x.detail:''}</p>)}
        </div>}
+       {bookingRejected&&<div className="bj-inline-warning" role="alert"><AlertCircle size={16}/>
+         <span>SportyBet code has not passed all checks. No code was released.
+         {receipt?.verified_odds!=null?' Current quote: '+odds(receipt.verified_odds)+'x.':''}
+         {' '}Review the reason and run a new read-only preview before requesting another code.</span>
+       </div>}
        {notice&&<div className="bj-inline-warning" role="alert"><AlertCircle size={16}/>{notice}</div>}
        {success&&<div className="bj-success" role="status"><CheckCircle2 size={20}/><p>SPORTYBET READBACK VERIFIED</p>
-         <strong>{receipt?.share_code}</strong><span>{receipt?.legs} exact picks · {odds(receipt?.verified_odds)}x verified</span>
+         <strong>{receipt?.share_code}</strong><span>{receipt?.legs} exact picks · {odds(receipt?.verified_odds)}x verified
+         {receipt?.verified_odds_source==='fresh_complete_sportybet_board'
+           ?' (fresh bookmaker board price; legs verified by code readback)'
+           :' (code readback price)'}</span>
          <button type="button" onClick={()=>receipt?.share_code&&navigator.clipboard.writeText(receipt.share_code)}><Clipboard size={15}/> Copy code</button>
        </div>}
        <div className="bj-disclaimer"><Activity size={16}/><p>Bookmaker-only manual experiment. Price availability is not a prediction of success. No bets or stakes are placed here.</p></div>
