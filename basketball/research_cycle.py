@@ -13,7 +13,7 @@ from pathlib import Path
 
 from basketball.research_data import read_games, write_games
 from basketball.research_model import paper_forecasts, train_offline
-from basketball.research_readiness import _model_cutoff, build_readiness
+from basketball.research_readiness import _model_cutoff, build_readiness, _timestamp
 from basketball.research_public_data import fetch_public_seasons
 from basketball.research_score_only import write_scoreboard_health
 from basketball.research_scoreboard import (
@@ -140,8 +140,25 @@ def run_cycle(
         blocked_examples = []
         eligible_dates = []
         from basketball.research_market_models import private_score_estimates
-        for offset in range(days_ahead):
-            forecast_day = (first_date + timedelta(days=offset)).isoformat()
+        # Provider game.date is an NBA-local calendar label, NOT the UTC
+        # tipoff day. Selecting UTC today/tomorrow loses games starting just
+        # after UTC midnight that have the prior US-local game date.
+        # Restrict by verified UTC tipoff first, then forecast those provider
+        # date labels. Explicit start_date retains its legacy date semantics.
+        if start_date is None:
+            horizon = timestamp + timedelta(days=days_ahead)
+            forecast_days = sorted({
+                game["date"] for game in games
+                if str(game["game_id"]) in eligible_ids
+                and (tipoff := _timestamp(game.get("start_utc"))) is not None
+                and timestamp < tipoff <= horizon
+            })
+        else:
+            forecast_days = [
+                (first_date + timedelta(days=offset)).isoformat()
+                for offset in range(days_ahead)
+            ]
+        for forecast_day in forecast_days:
             forecasts = paper_forecasts(games, model_path, forecast_day,
                                         as_of=timestamp)
             # Never allow the forecasting model to bypass read-only
@@ -193,6 +210,11 @@ def run_cycle(
             "readiness": {
                 "snapshot_health": readiness["snapshot"]["status"],
                 "eligible_next_14_days": readiness["eligible_forecasts"],
+                "forecast_provider_dates": forecast_days,
+                "forecast_window_ends_utc": (
+                    (timestamp + timedelta(days=days_ahead)).isoformat()
+                    if start_date is None else None
+                ),
                 "readiness_guard_rejected": guarded_out,
                 "guarded_fixture_ids": blocked_examples[:5],
             },
