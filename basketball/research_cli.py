@@ -207,6 +207,14 @@ def build_parser() -> argparse.ArgumentParser:
     advanced_report.add_argument("--home", type=Path,
         default=Path("data/basketball/research"))
 
+    archive = commands.add_parser(
+        "archive-export",
+        help="Create a local verified NBA research snapshot for admin import")
+    archive.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+    archive.add_argument("--output", type=Path,
+        default=Path("data/basketball/research/nba_admin_export.json"))
+
     early_advanced = commands.add_parser(
         "early-advanced-compare",
         help="Read-only opening-week last-season team pace/efficiency vs original score model")
@@ -445,6 +453,32 @@ def main(argv: list[str] | None = None) -> int:
             result = cycle(args.home)
         print(json.dumps(result, indent=2, default=str))
         return 2 if result["status"] in ("integrity_failed", "source_not_fresh") else 0
+    elif args.command == "archive-export":
+        import os
+        import tempfile
+        from basketball.research_private_bundle import export_bundle
+        from basketball.research_coldstart import _json
+        data = export_bundle(args.home)
+        path = args.output
+        path.parent.mkdir(parents=True, exist_ok=True)
+        candidate = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=path.parent, delete=False
+            ) as output:
+                candidate = Path(output.name)
+                output.write(_json(data))
+            os.replace(candidate, path)
+        finally:
+            if candidate is not None and candidate.exists():
+                candidate.unlink()
+        result = {
+            "status": "private_local_export_ready",
+            "file": str(path),
+            "fixture_count": len(data["fixtures"]),
+            "research_only": True, "not_bookable": True,
+            "no_network_upload": True,
+        }
     elif args.command == "early-advanced-compare":
         from basketball.research_early_advanced import benchmark
         result = benchmark(args.home)
