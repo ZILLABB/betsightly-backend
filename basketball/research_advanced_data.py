@@ -243,6 +243,20 @@ def _process(*, kind:str, season:int, fixtures:dict, loader=None,
         coverage=complete/len(season_final) if season_final else 0
         if season_final and coverage<MIN_TEAM_COMPLETE_COVERAGE:
             raise ValueError("Insufficient two-sided NBA team box-score coverage")
+    elif season>=2027:
+        # ESPN's current-season parquet releases can trail finalized schedule
+        # records. A one-player appearance is NOT complete game coverage:
+        # require published rows from both real fixture clubs.
+        sides=defaultdict(set)
+        for row in accepted:
+            sides[row["game_id"]].add(row["team_id"])
+        complete_ids={gid for gid,teams in sides.items() if len(teams)==2}
+        accepted=[r for r in accepted if r["game_id"] in complete_ids]
+        coverage=(len(complete_ids)/len(season_final)) if season_final else 0
+        if season_final and coverage<MIN_TEAM_COMPLETE_COVERAGE:
+            # Raise BEFORE fetch_advanced writes any asset or manifest.
+            # The last previously accepted private player asset survives.
+            raise ValueError("Insufficient current NBA player box-score coverage")
     result={
         "season":season,"kind":kind,"source":PROVENANCE,"source_url":url,
         "sha256":sha,"asset_bytes":len(raw),"raw_rows":len(data),
