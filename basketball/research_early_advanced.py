@@ -9,6 +9,7 @@ of the existing moneyline and score forecast ledgers. No betting advice.
 from __future__ import annotations
 
 import math
+import random
 from collections import defaultdict
 from itertools import groupby
 from pathlib import Path
@@ -199,6 +200,49 @@ def _comparison(rows):
     return result
 
 
+def paired_uncertainty(rows, *, draws=1200, seed=42):
+    """Paired source-day bootstrap for all four targets, not independent legs."""
+    by_day = defaultdict(list)
+    for r in rows:
+        by_day[r["date"]].append(r)
+    days = list(by_day.values())
+    if len(days) < 6:
+        return {
+            "status": "insufficient_independent_days",
+            "days": len(days), "matched_games": len(rows),
+            "targets": {}, "not_a_promotion_gate": True,
+        }
+    rng = random.Random(seed)
+    samples = {name: [] for name, _, _, _ in TARGETS}
+    for _ in range(draws):
+        selected = [days[rng.randrange(len(days))]
+                    for j in range(len(days))]
+        matches = [x for day in selected for x in day]
+        for name, predicted, _, actual in TARGETS:
+            gain = sum(
+                abs(r["reference_"+predicted]-r[actual]) -
+                abs(r[predicted]-r[actual])
+                for r in matches) / len(matches)
+            samples[name].append(gain)
+    results = {}
+    for name, estimates in samples.items():
+        estimates.sort()
+        lo = round(estimates[int((draws-1)*.025)], 4)
+        hi = round(estimates[int((draws-1)*.975)], 4)
+        results[name] = {
+            "improvement_interval_low": lo,
+            "improvement_interval_high": hi,
+            "improvement_demonstrated": lo > 0,
+        }
+    return {
+        "status": "retrospective_uncertainty",
+        "method": "paired_provider_calendar_day_bootstrap",
+        "draws": draws, "days": len(days),
+        "matched_games": len(rows), "targets": results,
+        "not_a_promotion_gate": True,
+    }
+
+
 def benchmark(home, *, now=None):
     games, paired, seasons = _box_snapshot(home)
     historical, basic_count = projections(
@@ -212,7 +256,16 @@ def benchmark(home, *, now=None):
     return {
         "status": "retrospective_diagnostic_only", "version": VERSION,
         "historical_matched": _comparison(historical),
+        "historical_paired_uncertainty": paired_uncertainty(historical),
         "historical_years": seasons_report,
+        "per_year_paired_uncertainty": {
+            str(season): paired_uncertainty(
+                [r for r in historical if r["season"] == season])
+            for season in (2025, 2026)
+        },
+        "advanced_historical_coverage_ratio": (
+            round(len(historical)/basic_count,4) if basic_count else None),
+        "advanced_historical_missing_count": basic_count-len(historical),
         "original_historical_early_score_eligible": basic_count,
         "available_prior_year_team_assets": seasons,
         "future_before_tipoff_eligible": len(new_rows),

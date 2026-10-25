@@ -195,6 +195,18 @@ def build_parser() -> argparse.ArgumentParser:
     wave2.add_argument("--home", type=Path,
                        default=Path("data/basketball/research"))
 
+    advanced_cycle = commands.add_parser(
+        "early-advanced-cycle",
+        help="Lock and save separate before-tipoff advanced-vs-original score forecasts")
+    advanced_cycle.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
+    advanced_report = commands.add_parser(
+        "early-advanced-report",
+        help="Read-only signed advanced-vs-original NBA score settlement report")
+    advanced_report.add_argument("--home", type=Path,
+        default=Path("data/basketball/research"))
+
     early_advanced = commands.add_parser(
         "early-advanced-compare",
         help="Read-only opening-week last-season team pace/efficiency vs original score model")
@@ -421,6 +433,18 @@ def main(argv: list[str] | None = None) -> int:
         result = wave2_report(args.home)
         print(json.dumps(result, indent=2, default=str))
         return 2 if result["status"] == "integrity_failed" else 0
+    elif args.command == "early-advanced-report":
+        from basketball.research_early_advanced_ops import audit
+        result = audit(args.home)
+        print(json.dumps(result, indent=2, default=str))
+        return 2 if result["status"] == "integrity_failed" else 0
+    elif args.command == "early-advanced-cycle":
+        from basketball.research_automation import exclusive_local_run
+        from basketball.research_early_advanced_ops import cycle
+        with exclusive_local_run(args.home):
+            result = cycle(args.home)
+        print(json.dumps(result, indent=2, default=str))
+        return 2 if result["status"] in ("integrity_failed", "source_not_fresh") else 0
     elif args.command == "early-advanced-compare":
         from basketball.research_early_advanced import benchmark
         result = benchmark(args.home)
