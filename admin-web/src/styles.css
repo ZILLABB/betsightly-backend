@@ -357,3 +357,15 @@ button:active:not(:disabled){transform:translateY(1px)}
 @media(max-width:1000px){.nba-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.nba-heading{flex-direction:column}}
 @media(max-width:560px){.nba-metrics{gap:9px}.nba-metrics>div{padding:13px}.nba-metrics strong{font-size:27px}.nba-toolbar{align-items:stretch}.nba-toolbar label{flex:1}.nba-toolbar label:nth-of-type(2){flex-basis:100%}.nba-toolbar input{min-width:unset;width:100%}.nba-heading .button{align-self:flex-start}}
 @media(prefers-reduced-motion:reduce){.nba-workspace *, .nba-workspace *::before,.nba-workspace *::after{transition:none!important;animation:none!important}}
+
+
+.nba-import{background:linear-gradient(140deg,#16354c,#102b43);border:1px solid #3b6680;border-radius:14px;padding:17px 18px;display:flex;justify-content:space-between;align-items:center;gap:15px}
+.nba-import>div{display:grid;gap:7px;max-width:750px}
+.nba-import strong{font-size:13px;color:#ecf8ff}
+.nba-import span{font-size:11px;color:#a9cada;line-height:1.6}
+.nba-import label.button{display:inline-flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;position:relative}
+.nba-import label.button input{position:absolute;inset:0;opacity:0;max-width:100%;cursor:pointer}
+.nba-import label.button:focus-within{outline:3px solid #88bfdf;outline-offset:3px}
+.nba-upload-busy{opacity:.5;pointer-events:none}
+.nba-upload-error{display:flex;gap:10px;align-items:flex-start;border:1px solid #815652;border-radius:9px;background:#3c2428;padding:12px 15px;font-size:12px;color:#ffdad3}
+@media(max-width:750px){.nba-import{flex-direction:column;align-items:flex-start}.nba-import label.button{max-width:100%}}

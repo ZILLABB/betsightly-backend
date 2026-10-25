@@ -36,3 +36,13 @@ test('honest loading, unavailable data, filtering and copy',()=>{
   assert.match(css,/\.nba-metrics/);
   assert.match(css,/prefers-reduced-motion:reduce/);
 });
+test('archived NBA imports require server-confirmed digest readback',()=>{
+  assert.match(page,/uploadArchive/);
+  assert.match(page,/file\.size>750_000/);
+  assert.match(page,/betsightly-nba-private-archive-v1/);
+  assert.match(page,/checked\.data\?\.archive_digest!==saved\.digest/);
+  assert.match(page,/Import research archive/);
+  assert.match(proxy,/'admin\/nba-research\/import'/);
+  assert.match(proxy,/route === 'admin\/nba-research\/import' \? 750000 : 16384/);
+  assert.match(page,/No data was uploaded/);
+});

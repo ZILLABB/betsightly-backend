@@ -23,7 +23,7 @@ export type ResearchBoard={
   booking_codes_available:false;
   summary:{fixtures:number;forecasts:Counts;verified_settlements:Counts;
     pending_fixtures:number};
-  games:ResearchGame[];
+  games:ResearchGame[];archive_digest?:string;hosted_source?:string;
 };
 const num=(v:number|null|undefined,suffix='')=>
   typeof v==='number'&&Number.isFinite(v)?v.toFixed(1)+suffix:'—';
@@ -54,6 +54,9 @@ export default function BasketballResearch(){
   const [state,setState]=useState('all');
   const [term,setTerm]=useState('');
   const [notice,setNotice]=useState('');
+  const [uploadBusy,setUploadBusy]=useState(false);
+  const [uploadIssue,setUploadIssue]=useState('');
+  const [uploadConfirmed,setUploadConfirmed]=useState(false);
   const q=useQuery<ResearchBoard>({
     queryKey:['nba-private-recorded-research'],
     queryFn:()=>api<ResearchBoard>('admin/nba-research'),
@@ -85,6 +88,34 @@ export default function BasketballResearch(){
       setNotice(items.length+' archived NBA games copied.');
     }catch{setNotice('Clipboard unavailable. Use Export CSV.');}
   }
+  async function uploadArchive(event:import('react').ChangeEvent<HTMLInputElement>){
+    const file=event.target.files?.[0];
+    event.target.value='';
+    if(!file||uploadBusy)return;
+    setUploadBusy(true);
+    setUploadIssue('');
+    setUploadConfirmed(false);
+    try{
+      if(file.size>750_000)throw Error('Private NBA file exceeds 750 KB. No data was uploaded.');
+      const raw=await file.text();
+      const data:unknown=JSON.parse(raw);
+      if(!data||typeof data!=='object'||Array.isArray(data)||
+        (data as any).version!=='betsightly-nba-private-archive-v1'||
+        (data as any).research_only!==true)
+        throw Error('Choose a verified BetSightly NBA archive export, not arbitrary JSON.');
+      const saved=await api<{status:string;digest:string;fixture_count:number}>(
+        'admin/nba-research/import',data);
+      if(saved.status!=='saved_and_verified'&&saved.status!=='already_saved')
+        throw Error('Backend did not confirm saved NBA research. Do not retry blindly.');
+      const checked=await q.refetch();
+      if(checked.isError||checked.data?.archive_digest!==saved.digest)
+        throw Error('Upload response received, but database readback did not confirm the same archive. Check status before resubmitting.');
+      setUploadConfirmed(true);
+      setNotice(saved.fixture_count+' NBA fixtures verified in private database. Existing football remains unchanged.');
+    }catch(error){
+      setUploadIssue(error instanceof Error?error.message:'NBA archive upload failed.');
+    }finally{setUploadBusy(false);}
+  }
   const status=q.error instanceof ApiError?q.error.status:0;
   return <section className="nba-workspace">
     <header className="page-heading nba-heading">
@@ -97,6 +128,23 @@ export default function BasketballResearch(){
         <RefreshCcw size={15} className={q.isFetching?'spin':''}/> Refresh records
       </button>
     </header>
+    <div className="nba-import">
+      <div><strong>Secure forecast archive</strong>
+        <span>Import the original signed NBA research bundle exported on your laptop.
+          Admin-only, append-only and never shared with football results.</span></div>
+      <label className={'button secondary '+(uploadBusy?'nba-upload-busy':'')}>
+        <Database size={15}/>{uploadBusy?'Verifying archive…':'Import research archive'}
+        <input aria-label="Choose exported NBA JSON archive" type="file"
+          accept=".json,application/json" disabled={uploadBusy}
+          onChange={e=>void uploadArchive(e)}/>
+      </label>
+    </div>
+    {uploadIssue&&<div className="nba-upload-error" role="alert">
+      <AlertTriangle size={17}/>{uploadIssue}
+    </div>}
+    {uploadConfirmed&&<div className="nba-notice" role="status">
+      <CheckCheck size={15}/> NBA archive saved and confirmed by database readback.
+    </div>}
     <div className="nba-disclaimer" role="note"><ShieldCheck size={19}/>
       <span><strong>Evaluation only.</strong> No SportyBet basketball booking code,
         verified market lines, stakes, public picks or guaranteed outcomes.</span></div>
