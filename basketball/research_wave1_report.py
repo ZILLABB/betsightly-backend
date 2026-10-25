@@ -33,10 +33,45 @@ def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
     # forecast or source compliance. Keep all three readiness layers separate.
     eligible = [item for item in upcoming if item["eligible"]]
     quality = advanced["current_2027_asset_health"]
-    warnings = list(dict.fromkeys([
+    # Distinguish a healthy baseline pregame job from an optional blocked
+    # advanced source. Surface the warning without declaring v1 unhealthy.
+    hard_warnings = list(dict.fromkeys([
         *ops.get("warnings", []),
         *tasks.get("issues", []),
     ]))
+    advisories = list(dict.fromkeys([
+        *tasks.get("advisories", []),
+        *(
+            ["advanced_2027_boxscores_stale"]
+            if advanced.get("current_2027_lagging_assets") else []
+        ),
+    ]))
+    # No unsupported extrapolation from future scheduled NBA games: counts
+    # refer ONLY to already completed, verified same-season finals.
+    closest = sorted(
+        (
+            {
+                "game_id": item["game_id"],
+                "start_utc": item["start_utc"],
+                "home_team": item["home_team"],
+                "away_team": item["away_team"],
+                "home_prior_verified": item["home_prior_games"],
+                "away_prior_verified": item["away_prior_games"],
+                "home_additional_finals_required": item["home_games_remaining"],
+                "away_additional_finals_required": item["away_games_remaining"],
+                "minimum_additional_team_finals": (
+                    item["home_games_remaining"] + item["away_games_remaining"]
+                ),
+            }
+            for item in upcoming
+            if item["home_games_remaining"] or item["away_games_remaining"]
+        ),
+        key=lambda item: (
+            item["minimum_additional_team_finals"],
+            item["start_utc"] or "",
+            item["game_id"],
+        ),
+    )
     reason = (
         "research_snapshot_missing"
         if readiness["snapshot"]["status"] in ("missing", "invalid", "unknown")
@@ -70,6 +105,8 @@ def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
             "eligible_in_next_48h": ops.get("eligible_in_daily_cycle_window", 0),
             "already_recorded_next_48h": ops.get("already_recorded_in_daily_window", 0),
             "blockers": readiness["blockers"],
+            "closest_to_five_verified_games": closest[:5],
+            "closest_are_not_predictions": True,
             "next_eligible": ({
                 "game_id": eligible[0]["game_id"],
                 "start_utc": eligible[0]["start_utc"],
@@ -91,12 +128,14 @@ def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
         },
         "automation": {
             "issues": tasks["issues"],
-            "advisories": tasks.get("advisories", []),
+            "advisories": advisories,
             "pregame_status": tasks["tasks"]["pregame"]["status"],
             "score_status": tasks["tasks"]["score"]["status"],
             "full_status": tasks["tasks"]["full"]["status"],
         },
-        "attention": warnings,
+        "attention": list(dict.fromkeys([*hard_warnings, *advisories])),
+        "hard_operational_issues": hard_warnings,
+        "nonblocking_advisories": advisories,
         "primary_next_step": reason,
         "release_gate": {
             "first_100_forward_finals_complete": (
