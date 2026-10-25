@@ -233,3 +233,12 @@ def test_historical_source_omission_keeps_previously_verified_final_only():
         "401910002","401910003"}
     assert next(row for row in merged if row["game_id"]=="401910002") == verified
     assert "401910004" not in {item["game_id"] for item in merged}
+
+
+def test_score_check_prioritizes_older_unsettled_over_newer_unpredicted():
+    dates=[f"2026-10-{day:02d}" for day in range(11,25)]
+    games=[scheduled(str(600000+day),day) for day in dates]
+    chosen=selected_dates(games,NOW,pending_dates=["2026-10-11"])
+    assert len(chosen)==12
+    assert chosen[0]=="2026-10-11"
+    assert "2026-10-24" in chosen
