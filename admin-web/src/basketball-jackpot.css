@@ -116,3 +116,79 @@
 @media(max-width:900px){.bj-columns{grid-template-columns:1fr}.bj-ticket{position:static}.bj-hero{padding:26px}.bj-stats{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:600px){.bj-hero{border-radius:15px;flex-direction:column;gap:20px;padding:24px}.bj-hero-side{border-left:0;border-top:1px solid rgba(206,233,246,.18);padding:17px 0 0;min-width:0}.bj-hero-side>strong{font-size:37px}.bj-hero-side>span{margin-bottom:11px}.bj-hero-tags{gap:6px;margin-top:18px}.bj-hero-tags span{font-size:10px}.bj-workspace,.bj-ticket{padding:16px;border-radius:13px}.bj-stats{gap:8px}.bj-stats>div{padding:13px}.bj-stats strong{font-size:15px}.bj-fixture-main{align-items:flex-start;flex-direction:column;gap:6px}.bj-tabs button{font-size:11px;gap:5px;padding:11px 7px}}
 @media(prefers-reduced-motion:reduce){.bj button{transition:none}.bj-button-primary:hover:not(:disabled){transform:none}}
+
+
+/* BASKETBALL ATLANTIC NIGHT: a single consistent dark workspace. */
+.bj{color:#d8e8f3;--bj-surface:#102638;--bj-elevated:#173349;--bj-stroke:#2a4c62;--bj-muted-night:#9fb9ca}
+.bj-stats>div,.bj-workspace,.bj-ticket{background:linear-gradient(155deg,#102537 0%,#0d2132 100%);border-color:#29465d;box-shadow:0 14px 38px rgba(0,8,18,.15)}
+.bj-stats>div{border-radius:13px}
+.bj-stats span{color:#93b0c4}
+.bj-stats strong{color:#ecf6fd}
+.bj-stats strong small{color:#87a6b9}
+.bj-stats .bj-green{color:#6ee4c8}
+.bj-section-top h2{color:#f3faff}
+.bj-section-top p{color:#9ab3c4}
+.bj-section-top>svg{color:#7cced3}
+.bj-overline{color:#74dad9}
+.bj-tabs{background:#0a1d2e;border-color:#294458}
+.bj-tabs button{color:#9eb6c7}
+.bj-tabs button:hover:not(:disabled){color:#edfbff;background:#18364b}
+.bj-tabs button.active{background:linear-gradient(120deg,#1b4558,#183c52);border-color:#39778a;box-shadow:0 3px 13px rgba(0,0,0,.14);color:#bdf8f2}
+.bj-input-heading{color:#e5f3fc}
+.bj-input-heading span{color:#99b6c7}
+.bj-paste-panel textarea{border-color:#33576e;background:#091b2a;color:#eaf6fc;box-shadow:inset 0 2px 12px rgba(0,0,0,.16);caret-color:#85e6dc}
+.bj-paste-panel textarea::placeholder{color:#7899ad;opacity:1}
+.bj-paste-panel textarea:focus{background:#0e2637;border-color:#60c9cb}
+.bj-paste-foot{color:#9cb5c5}
+.bj-paste-foot button{color:#acc4d2}
+.bj-format{background:linear-gradient(135deg,#122d3c,#0c2534);border-color:#294e60}
+.bj-format>div{color:#dff9f7}
+.bj-format>div svg{color:#70dbd2}
+.bj-format code{background:#091c2c;border-color:#274759;color:#b8e6f0}
+.bj-format p{color:#a3bdcc}
+.bj-search{background:#091d2c;border-color:#2c4d62;color:#9dbbcc}
+.bj-search input{color:#effbff}
+.bj-search input::placeholder{color:#829fad}
+.bj-filterrow button{background:#102a3d;border-color:#2c4b61;color:#a3bed0}
+.bj-filterrow button.active{background:#174657;border-color:#48aab1;color:#bcf1ec}
+.bj-fixture-count{color:#92aebf}
+.bj-fixture{background:#10283b;border-color:#2b4b62}
+.bj-league{color:#80d7d5}
+.bj-fixture-main strong{color:#f0f8fe}
+.bj-fixture-main strong span{color:#91aaba}
+.bj-fixture-main time{color:#aac3d1}
+.bj-fixture select{background:#091f30;border-color:#365a70;color:#e0f3fb}
+.bj-fixture select option,.bj-fixture select optgroup{background:#10283a;color:#e6f3fa}
+.bj-more{background:#15364b;border-color:#3a6476;color:#baedeb}
+.bj-more:hover:not(:disabled){background:#1c4658}
+.bj-empty{background:#0a1d2d;color:#a1bece;border:1px dashed #315069}
+.bj-ticket-leg{border-bottom-color:#29465b}
+.bj-ticket-leg>span{color:#8ab8c7}
+.bj-ticket-leg strong{color:#e5f4fc}
+.bj-ticket-leg small{color:#9abccc}
+.bj-ticket-leg b{color:#89e7dd}
+.bj-ticket-leg button{color:#ffae9f}
+.bj-ticket-callout{background:#102f40;border-color:#2b5a68;color:#73d8d2}
+.bj-ticket-callout strong{color:#e5f9fc}
+.bj-ticket-callout p{color:#a0becb}
+.bj-ticket-total{background:linear-gradient(115deg,#071b2b,#174456);border:1px solid #315b6c;box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
+.bj-target{color:#d9edf4}
+.bj-target input{background:#091e2d;border-color:#35596e;color:#f4fbff}
+.bj-quick button{background:#112e42;border-color:#305169;color:#adc6d8}
+.bj-quick button.active{background:#14515a;border-color:#61bfba;color:#c9fff5}
+.bj-button-outline{background:#15364a;border-color:#397487;color:#c4ebee}
+.bj-button-outline:hover:not(:disabled){background:#1c4858}
+.bj-button-primary{background:linear-gradient(95deg,#178b94,#117c86);border-color:#2ab2b5;color:#f9ffff}
+.bj-button-primary:hover:not(:disabled){background:linear-gradient(95deg,#197d88,#0d6d78)}
+.bj-quote-good{background:#123b35;border-color:#317968;color:#adf4da}
+.bj-quote-bad{background:#3a2b1c;border-color:#916b3a;color:#ffe3b4}
+.bj-inline-warning,.bj-alert{background:#362817;border-color:#805a31;color:#ffdaa5}
+.bj-progress{background:#143949;border-color:#3d8690;color:#c6f6f7}
+.bj-success{background:#153d38;border-color:#3f8e73;color:#bdffe4}
+.bj-success strong{color:#d9fff2}
+.bj-success button{background:#11332e;border-color:#4b997f;color:#d7fff1}
+.bj-disclaimer{border-top-color:#29465c;color:#9cb7c8}
+.bj-disclaimer svg{color:#76b6c6}
+.bj-workspace,.bj-ticket{color-scheme:dark}
+.bj-hero,.bj-stats,.bj-columns{isolation:isolate}
+@media(max-width:600px){.bj-stats>div{min-width:0}.bj-stats strong{overflow-wrap:anywhere;white-space:normal}.bj-hero-side{width:100%}}
