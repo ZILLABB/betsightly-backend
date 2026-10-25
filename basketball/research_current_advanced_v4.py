@@ -6,9 +6,10 @@ last season's team efficiencies for same-season prospective forecasts.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime,timezone
 from pathlib import Path
-from basketball.research_advanced_data import fetch_advanced,advanced_coverage
+from basketball.research_advanced_data import fetch_advanced,MIN_TEAM_COMPLETE_COVERAGE
 
 
 def refresh_current_advanced(home:str|Path,*,season:int,
@@ -32,10 +33,31 @@ def refresh_current_advanced(home:str|Path,*,season:int,
                 "checked_at":report["provenance_checked_at"],
             }
         except (RuntimeError,ValueError,OSError,TimeoutError) as exc:
+            # A newly completed NBA fixture can precede the box-score
+            # publisher's next release. Never replace a previously accepted
+            # file with a partially populated newer snapshot.
+            coverage_error=isinstance(exc,ValueError) and str(exc) in (
+                "Insufficient two-sided NBA team box-score coverage",
+                "Insufficient current NBA player box-score coverage",
+            )
             outcomes[kind]={
                 "status":"unavailable",
-                "reason":type(exc).__name__,
+                "reason":("insufficient_current_fixture_coverage"
+                          if coverage_error else type(exc).__name__),
             }
+            if coverage_error:
+                outcomes[kind]["minimum_fixture_coverage"]=MIN_TEAM_COMPLETE_COVERAGE
+                manifest=root/"advanced"/f"{kind}_{season}.manifest.json"
+                if manifest.is_file():
+                    try:
+                        old=json.loads(manifest.read_text(encoding="utf-8"))
+                        if old.get("season")==season and old.get("kind")==kind:
+                            outcomes[kind]["last_accepted_snapshot"]={
+                                "covered_final_games":int(old["covered_final_games"]),
+                                "source_checked_at":str(old["provenance_checked_at"]),
+                            }
+                    except (OSError,ValueError,TypeError,KeyError):
+                        pass
     count=sum(v["status"]=="verified" for v in outcomes.values())
     return {
         "status":"ready" if count==2 else "partial" if count else "blocked",
