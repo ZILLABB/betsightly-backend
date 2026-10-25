@@ -30,9 +30,10 @@ def stage4_report(home:str|Path,*,now:datetime|None=None)->dict:
     # when the verified 2027 schedule has already reached 36 finals.
     cached={str(record["kind"]):record for record in coverage["assets"]
             if record["season"]==2027}
+    fixture_path=root/"nba_games.jsonl"
     verified_final_count=sum(
         game["season"]==2027 and game["status"]=="final"
-        for game in read_games(root/"nba_games.jsonl")
+        for game in (read_games(fixture_path) if fixture_path.is_file() else [])
     )
     health={}
     for kind in ("team","player"):
