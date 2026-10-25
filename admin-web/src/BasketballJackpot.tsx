@@ -41,7 +41,11 @@ export default function BasketballJackpot(){
    if(lock.current)return;
    lock.current=true;setBusy('load');setNotice('');
    try{setBoard(await api<Board>('basketball-jackpot/board'));}
-   catch(e){setNotice(errorText(e));}finally{lock.current=false;setBusy(null);}
+   catch(e){
+     setBoard({status:'SERVICE_UNAVAILABLE',fixtures:[],
+       reason:'The bookmaker API is temporarily unreachable. This does not mean the stored basketball board is empty.'});
+     setNotice(errorText(e));
+   }finally{lock.current=false;setBusy(null);}
  };
  useEffect(()=>{void load();},[]);
  const reset=()=>{setQuote(null);setReceipt(null);setNotice('');setConfirm(false);};
@@ -128,7 +132,11 @@ export default function BasketballJackpot(){
    </div>
 
    {busy&&<div className="bj-progress" role="status"><Loader2 size={17} className="spin"/>{busyCopy[busy]}</div>}
-   {board?.status!=='success'&&busy!=='load'&&<div className="bj-alert"><AlertCircle size={18}/> {board?.reason||'No complete basketball snapshot. Refresh the bookmaker board first.'}</div>}
+   {board?.status!=='success'&&busy!=='load'&&<div className="bj-alert" role="alert">
+     <AlertCircle size={18}/><span>{board?.reason||'No complete basketball snapshot. Refresh the bookmaker board first.'}</span>
+     {board?.status==='SERVICE_UNAVAILABLE'&&<button type="button" disabled={busy!==null} onClick={()=>void load()}>
+       <RefreshCcw size={15}/> Retry connection</button>}
+   </div>}
 
    <div className="bj-columns">
      <section className="bj-workspace">
