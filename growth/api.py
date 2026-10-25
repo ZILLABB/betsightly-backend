@@ -223,6 +223,19 @@ def basketball_jackpot_paste_book(body: BasketballJackpotPasteRequest):
         raise HTTPException(422, str(exc))
 
 
+@router.get("/basketball-jackpot/history", dependencies=[Depends(require_admin)])
+def basketball_jackpot_history(limit: int = Query(default=30, ge=1, le=100)):
+    from growth.basketball_history import list_recent
+    return list_recent(limit=limit)
+
+
+@router.post("/basketball-jackpot/settle", dependencies=[Depends(require_admin)])
+def basketball_jackpot_settle():
+    """Explicit, bounded NBA final-score reconciliation; never invent finals."""
+    from growth.basketball_settlement import settle_due
+    return settle_due()
+
+
 class ManualCodeImportRequest(BaseModel):
     tier: str = Field(min_length=3, max_length=20)
     code: str = Field(min_length=4, max_length=32)
