@@ -275,10 +275,49 @@ def book(request: dict) -> dict:
         return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
                 "reason": "No valid code in bookmaker response"}
     valid, why, actual = booking.validate_code_details(code, selections)
-    if not valid or actual is None or actual < checked["target_odds"]:
+    if not valid:
         return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
-                "readback_status": "FAILED", "reason": (
-                    why if not valid else "Readback odds missing or below target")}
+                "readback_status": "FAILED", "reason": why}
+    odds_source = "sportybet_code_readback"
+    if actual is None:
+        # SportyBet sometimes verifies every returned leg but omits all odds.
+        # Refresh the complete bookmaker board *after* readback and require
+        # every event, market, specifier and outcome to remain independently
+        # available. Never substitute the old preview quote or generate a
+        # second share-code request.
+        fresh = refresh_board()
+        if fresh.get("status") != "success":
+            return {**checked, "status": "BOOKING_UNAVAILABLE",
+                    "share_code": None, "readback_status": "ODDS_UNAVAILABLE",
+                    "reason": ("Code legs matched, but readback omitted odds and "
+                               "a complete fresh bookmaker price check failed. "
+                               "Do not retry Generate Code blindly.")}
+        current_board = cached_board()
+        if current_board is None:
+            return {**checked, "status": "BOOKING_UNAVAILABLE",
+                    "share_code": None, "readback_status": "ODDS_UNAVAILABLE",
+                    "reason": "The freshly fetched bookmaker prices were not available."}
+        refreshed = _select(request, current_board)
+        if not refreshed["full_ticket_complete"]:
+            return {**checked, "status": "BOOKING_UNAVAILABLE",
+                    "share_code": None, "readback_status": "ODDS_UNAVAILABLE",
+                    "unmatched": refreshed["unmatched"],
+                    "reason": ("The share-code legs matched but one or more exact "
+                               "markets are no longer active at current prices.")}
+        actual = math.prod(float(leg["odds"]) for leg in refreshed["matched"])
+        odds_source = "fresh_complete_sportybet_board"
+    if not math.isfinite(float(actual)) or actual <= 1:
+        return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
+                "readback_status": "ODDS_UNAVAILABLE",
+                "reason": "Current bookmaker odds cannot be verified."}
+    if actual < checked["target_odds"]:
+        return {**checked, "status": "BOOKING_UNAVAILABLE", "share_code": None,
+                "readback_status": "BELOW_TARGET",
+                "verified_odds": round(actual, 3),
+                "verified_odds_source": odds_source,
+                "reason": (f"Current bookmaker total {actual:.3f}x is below "
+                           f"your {checked['target_odds']:g}x target. "
+                           "No code was released; re-preview the ticket.")}
     try:
         expiry = datetime.fromtimestamp(float(data["deadline"]) / 1000, tz=timezone.utc)
         if expiry <= datetime.now(timezone.utc):
@@ -289,6 +328,9 @@ def book(request: dict) -> dict:
                 "reason": "SportyBet did not provide a verifiable, future code expiry."}
     return {**checked, "status": "success", "share_code": code,
             "share_url": data.get("shareURL"),
-            "expires_at": expiry.isoformat(), "verified_odds": actual,
+            "expires_at": expiry.isoformat(),
+            "verified_odds": round(actual, 3),
+            "verified_odds_source": odds_source,
             "readback_status": "PASSED", "legs": len(selections),
-            "note": "Basketball bookmaker-only experimental slip; no stake placed"}
+            "note": ("Exact code legs confirmed by SportyBet. Odds verified from "
+                     "the source indicated; no stake placed.")}
