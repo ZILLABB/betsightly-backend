@@ -256,3 +256,52 @@ def test_current_source_lag_explained_without_claiming_fresh_asset(tmp_path):
     assert report["assets"]["team"]["last_accepted_snapshot"]["covered_final_games"]==28
     assert "last_accepted_snapshot" not in report["assets"]["player"]
     assert report["model_retrained"] is False
+
+
+def test_stage4_catches_cached_28_of_36_as_stale_not_verified(tmp_path):
+    """A historical 100% manifest becomes 77.78% after 8 new game finals."""
+    games=[_game(ident=str(60000+i),date="2026-10-23") for i in range(36)]
+    write_games(games,tmp_path/"nba_games.jsonl")
+    folder=tmp_path/"advanced"
+    folder.mkdir()
+    for kind,old_ratio in (("team",1.0),("player",0.7778)):
+        (folder/f"{kind}_2027.manifest.json").write_text(json.dumps({
+            "season":2027,"kind":kind,"covered_final_games":28,
+            "fixture_coverage":old_ratio,
+            "provenance_checked_at":NOW.isoformat(),
+        }),encoding="utf-8")
+    report=stage4_report(tmp_path,now=NOW)
+    assert report["current_2027_final_fixture_count"]==36
+    assert report["current_2027_missing_assets"]==[]
+    assert report["current_2027_lagging_assets"]==["team","player"]
+    assert report["current_2027_verified_assets"]=={}
+    assert len(report["current_2027_cached_assets"])==2
+    assert report["current_2027_asset_health"]["team"]["coverage_at_last_acceptance"]==1.0
+    for kind in ("team","player"):
+        detail=report["current_2027_asset_health"][kind]
+        assert detail["status"]=="stale_coverage"
+        assert detail["covered_final_games"]==28
+        assert detail["coverage_against_current_finals"]==0.7778
+    assert "stale_2027_team_player_boxscore_coverage" in report["blockers"]
+    assert report["deployable_to_public"] is False
+
+
+def test_stage4_current_coverage_recovers_without_fabricating_source(tmp_path):
+    """A real newly accepted 32/36 manifest clears the 85% health threshold."""
+    games=[_game(ident=str(60000+i),date="2026-10-23") for i in range(36)]
+    write_games(games,tmp_path/"nba_games.jsonl")
+    folder=tmp_path/"advanced"
+    folder.mkdir()
+    for kind in ("team","player"):
+        (folder/f"{kind}_2027.manifest.json").write_text(json.dumps({
+            "season":2027,"kind":kind,"covered_final_games":32,
+            "fixture_coverage":round(32/36,4),
+            "provenance_checked_at":NOW.isoformat(),
+        }),encoding="utf-8")
+    report=stage4_report(tmp_path,now=NOW)
+    assert report["current_2027_missing_assets"]==[]
+    assert report["current_2027_lagging_assets"]==[]
+    assert set(report["current_2027_verified_assets"])=={"team","player"}
+    assert report["current_2027_asset_health"]["team"]["coverage_against_current_finals"]==0.8889
+    assert not any(x.startswith("stale_2027_") for x in report["blockers"])
+    assert report["deployable_to_public"] is False
