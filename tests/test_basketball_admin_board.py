@@ -54,9 +54,13 @@ def test_signed_archive_tampering_blocks_entire_board(tmp_path):
 
 
 def test_admin_auth_and_server_feature_flag_fail_closed(tmp_path, monkeypatch):
+    # The Vercel/Render API must never implicitly read the owner's Windows
+    # NBA_RESEARCH_HOME. Only an expressly imported, verified hosted
+    # snapshot is visible. Separate API import tests exercise the actual DB.
+    from basketball import research_private_store
+    monkeypatch.setattr(research_private_store, "hosted_board", lambda: None)
     monkeypatch.setenv("SECRET_KEY", "synthetic-server-key")
     monkeypatch.setenv("ADMIN_PASSWORD_HASH", "synthetic-configuration-present")
-    monkeypatch.setenv("NBA_RESEARCH_HOME", str(tmp_path))
     monkeypatch.delenv("NBA_ADMIN_RESEARCH_ENABLED", raising=False)
     app = FastAPI()
     app.include_router(router, prefix="/api/growth")
@@ -69,6 +73,8 @@ def test_admin_auth_and_server_feature_flag_fail_closed(tmp_path, monkeypatch):
     assert client.get(path).status_code == 503
     setup_lab(tmp_path)
     original_capture(tmp_path, now=NOW)
+    monkeypatch.setattr(research_private_store, "hosted_board",
+                        lambda: board_from_home(tmp_path, now=NOW))
     response = client.get(path)
     assert response.status_code == 200
     assert response.headers["cache-control"] == "private, no-store"
