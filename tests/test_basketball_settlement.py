@@ -237,7 +237,7 @@ def test_historical_source_omission_keeps_previously_verified_final_only():
 
 def test_score_check_prioritizes_older_unsettled_over_newer_unpredicted():
     dates=[f"2026-10-{day:02d}" for day in range(11,25)]
-    games=[scheduled(str(600000+day),day) for day in dates]
+    games=[scheduled(str(600000+i),day) for i,day in enumerate(dates)]
     chosen=selected_dates(games,NOW,pending_dates=["2026-10-11"])
     assert len(chosen)==12
     assert chosen[0]=="2026-10-11"
