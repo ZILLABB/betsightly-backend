@@ -90,11 +90,26 @@ export default async function handler(req, res) {
     headers.origin = backend.origin;
   }
   try {
-    const upstreamResponse = await fetch(upstream, {
-      method: req.method, headers,
-      ...(req.method === 'POST' ? {body: JSON.stringify(payload)} : {}),
-      redirect:'manual', signal: AbortSignal.timeout(110000)
-    });
+    // A Render deploy can interrupt this read-only board GET while workers
+    // restart. Retry only this idempotent lookup, never a booking or other POST.
+    const safeBoardRead = req.method === 'GET' && route === 'basketball-jackpot/board';
+    let upstreamResponse;
+    for (let attempt = 0; attempt < (safeBoardRead ? 3 : 1); attempt++) {
+      try {
+        upstreamResponse = await fetch(upstream, {
+          method: req.method, headers,
+          ...(req.method === 'POST' ? {body: JSON.stringify(payload)} : {}),
+          redirect:'manual', signal: AbortSignal.timeout(45000)
+        });
+      } catch (error) {
+        if (!safeBoardRead || attempt === 2) throw error;
+        await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 1250));
+        continue;
+      }
+      if (!safeBoardRead || ![502,503,504].includes(upstreamResponse.status) || attempt === 2) break;
+      await upstreamResponse.body?.cancel().catch(() => {});
+      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 1250));
+    }
     const cookie = upstreamResponse.headers.get('set-cookie');
     if (cookie) res.setHeader('Set-Cookie',cookie);
     if (upstreamResponse.status >= 500) {
