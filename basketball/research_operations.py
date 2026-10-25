@@ -65,13 +65,14 @@ def build_operations(
     )
     saved = {str(row["game_id"]): row for row in forecasts}
     ready = [r for r in readiness["fixtures"] if r["eligible"]]
-    # The 18:00 local scheduled job forecasts exactly two provider date labels
-    # (UTC date of the run and the following UTC date).
-    date_start = instant.date()
-    eligible_for_cycle = [
+    # Automated cycle scans the next 48h of verified UTC tipoffs.
+    # NBA/ESPN provider dates are US-local labels and may be *yesterday*
+    # when a game begins just after midnight UTC.
+    window_end=instant+timedelta(days=2)
+    eligible_for_cycle=[
         r for r in ready
-        if date_start <= datetime.fromisoformat(r["date"]).date()
-        <= date_start + timedelta(days=1)
+        if (tipoff := _timestamp(r.get("start_utc"))) is not None
+        and instant < tipoff <= window_end
     ]
     unsaved = [r for r in eligible_for_cycle
                if r["game_id"] not in saved]
@@ -126,7 +127,8 @@ def build_operations(
             "status": cycle_status,
             "age_hours": round(cycle_age, 2) if cycle_age is not None else None,
             "handled_current_snapshot": cycle_processed_snapshot,
-            "expected_window": "UTC provider dates today and tomorrow",
+            "expected_window": "Next 48 hours by verified UTC tipoff",
+            "window_ends_utc": window_end.isoformat(),
         },
         "source": {
             "status": readiness["snapshot"]["status"],
