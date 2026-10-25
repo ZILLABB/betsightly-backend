@@ -91,3 +91,83 @@ def test_pagination_accepts_duplicate_boundary_only_with_verified_terminal(monke
     assert meta["is_complete"] is True
     assert meta["provider_total_shortfall"] == 1
     assert meta["unique_indexed_fixtures"] == 4
+
+
+def _one_event():
+    return {
+        "eventId": "sr:match:11",
+        "homeTeamName": "Home Eleven",
+        "awayTeamName": "Away Eleven",
+        "estimateStartTime": 1792782000000,
+        "markets": [],
+    }
+
+
+def test_incomplete_refresh_keeps_last_completed_admin_cache(monkeypatch):
+    from time import time
+    original = {
+        "fetched_at": time() - 60,
+        "metadata": {
+            "cache_schema_version": sb._CACHE_SCHEMA_VERSION,
+            "is_complete": True,
+            "snapshot_id": "known-good",
+        },
+        "fixtures": {"saved|fixture": [{
+            "event_id": "sr:match:existing", "home_team": "Saved",
+            "away_team": "Fixture", "kickoff_ms": 1792782000000,
+        }]},
+    }
+    stored = [original]
+    writes = []
+    monkeypatch.setattr(sb, "_db_get", lambda key: stored[0])
+    def save(key, value):
+        writes.append((key, value))
+        stored[0] = value
+    monkeypatch.setattr(sb, "_db_set", save)
+    def retrieve(url):
+        page = int(url.split("pageNum=")[1])
+        return {"data": {
+            "totalNum": 3,
+            "tournaments": ([{"name": "League", "events": [_one_event()]}]
+                            if page == 1 else []),
+        }}
+    monkeypatch.setattr(sb, "_get_json", retrieve)
+
+    attempt = sb.fetch_board(force=True)
+    assert sb.board_metadata(attempt)["is_complete"] is False
+    assert writes == []
+    assert stored[0] is original
+    admin = sb.cached_board_for_admin()
+    assert admin is not None
+    assert sb.board_metadata(admin)["snapshot_id"] == "known-good"
+
+
+def test_completed_refresh_replaces_cache(monkeypatch):
+    stored = []
+    monkeypatch.setattr(sb, "_db_get", lambda key: None)
+    monkeypatch.setattr(sb, "_db_set",
+                        lambda key, value: stored.append((key, value)))
+    monkeypatch.setattr(sb, "_get_json", lambda url: {
+        "data": {"totalNum": 1, "tournaments": [
+            {"name": "League", "events": [_one_event()]}]},
+    })
+    complete = sb.fetch_board(force=True)
+    assert sb.board_metadata(complete)["is_complete"] is True
+    assert len(stored) == 1
+    assert stored[0][0] == sb._CACHE_KEY
+    assert stored[0][1]["metadata"]["is_complete"] is True
+
+
+def test_old_completed_cache_is_not_served_past_age_limit(monkeypatch):
+    from time import time
+    stale = {
+        "fetched_at": time() - 10801,
+        "metadata": {
+            "cache_schema_version": sb._CACHE_SCHEMA_VERSION,
+            "is_complete": True,
+        },
+        "fixtures": {"saved|fixture": [{"event_id": "old"}]},
+    }
+    monkeypatch.setattr(sb, "_db_get", lambda key: stale)
+    monkeypatch.setattr(sb, "_db_set", lambda key, value: None)
+    assert sb.cached_board_for_admin() is None
