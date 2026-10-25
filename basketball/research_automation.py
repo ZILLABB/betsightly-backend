@@ -198,6 +198,16 @@ def _advanced_sidecar(root: Path, now: datetime) -> dict:
             "status": "unavailable", "error": _safe_error(exc),
             "created": 0, "new_settlements": 0,
         }
+    # Full-game totals, home margin and team points need independent
+    # before-tipoff verification. This never scores sportsbook prices.
+    try:
+        from basketball.research_opening_score import cycle as score_projection_cycle
+        outcome["opening_score"] = score_projection_cycle(root, now=now)
+    except (ValueError, TypeError, OSError, RuntimeError) as exc:
+        outcome["opening_score"] = {
+            "status": "unavailable", "error": _safe_error(exc),
+            "created": 0, "new_settlements": 0,
+        }
     candidate = root / "advanced" / "shadow_model.joblib"
     if not candidate.is_file():
         outcome["shadow"] = {"status": "not_configured"}
@@ -271,6 +281,15 @@ def run_automation(*, home: str | Path = Path("data/basketball/research"),
                             root, now=timestamp)
                     except (ValueError, TypeError, OSError, RuntimeError) as exc:
                         result["coldstart_settlement"] = {
+                            "status": "unavailable", "error": _safe_error(exc),
+                            "new_settlements": 0,
+                        }
+                    try:
+                        from basketball.research_opening_score import settle as settle_points
+                        result["opening_score_settlement"] = settle_points(
+                            root, now=timestamp)
+                    except (ValueError, TypeError, OSError, RuntimeError) as exc:
+                        result["opening_score_settlement"] = {
                             "status": "unavailable", "error": _safe_error(exc),
                             "new_settlements": 0,
                         }

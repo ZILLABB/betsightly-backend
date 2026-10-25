@@ -15,6 +15,7 @@ from basketball.research_automation import reliability_from_home
 from basketball.research_stage4_operations import stage4_report
 from basketball.research_coldstart_ops import closeout
 from basketball.research_cup_classification import from_home as cup_source_audit
+from basketball.research_opening_score import audit as opening_score_audit
 
 
 def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
@@ -29,6 +30,7 @@ def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
     advanced = stage4_report(root, now=instant)
     coldstart = closeout(root, now=instant)
     cup = cup_source_audit(root, now=instant)
+    opening_scores = opening_score_audit(root, now=instant)
     upcoming = [
         item for item in readiness["fixtures"]
         if item["fixture_state"] == "upcoming"
@@ -131,6 +133,17 @@ def wave1_report(home: str | Path, *, now: datetime | None = None) -> dict:
                 cup.get("raw_season_calendar", {}).get("teams_over_standard_count")),
             "no_source_mutation": True,
             "prospective_model_scores_replaced": False,
+        },
+        "separate_opening_score_experiment": {
+            "status": opening_scores["status"],
+            "forecast_count": opening_scores.get("forecasts"),
+            "settled": opening_scores.get("settled"),
+            "pending": opening_scores.get("pending"),
+            "prospective_metrics": opening_scores.get("prospective_metrics"),
+            "integrity_errors": opening_scores.get("integrity_errors", []),
+            "not_a_bookmaker_market": True,
+            "not_official_v1_calibration": True,
+            "research_only": True,
         },
         "separate_early_season_experiment": {
             "status": coldstart["status"],
