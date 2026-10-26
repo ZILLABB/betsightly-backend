@@ -6,6 +6,7 @@ Never return a booking code until the complete ticket passes share-code readback
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import re
 import time
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 from leagues import sportybet
 from leagues import booking
 
+logger = logging.getLogger(__name__)
 CACHE_KEY = "sportybet_basketball_board"
 SCHEMA = 1
 SPORT_ID = "sr:sport:2"
@@ -301,6 +303,40 @@ def book(request: dict) -> dict:
                     "expires_at": expires, "legs": len(selections),
                     "readback_status": "PASSED", "history_saved": True,
                     "reused_existing_code": True}
+        # Revalidate an earlier privately saved bookmaker code in read-only
+        # mode. Never send a second share POST for this exact fingerprint.
+        if valid_expiry and record["status"] in {"needs_review", "verifying"}:
+            try:
+                private = history.get(fp, private=True)
+                saved_code = str((private or {}).get("share_code") or "")
+                if re.fullmatch(r"[A-Za-z0-9]{4,32}", saved_code):
+                    valid, _reason, actual = booking.validate_code_details(
+                        saved_code, selections)
+                    source = "sportybet_code_readback"
+                    if valid and actual is None:
+                        fresh = refresh_board()
+                        current = cached_board() if fresh.get("status") == "success" else None
+                        second = _select(request, current) if current else None
+                        if (second and second["full_ticket_complete"]
+                                and second["status"] == "PROPOSED_NOT_BOOKED"):
+                            actual = math.prod(float(leg["odds"])
+                                               for leg in second["matched"])
+                            source = "fresh_complete_sportybet_board"
+                    original_target = float(record.get("target_odds") or checked["target_odds"])
+                    if (valid and actual is not None and math.isfinite(float(actual))
+                            and float(actual) >= max(original_target, checked["target_odds"])):
+                        history.mark(fp, status="active", share_code=saved_code,
+                                     verified_odds=round(float(actual), 3),
+                                     odds_source=source, expires_at=expires)
+                        return {**checked, "status": "success",
+                                "share_code": saved_code,
+                                "verified_odds": round(float(actual), 3),
+                                "verified_odds_source": source,
+                                "expires_at": expires, "legs": len(selections),
+                                "readback_status": "PASSED", "history_saved": True,
+                                "reused_existing_code": True}
+            except Exception:
+                logger.exception("Read-only basketball code recovery failed")
         return {**checked, "status": "BOOKING_PREVIOUS_ATTEMPT",
                 "share_code": None, "readback_status": "NOT_RETRIED",
                 "history_saved": True,
@@ -328,8 +364,18 @@ def book(request: dict) -> dict:
     code = str(data.get("shareCode") or "")
     if not re.fullmatch(r"[A-Za-z0-9]{4,32}", code):
         return hold("BOOKING_UNAVAILABLE", "No valid share code was returned.")
+    # Preserve a verifiable expiry even if subsequent odds checks fail.
+    # This enables read-only recovery of a previously created share code.
     try:
-        history.mark(fp, status="verifying", share_code=code)
+        pending_expiry = datetime.fromtimestamp(float(data["deadline"]) / 1000,
+                                                tz=timezone.utc)
+        if pending_expiry <= datetime.now(timezone.utc):
+            pending_expiry = None
+    except (KeyError, ValueError, TypeError, OSError, OverflowError):
+        pending_expiry = None
+    try:
+        history.mark(fp, status="verifying", share_code=code,
+                     expires_at=pending_expiry.isoformat() if pending_expiry else None)
     except Exception:
         return {**checked, "status": "BOOKING_HISTORY_UNAVAILABLE",
                 "share_code": None, "history_saved": False,
