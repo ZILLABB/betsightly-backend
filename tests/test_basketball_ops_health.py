@@ -48,7 +48,7 @@ def test_health_reports_archive_and_runs_without_fake_backup(tmp_path, monkeypat
     with factory() as db:
         info = ops.read_health(db=db)
         assert info["fixtures"] == len(archive["fixtures"])
-        assert info["remaining_fixture_slots"] == 120 - len(archive["fixtures"])
+        assert info["remaining_fixture_slots"] == ops.MAX_FIXTURES - len(archive["fixtures"])
         assert info["archive_digest"] == _digest(archive)
         assert info["automatic_backup_proven"] is False
         assert info["backup_policy"] == "private_vercel_blob_daily_snapshot_with_hash_readback"
