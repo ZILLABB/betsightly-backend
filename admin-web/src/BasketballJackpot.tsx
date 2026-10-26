@@ -46,6 +46,8 @@ export default function BasketballJackpot(){
  const [historyRows,setHistoryRows]=useState<HistoricalTicket[]>([]);
  const [historyBusy,setHistoryBusy]=useState<'loading'|'settling'|null>(null);
  const [historyError,setHistoryError]=useState('');
+ const [historyInfo,setHistoryInfo]=useState('');
+ const [recovering,setRecovering]=useState<string|null>(null);
  const lock=useRef(false);
  const load=async()=>{
    if(lock.current)return;
@@ -62,6 +64,23 @@ export default function BasketballJackpot(){
    try{const saved=await api<HistoryList>('basketball-jackpot/history');setHistoryRows(saved.tickets);}
    catch(e){setHistoryError(errorText(e));}
    finally{setHistoryBusy(null);}
+ };
+ const recoverSaved=async(fingerprint:string)=>{
+   if(recovering||historyBusy)return;
+   setRecovering(fingerprint);setHistoryError('');setHistoryInfo('');
+   try{
+     // Bookmaker readback ONLY: the backend derives every leg from the saved
+     // fingerprint and cannot send a new share-code creation request.
+     const result=await api<Quote>('basketball-jackpot/recover',{fingerprint},'POST');
+     const saved=await api<HistoryList>('basketball-jackpot/history');
+     setHistoryRows(saved.tickets);
+     if(result.status==='success'&&result.readback_status==='PASSED'&&result.share_code){
+       setHistoryInfo('Existing code verified and saved at '+odds(result.verified_odds)+'x. No new SportyBet share request was made.');
+     }else{
+       setHistoryError(result.reason||'The original code could not be verified. It remains hidden; no new share request was made.');
+     }
+   }catch(e){setHistoryError(errorText(e)+' No new share-code request was made.');}
+   finally{setRecovering(null);}
  };
  const settleHistory=async()=>{
    if(historyBusy)return;
@@ -245,7 +264,7 @@ export default function BasketballJackpot(){
        {bookingRejected&&<div className="bj-inline-warning" role="alert"><AlertCircle size={16}/>
          <span>SportyBet code has not passed all checks. No code was released.
          {receipt?.verified_odds!=null?' Current quote: '+odds(receipt.verified_odds)+'x.':''}
-         {' '}Review the reason and run a new read-only preview before requesting another code.</span>
+         {' '}Review the reason, then open Booking History and use Recheck existing code. Do not generate a duplicate.</span>
        </div>}
        {notice&&<div className="bj-inline-warning" role="alert"><AlertCircle size={16}/>{notice}</div>}
        {success&&<div className="bj-success" role="status"><CheckCircle2 size={20}/><p>SPORTYBET READBACK VERIFIED</p>
@@ -273,6 +292,7 @@ export default function BasketballJackpot(){
      {historyBusy&&<div className="bj-progress" role="status">
        <Loader2 size={16} className="spin"/>{historyBusy==='settling'?'Checking confirmed NBA final scores…':'Loading saved codes…'}</div>}
      {historyError&&<div className="bj-inline-warning" role="alert">{historyError}</div>}
+     {historyInfo&&<div className="bj-quote bj-quote-good" role="status">{historyInfo}</div>}
      {!historyRows.length&&!historyBusy&&<div className="bj-empty">
        <Database size={23}/><p>No basketball jackpot codes saved by this ledger yet. Newly verified tickets will appear here.</p></div>}
      <div className="bj-history-list">{historyRows.map(ticket=><details key={ticket.fingerprint} className="bj-history-ticket">
@@ -285,6 +305,9 @@ export default function BasketballJackpot(){
          <p>Created {new Date(ticket.created_at).toLocaleString('en-NG',{timeZone:'Africa/Lagos'})}
          {ticket.expires_at?' · Code expiry '+new Date(ticket.expires_at).toLocaleString('en-NG',{timeZone:'Africa/Lagos'}):''}
          {ticket.last_checked_at?' · Score check '+new Date(ticket.last_checked_at).toLocaleString('en-NG',{timeZone:'Africa/Lagos'}):''}</p>
+         {['needs_review','verifying'].includes(ticket.status)&&<button type="button" className="bj-history-copy" disabled={!!recovering||!!historyBusy} onClick={()=>void recoverSaved(ticket.fingerprint)}>
+           {recovering===ticket.fingerprint?<Loader2 size={14} className="spin"/>:<ShieldCheck size={14}/>}
+           {recovering===ticket.fingerprint?'Rechecking saved code…':'Recheck existing code · no new booking'}</button>}
          {ticket.share_code&&<button type="button" className="bj-history-copy" onClick={()=>navigator.clipboard.writeText(ticket.share_code||'')}>
            <Clipboard size={14}/> Copy saved code</button>}
          {ticket.detail?.reason&&<p className="bj-history-error">{ticket.detail.reason}</p>}
