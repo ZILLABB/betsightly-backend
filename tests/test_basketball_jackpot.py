@@ -456,3 +456,143 @@ def test_readonly_recovery_fails_closed_if_save_fails(monkeypatch):
     result = bj.recover_existing(fingerprint)
     assert result["status"] == "BOOKING_HISTORY_UNAVAILABLE"
     assert result["share_code"] is None
+
+
+def _approved_saved_attempt(fingerprint_value, saved, minimum=72.0):
+    saved["target_odds"] = 73.0
+    saved["detail"] = {"lower_target_approval": {
+        "fingerprint": fingerprint_value,
+        "original_target_odds": 73.0,
+        "approved_target_odds": minimum,
+        "approved_at": "2026-10-26T14:21:00+00:00",
+        "approved_by": "authenticated_admin",
+        "method": "explicit_existing_code_only",
+    }}
+    return saved
+
+
+def test_audited_72x_recovery_accepts_72_point_472_readback_without_rebooking(monkeypatch):
+    fingerprint, saved = _saved_basketball_attempt()
+    _approved_saved_attempt(fingerprint, saved)
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "exact same legs", 72.472))
+    monkeypatch.setattr(bj.booking, "_post_share",
+                        lambda *_: pytest.fail("No second SportyBet share POST"))
+    monkeypatch.setattr(bj, "refresh_board",
+                        lambda: pytest.fail("Authoritative code odds do not need board fallback"))
+    marks = []
+    monkeypatch.setattr(bh, "mark", lambda fp, **kw: marks.append(kw))
+    result = bj.recover_existing(fingerprint)
+    assert result["status"] == "success"
+    assert result["verified_odds"] == 72.472
+    assert result["original_target_odds"] == 73.0
+    assert result["approved_target_odds"] == 72.0
+    assert result["reused_existing_code"] is True
+    assert marks[0]["detail_update"]["recovery_minimum_used"] == 72.0
+    assert saved["target_odds"] == 73.0
+
+
+def test_no_lower_target_approval_still_blocks_72_point_472(monkeypatch):
+    fingerprint, saved = _saved_basketball_attempt()
+    saved["target_odds"] = 73.0
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "same", 72.472))
+    monkeypatch.setattr(bj.booking, "_post_share",
+                        lambda *_: pytest.fail("No second share POST"))
+    monkeypatch.setattr(bh, "mark",
+                        lambda *_args, **_kw: pytest.fail("Below original target"))
+    result = bj.recover_existing(fingerprint)
+    assert result["share_code"] is None
+    assert result["readback_status"] == "BELOW_TARGET"
+
+
+def test_audited_floor_still_blocks_price_below_72(monkeypatch):
+    fingerprint, saved = _saved_basketball_attempt()
+    _approved_saved_attempt(fingerprint, saved)
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "same", 71.9))
+    monkeypatch.setattr(bh, "mark",
+                        lambda *_args, **_kw: pytest.fail("Below approved floor"))
+    result = bj.recover_existing(fingerprint)
+    assert result["share_code"] is None
+    assert result["readback_status"] == "BELOW_TARGET"
+
+
+def test_audited_floor_never_ignores_wrong_selection_readback(monkeypatch):
+    fingerprint, saved = _saved_basketball_attempt()
+    _approved_saved_attempt(fingerprint, saved)
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (False, "wrong leg", 72.472))
+    monkeypatch.setattr(bh, "mark",
+                        lambda *_args, **_kw: pytest.fail("Wrong exact outcome"))
+    result = bj.recover_existing(fingerprint)
+    assert result["share_code"] is None
+    assert result["readback_status"] == "FAILED"
+
+
+def test_audited_floor_from_post_attempt_complete_snapshot(monkeypatch):
+    fingerprint, saved = _saved_basketball_attempt()
+    _approved_saved_attempt(fingerprint, saved)
+    board = _board()
+    board["fetched_at"] = time.time()
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "same", None))
+    monkeypatch.setattr(bj, "cached_board", lambda: board)
+    monkeypatch.setattr(bj, "refresh_board",
+                        lambda: pytest.fail("Complete post-attempt board is already cached"))
+    def checked(request, quote_board):
+        assert request["target_odds"] == 72.0
+        return {"status": "PROPOSED_NOT_BOOKED", "matched": [{"odds": 72.472}]}
+    monkeypatch.setattr(bj, "_select", checked)
+    monkeypatch.setattr(bj.booking, "_post_share",
+                        lambda *_: pytest.fail("No second share POST"))
+    result = bj.recover_existing(fingerprint)
+    assert result["status"] == "success"
+    assert result["verified_odds"] == 72.472
+    assert result["verified_odds_source"] == "fresh_complete_sportybet_board"
+
+
+def test_lower_floor_endpoint_requires_explicit_confirmation(monkeypatch):
+    fingerprint, _saved = _saved_basketball_attempt()
+    monkeypatch.setattr(bh, "approve_lower_target",
+                        lambda *_: pytest.fail("No approval without explicit confirmation"))
+    with pytest.raises(ValueError, match="confirmation"):
+        bj.approve_lower_target_and_recover(fingerprint, 72, 73, "yes")
+
+
+def test_lower_floor_approval_audit_persists_even_when_readback_fails(monkeypatch):
+    fingerprint, saved = _saved_basketball_attempt()
+    _approved_saved_attempt(fingerprint, saved)
+    calls = []
+    def approve(fp, minimum, original):
+        calls.append((fp, minimum, original))
+        return saved["detail"]["lower_target_approval"]
+    monkeypatch.setattr(bh, "approve_lower_target", approve)
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (False, "temporarily unavailable", None))
+    monkeypatch.setattr(bj.booking, "_post_share",
+                        lambda *_: pytest.fail("Approval must never create a new code"))
+    result = bj.approve_lower_target_and_recover(
+        fingerprint, 72, 73, "APPROVE_LOWER_TARGET_FOR_EXISTING_CODE")
+    assert calls == [(fingerprint, 72, 73)]
+    assert result["approval_audit_saved"] is True
+    assert result["share_code"] is None
+    assert result["status"] != "success"
+
+
+def test_corrupted_lower_floor_audit_fails_closed(monkeypatch):
+    fingerprint, saved = _saved_basketball_attempt()
+    _approved_saved_attempt(fingerprint, saved)
+    saved["detail"]["lower_target_approval"]["fingerprint"] = "another-ticket"
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda *_: pytest.fail("Corrupted audit cannot access code"))
+    result = bj.recover_existing(fingerprint)
+    assert result["status"] == "RECOVERY_NOT_VERIFIED"
+    assert result["share_code"] is None
