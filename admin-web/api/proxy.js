@@ -55,7 +55,15 @@ export default async function handler(req, res) {
   let backend;
   try {
     backend = new URL(originText);
-    if(backend.protocol !== 'https:' || backend.pathname !== '/' || backend.search || backend.hash || backend.username || backend.password || !/^(betsightly-api|betsightly-backend)\.onrender\.com$/.test(backend.hostname)) throw Error('invalid');
+    const isProductionBackend = /^(betsightly-api|betsightly-backend)\.onrender\.com$/.test(backend.hostname);
+    // Branch-scoped staging URL is allowed only for Vercel preview deployments.
+    // Do not allow staging to become the production command center's origin.
+    const isNbaPreviewBackend = process.env.VERCEL_ENV === 'preview' &&
+      backend.hostname === 'betsightly-nba-research-stage-20261025.onrender.com';
+    if(backend.protocol !== 'https:' || backend.pathname !== '/' ||
+       backend.search || backend.hash || backend.username || backend.password ||
+       backend.port || !(isProductionBackend || isNbaPreviewBackend))
+      throw Error('invalid');
   } catch {return res.status(503).json({detail:'Admin API proxy origin is invalid.'});}
   const incoming = new URL(req.url, 'https://' + req.headers.host);
   const raw = incoming.searchParams.get('path') || '';
