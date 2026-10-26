@@ -310,13 +310,16 @@ def recover_existing(fingerprint_value: str) -> dict:
     effective_target = target
     if approval is not None:
         try:
-            assert isinstance(approval, dict)
-            assert approval["fingerprint"] == fingerprint_value
-            assert approval["method"] == "explicit_existing_code_only"
-            assert approval["approved_by"] == "authenticated_admin"
-            assert float(approval["original_target_odds"]) == target
+            if not isinstance(approval, dict):
+                raise ValueError("Invalid approval record")
+            if (approval["fingerprint"] != fingerprint_value
+                    or approval["method"] != "explicit_existing_code_only"
+                    or approval["approved_by"] != "authenticated_admin"
+                    or float(approval["original_target_odds"]) != target):
+                raise ValueError("Approval does not match original booking")
             effective_target = float(approval["approved_target_odds"])
-            assert math.isfinite(effective_target) and 2 <= effective_target < target
+            if not math.isfinite(effective_target) or not 2 <= effective_target < target:
+                raise ValueError("Invalid approved floor")
         except (AssertionError, KeyError, TypeError, ValueError, OverflowError):
             return {**hidden, "reason": "Saved lower-target approval audit is invalid."}
 
