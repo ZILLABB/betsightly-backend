@@ -71,6 +71,17 @@ export default async function handler(req, res) {
   if (!/^[a-z0-9/_-]{1,100}$/.test(route) || !allowed(req.method,route) || raw.split('?').length > 2) {
     return res.status(404).json({detail:'Unknown admin operation.'});
   }
+  // NBA branch preview uses an isolated database with no production football
+  // audience, booking or publishing history. Fail closed on all football routes
+  // instead of displaying misleading zeroes or accepting staging publications.
+  if (process.env.VERCEL_ENV === 'preview' &&
+      backend.hostname === 'betsightly-nba-research-stage-20261025.onrender.com' &&
+      !new Set(['admin/config', 'admin/me', 'admin/login', 'admin/logout',
+        'admin/nba-research', 'admin/nba-research/import']).has(route)) {
+    return res.status(404).json({
+      detail:'This preview contains only private NBA research. Use the production admin for football operations.'
+    });
+  }
   // Every browser mutation MUST originate from the exact Vercel admin host.
   if (req.method !== 'GET') {
     const expected = 'https://' + req.headers.host;
