@@ -920,6 +920,58 @@ def _record_nba_machine_job(kind: str, status: str, result=None):
         logger.warning("NBA run audit unavailable: %s", type(exc).__name__)
 
 
+def _nba_backup_machine_allowed(request: Request) -> bool:
+    import hmac
+    import os
+    secret = os.getenv("NBA_BACKUP_JOB_TOKEN", "")
+    received = request.headers.get("x-betsightly-nba-backup-token", "")
+    return (
+        _nba_health_enabled()
+        and os.getenv("NBA_BACKUP_PRIVATE_ENABLED", "").lower()
+        in ("1", "true", "yes", "on")
+        and len(secret) >= 48 and bool(received)
+        and hmac.compare_digest(secret, received)
+    )
+
+
+@router.get("/internal/nba-research/backup")
+def nba_private_machine_backup(request: Request, response: Response):
+    """Never serves private research without the dedicated scheduler token."""
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    return nba_research_export_backup(response)
+
+
+@router.post("/internal/nba-research/backup/ack")
+def nba_private_machine_backup_ack(request: Request, body: dict = Body(...)):
+    """Write a limited audit only after cloud storage confirms hash readback."""
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    import re
+    digest = body.get("archive_digest")
+    signed = body.get("backup_sha256")
+    if (body.get("verified") is not True
+        or body.get("store") != "private_vercel_blob"
+        or not isinstance(digest, str) or not isinstance(signed, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        or not re.fullmatch(r"[0-9a-f]{64}", signed)):
+        raise HTTPException(409, "Offsite backup receipt invalid.")
+    from basketball.research_private_store import hosted_board
+    latest = hosted_board()
+    if latest is None or latest.get("archive_digest") != digest:
+        raise HTTPException(409, "Offsite backup is not current.")
+    from basketball.research_ops_health import record_run
+    try:
+        record_run("backup", "verified_private_blob_readback")
+    except Exception as exc:
+        logger.warning("NBA offsite receipt audit unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Backup receipt audit unavailable.") from exc
+    return {"status": "verified_private_blob_readback",
+            "archive_digest": digest, "research_only": True,
+            "not_bookable": True}
+
+
 @router.post("/internal/nba-research/markets/refresh")
 def nba_private_market_cron_refresh(request: Request, response: Response):
     """Machine-only, private NBA bookmaker market snapshot, no bets or tips.
