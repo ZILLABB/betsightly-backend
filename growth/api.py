@@ -1054,7 +1054,7 @@ def nba_admin_research_import(request: Request, body: dict = Body(...)):
             enabled("NBA_ADMIN_RESEARCH_IMPORT_ENABLED")):
         raise HTTPException(404, "Private NBA evidence importing is disabled.")
     length = request.headers.get("content-length")
-    if length and (not length.isdigit() or int(length) > 760_000):
+    if length and (not length.isdigit() or int(length) > 2_860_000):
         raise HTTPException(413, "NBA research archive exceeds upload limit.")
     from basketball.research_private_store import import_bundle
     try:
