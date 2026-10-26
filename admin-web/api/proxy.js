@@ -3,7 +3,9 @@
 const GET = new Set([
  'admin/config','admin/me','analytics','status','market-readiness','daily',
  'manual-tiers','basketball-jackpot/board','basketball-jackpot/history',
- 'admin/nba-research','admin/nba-research/markets','homepage-campaign','content','publications','settings','referrals'
+ 'admin/nba-research','admin/nba-research/markets',
+ 'admin/nba-research/health','admin/nba-research/history',
+ 'admin/nba-research/backup','homepage-campaign','content','publications','settings','referrals'
 ]);
 const POST = new Set([
  'admin/login','admin/logout','generate','retry','manual-tiers/import-code',
@@ -80,7 +82,8 @@ export default async function handler(req, res) {
       !new Set(['admin/config', 'admin/me', 'admin/login', 'admin/logout',
         'admin/nba-research', 'admin/nba-research/import', 'admin/nba-research/settle',
         'admin/nba-research/markets','admin/nba-research/markets/refresh',
-        'admin/nba-research/forecast']).has(route)) {
+        'admin/nba-research/forecast','admin/nba-research/health',
+        'admin/nba-research/history','admin/nba-research/backup']).has(route)) {
     return res.status(404).json({
       detail:'This preview contains only private NBA research. Use the production admin for football operations.'
     });
