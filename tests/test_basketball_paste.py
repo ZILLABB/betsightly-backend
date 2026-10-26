@@ -63,7 +63,7 @@ def test_rejects_duplicates_and_ambiguous_fixtures():
     assert report["unmatched"][0]["reason"] == "DUPLICATE_FIXTURE"
     extra = dict(board()["fixtures"][0], event_id="sr:match:other")
     report, _ = bp.resolve(request("Boston Celtics vs New York Knicks | Home win"), board([extra]))
-    assert report["unmatched"][0]["reason"] == "FIXTURE_NOT_FOUND_OR_AMBIGUOUS"
+    assert report["unmatched"][0]["reason"] == "FIXTURE_AMBIGUOUS"
 
 
 def test_mixed_valid_and_invalid_ticket_fails_closed():
@@ -88,3 +88,52 @@ def test_paste_limit_and_invalid_selection():
     report, resolved = bp.resolve(request("Boston Celtics vs New York Knicks | First quarter handicap +3.5"), board())
     assert resolved is None
     assert report["unmatched"][0]["reason"] == "UNSUPPORTED_MARKET"
+
+
+def test_missing_pasted_fixture_identifies_actual_board_names_without_substitution():
+    report, resolved = bp.resolve(request(
+        "Boston Celtics vs Philadelphia 76ers | Home win"), board())
+    assert resolved is None
+    error = report["unmatched"][0]
+    assert error["reason"] == "FIXTURE_NOT_ON_BOARD"
+    assert "Boston Celtics vs New York Knicks" in error["detail"]
+    assert report["matched_fixture_count"] == 0
+    assert report["share_code"] is None
+
+
+def test_reversed_home_away_does_not_flip_moneyline():
+    report, resolved = bp.resolve(request(
+        "New York Knicks vs Boston Celtics | Home win"), board())
+    assert resolved is None
+    assert report["unmatched"][0]["reason"] == "FIXTURE_NOT_ON_BOARD"
+    assert "reverse" in report["unmatched"][0]["detail"]
+    assert report["full_ticket_complete"] is False
+
+
+def test_matching_fixture_that_already_started_is_not_called_not_found():
+    fixture = dict(board()["fixtures"][0],
+                   kickoff_ms=int((time.time() - 60) * 1000))
+    report, _ = bp.resolve(request(
+        "Boston Celtics vs New York Knicks | Away win"), board([fixture]) | {
+            "fixtures": [fixture],
+        })
+    assert report["unmatched"][0]["reason"] == "FIXTURE_NOT_ELIGIBLE"
+    assert "ten minutes" in report["unmatched"][0]["detail"]
+
+
+def test_unsupported_basketball_market_explains_available_market_types():
+    report, _ = bp.resolve(request(
+        "Boston Celtics vs New York Knicks | First half Over 110.5"), board())
+    error = report["unmatched"][0]
+    assert error["reason"] == "UNSUPPORTED_MARKET"
+    assert "moneyline" in error["detail"]
+    assert "full-game" in error["detail"]
+
+
+def test_exact_points_line_missing_provides_no_substitution():
+    report, resolved = bp.resolve(request(
+        "Boston Celtics vs New York Knicks | Over 235.5"), board())
+    assert resolved is None
+    assert report["unmatched"][0]["reason"] == "EXACT_MARKET_UNAVAILABLE"
+    assert "not active" in report["unmatched"][0]["detail"]
+    assert report["share_code"] is None
