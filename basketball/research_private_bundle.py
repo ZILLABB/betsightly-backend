@@ -22,8 +22,8 @@ from basketball.research_early_advanced_ops import (
 )
 
 VERSION = "betsightly-nba-private-archive-v1"
-MAX_BYTES = 750_000
-MAX_FIXTURES = 120
+MAX_BYTES = 2_800_000
+MAX_FIXTURES = 480
 ARCHIVES = {
     "moneyline": MONEY, "opening_score": SCORE, "early_advanced": ADVANCED,
     "moneyline_finals": MONEY_FINALS, "opening_score_finals": SCORE_FINALS,
