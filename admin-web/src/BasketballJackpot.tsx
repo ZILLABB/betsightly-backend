@@ -31,7 +31,7 @@ const samples=['Boston Celtics vs New York Knicks | Home win','Los Angeles Laker
 
 
 const DRAFT_KEY='betsightly:basketball:unsent-ticket:v1';
-type TicketDraft={mode:'paste'|'browse';paste:string;selected:Pick[];target:string;updated_at:number};
+type TicketDraft={mode:'paste'|'browse';paste:string;selected:Pick[];target:string;updated_at:number;booking_attempted:boolean};
 function loadDraft():TicketDraft|null{
  try{
   const raw=window.sessionStorage.getItem(DRAFT_KEY);
@@ -62,6 +62,7 @@ export default function BasketballJackpot(){
  const [filter,setFilter]=useState('Featured');
  const [limit,setLimit]=useState(14);
  const [target,setTarget]=useState(restored.current?.target||'100');
+ const [bookingAttempted,setBookingAttempted]=useState(Boolean(restored.current?.booking_attempted));
  const [quote,setQuote]=useState<Quote|null>(null);
  const [receipt,setReceipt]=useState<Quote|null>(null);
  const [notice,setNotice]=useState('');
@@ -121,9 +122,10 @@ export default function BasketballJackpot(){
  // code, unverified quote, or approval flag; every reload needs fresh preview.
  useEffect(()=>{
    try{window.sessionStorage.setItem(DRAFT_KEY,JSON.stringify({
-     mode,paste,selected,target,updated_at:Date.now()} satisfies TicketDraft));}catch{}
- },[mode,paste,selected,target]);
+     mode,paste,selected,target,booking_attempted:bookingAttempted,updated_at:Date.now()} satisfies TicketDraft));}catch{}
+ },[mode,paste,selected,target,bookingAttempted]);
  const reset=()=>{setQuote(null);setReceipt(null);setNotice('');setConfirm(false);};
+ const edit=()=>{reset();setBookingAttempted(false);};
  const refresh=async()=>{
    if(lock.current)return;
    lock.current=true;setBusy('refresh');reset();
@@ -141,7 +143,7 @@ export default function BasketballJackpot(){
    if(!outcome||selected.some(p=>p.event_id===fixture.event_id)||selected.length>=50)return;
    setSelected(prev=>[...prev,{event_id:fixture.event_id,market_id,specifier,outcome_id,
      label:outcome.label,odds:outcome.odds,fixture:eventTitle(fixture)}]);
-   reset();
+   edit();
  };
  const shown=useMemo(()=>((board?.fixtures||[]).filter(f=>{
    const match=eventTitle(f)+' '+f.competition;
@@ -172,8 +174,13 @@ export default function BasketballJackpot(){
    }catch(e){setNotice(errorText(e));}finally{lock.current=false;setBusy(null);}
  };
  const generate=async()=>{
-   if(lock.current||!complete||receipt)return;
+   if(lock.current||!complete||receipt||bookingAttempted)return;
    if(!confirm){setConfirm(true);return;}
+   // Set the tab-level latch BEFORE any network request. Even an interrupted
+   // request may have created a share code, so reloading must not unlock POST.
+   setBookingAttempted(true);
+   try{window.sessionStorage.setItem(DRAFT_KEY,JSON.stringify({
+     mode,paste,selected,target,booking_attempted:true,updated_at:Date.now()} satisfies TicketDraft));}catch{}
    lock.current=true;setBusy('book');setNotice('');setReceipt(null);
    try{
      const result=await api<Quote>(mode==='paste'?'basketball-jackpot/paste-book':'basketball-jackpot/book',payload(),'POST');
@@ -232,9 +239,9 @@ export default function BasketballJackpot(){
        {mode==='paste'?<div className="bj-paste-panel">
          <div className="bj-input-heading"><strong>Paste fixtures and markets</strong><span>One exact pick per line</span></div>
          <textarea spellCheck={false} rows={10} disabled={busy!==null} value={paste}
-           onChange={e=>{setPaste(e.target.value);reset();}} placeholder={samples.join('\n')} aria-label="Basketball fixtures and exact selections"/>
+           onChange={e=>{setPaste(e.target.value);edit();}} placeholder={samples.join('\n')} aria-label="Basketball fixtures and exact selections"/>
          <div className="bj-paste-foot"><span>{lineCount} of 50 lines</span><button type="button" disabled={!paste||busy!==null}
-           onClick={()=>{setPaste('');reset();}}><Trash2 size={14}/> Clear text</button></div>
+           onClick={()=>{setPaste('');edit();}}><Trash2 size={14}/> Clear text</button></div>
          <div className="bj-format"><div><FileCheck2 size={18}/><strong>Supported format</strong></div>
            <code>Team A vs Team B | Home win</code>
            <code>Team A vs Team B | Away win</code>
@@ -270,7 +277,7 @@ export default function BasketballJackpot(){
        <div className="bj-section-top"><div><span className="bj-overline">02 / VERIFY & GENERATE</span><h2>Ticket workspace</h2><p>{mode==='paste'?'Your exact pasted selections':'Your selected bookmaker outcomes'}</p></div><Ticket size={23}/></div>
        {mode==='browse'&&<div className="bj-ticket-list">{selected.length?selected.map((p,i)=><div className="bj-ticket-leg" key={p.event_id}>
          <span>{String(i+1).padStart(2,'0')}</span><div><strong>{p.fixture}</strong><small>{p.label}</small></div><b>{odds(p.odds)}x</b>
-         <button type="button" aria-label={'Remove '+p.fixture} disabled={busy!==null} onClick={()=>{setSelected(v=>v.filter(x=>x.event_id!==p.event_id));reset();}}>×</button>
+         <button type="button" aria-label={'Remove '+p.fixture} disabled={busy!==null} onClick={()=>{setSelected(v=>v.filter(x=>x.event_id!==p.event_id));edit();}}>×</button>
        </div>):<div className="bj-empty"><Ticket size={26}/><p>No picks yet. Select fixtures from the board.</p></div>}</div>}
        {mode==='paste'&&<div className="bj-ticket-callout"><ClipboardPaste size={19}/><div><strong>{lineCount?lineCount+' pasted selections':'No picks pasted yet'}</strong><p>{lineCount?'Use Preview to validate every game, market and price.':'Paste your selections on the left to begin.'}</p></div></div>}
        <div className="bj-ticket-total"><span>{mode==='browse'?'Unverified board estimate':'Full-ticket reference price'}</span>
@@ -278,16 +285,17 @@ export default function BasketballJackpot(){
          <small>Only a completed bookmaker readback confirms a booking.</small>
        </div>
        <label className="bj-target">Minimum accumulator odds <input type="number" min="2" max="100000" step=".01" value={target}
-         disabled={busy!==null} onChange={e=>{setTarget(e.target.value);reset();}}/></label>
+         disabled={busy!==null} onChange={e=>{setTarget(e.target.value);edit();}}/></label>
        <div className="bj-quick">{[2,5,10,100,1000].map(v=><button type="button" key={v} disabled={busy!==null}
-         className={Number(target)===v?'active':''} onClick={()=>{setTarget(String(v));reset();}}>{v.toLocaleString()}x</button>)}</div>
+         className={Number(target)===v?'active':''} onClick={()=>{setTarget(String(v));edit();}}>{v.toLocaleString()}x</button>)}</div>
        <div className="bj-actions">
          <button type="button" className="bj-button bj-button-outline" disabled={!ready||busy!==null} onClick={inspect}>
            {busy==='preview'?<Loader2 className="spin" size={17}/>:<ShieldCheck size={17}/>} Preview exact picks</button>
-         <button type="button" className="bj-button bj-button-primary" disabled={!complete||busy!==null||!!receipt} onClick={generate}>
+         <button type="button" className="bj-button bj-button-primary" disabled={!complete||busy!==null||!!receipt||bookingAttempted} onClick={generate}>
            {busy==='book'?<Loader2 className="spin" size={17}/>:<ArrowRight size={17}/>}
            {confirm?'Confirm code request':'Generate SportyBet code'}</button>
        </div>
+       {bookingAttempted&&<div className="bj-inline-warning" role="alert">This draft has already sent a share-code request or its outcome is uncertain. Check Booking History and recover the existing code; do not generate another.</div>}
        {confirm&&<div className="bj-inline-warning">This makes one bookmaker share-code request for your verified ticket. It does not place a stake.</div>}
        {quote&&<div className={'bj-quote '+(complete?'bj-quote-good':'bj-quote-bad')} role="status">
          <strong>{complete?<CheckCircle2 size={18}/>:<AlertCircle size={18}/>} {complete?'Ready for confirmation':quote.status}</strong>
