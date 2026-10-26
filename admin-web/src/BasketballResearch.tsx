@@ -59,9 +59,27 @@ export default function BasketballResearch(){
   const [uploadConfirmed,setUploadConfirmed]=useState(false);
   const [settling,setSettling]=useState(false);
   const [settlementError,setSettlementError]=useState('');
+  const [marketBusy,setMarketBusy]=useState(false);
+  const [marketNotice,setMarketNotice]=useState('');
+
   const q=useQuery<ResearchBoard>({
     queryKey:['nba-private-recorded-research'],
     queryFn:()=>api<ResearchBoard>('admin/nba-research'),
+    refetchOnWindowFocus:false,retry:false,staleTime:60000
+  });
+  type NbaMarketLine={
+    game_id:string;home:string;away:string;line:number;
+    over_odds:number;under_odds:number;projected_total:number|null;
+    difference:number|null;model_probability:null;expected_value:null;
+    recommendation:string;tipoff_utc:string;observed_at:string;
+  };
+  type NbaMarketReport={
+    status:string;observed_at?:string;quoted_totals:NbaMarketLine[];
+    fixture_matches:number;digest?:string;calibrated_betting_edge:boolean;
+  };
+  const markets=useQuery<NbaMarketReport>({
+    queryKey:['nba-private-market-research'],
+    queryFn:()=>api<NbaMarketReport>('admin/nba-research/markets'),
     refetchOnWindowFocus:false,retry:false,staleTime:60000
   });
   const board=q.data;
@@ -140,6 +158,22 @@ export default function BasketballResearch(){
     }catch(error){
       setSettlementError(error instanceof Error?error.message:'NBA score verification unavailable.');
     }finally{setSettling(false);}
+  }
+  async function refreshMarketResearch(){
+    if(marketBusy||settling||uploadBusy||!verified)return;
+    setMarketBusy(true);setMarketNotice('');
+    try{
+      const captured=await api<NbaMarketReport>(
+        'admin/nba-research/markets/refresh',{},'POST');
+      if(captured.status!=='saved'&&captured.status!=='already_saved')
+        throw Error('No complete market crawl was confirmed by staging.');
+      const checked=await markets.refetch();
+      if(checked.isError||checked.data?.digest!==captured.digest)
+        throw Error('Market source responded, but private database readback did not confirm the same observation.');
+      setMarketNotice(captured.fixture_matches+' exact NBA events archived. No bets or recommendations generated.');
+    }catch(error){
+      setMarketNotice(error instanceof Error?error.message:'Bookmaker market research unavailable.');
+    }finally{setMarketBusy(false);}
   }
   const status=q.error instanceof ApiError?q.error.status:0;
   return <section className="nba-workspace">
@@ -257,6 +291,48 @@ export default function BasketballResearch(){
           </tbody>
         </table>
       </div>
+      <section className="nba-import" aria-label="Private NBA bookmaker market research"
+        style={{marginTop:18,display:'grid',gap:14}}>
+        <div>
+          <strong>Live bookmaker lines · private research</strong>
+          <span>Capture exact SportyBet NBA total-point prices and match them to existing
+            saved forecasts. This does not generate betting tips, codes, or stakes.</span>
+          <small>Snapshots require exact teams, validated kickoff and complete upstream results.</small>
+        </div>
+        <button type="button" className="button secondary"
+          disabled={!verified||marketBusy||settling||uploadBusy}
+          onClick={()=>void refreshMarketResearch()}>
+          {marketBusy?<Loader2 size={15} className="spin"/>:<RefreshCcw size={15}/>}
+          {marketBusy?'Checking exact bookmaker markets…':'Capture NBA market lines'}
+        </button>
+      </section>
+      {marketNotice&&<p role="status" className="nba-notice">{marketNotice}</p>}
+      {markets.isError?<p className="nba-disclaimer" role="note">
+        Market comparison is disabled or the source is unavailable. Predictions remain research-only.
+      </p>:markets.isPending?<p className="nba-disclaimer">
+        Reading private bookmaker market observations…
+      </p>:<section className="nba-table-wrap" aria-label="Exact NBA total-point prices">
+        <table className="nba-table">
+          <caption>{markets.data?.quoted_totals?.length??0} exact total-point lines
+            · no calibrated betting advantage has been demonstrated</caption>
+          <thead><tr><th>Match</th><th>Bookmaker total</th><th>Over</th>
+            <th>Under</th><th>Projection</th><th>Difference</th></tr></thead>
+          <tbody>{(markets.data?.quoted_totals??[]).map((m,i)=><tr key={m.game_id+'-'+m.line+'-'+i}>
+            <td>{m.home} vs {m.away}<small>{wat(m.tipoff_utc)}</small></td>
+            <td>{m.line.toFixed(1)}</td>
+            <td>{m.over_odds.toFixed(2)}x</td><td>{m.under_odds.toFixed(2)}x</td>
+            <td>{num(m.projected_total)}</td>
+            <td>{m.difference==null?'—':num(m.difference)}</td>
+          </tr>)}
+          {!markets.data?.quoted_totals?.length&&<tr><td colSpan={6}>
+            No verified market lines captured. There is no selection recommendation.
+          </td></tr>}
+          </tbody>
+        </table>
+      </section>}
+      <p className="nba-disclaimer">Prices are observational and may change.
+        An Over/Under projection difference is not a winning bet or verified edge.
+        NBA market calibration, betting ROI and public publishing remain disabled.</p>
       <div className="nba-foot"><CheckCheck size={17}/>
         <span>Verified grades: moneyline {board.summary.verified_settlements?.moneyline??0};
           original score {board.summary.verified_settlements?.original_score??0};
