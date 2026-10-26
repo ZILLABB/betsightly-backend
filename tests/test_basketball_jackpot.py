@@ -170,6 +170,52 @@ def test_incomplete_readback_odds_must_not_release_code(monkeypatch):
     assert report["readback_status"] == "ODDS_UNAVAILABLE"
 
 
+def test_previous_basketball_code_recovers_without_new_share_post(monkeypatch):
+    """A held private code can be repriced only after a complete new crawl."""
+    from datetime import datetime, timedelta, timezone
+    expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    monkeypatch.setattr(bj, "cached_board", _board)
+    monkeypatch.setattr(bj, "refresh_board", lambda: {"status": "success"})
+    monkeypatch.setattr(bh, "claim", lambda *args: (False, {
+        "fingerprint": "stored", "status": "needs_review",
+        "expires_at": expires, "target_odds": 2.0}))
+    monkeypatch.setattr(bh, "get",
+                        lambda fp, private=False: {"share_code": "NBA123"})
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "ok", None))
+    monkeypatch.setattr(bj.booking, "_post_share",
+                        lambda selections: pytest.fail("Duplicate POST forbidden"))
+    marked = []
+    monkeypatch.setattr(bh, "mark", lambda fp, **kw: marked.append(kw))
+    response = bj.book(_request())
+    assert response["status"] == "success"
+    assert response["share_code"] == "NBA123"
+    assert response["reused_existing_code"] is True
+    assert response["verified_odds_source"] == "fresh_complete_sportybet_board"
+    assert response["verified_odds"] == 2.2
+    assert marked and marked[-1]["status"] == "active"
+
+
+def test_previous_basketball_code_stays_hidden_if_repricing_fails(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    monkeypatch.setattr(bj, "cached_board", _board)
+    monkeypatch.setattr(bj, "refresh_board",
+                        lambda: {"status": "REFRESH_INCOMPLETE"})
+    monkeypatch.setattr(bh, "claim", lambda *args: (False, {
+        "fingerprint": "stored", "status": "needs_review",
+        "expires_at": expires, "target_odds": 2.0}))
+    monkeypatch.setattr(bh, "get",
+                        lambda fp, private=False: {"share_code": "NBA123"})
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "ok", None))
+    monkeypatch.setattr(bj.booking, "_post_share",
+                        lambda selections: pytest.fail("Duplicate POST forbidden"))
+    response = bj.book(_request())
+    assert response["status"] == "BOOKING_PREVIOUS_ATTEMPT"
+    assert response["share_code"] is None
+
+
 def test_basketball_cache_freshness_limit():
     cached = _board()
     cached["fetched_at"] = time.time() - bj.CACHE_AGE - 10
