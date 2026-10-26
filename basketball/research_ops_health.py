@@ -21,8 +21,8 @@ from basketball.research_private_store import (
 from basketball.research_market_store import NBAMarketObservation
 from basketball.research_market_presentation import present_market_snapshot
 
-MAX_HISTORY = 160
-MAX_BACKUP_BYTES = 8_000_000
+MAX_HISTORY = 600
+MAX_BACKUP_BYTES = 10_000_000
 MAX_RUNS = 20
 
 
@@ -53,7 +53,7 @@ def _verify_receipt(record):
 
 def record_run(kind, status, *, detail=None):
     """Best-effort observability only; never store secrets or request payloads."""
-    if kind not in ("forecast", "settlement", "market"):
+    if kind not in ("forecast", "settlement", "market", "backup"):
         raise ValueError("NBA_UNKNOWN_JOB_KIND")
     safe = {"outcome": str(status)[:40]}
     for key in ("new_finals", "fixture_count", "fixture_matches", "new_forecasts"):
@@ -92,6 +92,8 @@ def read_health(*, db=None):
             _verify_receipt(latest_market)
         jobs = db.query(NBAPrivateJobRun).order_by(
             NBAPrivateJobRun.id.desc()).limit(MAX_RUNS).all()
+        backups = [row for row in jobs if row.kind == "backup"
+                   and row.status == "verified_private_blob_readback"]
         return {
             "status": "private_research_health",
             "research_only": True,
@@ -116,8 +118,9 @@ def read_health(*, db=None):
             ],
             "database_expiry_declared_at": os.getenv(
                 "NBA_RESEARCH_DATABASE_EXPIRES_AT") or None,
-            "backup_policy": "manual_export_only_no_offsite_backup",
-            "automatic_backup_proven": False,
+            "backup_policy": "private_vercel_blob_daily_snapshot_with_hash_readback",
+            "automatic_backup_proven": bool(backups),
+            "last_backup_audit": backups[0].recorded_at.isoformat() + "Z" if backups else None,
         }
     finally:
         if owned:
@@ -203,11 +206,18 @@ def export_verified_backup(*, db=None):
             "not_bookable": True,
             "contains_private_research": True,
             "provider_data_rights_must_be_respected": True,
+            "restore_drill_passed": True,
+            "backup_sha256": "pending",
         }
         if len(_json(bundle).encode("utf-8")) > MAX_BACKUP_BYTES:
             raise ValueError("NBA_BACKUP_EXCEEDS_SAFE_DOWNLOAD_SIZE")
+        from basketball.research_restore_drill import verify_portable_backup
+        result = verify_portable_backup(bundle, require_sha=False)
+        if result["restore_drill_passed"] is not True:
+            raise ValueError("NBA_BACKUP_RESTORE_DRILL_FAILED")
+        unsigned = {k: v for k, v in bundle.items() if k != "backup_sha256"}
         bundle["backup_sha256"] = hashlib.sha256(
-            _json(bundle).encode("utf-8")).hexdigest()
+            _json(unsigned).encode("utf-8")).hexdigest()
         return bundle
     finally:
         if owned:
