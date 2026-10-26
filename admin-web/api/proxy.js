@@ -12,7 +12,7 @@ const POST = new Set([
  'private-jackpot/optimize','private-jackpot/auto-book',
  'private-jackpot/paste-preview','private-jackpot/paste-book','private-jackpot/market-catalog',
  'basketball-jackpot/refresh','basketball-jackpot/preview','basketball-jackpot/book',
- 'basketball-jackpot/paste-preview','basketball-jackpot/paste-book','basketball-jackpot/settle'
+ 'basketball-jackpot/paste-preview','basketball-jackpot/paste-book','basketball-jackpot/settle','basketball-jackpot/recover'
 ]);
 function allowed(method, route) {
  return method === 'GET' ? GET.has(route) :
