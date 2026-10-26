@@ -115,3 +115,33 @@ def test_stage_hosted_settlement_route_is_opt_in_admin_only(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "staging")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///football.db")
     assert client.post(path).status_code == 404
+
+def test_machine_settlement_requires_staging_secret_and_same_flag(monkeypatch):
+    from growth import api as growth
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://synthetic-not-real/db")
+    monkeypatch.setenv("NBA_ADMIN_RESEARCH_ENABLED", "true")
+    monkeypatch.setenv("NBA_ADMIN_RESEARCH_SETTLE_ENABLED", "true")
+    token = "synthetic-integration-test-only-token-0000"
+    monkeypatch.setenv("NBA_SETTLEMENT_JOB_TOKEN", token)
+    calls = []
+    monkeypatch.setattr(growth, "nba_admin_research_settle",
+                        lambda response: calls.append(True) or {"status": "idle"})
+    app = FastAPI()
+    app.include_router(router, prefix="/api/growth")
+    client = TestClient(app)
+    path = "/api/growth/internal/nba-research/settle"
+    assert client.get(path).status_code == 405
+    assert client.post(path).status_code == 404
+    assert client.post(path, headers={
+        "x-betsightly-nba-settle-token": "wrong-secret"}).status_code == 404
+    assert not calls
+    result = client.post(path, headers={
+        "x-betsightly-nba-settle-token": token})
+    assert result.status_code == 200
+    assert result.json()["status"] == "idle"
+    assert len(calls) == 1
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert client.post(path, headers={
+        "x-betsightly-nba-settle-token": token}).status_code == 404
+    assert len(calls) == 1
