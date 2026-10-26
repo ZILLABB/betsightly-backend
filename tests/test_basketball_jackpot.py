@@ -360,3 +360,99 @@ def test_basketball_verified_ticket_is_archived(monkeypatch):
     assert result["history_saved"] is True
     assert result["share_code"] == "PAID22"
     assert [item["status"] for item in steps] == ["verifying", "active"]
+
+
+def _saved_basketball_attempt(*, updated_at=None, expires_at=None):
+    """A code created earlier, with immutable source legs and original target."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    legs = bj._select(_request(), _board())["matched"]
+    selected = [{"eventId": leg["event_id"], "marketId": leg["market_id"],
+                 "outcomeId": leg["outcome_id"], "specifier": leg["specifier"]}
+                for leg in legs]
+    record = {"status": "needs_review", "share_code": "NBA123",
+              "target_odds": 2.0, "legs": legs,
+              "updated_at": updated_at or (now - timedelta(minutes=2)).isoformat(),
+              "expires_at": expires_at or (now + timedelta(hours=1)).isoformat()}
+    return bh.fingerprint(selected), record
+
+
+def test_readonly_recovery_uses_post_attempt_complete_snapshot_without_new_share(monkeypatch):
+    fingerprint, saved = _saved_basketball_attempt()
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj, "cached_board", _board)
+    monkeypatch.setattr(bj, "refresh_board",
+                        lambda: pytest.fail("Newer complete board is already saved"))
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "exact match", None))
+    monkeypatch.setattr(bj.booking, "_post_share",
+                        lambda _: pytest.fail("Must not issue a second share POST"))
+    marked = []
+    monkeypatch.setattr(bh, "mark", lambda fp, **kw: marked.append(kw))
+    result = bj.recover_existing(fingerprint)
+    assert result["status"] == "success"
+    assert result["share_code"] == "NBA123"
+    assert result["verified_odds"] == 2.2
+    assert result["verified_odds_source"] == "fresh_complete_sportybet_board"
+    assert result["reused_existing_code"] is True
+    assert marked[0]["status"] == "active"
+
+
+def test_readonly_recovery_never_promotes_older_or_incomplete_snapshot(monkeypatch):
+    from datetime import datetime, timezone
+    fingerprint, saved = _saved_basketball_attempt(
+        updated_at=datetime.now(timezone.utc).isoformat())
+    old_board = _board()
+    old_board["fetched_at"] = time.time() - 120
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj, "cached_board", lambda: old_board)
+    monkeypatch.setattr(bj, "refresh_board",
+                        lambda: {"status": "REFRESH_INCOMPLETE"})
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "matched", None))
+    monkeypatch.setattr(bj.booking, "_post_share",
+                        lambda _: pytest.fail("No new booking POST allowed"))
+    monkeypatch.setattr(bh, "mark",
+                        lambda *_a, **_kw: pytest.fail("Cannot activate a partial board"))
+    result = bj.recover_existing(fingerprint)
+    assert result["share_code"] is None
+    assert result["readback_status"] == "ODDS_UNAVAILABLE"
+
+
+def test_readonly_recovery_blocks_invalid_fingerprint_or_expired_ticket(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    fingerprint, saved = _saved_basketball_attempt(
+        expires_at=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat())
+    with pytest.raises(ValueError):
+        bj.recover_existing("not-a-sha256")
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda *_: pytest.fail("Expired code must not read back"))
+    result = bj.recover_existing(fingerprint)
+    assert result["share_code"] is None
+    assert result["status"] == "RECOVERY_NOT_VERIFIED"
+
+
+def test_readonly_recovery_never_exposes_mismatched_readback(monkeypatch):
+    fingerprint, saved = _saved_basketball_attempt()
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (False, "wrong selection", None))
+    monkeypatch.setattr(bh, "mark",
+                        lambda *_a, **_kw: pytest.fail("Mismatch must not activate code"))
+    result = bj.recover_existing(fingerprint)
+    assert result["share_code"] is None
+    assert result["readback_status"] == "FAILED"
+
+
+def test_readonly_recovery_fails_closed_if_save_fails(monkeypatch):
+    fingerprint, saved = _saved_basketball_attempt()
+    monkeypatch.setattr(bh, "get", lambda fp, private=False: saved)
+    monkeypatch.setattr(bj.booking, "validate_code_details",
+                        lambda code, expected: (True, "exact match", 2.2))
+    def fail_mark(*args, **kwargs):
+        raise RuntimeError("ledger write failed")
+    monkeypatch.setattr(bh, "mark", fail_mark)
+    result = bj.recover_existing(fingerprint)
+    assert result["status"] == "BOOKING_HISTORY_UNAVAILABLE"
+    assert result["share_code"] is None
