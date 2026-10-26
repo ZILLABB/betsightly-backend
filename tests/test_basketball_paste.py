@@ -137,3 +137,18 @@ def test_exact_points_line_missing_provides_no_substitution():
     assert report["unmatched"][0]["reason"] == "EXACT_MARKET_UNAVAILABLE"
     assert "not active" in report["unmatched"][0]["detail"]
     assert report["share_code"] is None
+
+
+def test_football_list_pasted_into_basketball_desk_is_rejected_with_sport_hint():
+    report, resolved = bp.resolve(request(
+        "Walsall FC vs Salford City | Away win\n"
+        "US Boulogne vs Reims | Away win\n"
+        "America FC MG vs Cuiaba EC MT | Draw"), board())
+    assert resolved is None
+    assert report["matched_fixture_count"] == 0
+    assert len(report["unmatched"]) == 3
+    assert [item["reason"] for item in report["unmatched"]] == [
+        "FIXTURE_NOT_ON_BOARD", "FIXTURE_NOT_ON_BOARD", "UNSUPPORTED_MARKET"]
+    assert "football fixtures" in report["reason"]
+    assert report["share_code"] is None
+    assert report["readback_status"] == "NOT_REQUESTED"
