@@ -306,6 +306,20 @@ def recover_existing(fingerprint_value: str) -> dict:
             or any(k <= (time.time() + KICKOFF_BUFFER) * 1000 for k in kickoffs)):
         return {**hidden, "reason": "The saved code or its fixtures are no longer eligible."}
 
+    approval = (record.get("detail") or {}).get("lower_target_approval")
+    effective_target = target
+    if approval is not None:
+        try:
+            assert isinstance(approval, dict)
+            assert approval["fingerprint"] == fingerprint_value
+            assert approval["method"] == "explicit_existing_code_only"
+            assert approval["approved_by"] == "authenticated_admin"
+            assert float(approval["original_target_odds"]) == target
+            effective_target = float(approval["approved_target_odds"])
+            assert math.isfinite(effective_target) and 2 <= effective_target < target
+        except (AssertionError, KeyError, TypeError, ValueError, OverflowError):
+            return {**hidden, "reason": "Saved lower-target approval audit is invalid."}
+
     selections = [{"eventId": str(leg.get("event_id") or ""),
                    "marketId": str(leg.get("market_id") or ""),
                    "outcomeId": str(leg.get("outcome_id") or ""),
@@ -347,27 +361,32 @@ def recover_existing(fingerprint_value: str) -> dict:
                                    "outcome_id": leg["outcomeId"],
                                    "specifier": leg["specifier"]}
                                   for leg in selections],
-                   "target_odds": target}
+                   "target_odds": effective_target}
         checked = _select(request, board)
+        if checked["status"] == "BELOW_TARGET":
+            return {**hidden, "readback_status": "BELOW_TARGET",
+                    "reason": (f"Exact-market quote {checked['indicative_odds']:.3f}x "
+                               f"is below the approved {effective_target:g}x minimum.")}
         if checked["status"] != "PROPOSED_NOT_BOOKED":
             return {**hidden, "readback_status": "ODDS_UNAVAILABLE",
-                    "reason": "Exact saved markets are unavailable or below the original target."}
+                    "reason": "One or more saved exact markets are unavailable."}
         actual = math.prod(float(leg["odds"]) for leg in checked["matched"])
         source = "fresh_complete_sportybet_board"
     try:
         verified = float(actual)
     except (ValueError, TypeError, OverflowError):
         verified = float("nan")
-    if not math.isfinite(verified) or verified < target:
+    if not math.isfinite(verified) or verified < effective_target:
         return {**hidden, "readback_status": "BELOW_TARGET",
-                "reason": "The recovered price is invalid or below the original target."}
+                "reason": f"Recovered odds are invalid or below {effective_target:g}x."}
 
     try:
         history.mark(fingerprint_value, status="active", share_code=code,
                      verified_odds=round(verified, 3), odds_source=source,
                      expires_at=expires,
                      detail_update={"ticket_status": "pending",
-                                    "recovery_method": "read_only_existing_code"})
+                                    "recovery_method": "read_only_existing_code",
+                                    "recovery_minimum_used": effective_target})
     except Exception:
         logger.exception("Basketball saved-code recovery could not persist")
         return {**hidden, "status": "BOOKING_HISTORY_UNAVAILABLE",
@@ -376,8 +395,35 @@ def recover_existing(fingerprint_value: str) -> dict:
             "readback_status": "PASSED", "verified_odds": round(verified, 3),
             "verified_odds_source": source, "legs": len(legs),
             "history_saved": True, "reused_existing_code": True,
+            "original_target_odds": target,
+            "approved_target_odds": effective_target,
             "expires_at": expires,
             "note": "Existing share code verified without creating another code."}
+
+
+def approve_lower_target_and_recover(fingerprint_value: str, proposed_target: float,
+                                     expected_original_target: float,
+                                     confirmation: str) -> dict:
+    """Explicit audited exception for ONE EXISTING code, with no new bookmaker share POST."""
+    from growth import basketball_history as history
+
+    if not re.fullmatch(r"[0-9a-f]{64}", fingerprint_value):
+        raise ValueError("Invalid basketball booking fingerprint.")
+    if confirmation != "APPROVE_LOWER_TARGET_FOR_EXISTING_CODE":
+        raise ValueError("Explicit lower-target approval confirmation is required.")
+    try:
+        audit = history.approve_lower_target(
+            fingerprint_value, proposed_target, expected_original_target)
+    except ValueError:
+        raise
+    except Exception:
+        logger.exception("Basketball lower-target audit could not be saved")
+        return {"status": "BOOKING_HISTORY_UNAVAILABLE", "share_code": None,
+                "reason": "Could not persist the lower-target approval. No code released."}
+    result = recover_existing(fingerprint_value)
+    return {**result, "approval_audit_saved": True,
+            "original_target_odds": audit["original_target_odds"],
+            "approved_target_odds": audit["approved_target_odds"]}
 
 
 def book(request: dict) -> dict:
