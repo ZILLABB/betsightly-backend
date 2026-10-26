@@ -375,6 +375,32 @@ export default function BasketballJackpot(){
          {['needs_review','verifying'].includes(ticket.status)&&<button type="button" className="bj-history-copy" disabled={!!recovering||!!historyBusy} onClick={()=>void recoverSaved(ticket.fingerprint)}>
            {recovering===ticket.fingerprint?<Loader2 size={14} className="spin"/>:<ShieldCheck size={14}/>}
            {recovering===ticket.fingerprint?'Rechecking saved code…':'Recheck existing code · no new booking'}</button>}
+         {['needs_review','verifying'].includes(ticket.status)&&!ticket.detail?.lower_target_approval&&ticket.target_odds>2&&
+           <button type="button" className="bj-history-copy" disabled={!!recovering||!!historyBusy}
+             onClick={()=>{setApprovalDraft({fingerprint:ticket.fingerprint,minimum:String(Math.max(2,Math.floor(ticket.target_odds)-1))});setApprovalConfirmed(false);}}>
+             Review a lower minimum · existing code only</button>}
+         {ticket.detail?.lower_target_approval&&<p className="bj-history-note">
+            Original target: {odds(ticket.target_odds)}x · Approved recovery minimum: {odds(ticket.detail.lower_target_approval.approved_target_odds)}x
+            · Audited {new Date(ticket.detail.lower_target_approval.approved_at).toLocaleString('en-NG',{timeZone:'Africa/Lagos'})}.
+         </p>}
+         {approvalDraft?.fingerprint===ticket.fingerprint&&!ticket.detail?.lower_target_approval&&
+           <div className="bj-inline-warning" role="group" aria-label="Explicit saved-code lower minimum approval">
+             <strong>Approve a lower minimum for this original {ticket.leg_count}-game code</strong>
+             <p>Original {odds(ticket.target_odds)}x remains in the ledger. This cannot change the games, markets, saved code, expiry or place any stake. Exact markets and current odds must still pass verification.</p>
+             <label>New minimum (x) <input type="number" min="2" max={ticket.target_odds} step=".001"
+               value={approvalDraft.minimum} disabled={!!recovering}
+               onChange={e=>{setApprovalDraft({fingerprint:ticket.fingerprint,minimum:e.target.value});setApprovalConfirmed(false);}}/></label>
+             <label><input type="checkbox" checked={approvalConfirmed} disabled={!!recovering}
+               onChange={e=>setApprovalConfirmed(e.target.checked)}/>
+               I approve this minimum for the saved code only; the original 73x target is unchanged.</label>
+             <button type="button" className="bj-history-copy" disabled={!!recovering||!!historyBusy||!approvalConfirmed||
+                 !Number.isFinite(Number(approvalDraft.minimum))||Number(approvalDraft.minimum)<2||
+                 Number(approvalDraft.minimum)>=ticket.target_odds}
+               onClick={()=>void approveSaved(ticket)}>
+               {recovering===ticket.fingerprint?<Loader2 size={14} className="spin"/>:<ShieldCheck size={14}/>}
+               Approve and recheck original code (no new booking)</button>
+             <button type="button" disabled={!!recovering} onClick={()=>{setApprovalDraft(null);setApprovalConfirmed(false);}}>Cancel</button>
+           </div>}
          {ticket.share_code&&<button type="button" className="bj-history-copy" onClick={()=>navigator.clipboard.writeText(ticket.share_code||'')}>
            <Clipboard size={14}/> Copy saved code</button>}
          {ticket.detail?.reason&&<p className="bj-history-error">{ticket.detail.reason}</p>}
