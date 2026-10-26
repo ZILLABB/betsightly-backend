@@ -237,6 +237,25 @@ def basketball_jackpot_recover(body: BasketballJackpotRecoveryRequest):
         raise HTTPException(422, str(exc))
 
 
+class BasketballJackpotLowerTargetApproval(BaseModel):
+    fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    approved_target_odds: float = Field(ge=2, le=100_000, allow_inf_nan=False)
+    expected_original_target_odds: float = Field(ge=2, le=100_000, allow_inf_nan=False)
+    confirmation: str = Field(pattern=r"^APPROVE_LOWER_TARGET_FOR_EXISTING_CODE$")
+
+
+@router.post("/basketball-jackpot/recover-approve", dependencies=[Depends(require_admin)])
+def basketball_jackpot_approve_lower_target(body: BasketballJackpotLowerTargetApproval):
+    """Record explicit lower-floor approval and revalidate only the existing code."""
+    from growth.basketball_jackpot import approve_lower_target_and_recover
+    try:
+        return approve_lower_target_and_recover(
+            body.fingerprint, body.approved_target_odds,
+            body.expected_original_target_odds, body.confirmation)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 @router.get("/basketball-jackpot/history", dependencies=[Depends(require_admin)])
 def basketball_jackpot_history(limit: int = Query(default=30, ge=1, le=100)):
     from growth.basketball_history import list_recent
