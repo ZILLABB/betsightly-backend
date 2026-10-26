@@ -100,6 +100,12 @@ def capture_observations(*, now=None, db=None, collector=None):
                     tzinfo=None),
             ))
             db.commit()
+        # A committed observation must be available through a fresh SELECT
+        # before this operation reports success. Do not equate HTTP 200
+        # with an archival confirmation.
+        confirmed = _latest(db)
+        if confirmed is None or confirmed["digest"] != receipt["digest"]:
+            raise RuntimeError("NBA_MARKET_DB_READBACK_MISMATCH")
         return {
             **comparisons,
             "status": ("saved" if existing is None else "already_saved"),
