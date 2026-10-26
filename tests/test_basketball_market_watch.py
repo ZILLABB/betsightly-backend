@@ -107,3 +107,35 @@ def test_private_market_routes_auth_and_optin(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     assert client.get(url).status_code == 404
     assert client.post(url + "/refresh", json={}).status_code == 404
+
+def test_market_cron_uses_independent_machine_token(monkeypatch):
+    from growth import api as growth
+
+    token = "market-only-integration-synthetic-64-character-test-token-123456789"
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("NBA_MARKET_JOB_TOKEN", token)
+    calls = []
+    monkeypatch.setattr(
+        growth, "nba_admin_market_refresh",
+        lambda response: calls.append(True) or {"status": "saved"}
+    )
+    app = FastAPI()
+    app.include_router(growth.router, prefix="/api/growth")
+    client = TestClient(app)
+    path = "/api/growth/internal/nba-research/markets/refresh"
+    assert client.get(path).status_code == 405
+    assert client.post(path).status_code == 404
+    assert client.post(path, headers={
+        "x-betsightly-nba-market-token": "invalid"}).status_code == 404
+    assert calls == []
+    assert client.post(path, headers={
+        "x-betsightly-nba-market-token": token}).status_code == 200
+    assert calls == [True]
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert client.post(path, headers={
+        "x-betsightly-nba-market-token": token}).status_code == 404
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("NBA_MARKET_JOB_TOKEN", "")
+    assert client.post(path, headers={
+        "x-betsightly-nba-market-token": token}).status_code == 404
+    assert calls == [True]
