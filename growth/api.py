@@ -731,6 +731,60 @@ def nba_admin_research(response: Response):
     return result
 
 
+def _nba_market_stage_enabled():
+    import os
+    return (
+        os.getenv("ENVIRONMENT", "").lower() == "staging"
+        and os.getenv("NBA_ADMIN_RESEARCH_ENABLED", "").lower() in
+        ("1", "true", "yes", "on")
+        and os.getenv("NBA_ADMIN_RESEARCH_MARKETS_ENABLED", "").lower() in
+        ("1", "true", "yes", "on")
+        and os.getenv("DATABASE_URL", "").startswith(
+            ("postgresql://", "postgres://", "postgresql+psycopg://")
+        )
+    )
+
+
+@router.get("/admin/nba-research/markets",
+            dependencies=[Depends(require_admin)])
+def nba_admin_market_research(response: Response):
+    """Read signed, private exact NBA bookmaker line observations."""
+    if not _nba_market_stage_enabled():
+        raise HTTPException(404, "Private NBA market research disabled.")
+    from basketball.research_market_store import read_observations
+    try:
+        result = read_observations()
+    except ValueError as exc:
+        logger.warning("NBA market snapshot integrity failed: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA market observation integrity invalid.") from exc
+    except Exception as exc:
+        logger.warning("NBA market snapshots unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA market observations unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.post("/admin/nba-research/markets/refresh",
+             dependencies=[Depends(require_admin)])
+def nba_admin_market_refresh(response: Response):
+    """Opt-in, read-only SportyBet crawl; persists ONLY private quoted prices."""
+    if not _nba_market_stage_enabled():
+        raise HTTPException(404, "Private NBA market research disabled.")
+    from basketball.research_market_store import capture_observations
+    try:
+        result = capture_observations()
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("NBA market source rejected: %s", type(exc).__name__)
+        raise HTTPException(409, "No complete verified NBA bookmaker market snapshot.") from exc
+    except Exception as exc:
+        logger.warning("NBA market source unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA bookmaker market source unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.post("/admin/nba-research/settle", dependencies=[Depends(require_admin)])
 def nba_admin_research_settle(response: Response):
     """Explicit staging-only verified NBA scoreboard settlement.
