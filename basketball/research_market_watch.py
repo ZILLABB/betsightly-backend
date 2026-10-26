@@ -227,7 +227,36 @@ def compare_to_archive(board, observation):
             estimate = item.get("advanced_total")
             if estimate is None:
                 estimate = item.get("projected_total")
+            # The observed bookmaker line and model's directional forecast
+            # can be graded only after a verified final. This is PAPER
+            # agreement, not evidence a real wager was placed or won.
+            direction = (
+                "over" if estimate is not None and estimate > market["line"]
+                else "under" if estimate is not None and estimate < market["line"]
+                else None
+            )
+            ah = item.get("actual_home_score")
+            aa = item.get("actual_away_score")
+            final = (
+                int(ah) + int(aa) if item.get("status") == "verified_settled"
+                and isinstance(ah, int) and isinstance(aa, int)
+                and not isinstance(ah, bool) and not isinstance(aa, bool)
+                else None
+            )
+            grade = "pending"
+            if final is not None and direction is not None:
+                if final == market["line"]:
+                    grade = "push"
+                else:
+                    actual_direction = (
+                        "over" if final > market["line"] else "under"
+                    )
+                    grade = "correct" if actual_direction == direction else "incorrect"
             comparisons.append({
+                "paper_direction": direction,
+                "paper_grade": grade,
+                "actual_total": final,
+                "real_bet_settlement": None,
                 "game_id": event["game_id"],
                 "home": event["home"], "away": event["away"],
                 "tipoff_utc": event["kickoff_utc"], "event_id": event["event_id"],
@@ -242,7 +271,16 @@ def compare_to_archive(board, observation):
                 "market_status": item["status"],
                 "observed_at": observation["observed_at"],
             })
+    graded = [x for x in comparisons if x["paper_grade"] in (
+        "correct", "incorrect", "push"
+    )]
     return {
+        "paper_grade_summary": {
+            "correct": sum(x["paper_grade"] == "correct" for x in graded),
+            "incorrect": sum(x["paper_grade"] == "incorrect" for x in graded),
+            "push": sum(x["paper_grade"] == "push" for x in graded),
+            "real_bets_placed": 0,
+        },
         "status": "private_market_comparison",
         "observed_at": observation["observed_at"],
         "fixture_matches": len(observation.get("fixtures", [])),
