@@ -123,7 +123,11 @@ def resolve(request, board):
                 "matched_fixture_count": len(selected), "pasted_fixture_count": len(rows),
                 "unmatched": errors, "matched": [], "full_ticket_complete": False,
                 "share_code": None, "readback_status": "NOT_REQUESTED",
-                "reason": "Resolve every rejected line. No markets were substituted."}, None
+                "reason": ("None of the pasted games matched the basketball bookmaker board. "
+                           "If these are football fixtures, open Private Jackpot "
+                           "instead. No markets were substituted."
+                           if not selected else
+                           "Resolve every rejected line. No markets were substituted.")}, None
     verified = bj._select({**request, "selections": selected}, board)
     return verified, {**request, "selections": selected}
 
