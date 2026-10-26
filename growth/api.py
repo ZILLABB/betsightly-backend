@@ -731,6 +731,37 @@ def nba_admin_research(response: Response):
     return result
 
 
+@router.post("/admin/nba-research/settle", dependencies=[Depends(require_admin)])
+def nba_admin_research_settle(response: Response):
+    """Explicit staging-only verified NBA scoreboard settlement.
+
+    Never publishes football, changes forecasts, or creates betting codes.
+    Keep disabled until its separate stage flag is set after tests.
+    """
+    import os
+    enabled = lambda key: os.getenv(key, "").lower() in ("1", "true", "yes", "on")
+    if (os.getenv("ENVIRONMENT", "").lower() != "staging" or
+        not enabled("NBA_ADMIN_RESEARCH_ENABLED") or
+        not enabled("NBA_ADMIN_RESEARCH_SETTLE_ENABLED") or
+        not os.getenv("DATABASE_URL", "").startswith(("postgresql://", "postgres://",
+                                                       "postgresql+psycopg://"))):
+        raise HTTPException(404, "Hosted NBA settlement disabled.")
+    from basketball.research_hosted_settlement import settle_hosted
+    try:
+        result = settle_hosted()
+    except ValueError as exc:
+        logger.warning("NBA hosted settlement validation rejected: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "NBA evidence integrity prevented settlement.") from exc
+    except Exception as exc:
+        logger.warning("NBA hosted settlement unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "NBA score verification unavailable. No result confirmed.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.post("/admin/nba-research/import", dependencies=[Depends(require_admin)])
 def nba_admin_research_import(request: Request, body: dict = Body(...)):
     """Explicit private import, never a public prediction or betting action."""
