@@ -120,6 +120,60 @@ def mark(fingerprint_value, *, status, share_code=None,
                "detail": json.dumps(detail), "now": _iso()})
 
 
+
+def approve_lower_target(fingerprint_value, approved_odds, expected_original_target):
+    """Audit a one-time lower floor for the same privately saved share code.
+
+    This never changes the original target, legs or unique booking fingerprint.
+    """
+    import math
+    from sqlalchemy import text
+    from database import engine
+
+    proposed = float(approved_odds)
+    expected = float(expected_original_target)
+    if not math.isfinite(proposed) or not math.isfinite(expected) or proposed < 2:
+        raise ValueError("Approval minimum must be finite and at least 2x.")
+    with engine.begin() as conn:
+        _ensure(conn)
+        row = conn.execute(text("""
+            SELECT status, target_odds, share_code, detail
+            FROM basketball_private_bookings WHERE fingerprint=:f FOR UPDATE
+        """), {"f": fingerprint_value}).mappings().first()
+        if row is None:
+            raise ValueError("The original booking attempt was not found.")
+        original = float(row["target_odds"])
+        if (row["status"] not in {"needs_review", "verifying"}
+                or not row["share_code"]):
+            raise ValueError("Only existing unverified share codes can receive this approval.")
+        if not math.isclose(original, expected, rel_tol=0, abs_tol=0.000001):
+            raise ValueError("The original saved target changed; reload history first.")
+        if proposed >= original:
+            raise ValueError("The approved minimum must be below the original saved target.")
+        detail = json.loads(row["detail"] or "{}")
+        prior = detail.get("lower_target_approval")
+        if prior is not None:
+            if (not isinstance(prior, dict)
+                    or not math.isclose(float(prior.get("approved_target_odds", 0)),
+                                        proposed, rel_tol=0, abs_tol=0.000001)):
+                raise ValueError("A different lower minimum is already approved for this code.")
+            return prior
+        approval = {
+            "fingerprint": fingerprint_value,
+            "original_target_odds": original,
+            "approved_target_odds": proposed,
+            "approved_at": _iso(),
+            "approved_by": "authenticated_admin",
+            "method": "explicit_existing_code_only",
+        }
+        detail["lower_target_approval"] = approval
+        conn.execute(text("""
+            UPDATE basketball_private_bookings SET detail=:detail, updated_at=:now
+            WHERE fingerprint=:f
+        """), {"f": fingerprint_value, "detail": json.dumps(detail), "now": _iso()})
+        return approval
+
+
 def list_recent(limit=30):
     from sqlalchemy import text
     from database import engine
