@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Integer, String, Text, func
 from database import Base, SessionLocal
 from basketball.research_coldstart import _json
-from basketball.research_private_bundle import _digest, inspect_bundle, report_from_bundle
+from basketball.research_private_bundle import _digest, inspect_bundle, report_from_bundle, MAX_FIXTURES
 from basketball.research_private_store import (
     NBAPrivateSnapshot, latest_bundle,
 )
@@ -102,8 +102,8 @@ def read_health(*, db=None):
             "fixtures": board["summary"]["fixtures"],
             "pending_fixtures": board["summary"]["pending_fixtures"],
             "verified_settlements": board["summary"]["verified_settlements"],
-            "archive_capacity": 120,
-            "remaining_fixture_slots": 120 - board["summary"]["fixtures"],
+            "archive_capacity": MAX_FIXTURES,
+            "remaining_fixture_slots": MAX_FIXTURES - board["summary"]["fixtures"],
             "research_snapshots": snapshot_count,
             "market_snapshots": market_count,
             "last_market_observed_at": (
