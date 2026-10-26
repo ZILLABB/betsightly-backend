@@ -785,6 +785,72 @@ def nba_admin_market_refresh(response: Response):
     return result
 
 
+def _nba_health_enabled():
+    import os
+    return (
+        os.getenv("ENVIRONMENT", "").lower() == "staging"
+        and os.getenv("NBA_ADMIN_RESEARCH_ENABLED", "").lower()
+        in ("1", "true", "yes", "on")
+        and os.getenv("DATABASE_URL", "").startswith(
+            ("postgresql://", "postgres://", "postgresql+psycopg://")
+        )
+    )
+
+
+@router.get("/admin/nba-research/health",
+            dependencies=[Depends(require_admin)])
+def nba_research_private_health(response: Response):
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA private operations unavailable.")
+    from basketball.research_ops_health import read_health
+    try:
+        result = read_health()
+    except ValueError as exc:
+        raise HTTPException(409, "NBA operations integrity failed.") from exc
+    except Exception as exc:
+        logger.warning("NBA operations read failed: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA operations currently unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return result
+
+
+@router.get("/admin/nba-research/history",
+            dependencies=[Depends(require_admin)])
+def nba_research_market_history(response: Response):
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA private research unavailable.")
+    from basketball.research_ops_health import frozen_market_history
+    try:
+        result = frozen_market_history()
+    except ValueError as exc:
+        raise HTTPException(409, "NBA market history integrity failed.") from exc
+    except Exception as exc:
+        logger.warning("NBA market history unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA private market history unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return result
+
+
+@router.get("/admin/nba-research/backup",
+            dependencies=[Depends(require_admin)])
+def nba_research_export_backup(response: Response):
+    """Full signed NBA archive and market evidence. Manual export only."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA research backup unavailable.")
+    from basketball.research_ops_health import export_verified_backup
+    try:
+        result = export_verified_backup()
+    except ValueError as exc:
+        logger.warning("NBA backup integrity/size blocked: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA complete export unavailable; never download partial evidence.") from exc
+    except Exception as exc:
+        logger.warning("NBA backup unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA private backup unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.post("/admin/nba-research/forecast",
              dependencies=[Depends(require_admin)])
 def nba_admin_forecast_research(response: Response):
