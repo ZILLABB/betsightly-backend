@@ -62,6 +62,8 @@ export default function BasketballResearch(){
   const [marketBusy,setMarketBusy]=useState(false);
   const [marketNotice,setMarketNotice]=useState('');
   const [expandedMarketGame,setExpandedMarketGame]=useState<string|null>(null);
+  const [backupBusy,setBackupBusy]=useState(false);
+  const [backupNotice,setBackupNotice]=useState('');
   const [forecastBusy,setForecastBusy]=useState(false);
   const [forecastNotice,setForecastNotice]=useState('');
 
@@ -98,6 +100,58 @@ export default function BasketballResearch(){
     queryFn:()=>api<NbaMarketReport>('admin/nba-research/markets'),
     refetchOnWindowFocus:false,retry:false,staleTime:60000
   });
+  type NbaOpsHealth={
+    status:string;archive_digest:string;fixtures:number;
+    pending_fixtures:number;remaining_fixture_slots:number;
+    research_snapshots:number;market_snapshots:number;
+    last_market_observed_at:string|null;
+    database_expiry_declared_at:string|null;
+    backup_policy:string;automatic_backup_proven:boolean;
+    jobs:Array<{kind:string;status:string;recorded_at:string;
+      summary:Record<string,unknown>}>;
+  };
+  type NbaFrozenMarketHistory={
+    status:string;source_snapshots_total:number;history_truncated:boolean;
+    evaluated_games:number;results:NbaMarketReference[];
+    paper_results:{correct:number;incorrect:number;push:number;pending:number};
+    real_bets_placed:number;calibrated_betting_edge:boolean;
+  };
+  const health=useQuery<NbaOpsHealth>({
+    queryKey:['nba-private-operations-health'],
+    queryFn:()=>api<NbaOpsHealth>('admin/nba-research/health'),
+    retry:false,refetchOnWindowFocus:false,staleTime:30000,
+  });
+  const frozen=useQuery<NbaFrozenMarketHistory>({
+    queryKey:['nba-private-market-history'],
+    queryFn:()=>api<NbaFrozenMarketHistory>('admin/nba-research/history'),
+    retry:false,refetchOnWindowFocus:false,staleTime:30000,
+  });
+  async function downloadFullEvidence(){
+    if(backupBusy||!verified)return;
+    setBackupBusy(true);setBackupNotice('');
+    try{
+      const result=await api<{
+        version:string;archive_digest:string;archive:unknown;
+        market_receipt_count:number;market_receipts:unknown[];
+        backup_sha256:string
+      }>('admin/nba-research/backup');
+      if(result.version!=='betsightly-nba-private-offline-backup-v1'||
+         !result.archive||typeof result.backup_sha256!=='string'||
+         result.market_receipt_count!==result.market_receipts.length||
+         result.archive_digest!==q.data?.archive_digest)
+        throw Error('The full private archive did not reconcile. No partial download was issued.');
+      const blob=new Blob([JSON.stringify(result,null,2)],
+        {type:'application/json;charset=utf-8'});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');link.href=url;
+      link.download='betsightly-nba-private-full-backup-'+new Date().toISOString().slice(0,10)+'.json';
+      link.click();URL.revokeObjectURL(url);
+      setBackupNotice('Full verified NBA archive plus '+result.market_receipt_count+
+        ' market snapshots exported. Store this file securely outside the expiring database. Restore is not yet tested.');
+    }catch(error){
+      setBackupNotice(error instanceof Error?error.message:'Full private export failed.');
+    }finally{setBackupBusy(false);}
+  }
   const board=q.data;
   const verified=!!board&&board.research_only===true&&board.private===true&&
     board.bookmaker_verified===false&&board.booking_codes_available===false&&
@@ -267,8 +321,8 @@ export default function BasketballResearch(){
       <CheckCheck size={15}/> NBA archive saved and confirmed by database readback.
     </div>}
     <div className="nba-disclaimer" role="note"><ShieldCheck size={19}/>
-      <span><strong>Evaluation only.</strong> No SportyBet basketball booking code,
-        verified market lines, stakes, public picks or guaranteed outcomes.</span></div>
+      <span><strong>Evaluation only.</strong> Private bookmaker observations can now be compared
+        with archived forecasts. No verified betting advantage, stakes, public picks or guaranteed outcomes.</span></div>
     {q.isPending?<div className="nba-state" role="status" aria-live="polite">
       <Loader2 size={24} className="spin"/>
       <span><strong>Reading signed NBA records…</strong>
@@ -289,6 +343,43 @@ export default function BasketballResearch(){
         <p>Backend response did not satisfy the private research contract.
           No predictions have been invented.</p></div>
     </div>:<>
+      <section className="nba-ops-panel" aria-label="NBA staging operational readiness">
+        <div className="nba-ops-head">
+          <div><strong>Cloud operations & evidence protection</strong>
+            <small>Separate research PostgreSQL · no football writes</small></div>
+          <div className="nba-ops-actions">
+            <button type="button" className="button secondary" disabled={health.isFetching}
+              onClick={()=>void Promise.all([health.refetch(),frozen.refetch()])}>
+              <RefreshCcw size={15}/> Refresh health
+            </button>
+            <button type="button" className="button secondary" disabled={backupBusy||!verified}
+              onClick={()=>void downloadFullEvidence()}>
+              {backupBusy?<Loader2 size={15} className="spin"/>:<ArrowDownToLine size={15}/>}
+              {backupBusy?'Verifying full archive…':'Export full NBA evidence'}
+            </button>
+          </div>
+        </div>
+        {backupNotice&&<p className="nba-notice" role="status">{backupNotice}</p>}
+        {health.isPending?<p className="nba-ops-muted">Reading private job and archive status…</p>:
+         health.isError?<p className="nba-ops-muted">Operations status unavailable. Saved forecast records remain separate.</p>:
+         <div className="nba-ops-metrics">
+          <div><small>Remaining archive capacity</small><strong>{health.data?.remaining_fixture_slots??'—'}</strong></div>
+          <div><small>Archived bookmaker snapshots</small><strong>{health.data?.market_snapshots??'—'}</strong></div>
+          <div><small>Research snapshot versions</small><strong>{health.data?.research_snapshots??'—'}</strong></div>
+          <div><small>Automatic offsite backup</small><strong>Not configured</strong></div>
+         </div>}
+        {health.data?.database_expiry_declared_at&&<p className="nba-ops-warning">
+          Current free staging database expiry: {wat(health.data.database_expiry_declared_at)}.
+          A downloaded export is not a tested backup and restore strategy.
+        </p>}
+        <div className="nba-ops-runs">
+          <strong>Recent unattended job outcomes</strong>
+          {!health.data?.jobs.length?<small>No verified unattended job execution logged in the private database yet.</small>:
+           health.data.jobs.slice(0,6).map((job,i)=><div key={job.kind+job.recorded_at+i}>
+            <span>{job.kind}</span><span>{job.status}</span><small>{wat(job.recorded_at)}</small>
+           </div>)}
+        </div>
+      </section>
       <div className="nba-metrics" aria-label="NBA forecast evidence">
         <div><small>Recorded fixtures</small><strong>{board.summary.fixtures}</strong>
           <span>Distinct game IDs</span></div>
@@ -429,6 +520,35 @@ export default function BasketballResearch(){
           Too many alternative lines for one response. Original prices are retained in the private database.
         </p>}
       </section>}
+      <section className="nba-ops-panel" aria-label="NBA first recorded bookmaker market history">
+        <div className="nba-ops-head"><div>
+          <strong>Frozen pregame market evaluation</strong>
+          <small>First saved pregame observation for each game; subsequent odds cannot replace the evaluated reference.</small>
+        </div></div>
+        {frozen.isPending?<p className="nba-ops-muted">Reading signed market history…</p>:
+         frozen.isError?<p className="nba-ops-muted">Private market history is unavailable.</p>:
+         <div className="nba-ops-metrics">
+          <div><small>Historical NBA fixtures</small><strong>{frozen.data?.evaluated_games??0}</strong></div>
+          <div><small>Paper correct</small><strong>{frozen.data?.paper_results.correct??0}</strong></div>
+          <div><small>Paper incorrect</small><strong>{frozen.data?.paper_results.incorrect??0}</strong></div>
+          <div><small>Pending verified finals</small><strong>{frozen.data?.paper_results.pending??0}</strong></div>
+         </div>}
+        {(frozen.data?.results??[]).length>0&&<div className="nba-table-wrap">
+          <table className="nba-table">
+            <caption>Frozen reference is median offered total; no real wagers or calibrated tips.</caption>
+            <thead><tr><th>NBA game</th><th>First reference total</th><th>Advanced projection</th><th>Final total</th><th>Paper result</th></tr></thead>
+            <tbody>{frozen.data?.results.map(g=><tr key={g.game_id}>
+              <td>{g.home} vs {g.away}<small>{wat(g.observed_at)}</small></td>
+              <td>{num(g.reference_total)}</td><td>{num(g.projected_total)}</td>
+              <td>{num(g.actual_total)}</td><td>{g.paper_grade==='correct'?'Correct':
+                g.paper_grade==='incorrect'?'Incorrect':g.paper_grade==='push'?'Push':'Pending'}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
+        {frozen.data?.history_truncated&&<p className="nba-ops-warning">
+          Historical snapshot scan reached its protection limit; results are incomplete and should not be used to assess model performance.
+        </p>}
+      </section>
       <p className="nba-disclaimer">Prices are observational and may change.
         An Over/Under projection difference is not a winning bet or verified edge.
         NBA market calibration, betting ROI and public publishing remain disabled.</p>
@@ -436,7 +556,7 @@ export default function BasketballResearch(){
         <span>Verified grades: moneyline {board.summary.verified_settlements?.moneyline??0};
           original score {board.summary.verified_settlements?.original_score??0};
           advanced score {board.summary.verified_settlements?.advanced_score??0}.
-          No bookmaker odds or NBA code generation.</span>
+          Bookmaker odds remain private; no NBA booking codes or public betting products.</span>
       </div>
     </>}
   </section>;
