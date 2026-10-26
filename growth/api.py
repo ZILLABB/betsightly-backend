@@ -785,6 +785,35 @@ def nba_admin_market_refresh(response: Response):
     return result
 
 
+@router.post("/admin/nba-research/forecast",
+             dependencies=[Depends(require_admin)])
+def nba_admin_forecast_research(response: Response):
+    """Research-only signed NBA pregame capture; never publishes a public tip."""
+    import os
+    enabled = lambda key: os.getenv(key, "").lower() in ("1", "true", "yes", "on")
+    if (os.getenv("ENVIRONMENT", "").lower() != "staging"
+        or not enabled("NBA_ADMIN_RESEARCH_ENABLED")
+        or not enabled("NBA_ADMIN_RESEARCH_FORECAST_ENABLED")
+        or not os.getenv("DATABASE_URL", "").startswith((
+            "postgresql://", "postgres://", "postgresql+psycopg://"
+        ))):
+        raise HTTPException(404, "NBA cloud forecast research is disabled.")
+    from basketball.research_hosted_forecast import forecast_hosted
+    try:
+        result = forecast_hosted()
+    except ValueError as exc:
+        logger.warning("NBA forecast source validation rejected: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "NBA cloud forecasts withheld by source validation.") from exc
+    except Exception as exc:
+        logger.warning("NBA forecast source unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "NBA cloud forecast input unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.post("/admin/nba-research/settle", dependencies=[Depends(require_admin)])
 def nba_admin_research_settle(response: Response):
     """Explicit staging-only verified NBA scoreboard settlement.
