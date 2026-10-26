@@ -61,6 +61,7 @@ export default function BasketballResearch(){
   const [settlementError,setSettlementError]=useState('');
   const [marketBusy,setMarketBusy]=useState(false);
   const [marketNotice,setMarketNotice]=useState('');
+  const [expandedMarketGame,setExpandedMarketGame]=useState<string|null>(null);
   const [forecastBusy,setForecastBusy]=useState(false);
   const [forecastNotice,setForecastNotice]=useState('');
 
@@ -77,9 +78,20 @@ export default function BasketballResearch(){
     recommendation:string;tipoff_utc:string;observed_at:string;
     paper_direction:'over'|'under'|null;paper_grade:string;actual_total:number|null;
   };
+  type NbaMarketReference={
+    game_id:string;event_id:string;home:string;away:string;
+    tipoff_utc:string;observed_at:string;reference_total:number;
+    over_odds:number;under_odds:number;projected_total:number|null;
+    difference:number|null;available_lines:number;
+    paper_direction:'over'|'under'|null;paper_grade:string;
+    actual_total:number|null;recommendation:string;
+    reference_kind:string;
+  };
   type NbaMarketReport={
     status:string;observed_at?:string;quoted_totals:NbaMarketLine[];
+    reference_games?:NbaMarketReference[];
     fixture_matches:number;digest?:string;calibrated_betting_edge:boolean;
+    available_line_count?:number;display_truncated?:boolean;
   };
   const markets=useQuery<NbaMarketReport>({
     queryKey:['nba-private-market-research'],
@@ -356,32 +368,66 @@ export default function BasketballResearch(){
         Market comparison is disabled or the source is unavailable. Predictions remain research-only.
       </p>:markets.isPending?<p className="nba-disclaimer">
         Reading private bookmaker market observations…
-      </p>:<section className="nba-table-wrap" aria-label="Exact NBA total-point prices">
-        <table className="nba-table">
-          <caption>{markets.data?.quoted_totals?.length??0} exact total-point lines
-            · no calibrated betting advantage has been demonstrated</caption>
-          <thead><tr><th>Match</th><th>Bookmaker total</th><th>Over</th>
-            <th>Under</th><th>Projection</th><th>Difference</th><th>Paper grade</th></tr></thead>
-          <tbody>{(markets.data?.quoted_totals??[]).map((m,i)=><tr key={m.game_id+'-'+m.line+'-'+i}>
-            <td>{m.home} vs {m.away}<small>{wat(m.tipoff_utc)}</small></td>
-            <td>{m.line.toFixed(1)}</td>
-            <td>{m.over_odds.toFixed(2)}x</td><td>{m.under_odds.toFixed(2)}x</td>
-            <td>{num(m.projected_total)}</td>
-            <td>{m.difference==null?'—':num(m.difference)}</td>
-            <td>{m.paper_grade==='correct'?'Correct · research only':
-                 m.paper_grade==='incorrect'?'Incorrect · research only':
-                 m.paper_grade==='push'?'Push':m.paper_direction
-                   ?'Awaiting verified final':'No directional forecast'}</td>
-          </tr>)}
-          {!markets.data?.quoted_totals?.length&&<tr><td colSpan={7}>
-            {markets.data?.status==='no_market_snapshot'
-              ?'No bookmaker snapshot has been saved yet. Use Capture NBA market lines to run the first verified provider check.'
-              :markets.data?.observed_at
-                ?'A bookmaker snapshot was saved, but no exact pregame NBA total-point lines matched the archived fixtures. No selection was generated.'
-                :'No verified market observation is available. No selection was generated.'}
-          </td></tr>}
-          </tbody>
-        </table>
+      </p>:<section className="nba-market-desk" aria-label="NBA market research by fixture">
+        <div className="nba-market-desk-heading">
+          <div>
+            <strong>{markets.data?.reference_games?.length??0} matched NBA games</strong>
+            <small>{markets.data?.available_line_count??markets.data?.quoted_totals?.length??0} archived total-point lines
+              · one neutral mid-ladder reference per game</small>
+          </div>
+          <span>Private evaluation only · no selections</span>
+        </div>
+        {(markets.data?.reference_games??[]).map(g=>{
+          const alternatives=(markets.data?.quoted_totals??[]).filter(x=>x.game_id===g.game_id);
+          const expanded=expandedMarketGame===g.game_id;
+          return <article className="nba-market-game" key={g.game_id}>
+            <div className="nba-market-game-head">
+              <div className="nba-market-game-title">
+                <strong>{g.home} <span>vs</span> {g.away}</strong>
+                <small>{wat(g.tipoff_utc)} · {g.available_lines} offered total lines</small>
+              </div>
+              <button type="button" className="button secondary nba-market-toggle"
+                aria-expanded={expanded} onClick={()=>setExpandedMarketGame(expanded?null:g.game_id)}>
+                {expanded?'Hide alternatives':'View all lines'}
+              </button>
+            </div>
+            <div className="nba-market-numbers">
+              <div><small>Reference total</small><strong>{num(g.reference_total)}</strong></div>
+              <div><small>Over / Under prices</small><strong>{g.over_odds.toFixed(2)}x / {g.under_odds.toFixed(2)}x</strong></div>
+              <div><small>Advanced projection</small><strong>{num(g.projected_total)}</strong></div>
+              <div><small>Projection difference</small><strong>{g.difference==null?'—':num(g.difference)}</strong></div>
+              <div><small>Paper result</small><strong>{g.paper_grade==='correct'?'Correct':
+                g.paper_grade==='incorrect'?'Incorrect':g.paper_grade==='push'?'Push':'Pending'}</strong></div>
+            </div>
+            {expanded&&<div className="nba-market-expanded">
+              <p>Alternative totals as captured at {wat(g.observed_at)}.
+                Reference is the middle offered line, not an official main line or recommendation.</p>
+              <div className="nba-table-wrap"><table className="nba-table">
+                <thead><tr><th>Line</th><th>Over</th><th>Under</th><th>Projected total</th><th>Difference</th><th>Paper grade</th></tr></thead>
+                <tbody>{alternatives.map(m=><tr key={m.game_id+'-'+m.line}>
+                  <td>{num(m.line)}</td><td>{m.over_odds.toFixed(2)}x</td>
+                  <td>{m.under_odds.toFixed(2)}x</td>
+                  <td>{num(m.projected_total)}</td><td>{num(m.difference)}</td>
+                  <td>{m.paper_grade==='correct'?'Correct':m.paper_grade==='incorrect'?'Incorrect':
+                    m.paper_grade==='push'?'Push':'Pending'}</td>
+                </tr>)}</tbody>
+              </table></div>
+              {alternatives.length!==g.available_lines&&<p>
+                Only {alternatives.length} of {g.available_lines} saved lines were returned by this response.
+                The original full snapshot remains stored privately.</p>}
+            </div>}
+          </article>;
+        })}
+        {!markets.data?.reference_games?.length&&<p className="nba-market-empty">
+          {markets.data?.status==='no_market_snapshot'
+          ?'No bookmaker snapshot has been saved. Use Capture NBA market lines to run the first verified source check.'
+          :markets.data?.observed_at
+            ?'A snapshot was saved, but no exact upcoming NBA total lines matched the archived fixtures.'
+            :'No verified bookmaker observations available.'}
+        </p>}
+        {markets.data?.display_truncated&&<p className="nba-disclaimer">
+          Too many alternative lines for one response. Original prices are retained in the private database.
+        </p>}
       </section>}
       <p className="nba-disclaimer">Prices are observational and may change.
         An Over/Under projection difference is not a winning bet or verified edge.
