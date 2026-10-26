@@ -393,3 +393,25 @@ button:active:not(:disabled){transform:translateY(1px)}
 .nba-market-empty{padding:22px;color:#b6d1e3;font-size:12px}
 @media(max-width:1000px){.nba-market-numbers{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:560px){.nba-market-numbers{grid-template-columns:repeat(2,minmax(0,1fr))}.nba-market-game-head,.nba-market-desk-heading{align-items:flex-start;flex-direction:column}}
+
+/* NBA staging operations: private job evidence and portable export controls. */
+.nba-ops-panel{background:linear-gradient(145deg,#173851,#0d283e);border:1px solid #3c6481;border-radius:16px;padding:20px;display:grid;gap:16px}
+.nba-ops-head{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.nba-ops-head>div:first-child{display:grid;gap:7px}
+.nba-ops-head strong{font-size:15px;color:#edf9ff}
+.nba-ops-head small{font-size:11px;color:#a6cce4}
+.nba-ops-actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.nba-ops-actions .button{display:inline-flex;gap:7px;align-items:center;min-height:41px}
+.nba-ops-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.nba-ops-metrics>div{display:grid;gap:8px;background:#122e44;border-radius:11px;border:1px solid #375e77;padding:15px;min-width:0}
+.nba-ops-metrics small{font-size:10px;color:#9ec4db}
+.nba-ops-metrics strong{font-variant-numeric:tabular-nums;font-size:21px;overflow-wrap:anywhere;color:#f1f9ff}
+.nba-ops-warning{padding:12px 14px;background:#3d3229;border:1px solid #886547;border-radius:10px;color:#ffdfa6;font-size:11px;line-height:1.6;margin:0}
+.nba-ops-muted{font-size:12px;color:#adcede;line-height:1.6;margin:0}
+.nba-ops-runs{display:grid;gap:10px;padding-top:12px;border-top:1px solid #365773}
+.nba-ops-runs>strong{font-size:12px;color:#e9f6ff}
+.nba-ops-runs>small{font-size:11px;color:#a9cbdc}
+.nba-ops-runs>div{display:grid;grid-template-columns:1fr 1fr auto;gap:12px;font-size:11px;color:#cde3f4;align-items:center}
+.nba-ops-runs>div small{color:#9abbd2}
+@media(max-width:950px){.nba-ops-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.nba-ops-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.nba-ops-runs>div{grid-template-columns:1fr 1fr}.nba-ops-runs>div small{grid-column:1/-1}}
