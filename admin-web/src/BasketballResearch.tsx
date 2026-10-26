@@ -321,8 +321,9 @@ export default function BasketballResearch(){
       <CheckCheck size={15}/> NBA archive saved and confirmed by database readback.
     </div>}
     <div className="nba-disclaimer" role="note"><ShieldCheck size={19}/>
-      <span><strong>Evaluation only.</strong> Private bookmaker observations can now be compared
-        with archived forecasts. No verified betting advantage, stakes, public picks or guaranteed outcomes.</span></div>
+      <span><strong>Evaluation only.</strong> No SportyBet basketball booking code, stakes,
+        public picks or guaranteed outcomes. Private bookmaker observations are available
+        for research, not verified betting advantage.</span></div>
     {q.isPending?<div className="nba-state" role="status" aria-live="polite">
       <Loader2 size={24} className="spin"/>
       <span><strong>Reading signed NBA records…</strong>
