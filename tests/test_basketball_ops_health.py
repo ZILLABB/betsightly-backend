@@ -115,3 +115,54 @@ def test_operations_api_admin_only_staging_only(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     for name in names:
         assert client.get("/api/growth/admin/nba-research/"+name).status_code == 404
+
+def test_backup_restore_drill_and_tamper_rejection(tmp_path, monkeypatch):
+    import pytest
+    from basketball.research_restore_drill import verify_portable_backup
+    _, factory = prepare(tmp_path, monkeypatch)
+    with factory() as db:
+        backup = ops.export_verified_backup(db=db)
+        assert backup["restore_drill_passed"] is True
+        audited = verify_portable_backup(backup)
+        assert audited["restore_drill_passed"] is True
+        assert audited["isolated_ephemeral_database"] is True
+        assert audited["permanent_database_unchanged"] is True
+        original_rows = db.query(store.NBAPrivateSnapshot).count()
+        assert original_rows == 1
+        tampered = {**backup, "archive_digest": "0"*64}
+        with pytest.raises(ValueError, match="NBA_BACKUP_DIGEST_MISMATCH"):
+            verify_portable_backup(tampered)
+        assert db.query(store.NBAPrivateSnapshot).count() == original_rows
+
+
+def test_backup_machine_routes_are_not_public(monkeypatch):
+    from growth import api as growth
+    token = "synthetic-backup-machine-token-never-used-in-production-123456789"
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("NBA_ADMIN_RESEARCH_ENABLED", "true")
+    monkeypatch.setenv("NBA_BACKUP_PRIVATE_ENABLED", "true")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://fake/staging")
+    monkeypatch.setenv("NBA_BACKUP_JOB_TOKEN", token)
+    app = FastAPI()
+    app.include_router(growth.router, prefix="/api/growth")
+    client = TestClient(app)
+    path="/api/growth/internal/nba-research/backup"
+    assert client.get(path).status_code == 404
+    assert client.get(path, headers={
+        "x-betsightly-nba-backup-token": "incorrect"}).status_code == 404
+    stub=[]
+    monkeypatch.setattr(growth, "nba_research_export_backup",
+        lambda response: stub.append("export") or {"status":"research_only"})
+    assert client.get(path, headers={
+        "x-betsightly-nba-backup-token": token}).status_code == 200
+    assert stub==["export"]
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert client.get(path, headers={
+        "x-betsightly-nba-backup-token": token}).status_code == 404
+    ack=path+"/ack"
+    assert client.post(ack,json={
+        "verified":True,"store":"private_vercel_blob",
+        "archive_digest":"1"*64,"backup_sha256":"2"*64
+    }).status_code == 404
+    assert client.post(ack,json={},headers={
+        "x-betsightly-nba-backup-token": token}).status_code == 404
