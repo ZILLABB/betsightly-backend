@@ -369,3 +369,27 @@ button:active:not(:disabled){transform:translateY(1px)}
 .nba-upload-busy{opacity:.5;pointer-events:none}
 .nba-upload-error{display:flex;gap:10px;align-items:flex-start;border:1px solid #815652;border-radius:9px;background:#3c2428;padding:12px 15px;font-size:12px;color:#ffdad3}
 @media(max-width:750px){.nba-import{flex-direction:column;align-items:flex-start}.nba-import label.button{max-width:100%}}
+
+/* Fixture-first NBA research: one event summary, expanding saved alternatives. */
+.nba-market-desk{background:#102b40;border:1px solid #355e77;border-radius:16px;overflow:hidden;display:grid;gap:0}
+.nba-market-desk-heading{padding:17px 20px;display:flex;align-items:center;justify-content:space-between;gap:15px;background:#173a50;color:#bad8e8}
+.nba-market-desk-heading>div{display:grid;gap:5px}
+.nba-market-desk-heading strong{color:#f2f9ff;font-size:15px}
+.nba-market-desk-heading small,.nba-market-desk-heading>span{font-size:11px;color:#a6c9df}
+.nba-market-game{padding:18px 20px;border-top:1px solid #31536b;display:grid;gap:13px}
+.nba-market-game-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.nba-market-game-title{display:grid;gap:6px}
+.nba-market-game-title strong{font-size:14px;color:#f2f8ff}
+.nba-market-game-title strong span{font-size:11px;color:#88bbd8;font-weight:500;margin:0 4px}
+.nba-market-game-title small{font-size:11px;color:#98c0d8}
+.nba-market-toggle{white-space:nowrap}
+.nba-market-numbers{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.nba-market-numbers>div{display:grid;gap:7px;border:1px solid #375b73;background:#153249;border-radius:9px;padding:12px;min-width:0}
+.nba-market-numbers small{font-size:10px;color:#a9c9da}
+.nba-market-numbers strong{font-size:15px;color:#f0f9ff;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.nba-market-expanded{display:grid;gap:10px}
+.nba-market-expanded>p{color:#a9c8d8;font-size:11px;line-height:1.6}
+.nba-market-expanded .nba-table{min-width:680px}
+.nba-market-empty{padding:22px;color:#b6d1e3;font-size:12px}
+@media(max-width:1000px){.nba-market-numbers{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:560px){.nba-market-numbers{grid-template-columns:repeat(2,minmax(0,1fr))}.nba-market-game-head,.nba-market-desk-heading{align-items:flex-start;flex-direction:column}}
