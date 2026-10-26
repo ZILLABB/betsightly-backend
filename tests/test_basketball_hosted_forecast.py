@@ -78,3 +78,40 @@ def test_cloud_forecast_refuses_missing_verified_previous_season(tmp_path, monke
         raise AssertionError("Missing prior season cannot produce a forecast")
     with sessions() as db:
         assert db.query(store.NBAPrivateSnapshot).count() == 1
+
+def test_machine_daily_forecast_token_gate(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from growth import api as growth
+
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://synthetic/db")
+    monkeypatch.setenv("NBA_ADMIN_RESEARCH_ENABLED", "true")
+    monkeypatch.setenv("NBA_ADMIN_RESEARCH_FORECAST_ENABLED", "true")
+    token = "synthetic-only-test-token-for-nba-forecast-auth-0000000000000"
+    monkeypatch.setenv("NBA_FORECAST_JOB_TOKEN", token)
+    calls = []
+    monkeypatch.setattr(
+        growth, "nba_admin_forecast_research",
+        lambda response: calls.append("allowed") or {"status": "no_new_eligible_forecasts"}
+    )
+    app = FastAPI()
+    app.include_router(growth.router, prefix="/api/growth")
+    client = TestClient(app)
+    path = "/api/growth/internal/nba-research/forecast"
+    assert client.get(path).status_code == 405
+    assert client.post(path).status_code == 404
+    assert client.post(path, headers={
+        "x-betsightly-nba-forecast-token": "incorrect"}).status_code == 404
+    assert calls == []
+    assert client.post(path, headers={
+        "x-betsightly-nba-forecast-token": token}).status_code == 200
+    assert calls == ["allowed"]
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert client.post(path, headers={
+        "x-betsightly-nba-forecast-token": token}).status_code == 404
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.delenv("NBA_FORECAST_JOB_TOKEN")
+    assert client.post(path, headers={
+        "x-betsightly-nba-forecast-token": token}).status_code == 404
+    assert calls == ["allowed"]
