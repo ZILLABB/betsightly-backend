@@ -186,7 +186,7 @@ export default function BasketballResearch(){
     setUploadIssue('');
     setUploadConfirmed(false);
     try{
-      if(file.size>750_000)throw Error('Private NBA file exceeds 750 KB. No data was uploaded.');
+      if(file.size>2_800_000)throw Error('Private NBA signed archive exceeds 2.8 MB. No data was uploaded.');
       const raw=await file.text();
       const data:unknown=JSON.parse(raw);
       if(!data||typeof data!=='object'||Array.isArray(data)||
@@ -367,11 +367,11 @@ export default function BasketballResearch(){
           <div><small>Remaining archive capacity</small><strong>{health.data?.remaining_fixture_slots??'—'}</strong></div>
           <div><small>Archived bookmaker snapshots</small><strong>{health.data?.market_snapshots??'—'}</strong></div>
           <div><small>Research snapshot versions</small><strong>{health.data?.research_snapshots??'—'}</strong></div>
-          <div><small>Automatic offsite backup</small><strong>Not configured</strong></div>
+          <div><small>Automatic offsite backup</small><strong>{health.data?.automatic_backup_proven?'Verified':'Awaiting first run'}</strong></div>
          </div>}
         {health.data?.database_expiry_declared_at&&<p className="nba-ops-warning">
           Current free staging database expiry: {wat(health.data.database_expiry_declared_at)}.
-          A downloaded export is not a tested backup and restore strategy.
+          The private backup workflow is independently checked; database migration and disaster-recovery cutover are not yet tested.
         </p>}
         <div className="nba-ops-runs">
           <strong>Recent unattended job outcomes</strong>
