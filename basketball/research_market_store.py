@@ -14,9 +14,8 @@ from database import Base, SessionLocal
 from basketball.research_coldstart import _json
 from basketball.research_private_bundle import report_from_bundle
 from basketball.research_private_store import latest_bundle
-from basketball.research_market_watch import (
-    fetch_exact_nba_markets, compare_to_archive,
-)
+from basketball.research_market_watch import fetch_exact_nba_markets
+from basketball.research_market_presentation import present_market_snapshot
 
 
 class NBAMarketObservation(Base):
@@ -59,7 +58,7 @@ def read_observations(*, db=None):
                 "research_only": True, "not_bookable": True,
             }
         return {
-            **compare_to_archive(board, observation),
+            **present_market_snapshot(board, observation),
             "research_only": True,
         }
     finally:
@@ -82,7 +81,7 @@ def capture_observations(*, now=None, db=None, collector=None):
             archive["fixtures"], now=instant
         )
         # Independent reconciliation with the archived pregame board.
-        comparisons = compare_to_archive(board, receipt)
+        comparisons = present_market_snapshot(board, receipt)
         encoded = _json(receipt)
         if len(encoded.encode("utf-8")) > 250_000:
             raise ValueError("NBA_MARKET_RECEIPT_TOO_LARGE")
