@@ -762,6 +762,24 @@ def nba_admin_research_settle(response: Response):
     return result
 
 
+@router.post("/internal/nba-research/settle")
+def nba_private_cron_settle(request: Request, response: Response):
+    """Machine-only staging settlement; requires dedicated 256-bit token.
+
+    Distinct from interactive administrator cookies and disabled in production.
+    Never accepts user-supplied fixtures, outcomes, model parameters or stakes.
+    """
+    import hmac
+    import os
+    configured = os.getenv("NBA_SETTLEMENT_JOB_TOKEN", "")
+    incoming = request.headers.get("x-betsightly-nba-settle-token", "")
+    if (os.getenv("ENVIRONMENT", "").lower() != "staging" or
+        len(configured) < 32 or not incoming or
+        not hmac.compare_digest(configured, incoming)):
+        raise HTTPException(404, "Not found.")
+    return nba_admin_research_settle(response)
+
+
 @router.post("/admin/nba-research/import", dependencies=[Depends(require_admin)])
 def nba_admin_research_import(request: Request, body: dict = Body(...)):
     """Explicit private import, never a public prediction or betting action."""
