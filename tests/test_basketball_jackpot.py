@@ -76,6 +76,29 @@ def test_partial_basketball_refresh_preserves_previous_complete_board(monkeypatc
     assert bj.cached_board() is stored
 
 
+def test_basketball_refresh_retries_one_event_count_drift(monkeypatch):
+    """A near-complete response is not promoted; only the second full pass is."""
+    attempts, writes = [], []
+
+    def unstable_provider(url, timeout=20):
+        if "pageNum=1" in url:
+            attempts.append(1)
+            declared = 2 if len(attempts) == 1 else 1
+            return {"bizCode": 10000, "data": {"totalNum": declared,
+                "tournaments": [{"name": "NBA", "events": [_event()]}]}}
+        return {"bizCode": 10000, "data": {"totalNum": 2, "tournaments": []}}
+
+    monkeypatch.setattr(bj.sportybet, "_get_json", unstable_provider)
+    monkeypatch.setattr(bj.sportybet, "_db_set",
+                        lambda key, data: writes.append((key, data)))
+    report = bj.refresh_board()
+    assert report["status"] == "success"
+    assert len(attempts) == 2
+    assert len(writes) == 1
+    assert writes[0][0] == bj.CACHE_KEY
+    assert writes[0][1]["metadata"]["is_complete"] is True
+
+
 def test_full_basketball_refresh_is_promoted(monkeypatch):
     changes = []
     monkeypatch.setattr(bj.sportybet, "_db_set",
