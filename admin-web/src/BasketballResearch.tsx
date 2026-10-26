@@ -347,6 +347,8 @@ export default function BasketballResearch(){
         </button>
       </section>
       {marketNotice&&<p role="status" className="nba-notice">{marketNotice}</p>}
+      {markets.data?.status==='no_market_snapshot'&&
+        <p role="status" className="nba-disclaimer">No saved bookmaker snapshot yet. Reading this page does not contact SportyBet; capture must run successfully before prices appear.</p>}
       {markets.data?.observed_at&&
         <p className="nba-disclaimer">Last bookmaker observation: {wat(markets.data.observed_at)}.
           These quoted prices are historical snapshots, not live guaranteed prices.</p>}
@@ -372,7 +374,11 @@ export default function BasketballResearch(){
                    ?'Awaiting verified final':'No directional forecast'}</td>
           </tr>)}
           {!markets.data?.quoted_totals?.length&&<tr><td colSpan={7}>
-            No verified market lines captured. There is no selection recommendation.
+            {markets.data?.status==='no_market_snapshot'
+              ?'No bookmaker snapshot has been saved yet. Use Capture NBA market lines to run the first verified provider check.'
+              :markets.data?.observed_at
+                ?'A bookmaker snapshot was saved, but no exact pregame NBA total-point lines matched the archived fixtures. No selection was generated.'
+                :'No verified market observation is available. No selection was generated.'}
           </td></tr>}
           </tbody>
         </table>
