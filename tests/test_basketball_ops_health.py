@@ -51,7 +51,7 @@ def test_health_reports_archive_and_runs_without_fake_backup(tmp_path, monkeypat
         assert info["remaining_fixture_slots"] == 120 - len(archive["fixtures"])
         assert info["archive_digest"] == _digest(archive)
         assert info["automatic_backup_proven"] is False
-        assert info["backup_policy"] == "manual_export_only_no_offsite_backup"
+        assert info["backup_policy"] == "private_vercel_blob_daily_snapshot_with_hash_readback"
     ops.record_run("forecast", "no_new_eligible_forecasts",
                    detail={"new_forecasts": {"moneyline": 0}})
     with factory() as db:
