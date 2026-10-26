@@ -7,8 +7,9 @@ isolated proof of export restorability, not a cloud disaster-recovery guarantee.
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 
-from sqlalchemy import create_engine, Column, Integer, DateTime, String, Text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -81,7 +82,9 @@ def verify_portable_backup(backup, *, require_sha=True):
             for row in receipts:
                 session.add(NBAMarketObservation(
                     digest=row["digest"],payload_json=_json(row),
-                    recorded_at=None,
+                    recorded_at=datetime.fromisoformat(
+                        row["observed_at"].replace("Z", "+00:00")
+                    ).replace(tzinfo=None),
                 ))
             session.commit()
             restored=latest_bundle(session)
