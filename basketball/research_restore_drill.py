@@ -48,7 +48,7 @@ def verify_portable_backup(backup, *, require_sha=True):
     receipts=backup["market_receipts"]
     if not isinstance(receipts,list) or len(receipts)!=backup["market_receipt_count"]:
         raise ValueError("NBA_BACKUP_MARKET_COUNT_MISMATCH")
-    if len(receipts)>160:
+    if len(receipts)>600:
         raise ValueError("NBA_BACKUP_MARKET_LIST_UNBOUNDED")
     origin_ids={str(x["game_id"]) for x in archive["fixtures"]}
     digest_seen=set()
