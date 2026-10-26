@@ -61,6 +61,9 @@ export default function BasketballResearch(){
   const [settlementError,setSettlementError]=useState('');
   const [marketBusy,setMarketBusy]=useState(false);
   const [marketNotice,setMarketNotice]=useState('');
+  const [forecastBusy,setForecastBusy]=useState(false);
+  const [forecastNotice,setForecastNotice]=useState('');
+
 
   const q=useQuery<ResearchBoard>({
     queryKey:['nba-private-recorded-research'],
@@ -175,6 +178,28 @@ export default function BasketballResearch(){
       setMarketNotice(error instanceof Error?error.message:'Bookmaker market research unavailable.');
     }finally{setMarketBusy(false);}
   }
+  async function runResearchForecasts(){
+    if(!verified||forecastBusy||settling||marketBusy||uploadBusy)return;
+    setForecastBusy(true);setForecastNotice('');
+    try{
+      const result=await api<{status:string;archive_digest:string;
+        new_forecasts:Record<string,number>;fixture_count?:number}>(
+        'admin/nba-research/forecast',{},'POST');
+      const checked=await q.refetch();
+      if(checked.isError||checked.data?.archive_digest!==result.archive_digest)
+        throw Error('Research forecast response was not confirmed by the NBA database.');
+      const count=Object.values(result.new_forecasts||{}).reduce((sum,n)=>sum+n,0);
+      setForecastNotice(result.status==='archived_before_tipoff'
+        ?count+' new signed research forecasts archived before tipoff. No betting tips or codes published.'
+        :result.status==='no_upcoming_eligible_source_window'
+          ?'No new eligible fixture is available in the verified 48-hour source window.'
+          :result.status==='archive_capacity_reached'
+            ?'Archive capacity reached. Existing forecasts remain safe; extend storage before new capture.'
+            :'No new research predictions. Existing forecasts remain unchanged.');
+    }catch(error){
+      setForecastNotice(error instanceof Error?error.message:'NBA daily forecast inputs unavailable.');
+    }finally{setForecastBusy(false);}
+  }
   const status=q.error instanceof ApiError?q.error.status:0;
   return <section className="nba-workspace">
     <header className="page-heading nba-heading">
@@ -194,6 +219,20 @@ export default function BasketballResearch(){
         </button>
       </div>
     </header>
+    <section className="nba-import" aria-label="Prospective NBA forecast capture">
+      <div>
+        <strong>Cloud research forecast capture</strong>
+        <span>Generate only eligible before-tipoff moneyline and original score forecasts
+          using verified prior-season data. Advanced forecasts require separate boxscore evidence.</span>
+      </div>
+      <button type="button" className="button secondary"
+        disabled={!verified||forecastBusy||settling||marketBusy||uploadBusy}
+        onClick={()=>void runResearchForecasts()}>
+        {forecastBusy?<Loader2 size={15} className="spin"/>:<Clock3 size={15}/>}
+        {forecastBusy?'Validating historical data…':'Generate new NBA research'}
+      </button>
+    </section>
+    {forecastNotice&&<p role="status" className="nba-notice">{forecastNotice}</p>}
     <div className="nba-import">
       <div><strong>Secure forecast archive</strong>
         <span>Import the original signed NBA research bundle exported on your laptop.
