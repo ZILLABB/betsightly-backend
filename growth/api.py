@@ -911,6 +911,15 @@ def nba_admin_research_settle(response: Response):
     return result
 
 
+def _record_nba_machine_job(kind: str, status: str, result=None):
+    """Record only non-sensitive outcomes after a validated cron invocation."""
+    try:
+        from basketball.research_ops_health import record_run
+        record_run(kind, status, detail=result)
+    except Exception as exc:
+        logger.warning("NBA run audit unavailable: %s", type(exc).__name__)
+
+
 @router.post("/internal/nba-research/markets/refresh")
 def nba_private_market_cron_refresh(request: Request, response: Response):
     """Machine-only, private NBA bookmaker market snapshot, no bets or tips.
@@ -926,7 +935,13 @@ def nba_private_market_cron_refresh(request: Request, response: Response):
         or len(expected) < 48 or not presented
         or not hmac.compare_digest(expected, presented)):
         raise HTTPException(404, "Not found.")
-    return nba_admin_market_refresh(response)
+    try:
+        result = nba_admin_market_refresh(response)
+    except HTTPException as exc:
+        _record_nba_machine_job("market", "http_" + str(exc.status_code))
+        raise
+    _record_nba_machine_job("market", str(result.get("status", "unknown")), result)
+    return result
 
 
 @router.post("/internal/nba-research/forecast")
@@ -944,7 +959,13 @@ def nba_private_cron_forecast(request: Request, response: Response):
         or len(configured) < 48 or not incoming
         or not hmac.compare_digest(configured, incoming)):
         raise HTTPException(404, "Not found.")
-    return nba_admin_forecast_research(response)
+    try:
+        result = nba_admin_forecast_research(response)
+    except HTTPException as exc:
+        _record_nba_machine_job("forecast", "http_" + str(exc.status_code))
+        raise
+    _record_nba_machine_job("forecast", str(result.get("status", "unknown")), result)
+    return result
 
 
 @router.post("/internal/nba-research/settle")
@@ -962,7 +983,13 @@ def nba_private_cron_settle(request: Request, response: Response):
         len(configured) < 32 or not incoming or
         not hmac.compare_digest(configured, incoming)):
         raise HTTPException(404, "Not found.")
-    return nba_admin_research_settle(response)
+    try:
+        result = nba_admin_research_settle(response)
+    except HTTPException as exc:
+        _record_nba_machine_job("settlement", "http_" + str(exc.status_code))
+        raise
+    _record_nba_machine_job("settlement", str(result.get("status", "unknown")), result)
+    return result
 
 
 @router.post("/admin/nba-research/import", dependencies=[Depends(require_admin)])
