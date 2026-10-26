@@ -75,6 +75,7 @@ export default function BasketballResearch(){
     over_odds:number;under_odds:number;projected_total:number|null;
     difference:number|null;model_probability:null;expected_value:null;
     recommendation:string;tipoff_utc:string;observed_at:string;
+    paper_direction:'over'|'under'|null;paper_grade:string;actual_total:number|null;
   };
   type NbaMarketReport={
     status:string;observed_at?:string;quoted_totals:NbaMarketLine[];
@@ -355,15 +356,19 @@ export default function BasketballResearch(){
           <caption>{markets.data?.quoted_totals?.length??0} exact total-point lines
             · no calibrated betting advantage has been demonstrated</caption>
           <thead><tr><th>Match</th><th>Bookmaker total</th><th>Over</th>
-            <th>Under</th><th>Projection</th><th>Difference</th></tr></thead>
+            <th>Under</th><th>Projection</th><th>Difference</th><th>Paper grade</th></tr></thead>
           <tbody>{(markets.data?.quoted_totals??[]).map((m,i)=><tr key={m.game_id+'-'+m.line+'-'+i}>
             <td>{m.home} vs {m.away}<small>{wat(m.tipoff_utc)}</small></td>
             <td>{m.line.toFixed(1)}</td>
             <td>{m.over_odds.toFixed(2)}x</td><td>{m.under_odds.toFixed(2)}x</td>
             <td>{num(m.projected_total)}</td>
             <td>{m.difference==null?'—':num(m.difference)}</td>
+            <td>{m.paper_grade==='correct'?'Correct · research only':
+                 m.paper_grade==='incorrect'?'Incorrect · research only':
+                 m.paper_grade==='push'?'Push':m.paper_direction
+                   ?'Awaiting verified final':'No directional forecast'}</td>
           </tr>)}
-          {!markets.data?.quoted_totals?.length&&<tr><td colSpan={6}>
+          {!markets.data?.quoted_totals?.length&&<tr><td colSpan={7}>
             No verified market lines captured. There is no selection recommendation.
           </td></tr>}
           </tbody>
