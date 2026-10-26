@@ -10,6 +10,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from basketball.research_coldstart import _json
+from basketball.research_opening_score import capture as capture_score
+from basketball.research_early_advanced_ops import capture as capture_advanced
 from basketball.research_private_bundle import _digest, export_bundle
 from basketball import research_private_store as store
 from basketball import research_ops_health as ops
@@ -30,6 +32,9 @@ def sessions():
 
 def prepare(tmp_path, monkeypatch):
     setup_lab(tmp_path)
+    cutoff = datetime(2026, 10, 25, 12, tzinfo=timezone.utc)
+    assert capture_score(tmp_path, now=cutoff)["created"] == 1
+    assert capture_advanced(tmp_path, now=cutoff)["created"] == 1
     archive = export_bundle(tmp_path)
     factory = sessions()
     monkeypatch.setattr(store, "SessionLocal", factory)
