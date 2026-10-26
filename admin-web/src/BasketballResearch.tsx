@@ -57,6 +57,8 @@ export default function BasketballResearch(){
   const [uploadBusy,setUploadBusy]=useState(false);
   const [uploadIssue,setUploadIssue]=useState('');
   const [uploadConfirmed,setUploadConfirmed]=useState(false);
+  const [settling,setSettling]=useState(false);
+  const [settlementError,setSettlementError]=useState('');
   const q=useQuery<ResearchBoard>({
     queryKey:['nba-private-recorded-research'],
     queryFn:()=>api<ResearchBoard>('admin/nba-research'),
@@ -116,6 +118,29 @@ export default function BasketballResearch(){
       setUploadIssue(error instanceof Error?error.message:'NBA archive upload failed.');
     }finally{setUploadBusy(false);}
   }
+  async function checkFinals(){
+    if(settling||uploadBusy||!verified)return;
+    setSettling(true);setSettlementError('');
+    try{
+      const result=await api<{status:string;archive_digest:string;new_finals:number;
+        new_settlements:Record<string,number>;failed_dates?:Array<{date:string;error:string}>}>(
+        'admin/nba-research/settle',{},'POST');
+      const checked=await q.refetch();
+      if(checked.isError||!checked.data||
+        checked.data.archive_digest!==result.archive_digest)
+        throw Error('Score check returned, but the private database did not confirm its result. Refresh before repeating.');
+      const count=Object.values(result.new_settlements||{}).reduce((total,n)=>total+n,0);
+      setNotice(result.status==='settled_and_verified'
+        ?result.new_finals+' new NBA final(s), '+count+' model grades verified and saved.'
+        :result.status==='idle'
+          ?'No eligible NBA finals are awaiting verification yet.'
+          :'No new verified NBA finals. Unverified games remain pending; no result was guessed.');
+      if(result.failed_dates?.length)
+        setSettlementError(result.failed_dates.length+' NBA source day(s) could not be verified. These games remain pending.');
+    }catch(error){
+      setSettlementError(error instanceof Error?error.message:'NBA score verification unavailable.');
+    }finally{setSettling(false);}
+  }
   const status=q.error instanceof ApiError?q.error.status:0;
   return <section className="nba-workspace">
     <header className="page-heading nba-heading">
@@ -123,10 +148,17 @@ export default function BasketballResearch(){
         <h1>NBA intelligence desk.</h1>
         <p>Original before-tipoff evidence, independent scoring models,
           and verified finals. Football records remain separate.</p></div>
-      <button type="button" className="button secondary" disabled={q.isFetching}
-        onClick={()=>void q.refetch()}>
-        <RefreshCcw size={15} className={q.isFetching?'spin':''}/> Refresh records
-      </button>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <button type="button" className="button secondary" disabled={q.isFetching||settling}
+          onClick={()=>void q.refetch()}>
+          <RefreshCcw size={15} className={q.isFetching?'spin':''}/> Refresh records
+        </button>
+        <button type="button" className="button secondary"
+          disabled={!verified||settling||uploadBusy} onClick={()=>void checkFinals()}>
+          {settling?<Loader2 size={15} className="spin"/>:<CheckCheck size={15}/>}
+          {settling?'Verifying final scores…':'Check NBA finals'}
+        </button>
+      </div>
     </header>
     <div className="nba-import">
       <div><strong>Secure forecast archive</strong>
@@ -139,6 +171,9 @@ export default function BasketballResearch(){
           onChange={e=>void uploadArchive(e)}/>
       </label>
     </div>
+    {settlementError&&<div className="nba-upload-error" role="alert">
+      <AlertTriangle size={17}/>{settlementError}
+    </div>}
     {uploadIssue&&<div className="nba-upload-error" role="alert">
       <AlertTriangle size={17}/>{uploadIssue}
     </div>}
