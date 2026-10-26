@@ -223,6 +223,20 @@ def basketball_jackpot_paste_book(body: BasketballJackpotPasteRequest):
         raise HTTPException(422, str(exc))
 
 
+class BasketballJackpotRecoveryRequest(BaseModel):
+    fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+
+
+@router.post("/basketball-jackpot/recover", dependencies=[Depends(require_admin)])
+def basketball_jackpot_recover(body: BasketballJackpotRecoveryRequest):
+    """Verify one SAVED share code; never request another SportyBet share."""
+    from growth.basketball_jackpot import recover_existing
+    try:
+        return recover_existing(body.fingerprint)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 @router.get("/basketball-jackpot/history", dependencies=[Depends(require_admin)])
 def basketball_jackpot_history(limit: int = Query(default=30, ge=1, le=100)):
     from growth.basketball_history import list_recent
