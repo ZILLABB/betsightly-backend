@@ -845,6 +845,24 @@ def nba_admin_research_settle(response: Response):
     return result
 
 
+@router.post("/internal/nba-research/markets/refresh")
+def nba_private_market_cron_refresh(request: Request, response: Response):
+    """Machine-only, private NBA bookmaker market snapshot, no bets or tips.
+
+    Uses independent least-privilege secret and all existing research/DB
+    feature gates, not an interactive administrator cookie.
+    """
+    import hmac
+    import os
+    expected = os.getenv("NBA_MARKET_JOB_TOKEN", "")
+    presented = request.headers.get("x-betsightly-nba-market-token", "")
+    if (os.getenv("ENVIRONMENT", "").lower() != "staging"
+        or len(expected) < 48 or not presented
+        or not hmac.compare_digest(expected, presented)):
+        raise HTTPException(404, "Not found.")
+    return nba_admin_market_refresh(response)
+
+
 @router.post("/internal/nba-research/forecast")
 def nba_private_cron_forecast(request: Request, response: Response):
     """Machine-only NBA forecast trigger, isolated from interactive admin auth.
