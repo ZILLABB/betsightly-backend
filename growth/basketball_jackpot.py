@@ -264,6 +264,122 @@ def preview(request: dict) -> dict:
 
 
 
+def recover_existing(fingerprint_value: str) -> dict:
+    """Revalidate a saved code without making another bookmaker share POST.
+
+    The administrator supplies only the ledger fingerprint. All selections,
+    target odds and expiry are taken from the original immutable attempt.
+    """
+    from growth import basketball_history as history
+
+    if not re.fullmatch(r"[0-9a-f]{64}", fingerprint_value):
+        raise ValueError("Invalid basketball booking fingerprint.")
+    hidden = {"status": "RECOVERY_NOT_VERIFIED", "share_code": None,
+              "readback_status": "NOT_VERIFIED", "reused_existing_code": True}
+
+    try:
+        record = history.get(fingerprint_value, private=True)
+    except Exception:
+        logger.exception("Basketball ledger recovery lookup failed")
+        return {**hidden, "status": "BOOKING_HISTORY_UNAVAILABLE",
+                "reason": "Could not safely retrieve the saved booking attempt."}
+    if not record:
+        return {**hidden, "status": "BOOKING_NOT_FOUND",
+                "reason": "No matching saved basketball attempt was found."}
+    if record.get("status") not in {"needs_review", "verifying"}:
+        return {**hidden, "status": "RECOVERY_NOT_APPLICABLE",
+                "reason": "This attempt is not awaiting code recovery. Check history."}
+
+    legs = record.get("legs") or []
+    code = str(record.get("share_code") or "")
+    expires = record.get("expires_at")
+    try:
+        expiry = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+        target = float(record["target_odds"])
+        kickoffs = [int(leg["kickoff_ms"]) for leg in legs]
+    except (ValueError, KeyError, TypeError, OverflowError):
+        return {**hidden, "reason": "Saved expiry, target or fixture times are incomplete."}
+    if (not re.fullmatch(r"[A-Za-z0-9]{4,32}", code)
+            or expiry.tzinfo is None or expiry <= datetime.now(timezone.utc)
+            or not math.isfinite(target) or target < 2
+            or not 1 <= len(legs) <= MAX_LEGS
+            or any(k <= (time.time() + KICKOFF_BUFFER) * 1000 for k in kickoffs)):
+        return {**hidden, "reason": "The saved code or its fixtures are no longer eligible."}
+
+    selections = [{"eventId": str(leg.get("event_id") or ""),
+                   "marketId": str(leg.get("market_id") or ""),
+                   "outcomeId": str(leg.get("outcome_id") or ""),
+                   "specifier": str(leg.get("specifier") or "")}
+                  for leg in legs]
+    if (len({leg["eventId"] for leg in selections}) != len(selections)
+            or any(not leg["eventId"] or not leg["marketId"]
+                   or not leg["outcomeId"] for leg in selections)
+            or history.fingerprint(selections) != fingerprint_value):
+        return {**hidden, "reason": "Saved selection fingerprint is inconsistent."}
+
+    try:
+        valid, why, actual = booking.validate_code_details(code, selections)
+    except Exception:
+        logger.exception("Basketball saved share-code readback failed")
+        return {**hidden, "reason": "SportyBet code readback is temporarily unavailable."}
+    if not valid:
+        return {**hidden, "readback_status": "FAILED",
+                "reason": "The saved share code failed exact-leg readback: " + str(why)[:140]}
+
+    source = "sportybet_code_readback"
+    if actual is None:
+        # A pre-booking snapshot must not certify a post-booking price. Reuse
+        # only a complete snapshot created AFTER the failed booking attempt.
+        board = cached_board()
+        try:
+            attempted_at = datetime.fromisoformat(
+                str(record["updated_at"]).replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError, KeyError, OverflowError):
+            attempted_at = float("inf")
+        if not board or float(board["fetched_at"]) <= attempted_at:
+            fresh = refresh_board()
+            board = cached_board() if fresh.get("status") == "success" else None
+        if not board or float(board["fetched_at"]) <= attempted_at:
+            return {**hidden, "readback_status": "ODDS_UNAVAILABLE",
+                    "reason": "No complete bookmaker price snapshot newer than the failed attempt."}
+        request = {"selections": [{"event_id": leg["eventId"],
+                                   "market_id": leg["marketId"],
+                                   "outcome_id": leg["outcomeId"],
+                                   "specifier": leg["specifier"]}
+                                  for leg in selections],
+                   "target_odds": target}
+        checked = _select(request, board)
+        if checked["status"] != "PROPOSED_NOT_BOOKED":
+            return {**hidden, "readback_status": "ODDS_UNAVAILABLE",
+                    "reason": "Exact saved markets are unavailable or below the original target."}
+        actual = math.prod(float(leg["odds"]) for leg in checked["matched"])
+        source = "fresh_complete_sportybet_board"
+    try:
+        verified = float(actual)
+    except (ValueError, TypeError, OverflowError):
+        verified = float("nan")
+    if not math.isfinite(verified) or verified < target:
+        return {**hidden, "readback_status": "BELOW_TARGET",
+                "reason": "The recovered price is invalid or below the original target."}
+
+    try:
+        history.mark(fingerprint_value, status="active", share_code=code,
+                     verified_odds=round(verified, 3), odds_source=source,
+                     expires_at=expires,
+                     detail_update={"ticket_status": "pending",
+                                    "recovery_method": "read_only_existing_code"})
+    except Exception:
+        logger.exception("Basketball saved-code recovery could not persist")
+        return {**hidden, "status": "BOOKING_HISTORY_UNAVAILABLE",
+                "reason": "The verified code could not be archived. No code released."}
+    return {"status": "success", "share_code": code,
+            "readback_status": "PASSED", "verified_odds": round(verified, 3),
+            "verified_odds_source": source, "legs": len(legs),
+            "history_saved": True, "reused_existing_code": True,
+            "expires_at": expires,
+            "note": "Existing share code verified without creating another code."}
+
+
 def book(request: dict) -> dict:
     """Claim intent before one bookmaker POST; never silently repeat a code request."""
     from growth import basketball_history as history
