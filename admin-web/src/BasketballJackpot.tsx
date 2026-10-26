@@ -39,7 +39,7 @@ function loadDraft():TicketDraft|null{
   const value:unknown=JSON.parse(raw);
   if(!value||typeof value!=='object')return null;
   const d=value as Partial<TicketDraft>;
-  if(!Number.isFinite(d.updated_at)||Date.now()-Number(d.updated_at)>24*60*60*1000)return null;
+  if(!Number.isFinite(Number(d.updated_at))||Date.now()-Number(d.updated_at)>24*60*60*1000)return null;
   if(d.mode!=='paste'&&d.mode!=='browse')return null;
   if(typeof d.paste!=='string'||d.paste.length>9000)return null;
   if(typeof d.target!=='string'||!Number.isFinite(Number(d.target)))return null;
