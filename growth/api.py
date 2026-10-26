@@ -845,6 +845,24 @@ def nba_admin_research_settle(response: Response):
     return result
 
 
+@router.post("/internal/nba-research/forecast")
+def nba_private_cron_forecast(request: Request, response: Response):
+    """Machine-only NBA forecast trigger, isolated from interactive admin auth.
+
+    Separate least-privilege secret, only for verified staging PostgreSQL.
+    Invokes existing signed pregame forecast path with no caller parameters.
+    """
+    import hmac
+    import os
+    configured = os.getenv("NBA_FORECAST_JOB_TOKEN", "")
+    incoming = request.headers.get("x-betsightly-nba-forecast-token", "")
+    if (os.getenv("ENVIRONMENT", "").lower() != "staging"
+        or len(configured) < 48 or not incoming
+        or not hmac.compare_digest(configured, incoming)):
+        raise HTTPException(404, "Not found.")
+    return nba_admin_forecast_research(response)
+
+
 @router.post("/internal/nba-research/settle")
 def nba_private_cron_settle(request: Request, response: Response):
     """Machine-only staging settlement; requires dedicated 256-bit token.
