@@ -24,7 +24,8 @@ def _parse(text):
     for i, line in enumerate(lines, 1):
         match = _PAIR.fullmatch(line)
         if not match:
-            result.append({"line": i, "reason": "INVALID_FORMAT"})
+            result.append({"line": i, "reason": "INVALID_FORMAT",
+                           "detail": "Use Team A vs Team B | Home win, Away win, Over N.N or Under N.N."})
             continue
         home, away, label = (p.strip() for p in match.groups())
         name = _ODDS.sub("", label).strip().lower()
@@ -37,10 +38,13 @@ def _parse(text):
         elif name in {"away", "away win", "away ml", "away moneyline", "2", away.lower(), away.lower()+" win"}:
             mid, oid, spec = "219", "5", ""
         else:
-            result.append({"line": i, "reason": "UNSUPPORTED_MARKET"})
+            result.append({"line": i, "reason": "UNSUPPORTED_MARKET",
+                           "detail": ("Requested '" + label[:70] + "'. Only home/away "
+                                      "moneyline and exact full-game Over/Under totals are supported.")})
             continue
         if _id(home) == _id(away):
-            result.append({"line": i, "reason": "INVALID_FIXTURE"})
+            result.append({"line": i, "reason": "INVALID_FIXTURE",
+                           "detail": "Home and away team names resolve to the same name."})
             continue
         result.append({"line": i, "home": home, "away": away,
                        "market_id": mid, "outcome_id": oid, "specifier": spec})
@@ -56,23 +60,61 @@ def resolve(request, board):
     for row in rows:
         line = row["line"]
         if "reason" in row:
-            errors.append({"line": line, "reason": row["reason"]})
+            errors.append({"line": line, "reason": row["reason"],
+                           "detail": row.get("detail")})
             continue
         matches = index.get((_id(row["home"]), _id(row["away"])), [])
         available = [m for m in matches if m["kickoff_ms"] > (time.time()+bj.KICKOFF_BUFFER)*1000]
-        if len(available) != 1:
-            errors.append({"line": line, "reason": "FIXTURE_NOT_FOUND_OR_AMBIGUOUS"})
+        if not matches:
+            # Suggestions are grounded ONLY in the cached bookmaker board.
+            # They are never resolved or booked without an exact team-pair match.
+            reversed_matches = index.get((_id(row["away"]), _id(row["home"])), [])
+            if reversed_matches:
+                detail = ("Bookmaker lists these teams in the reverse home/away "
+                          "order. Confirm the actual fixture and choose its exact "
+                          "market from Browse fixtures; nothing was reversed automatically.")
+            else:
+                same_home = [m for m in board["fixtures"]
+                             if _id(m["home_team"]) == _id(row["home"])]
+                same_away = [m for m in board["fixtures"]
+                             if _id(m["away_team"]) == _id(row["away"])]
+                examples = (same_home or same_away)[:2]
+                detail = ("No matching home/away pairing on the current "
+                          "SportyBet board.")
+                if examples:
+                    names = "; ".join(m["home_team"] + " vs " + m["away_team"]
+                                      for m in examples)
+                    detail += " Different board fixtures: " + names + "."
+                else:
+                    detail += " Check spelling, league and fixture date in Browse fixtures."
+            errors.append({"line": line, "reason": "FIXTURE_NOT_ON_BOARD",
+                           "detail": detail})
+            continue
+        if len(available) > 1:
+            errors.append({"line": line, "reason": "FIXTURE_AMBIGUOUS",
+                           "detail": (f"{len(available)} upcoming events use these exact "
+                                      "names. Choose the correct event from Browse fixtures.")})
+            continue
+        if not available:
+            errors.append({"line": line, "reason": "FIXTURE_NOT_ELIGIBLE",
+                           "detail": ("Matching fixture exists but it has started "
+                                      "or is within ten minutes of tipoff.")})
             continue
         event = available[0]
         if event["event_id"] in used:
-            errors.append({"line": line, "reason": "DUPLICATE_FIXTURE"})
+            errors.append({"line": line, "reason": "DUPLICATE_FIXTURE",
+                           "detail": "This event is already selected on another line."})
             continue
         used.add(event["event_id"])
         options = [o for market in event["markets"] if
                    (market["market_id"], market["specifier"]) == (row["market_id"], row["specifier"])
                    for o in market["outcomes"] if o["outcome_id"] == row["outcome_id"]]
         if len(options) != 1:
-            errors.append({"line": line, "reason": "EXACT_MARKET_UNAVAILABLE"})
+            errors.append({"line": line, "reason": "EXACT_MARKET_UNAVAILABLE",
+                           "detail": ("The fixture matched, but this exact "
+                                      "moneyline outcome or points line is not "
+                                      "active on the bookmaker board. Use Browse "
+                                      "fixtures to inspect current markets.")})
             continue
         selected.append({"event_id": event["event_id"], "market_id": row["market_id"],
                          "outcome_id": row["outcome_id"], "specifier": row["specifier"]})
