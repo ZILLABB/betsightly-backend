@@ -13,11 +13,11 @@ type HistoricalLeg={event_id:string;home_team:string;away_team:string;competitio
   result?:string;score?:{home:number;away:number}|null;score_source?:string|null;};
 type HistoricalTicket={fingerprint:string;share_code?:string|null;status:string;created_at:string;expires_at?:string|null;
   target_odds:number;verified_odds?:number|null;verified_odds_source?:string;legs:HistoricalLeg[];
-  leg_count:number;detail?:{ticket_status?:string;reason?:string};last_checked_at?:string|null;};
+  leg_count:number;detail?:{ticket_status?:string;reason?:string;lower_target_approval?:{original_target_odds:number;approved_target_odds:number;approved_at:string;approved_by:string}};last_checked_at?:string|null;};
 type HistoryList={status:string;tickets:HistoricalTicket[];count:number;};
 type Quote={status:string;reason?:string;indicative_odds?:number;verified_odds?:number;matched_fixture_count?:number;
   pasted_fixture_count?:number;full_ticket_complete?:boolean;share_code?:string|null;readback_status?:string;
-  verified_odds_source?:string;
+  verified_odds_source?:string;approval_audit_saved?:boolean;
   unmatched?:Unmatched[];share_url?:string;legs?:number};
 
 const errorText=(e:unknown)=>e instanceof Error?e.message:'Unexpected problem contacting the server';
@@ -73,6 +73,8 @@ export default function BasketballJackpot(){
  const [historyError,setHistoryError]=useState('');
  const [historyInfo,setHistoryInfo]=useState('');
  const [recovering,setRecovering]=useState<string|null>(null);
+ const [approvalDraft,setApprovalDraft]=useState<{fingerprint:string;minimum:string}|null>(null);
+ const [approvalConfirmed,setApprovalConfirmed]=useState(false);
  const lock=useRef(false);
  const load=async()=>{
    if(lock.current)return;
@@ -105,6 +107,29 @@ export default function BasketballJackpot(){
        setHistoryError(result.reason||'The original code could not be verified. It remains hidden; no new share request was made.');
      }
    }catch(e){setHistoryError(errorText(e)+' No new share-code request was made.');}
+   finally{setRecovering(null);}
+ };
+ const approveSaved=async(ticket:HistoricalTicket)=>{
+   if(recovering||historyBusy||!approvalConfirmed||approvalDraft?.fingerprint!==ticket.fingerprint)return;
+   const minimum=Number(approvalDraft.minimum);
+   if(!Number.isFinite(minimum)||minimum<2||minimum>=ticket.target_odds)return;
+   setRecovering(ticket.fingerprint);setHistoryError('');setHistoryInfo('');
+   try{
+     const result=await api<Quote>('basketball-jackpot/recover-approve',{
+       fingerprint:ticket.fingerprint,approved_target_odds:minimum,
+       expected_original_target_odds:ticket.target_odds,
+       confirmation:'APPROVE_LOWER_TARGET_FOR_EXISTING_CODE'},'POST');
+     const saved=await api<HistoryList>('basketball-jackpot/history');
+     setHistoryRows(saved.tickets);
+     if(result.approval_audit_saved){setApprovalDraft(null);setApprovalConfirmed(false);}
+     if(result.status==='success'&&result.share_code&&result.readback_status==='PASSED'){
+       setHistoryInfo('Existing code verified at '+odds(result.verified_odds)+'x under the approved '+odds(minimum)+'x minimum. The original '+odds(ticket.target_odds)+'x target remains recorded. No new code was created.');
+     }else if(result.approval_audit_saved){
+       setHistoryError('Approval saved, but code remains hidden: '+(result.reason||'Bookmaker verification incomplete.')+' Recheck this saved code later; do not generate another.');
+     }else{
+       setHistoryError(result.reason||'Approval could not be saved. No code was released.');
+     }
+   }catch(e){setHistoryError(errorText(e)+' No new code was requested.');}
    finally{setRecovering(null);}
  };
  const settleHistory=async()=>{
