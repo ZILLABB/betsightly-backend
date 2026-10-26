@@ -104,7 +104,7 @@ export default async function handler(req, res) {
   }
   let payload;
   if (req.method === 'POST') {
-    try { payload = await decodeBody(req, route === 'admin/nba-research/import' ? 750000 : 16384); }
+    try { payload = await decodeBody(req, route === 'admin/nba-research/import' ? 2800000 : 16384); }
     catch { return res.status(400).json({detail:'Invalid request format. No change was submitted.'}); }
     if (route === 'admin/login' && (typeof payload.password !== 'string' || payload.password.length === 0)) {
       return res.status(400).json({detail:'The admin password was not received. Please refresh and retry once.'});
