@@ -14,7 +14,8 @@ const POST = new Set([
  'private-jackpot/paste-preview','private-jackpot/paste-book','private-jackpot/market-catalog',
  'basketball-jackpot/refresh','basketball-jackpot/preview','basketball-jackpot/book',
  'basketball-jackpot/paste-preview','basketball-jackpot/paste-book','basketball-jackpot/settle',
- 'admin/nba-research/import','admin/nba-research/settle','admin/nba-research/markets/refresh'
+ 'admin/nba-research/import','admin/nba-research/settle','admin/nba-research/markets/refresh',
+ 'admin/nba-research/forecast'
 ]);
 function allowed(method, route) {
  return method === 'GET' ? GET.has(route) :
@@ -78,7 +79,8 @@ export default async function handler(req, res) {
       backend.hostname === 'betsightly-nba-research-stage-20261025.onrender.com' &&
       !new Set(['admin/config', 'admin/me', 'admin/login', 'admin/logout',
         'admin/nba-research', 'admin/nba-research/import', 'admin/nba-research/settle',
-        'admin/nba-research/markets','admin/nba-research/markets/refresh']).has(route)) {
+        'admin/nba-research/markets','admin/nba-research/markets/refresh',
+        'admin/nba-research/forecast']).has(route)) {
     return res.status(404).json({
       detail:'This preview contains only private NBA research. Use the production admin for football operations.'
     });
