@@ -242,7 +242,7 @@ export default function BasketballJackpot(){
            onChange={e=>{setPaste(e.target.value);edit();}} placeholder={samples.join('\n')} aria-label="Basketball fixtures and exact selections"/>
          <div className="bj-paste-foot"><span>{lineCount} of 50 lines</span><button type="button" disabled={!paste||busy!==null}
            onClick={()=>{setPaste('');edit();}}><Trash2 size={14}/> Clear text</button></div>
-         <div className="bj-format"><div><FileCheck2 size={18}/><strong>Supported format</strong></div>
+         <div className="bj-format"><p><strong>Basketball only.</strong> Football matches (including 1X2 Draw) must go to Private Jackpot in the left menu.</p><div><FileCheck2 size={18}/><strong>Supported format</strong></div>
            <code>Team A vs Team B | Home win</code>
            <code>Team A vs Team B | Away win</code>
            <code>Team A vs Team B | Over 221.5</code>
