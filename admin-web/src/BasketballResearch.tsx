@@ -347,6 +347,9 @@ export default function BasketballResearch(){
         </button>
       </section>
       {marketNotice&&<p role="status" className="nba-notice">{marketNotice}</p>}
+      {markets.data?.observed_at&&
+        <p className="nba-disclaimer">Last bookmaker observation: {wat(markets.data.observed_at)}.
+          These quoted prices are historical snapshots, not live guaranteed prices.</p>}
       {markets.isError?<p className="nba-disclaimer" role="note">
         Market comparison is disabled or the source is unavailable. Predictions remain research-only.
       </p>:markets.isPending?<p className="nba-disclaimer">
