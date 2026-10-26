@@ -99,8 +99,12 @@ def cached_board() -> dict | None:
     return cached if _valid_cached(cached) else None
 
 
-def refresh_board() -> dict:
-    """Read the real SportyBet basketball board; promote complete crawls only."""
+def refresh_board(*, _retried: bool = False) -> dict:
+    """Read the SportyBet board; retry one near-complete pagination drift.
+
+    A changing upstream event count may leave one event out between pages.
+    Retry the *whole* crawl once; never promote either incomplete snapshot.
+    """
     fixtures = []
     seen = set()
     declared = None
@@ -153,6 +157,13 @@ def refresh_board() -> dict:
     except Exception as exc:
         error = str(exc)[:180]
         complete = False
+
+    # The provider's totalNum can shift while pages are being read.
+    # Only a fresh COMPLETE second pass is accepted; never fill missing legs,
+    # lower the declared total, or certify the first incomplete snapshot.
+    if (not complete and not _retried and error is None and declared
+            and 0 < declared - counted <= 2 and len(seen) == counted):
+        return refresh_board(_retried=True)
 
     if complete and not any(entry.get("markets") for entry in fixtures):
         complete = False
