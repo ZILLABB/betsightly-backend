@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install repository dependencies (no credentials)
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt pytest
       - name: Prove failed export cannot connect to a target database
         run: python -m pytest --noconftest tests/test_nba_safe_backup_migration.py -q
       - run: python -m py_compile basketball/research_safe_migrate.py basketball/research_restore_drill.py
