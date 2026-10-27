@@ -84,6 +84,8 @@ def snapshot(*, engine=None, now=None):
                 "verified_final_legs":0,"tickets_updated":0}
     latest = rows[0]
     last = latest["checked_at"]
+    if isinstance(last, str):
+        last = datetime.fromisoformat(last.replace("Z", "+00:00"))
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     minutes = max(0, (instant-last.astimezone(timezone.utc)).total_seconds()/60)
