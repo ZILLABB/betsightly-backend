@@ -229,7 +229,8 @@ if _NBA_STAGE_ISOLATED:
     app.include_router(nba_router, prefix="/api/growth")
     logger.info("Private NBA research routes only; football table setup omitted")
 else:
-    # Include API router
+    # Football router is loaded only outside isolated NBA staging.
+    from api.api import api_router
     app.include_router(api_router, prefix="/api")
     
     # Multi-league prediction engine endpoints
