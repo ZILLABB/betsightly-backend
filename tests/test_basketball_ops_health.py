@@ -210,6 +210,8 @@ def test_job_health_distinguishes_missing_stale_and_degraded_runs(tmp_path, monk
 def test_backup_readback_is_recent_only_for_current_signed_archive(tmp_path, monkeypatch):
     archive, factory = prepare(tmp_path, monkeypatch)
     with factory() as db:
+        # Simulate the same schema bootstrap used by the health endpoint.
+        ops._session_tables(db)
         stamp = NOW.replace(tzinfo=None)
         row = ops.NBAPrivateJobRun(
             kind="backup", status="verified_private_blob_readback",
