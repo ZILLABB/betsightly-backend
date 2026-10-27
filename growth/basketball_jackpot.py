@@ -14,12 +14,13 @@ from datetime import datetime, timezone
 
 from leagues import sportybet
 from leagues import booking
+from growth import basketball_markets as extra_markets
 
 logger = logging.getLogger(__name__)
 CACHE_KEY = "sportybet_basketball_board"
 SCHEMA = 1
 SPORT_ID = "sr:sport:2"
-MARKET_IDS = ("219", "225")
+MARKET_IDS = ("219", "225")  # supported by default; others require explicit coverage gate
 PAGE_SIZE = 100
 MAX_PAGES = 10
 CACHE_AGE = 3 * 3600
@@ -43,13 +44,20 @@ def _parse_event(raw: dict, league: str) -> dict | None:
     markets = []
     for market in raw.get("markets") or []:
         mid = str(market.get("id") or "")
-        if mid not in MARKET_IDS:
+        if mid not in extra_markets.market_ids():
             continue
         if not _active(market.get("isActive", True)):
             continue
         if str(market.get("status") or "").upper() in {"SUSPENDED", "CLOSED", "INACTIVE"}:
             continue
         spec = str(market.get("specifier") or "")
+        if mid not in MARKET_IDS:
+            # A new market is never bookable without explicit research gating,
+            # exact provider labels and a deterministic settlement contract.
+            candidate = extra_markets.parse_extended(market, str(home), str(away))
+            if candidate is not None:
+                markets.append(candidate)
+            continue
         # Basketball point lines must be exact, never inferred or substituted.
         if mid == "225" and not re.fullmatch(r"total=\d+(?:\.\d+)?", spec):
             continue
@@ -116,7 +124,7 @@ def refresh_board(*, _retried: bool = False) -> dict:
     try:
         for page in range(1, MAX_PAGES + 1):
             url = (f"{sportybet.BASE_URL}/api/ng/factsCenter/pcUpcomingEvents"
-                   f"?sportId=sr%3Asport%3A2&marketId=219%2C225"
+                   f"?sportId=sr%3Asport%3A2&marketId={%27%2C%27.join(extra_markets.market_ids())}"
                    f"&pageSize={PAGE_SIZE}&pageNum={page}")
             response = sportybet._get_json(url, timeout=20)
             if response.get("bizCode") not in (None, 10000):
