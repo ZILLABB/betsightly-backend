@@ -1,0 +1,39 @@
+name: NBA staging - isolated Supabase migration
+# Exact GitHub-signed source workflow identity is checked by the stage service.
+# No source archive or PostgreSQL password enters GitHub.
+"on":
+  push:
+    branches: [dev]
+    paths:
+      - ".github/workflows/nba-private-stage-migration.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Probe empty target (safe) or restore signed archive (one-time)"
+        type: choice
+        required: true
+        options:
+          - probe
+          - restore
+permissions:
+  contents: read
+concurrency:
+  group: nba-private-staging-database-migration
+  cancel-in-progress: false
+jobs:
+  verify-target:
+    if: github.repository == 'ZILLABB/betsightly-backend' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify runner has no credential requirement
+        run: python -m unittest discover -s tests -p test_nba_private_migration_ping.py -v
+      - name: Run signed, scope-restricted, server-side migration action
+        run: python -m scripts.nba_stage_migration_ping "${{ inputs.mode || 'probe' }}"
