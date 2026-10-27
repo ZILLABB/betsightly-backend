@@ -1,0 +1,29 @@
+name: NBA staging - one-time signed audit receipt preservation
+"on":
+  push:
+    branches: [dev]
+    paths:
+      - ".github/workflows/nba-audit-history-once-20261027.yml"
+permissions:
+  contents: read
+jobs:
+  mirror-audit-receipts:
+    if: github.repository == 'ZILLABB/betsightly-backend' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch append-only private NBA scheduler history mirror
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nba-private-stage-migration.yml',
+              ref: 'dev',
+              inputs: { mode: 'history' }
+            });
+            core.notice('History mirror requested; verified child run readback is mandatory before cutover.');
