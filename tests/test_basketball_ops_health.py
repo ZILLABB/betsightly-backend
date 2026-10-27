@@ -1,7 +1,7 @@
 """Private NBA operational health/export and stage route contracts."""
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -166,3 +166,86 @@ def test_backup_machine_routes_are_not_public(monkeypatch):
     }).status_code == 404
     assert client.post(ack,json={},headers={
         "x-betsightly-nba-backup-token": token}).status_code == 404
+
+
+def test_job_health_distinguishes_missing_stale_and_degraded_runs(tmp_path, monkeypatch):
+    archive, factory = prepare(tmp_path, monkeypatch)
+    with factory() as db:
+        empty = ops.read_health(db=db, now=NOW)
+        assert set(empty["job_readiness"]) == {
+            "forecast", "settlement", "market", "backup"
+        }
+        assert all(v["state"] == "not_observed"
+                   for v in empty["job_readiness"].values())
+        assert empty["backup_recent_for_current_archive"] is False
+        stamp = NOW.replace(tzinfo=None)
+        db.add_all([
+            ops.NBAPrivateJobRun(
+                kind="forecast", status="no_new_eligible_forecasts",
+                summary_json=_json({"outcome": "no_new_eligible_forecasts"}),
+                recorded_at=stamp - timedelta(hours=40),
+            ),
+            ops.NBAPrivateJobRun(
+                kind="settlement", status="provider_partial",
+                summary_json=_json({"outcome": "provider_partial",
+                                    "provider_status": "partial"}),
+                recorded_at=stamp - timedelta(hours=2),
+            ),
+            ops.NBAPrivateJobRun(
+                kind="backup", status="verified_private_blob_readback",
+                summary_json=_json({"archive_digest": _digest(archive)}),
+                recorded_at=stamp - timedelta(hours=40),
+            ),
+        ])
+        db.commit()
+        info = ops.read_health(db=db, now=NOW)
+        assert info["job_readiness"]["forecast"]["state"] == "stale"
+        assert info["job_readiness"]["settlement"]["state"] == "degraded"
+        assert info["job_readiness"]["backup"]["state"] == "stale"
+        assert info["job_readiness"]["market"]["state"] == "not_observed"
+        assert info["automatic_backup_proven"] is True
+        assert info["backup_recent_for_current_archive"] is False
+
+
+def test_backup_readback_is_recent_only_for_current_signed_archive(tmp_path, monkeypatch):
+    archive, factory = prepare(tmp_path, monkeypatch)
+    with factory() as db:
+        stamp = NOW.replace(tzinfo=None)
+        row = ops.NBAPrivateJobRun(
+            kind="backup", status="verified_private_blob_readback",
+            summary_json=_json({"archive_digest": "a" * 64}),
+            recorded_at=stamp - timedelta(hours=2),
+        )
+        db.add(row)
+        db.commit()
+        assert ops.read_health(db=db, now=NOW)[
+            "backup_recent_for_current_archive"] is False
+        row.summary_json = _json({"archive_digest": _digest(archive)})
+        db.commit()
+        status = ops.read_health(db=db, now=NOW)
+        assert status["backup_recent_for_current_archive"] is True
+        assert status["job_readiness"]["backup"]["state"] == "observed"
+        row.recorded_at = stamp - timedelta(hours=40)
+        db.commit()
+        assert ops.read_health(db=db, now=NOW)[
+            "backup_recent_for_current_archive"] is False
+
+
+def test_nba_job_receipts_redact_provider_failures_and_preserve_digest(tmp_path, monkeypatch):
+    archive, factory = prepare(tmp_path, monkeypatch)
+    ops.record_run("settlement", "provider_partial", detail={
+        "provider_status": "partial", "failed_dates": [
+            {"date": "2026-10-25", "detail": "private provider error"}
+        ], "secret": "NEVER_EXPORT_THIS",
+    })
+    ops.record_run("backup", "verified_private_blob_readback",
+                   detail={"archive_digest": _digest(archive)})
+    with factory() as db:
+        rows = db.query(ops.NBAPrivateJobRun).order_by(
+            ops.NBAPrivateJobRun.id.desc()).all()
+        assert json.loads(rows[0].summary_json)["archive_digest"] == _digest(archive)
+        settlement = json.loads(rows[1].summary_json)
+        assert settlement["provider_status"] == "partial"
+        assert settlement["failed_date_count"] == 1
+        assert "NEVER_EXPORT_THIS" not in rows[1].summary_json
+        assert "private provider error" not in rows[1].summary_json
