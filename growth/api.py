@@ -1021,6 +1021,72 @@ def nba_private_cron_forecast(request: Request, response: Response):
     return result
 
 
+@router.post("/internal/nba-research/github-oidc")
+def nba_private_github_oidc_job(request: Request, response: Response,
+                                 body: dict = Body(...)):
+    """Staging-only, GitHub-signed scheduler identity; no new bearer secrets.
+
+    Only Actions launched from the default dev branch and the exact named
+    workflows can invoke their matching private jobs. This is not a public
+    bookmaker service and does not accept caller-provided fixtures or picks.
+    """
+    import os
+    from basketball.research_oidc import verify_github_job
+
+    if not _nba_health_enabled():
+        raise HTTPException(404, "Not found.")
+    job = body.get("job")
+    auth = request.headers.get("authorization", "")
+    if (not isinstance(job, str) or job not in ("settlement", "forecast", "market")
+            or not auth.startswith("Bearer ") or len(auth) > 10_020):
+        raise HTTPException(404, "Not found.")
+    try:
+        verify_github_job(auth[7:], job)
+    except ValueError:
+        # Do not disclose whether the repo, token, event, or job was wrong.
+        raise HTTPException(404, "Not found.") from None
+    try:
+        if job == "settlement":
+            result = nba_admin_research_settle(response)
+            if result.get("provider_status") not in (None, "ok", "idle") or result.get("failed_dates"):
+                _record_nba_machine_job("settlement", "provider_partial", result)
+                raise HTTPException(503, "NBA score source partially unavailable.")
+        elif job == "forecast":
+            result = nba_admin_forecast_research(response)
+            if result.get("status") not in (
+                "archived_before_tipoff", "no_new_eligible_forecasts",
+                "no_upcoming_eligible_source_window",
+            ):
+                raise HTTPException(503, "NBA pregame source unavailable.")
+        else:
+            result = nba_admin_market_refresh(response)
+            if result.get("status") not in ("saved", "already_saved"):
+                raise HTTPException(503, "NBA market evidence incomplete.")
+        if result.get("research_only") is not True or result.get("not_bookable") is not True:
+            raise HTTPException(503, "NBA staging isolation validation failed.")
+    except HTTPException as exc:
+        if not (job == "settlement" and exc.status_code == 503
+                and "partially" in str(exc.detail)):
+            _record_nba_machine_job(job, "http_" + str(exc.status_code))
+        raise
+    # Preserve signed source evidence in the archive; expose only bounded
+    # operational metadata to the short-lived authenticated scheduler.
+    _record_nba_machine_job(job, str(result.get("status", "unknown")), result)
+    response.headers["Cache-Control"] = "private, no-store"
+    return {
+        "status": result.get("status"),
+        "job": job,
+        "research_only": True,
+        "not_bookable": True,
+        "archive_digest": result.get("archive_digest"),
+        "market_digest": result.get("digest"),
+        "new_finals": result.get("new_finals", 0),
+        "new_forecasts": result.get("new_forecasts", {}),
+        "new_settlements": result.get("new_settlements", {}),
+        "failed_dates": result.get("failed_dates", []),
+    }
+
+
 @router.post("/internal/nba-research/settle")
 def nba_private_cron_settle(request: Request, response: Response):
     """Machine-only staging settlement; requires dedicated 256-bit token.
