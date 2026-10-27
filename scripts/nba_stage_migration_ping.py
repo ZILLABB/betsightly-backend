@@ -58,8 +58,8 @@ def invoke(mode: str, *, identity_provider=github_identity, opener=strict_open):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] not in ("probe", "restore", "compare"):
-        print("::error::Private NBA migration requires probe, compare or restore", file=sys.stderr)
+    if len(sys.argv) != 2 or sys.argv[1] not in ("probe", "restore", "compare", "history"):
+        print("::error::Private NBA migration requires probe, compare, history or restore", file=sys.stderr)
         raise SystemExit(2)
     try:
         result = invoke(sys.argv[1])
