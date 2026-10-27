@@ -962,7 +962,8 @@ def nba_private_machine_backup_ack(request: Request, body: dict = Body(...)):
         raise HTTPException(409, "Offsite backup is not current.")
     from basketball.research_ops_health import record_run
     try:
-        record_run("backup", "verified_private_blob_readback")
+        record_run("backup", "verified_private_blob_readback",
+                   detail={"archive_digest": digest})
     except Exception as exc:
         logger.warning("NBA offsite receipt audit unavailable: %s",
                        type(exc).__name__)
