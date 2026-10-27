@@ -841,6 +841,41 @@ def nba_research_model_validation(response: Response):
     return result
 
 
+@router.get("/admin/nba-research/league-sources",
+            dependencies=[Depends(require_admin)])
+def nba_private_league_sources(response: Response, league: str, day: str):
+    """Bounded operator-only independent non-NBA final-score source probe.
+
+    Does not train NBA models, alter NBA archives or settle bookmaker tickets.
+    Restricted to one verified historical UTC calendar day and known leagues.
+    """
+    from datetime import date, datetime, timezone, timedelta
+    from basketball.research_other_league_sources import (
+        CANDIDATES, probe_candidate_source,
+    )
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA private research unavailable.")
+    if league not in CANDIDATES or len(day) != 8 or not day.isdecimal():
+        raise HTTPException(422, "League or date unsupported.")
+    try:
+        requested = date(int(day[:4]), int(day[4:6]), int(day[6:]))
+    except ValueError:
+        raise HTTPException(422, "Invalid calendar date.") from None
+    today = datetime.now(timezone.utc).date()
+    if requested > today or requested < today - timedelta(days=370):
+        raise HTTPException(422, "Historical source date outside permitted range.")
+    try:
+        result = probe_candidate_source(league, day)
+    except (ValueError, RuntimeError):
+        raise HTTPException(503, "Independent league source unavailable.") from None
+    except Exception as exc:
+        logger.warning("NBA candidate league probe rejected: %s", type(exc).__name__)
+        raise HTTPException(503, "Independent league source unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.get("/admin/nba-research/history",
             dependencies=[Depends(require_admin)])
 def nba_research_market_history(response: Response):
