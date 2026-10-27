@@ -191,6 +191,22 @@ export default function BasketballJackpot(){
    }catch(e){setNotice(errorText(e)+' Do not repeat an uncertain share-code request before checking SportyBet.');}
    finally{lock.current=false;setBusy(null);setConfirm(false);}
  };
+ const leagueCoverage=useMemo(()=>{
+   if(board?.status!=='success')return [] as {name:string;games:number;teams:number}[];
+   const leagues=new Map<string,{games:number;teams:Set<string>}>();
+   for(const item of board.fixtures){
+     const name=item.competition?.trim();
+     if(!name)continue;
+     if(!leagues.has(name))leagues.set(name,{games:0,teams:new Set<string>()});
+     const entry=leagues.get(name)!;
+     entry.games++;
+     entry.teams.add(item.home_team);
+     entry.teams.add(item.away_team);
+   }
+   return [...leagues.entries()].map(([name,val])=>({
+     name,games:val.games,teams:val.teams.size,
+   })).sort((a,b)=>b.games-a.games||a.name.localeCompare(b.name));
+ },[board]);
  return <div className="bj">
    <header className="bj-hero">
      <div className="bj-hero-main">
@@ -207,6 +223,18 @@ export default function BasketballJackpot(){
        </button>
      </div>
    </header>
+
+   <section className="bj-coverage" aria-label="Live basketball team and league coverage">
+     <div><strong>Competitions available on this bookmaker board</strong>
+       <p>{leagueCoverage.length
+         ?leagueCoverage.length+' basketball leagues, from the last complete bookmaker snapshot. NBA alone has private prediction research; all other teams are bookmaker-only.'
+         :'No verified league inventory yet. Refresh the complete bookmaker board.'}</p></div>
+     {leagueCoverage.length>0&&<div className="bj-coverage-leagues">
+       {leagueCoverage.slice(0,9).map(item=><span key={item.name} title={item.teams+' unique teams'}>
+         {item.name} · {item.games} games</span>)}
+       {leagueCoverage.length>9&&<span>+{leagueCoverage.length-9} more in All</span>}
+     </div>}
+   </section>
 
    {restored.current&&(restored.current.paste.trim()||restored.current.selected.length>0)&&
       <div className="bj-inline-warning" role="status">
