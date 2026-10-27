@@ -17,6 +17,7 @@ import main
 paths = {route.path for route in main.app.routes}
 assert "/api/growth/admin/nba-research" in paths
 assert "/api/growth/internal/nba-research/github-oidc" in paths
+assert "/api/growth/internal/nba-research/github-oidc-migration" in paths, "Signed migration route missing in isolated staging"
 assert "/api/growth/admin/login" in paths
 assert not any(p.startswith("/api/leagues") for p in paths)
 assert not any(p.startswith("/api/growth/manual") for p in paths)

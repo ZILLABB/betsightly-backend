@@ -1096,18 +1096,29 @@ def nba_private_oidc_migration(request: Request, response: Response,
     from basketball.research_safe_migrate import (
         probe_empty_target, restore_into_empty_target,
     )
-    if (not _nba_health_enabled()
-        or os.getenv("NBA_PRIVATE_MIGRATION_ENABLED") != "1"
-        or os.getenv("NBA_RESTORE_REQUIRE_PRIVATE_SCHEMA") != "1"):
+    # Deliberately conceal the endpoint from callers while reporting only
+    # the guard category to private server logs (never bearer/claims/secrets).
+    if not _nba_health_enabled():
+        logger.warning("nba_migration_gate_denied reason=staging_disabled")
+        raise HTTPException(404, "Not found.")
+    if os.getenv("NBA_PRIVATE_MIGRATION_ENABLED") != "1":
+        logger.warning("nba_migration_gate_denied reason=migration_disabled")
+        raise HTTPException(404, "Not found.")
+    if os.getenv("NBA_RESTORE_REQUIRE_PRIVATE_SCHEMA") != "1":
+        logger.warning("nba_migration_gate_denied reason=private_schema_required")
         raise HTTPException(404, "Not found.")
     mode = body.get("mode")
     auth = request.headers.get("authorization", "")
-    if (mode not in ("probe", "restore", "compare", "history") or
-        not auth.startswith("Bearer ") or len(auth) > 10020):
+    if mode not in ("probe", "restore", "compare", "history"):
+        logger.warning("nba_migration_gate_denied reason=invalid_mode")
+        raise HTTPException(404, "Not found.")
+    if not auth.startswith("Bearer ") or len(auth) > 10020:
+        logger.warning("nba_migration_gate_denied reason=invalid_auth_header")
         raise HTTPException(404, "Not found.")
     try:
         verify_github_job(auth[7:], "migration")
     except ValueError:
+        logger.warning("nba_migration_gate_denied reason=identity_rejected")
         raise HTTPException(404, "Not found.") from None
     source = os.getenv("DATABASE_URL", "")
     target = os.getenv("NBA_RESTORE_TARGET_DATABASE_URL", "")
