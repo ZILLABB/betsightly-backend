@@ -1,0 +1,55 @@
+name: NBA private staging - verified finals monitor
+
+# Research-only, isolated NBA PostgreSQL. Never touches football or betting.
+# Scheduled GitHub Actions run only from the repository default branch (dev).
+"on":
+  pull_request:
+    paths:
+      - ".github/workflows/nba-private-stage-settlement.yml"
+      - "scripts/nba_stage_settlement_ping.py"
+      - "tests/test_nba_stage_settlement_ping.py"
+      - "scripts/nba_stage_oidc_ping.py"
+      - "tests/test_nba_stage_oidc_ping.py"
+  workflow_dispatch:
+  schedule:
+    # Every 30 minutes, 02:13-13:43 WAT. UTC, away from top-of-hour peaks.
+    - cron: '13,43 1-12 * * *'
+    # Late-day catch-up when providers are temporarily unavailable.
+    - cron: '27 16,20 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nba-private-staging-settlement
+  cancel-in-progress: false
+
+jobs:
+  nba-trigger-contract-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-slim
+    timeout-minutes: 3
+    steps:
+      - name: Checkout isolated private NBA trigger
+        uses: actions/checkout@v4
+      - name: Run network-free settlement failure-mode tests
+        run: python3 -m unittest discover -s tests -p test_nba_stage_settlement_ping.py -v
+      - name: Run signed identity request tests
+        run: python3 -m unittest discover -s tests -p test_nba_stage_oidc_ping.py -v
+
+  verify-private-finals:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-slim
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout read-only settlement trigger
+        uses: actions/checkout@v4
+      - name: Verify failure modes without network access
+        run: python3 -m unittest discover -s tests -p test_nba_stage_settlement_ping.py -q
+      - name: Verify signed identity workflow failure modes
+        run: python3 -m unittest discover -s tests -p test_nba_stage_oidc_ping.py -q
+      - name: Verify and settle isolated NBA staging archive
+        run: python3 scripts/nba_stage_oidc_ping.py settlement

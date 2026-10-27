@@ -1,0 +1,73 @@
+name: NBA private staging - forecast and market research
+
+# Independent free-tier fallback to Vercel daily staging crons.
+# No football credentials, betting codes, wagers, or public publishing.
+"on":
+  pull_request:
+    paths:
+      - ".github/workflows/nba-private-stage-research.yml"
+      - "scripts/nba_stage_cloud_research_ping.py"
+      - "tests/test_nba_stage_cloud_research_ping.py"
+      - "scripts/nba_stage_oidc_ping.py"
+      - "tests/test_nba_stage_oidc_ping.py"
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Which isolated research job?"
+        required: true
+        type: choice
+        options:
+          - forecast
+          - market
+  schedule:
+    - cron: '16 15,18 * * *'
+    - cron: '21 17,20 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nba-private-stage-research-${{ github.event_name }}-${{ github.event.schedule || inputs.job || 'test' }}
+  cancel-in-progress: false
+
+jobs:
+  offline-contract-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-slim
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -p test_nba_stage_cloud_research_ping.py -v
+      - run: python3 -m unittest discover -s tests -p test_nba_stage_oidc_ping.py -v
+
+  private-forecast:
+    if: (github.event_name == 'schedule' && github.event.schedule == '16 15,18 * * *') || (github.event_name == 'workflow_dispatch' && inputs.job == 'forecast')
+    runs-on: ubuntu-slim
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate forecast receipt failure modes
+        run: python3 -m unittest discover -s tests -p test_nba_stage_cloud_research_ping.py -q
+      - name: Validate ephemeral identity and audience
+        run: python3 -m unittest discover -s tests -p test_nba_stage_oidc_ping.py -q
+      - name: Capture eligible signed before-tipoff NBA models
+        run: python3 scripts/nba_stage_oidc_ping.py forecast
+
+  private-market:
+    if: (github.event_name == 'schedule' && github.event.schedule == '21 17,20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.job == 'market')
+    runs-on: ubuntu-slim
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate research receipt failure modes
+        run: python3 -m unittest discover -s tests -p test_nba_stage_cloud_research_ping.py -q
+      - name: Validate ephemeral identity and audience
+        run: python3 -m unittest discover -s tests -p test_nba_stage_oidc_ping.py -q
+      - name: Capture and save independent NBA bookmaker market evidence
+        run: python3 scripts/nba_stage_oidc_ping.py market
