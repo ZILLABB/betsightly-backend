@@ -1040,6 +1040,14 @@ def nba_private_cron_settle(request: Request, response: Response):
     except HTTPException as exc:
         _record_nba_machine_job("settlement", "http_" + str(exc.status_code))
         raise
+    # The verifier may persist genuine signed finals while another provider
+    # date failed. Never acknowledge that mixed result as a successful cron
+    # run: the scheduler must report a retryable failure, while committed
+    # verified evidence stays immutable and available on the next attempt.
+    if (result.get("provider_status") not in (None, "ok", "idle")
+            or result.get("failed_dates")):
+        _record_nba_machine_job("settlement", "provider_partial", result)
+        raise HTTPException(503, "NBA scoreboard verification incomplete.")
     _record_nba_machine_job("settlement", str(result.get("status", "unknown")), result)
     return result
 
