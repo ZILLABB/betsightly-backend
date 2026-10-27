@@ -18,7 +18,7 @@ STAGING_URL = (
     "/api/growth/internal/nba-research/settle"
 )
 ALLOWED = {"idle", "no_new_verified_finals", "settled_and_verified"}
-HEX_SHA256 = re.compile(r"[0-9a-f]{64}\\Z")
+HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class VerificationFailure(RuntimeError):
@@ -56,7 +56,7 @@ def _validate(out: object) -> dict:
 
 def invoke(token: str, *, opener=urlopen, sleeper=time.sleep) -> dict:
     """Retry one transient provider/transport error; never retry bad evidence."""
-    if not isinstance(token, str) or len(token) < 32 or "\\n" in token or "\\r" in token:
+    if not isinstance(token, str) or len(token) < 32 or "\n" in token or "\r" in token:
         raise VerificationFailure("NBA_SETTLEMENT_MACHINE_TOKEN_NOT_CONFIGURED")
     request = Request(STAGING_URL, method="POST", headers={
         "Accept": "application/json",
