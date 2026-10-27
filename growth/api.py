@@ -176,6 +176,14 @@ def basketball_jackpot_board():
     return board_status()
 
 
+@router.get("/basketball-jackpot/coverage", dependencies=[Depends(require_admin)])
+def basketball_private_coverage():
+    """What teams/leagues are ACTUALLY on the current complete book board."""
+    from growth.basketball_jackpot import board_status
+    from growth.basketball_coverage import summarize, MODEL_READINESS
+    return {**summarize(board_status()), "model_readiness": MODEL_READINESS}
+
+
 @router.post("/basketball-jackpot/refresh", dependencies=[Depends(require_admin)])
 def basketball_jackpot_refresh():
     from growth.basketball_jackpot import refresh_board
