@@ -20,3 +20,17 @@ The NBA Research page now has Import research archive, which accepts the local e
 Configuration is split deliberately: frontend flag VITE_NBA_RESEARCH_ADMIN_ENABLED=true only exposes the tab; backend flags NBA_ADMIN_RESEARCH_ENABLED=true (GET) and NBA_ADMIN_RESEARCH_IMPORT_ENABLED=true (POST) separately authorize storage access. All are disabled by default. The current 16 forecasts cannot appear on Vercel until the owner exports them from Windows and imports them to an approved private/staging deployment.
 
 Use the unmerged PRs for controlled staging verification; do not send private JSONL files to GitHub, email, Telegram or public APIs. No SportyBet code is produced. No public football site code was changed.
+
+## Reconciled private-preview deployment (2026-10-27)
+This branch was replayed onto current `devil`, preserving merged Basketball
+Jackpot readback/recovery code, the production proxy's safe GET retries and all
+existing football routes. Previous draft PR #180 remains unmerged.
+
+Vercel **branch-only preview** configuration for this exact branch:
+`VITE_NBA_RESEARCH_STAGING_ONLY=true`,
+`VITE_NBA_RESEARCH_ADMIN_ENABLED=true`, and
+`ADMIN_BACKEND_ORIGIN=https://betsightly-nba-research-stage-20261025.onrender.com`.
+Never copy these staging settings into production. The proxy denies all football
+and basketball booking paths when it is pointing at the NBA staging backend.
+A fresh deployment after these environment changes is required to test the
+research-only navigation and signed archive/market history readback.
