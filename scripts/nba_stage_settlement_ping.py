@@ -11,7 +11,7 @@ import re
 import sys
 import time
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 STAGING_URL = (
     "https://betsightly-nba-research-stage-20261025.onrender.com"
@@ -23,6 +23,17 @@ HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 class VerificationFailure(RuntimeError):
     """Non-sensitive operational failure: never dump raw upstream responses."""
+
+
+class RejectRedirect(HTTPRedirectHandler):
+    """Never forward the private machine token to a redirected host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise VerificationFailure("NBA_UNEXPECTED_REDIRECT")
+
+
+def _strict_open(request, *, timeout):
+    return build_opener(RejectRedirect()).open(request, timeout=timeout)
 
 
 def _validate(out: object) -> dict:
@@ -54,7 +65,7 @@ def _validate(out: object) -> dict:
     }
 
 
-def invoke(token: str, *, opener=urlopen, sleeper=time.sleep) -> dict:
+def invoke(token: str, *, opener=_strict_open, sleeper=time.sleep) -> dict:
     """Retry one transient provider/transport error; never retry bad evidence."""
     if not isinstance(token, str) or len(token) < 32 or "\n" in token or "\r" in token:
         raise VerificationFailure("NBA_SETTLEMENT_MACHINE_TOKEN_NOT_CONFIGURED")
