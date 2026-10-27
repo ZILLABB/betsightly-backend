@@ -107,6 +107,10 @@ export default function BasketballResearch(){
     last_market_observed_at:string|null;
     database_expiry_declared_at:string|null;
     backup_policy:string;automatic_backup_proven:boolean;
+    backup_recent_for_current_archive?:boolean;
+    job_readiness?:Record<'forecast'|'settlement'|'market'|'backup',{
+      state:string;last_status:string|null;last_observed_at:string|null;age_hours:number|null
+    }>;
     jobs:Array<{kind:string;status:string;recorded_at:string;
       summary:Record<string,unknown>}>;
   };
@@ -156,6 +160,11 @@ export default function BasketballResearch(){
   const verified=!!board&&board.research_only===true&&board.private===true&&
     board.bookmaker_verified===false&&board.booking_codes_available===false&&
     board.model_promotion_approved===false&&Array.isArray(board.games)&&!!board.summary;
+  const overdueUnverified=verified ? board!.games.filter(g=>{
+    if(g.status!=='awaiting_verified_final'&&g.status!=='final_pending_grade')return false;
+    const kickoff=Date.parse(g.tipoff_utc);
+    return Number.isFinite(kickoff)&&Date.now()-kickoff>5*60*60*1000;
+  }).length : 0;
   const items=useMemo(()=>{
     if(!verified)return [];
     return board!.games.filter(g=>{
@@ -225,6 +234,7 @@ export default function BasketballResearch(){
           :'No new verified NBA finals. Unverified games remain pending; no result was guessed.');
       if(result.failed_dates?.length)
         setSettlementError(result.failed_dates.length+' NBA source day(s) could not be verified. These games remain pending.');
+      await Promise.all([health.refetch(),frozen.refetch()]);
     }catch(error){
       setSettlementError(error instanceof Error?error.message:'NBA score verification unavailable.');
     }finally{setSettling(false);}
@@ -344,6 +354,12 @@ export default function BasketballResearch(){
         <p>Backend response did not satisfy the private research contract.
           No predictions have been invented.</p></div>
     </div>:<>
+      {overdueUnverified>0&&<div className="nba-upload-error" role="alert">
+        <AlertTriangle size={17}/>
+        <span><strong>{overdueUnverified} archived NBA game(s) remain unverified more than five hours after tip-off.</strong>
+        {' '}A completed game is not a confirmed final in this archive. Check NBA finals
+        to run identity-verified settlement; the scheduled cloud settlement must also be checked.</span>
+      </div>}
       <section className="nba-ops-panel" aria-label="NBA staging operational readiness">
         <div className="nba-ops-head">
           <div><strong>Cloud operations & evidence protection</strong>
@@ -367,12 +383,29 @@ export default function BasketballResearch(){
           <div><small>Remaining archive capacity</small><strong>{health.data?.remaining_fixture_slots??'—'}</strong></div>
           <div><small>Archived bookmaker snapshots</small><strong>{health.data?.market_snapshots??'—'}</strong></div>
           <div><small>Research snapshot versions</small><strong>{health.data?.research_snapshots??'—'}</strong></div>
-          <div><small>Automatic offsite backup</small><strong>{health.data?.automatic_backup_proven?'Verified':'Awaiting first run'}</strong></div>
+          <div><small>Automatic offsite backup</small><strong>{
+            health.data?.backup_recent_for_current_archive?'Current archive verified':
+            health.data?.automatic_backup_proven?'Previous backup only':
+            'Awaiting verified backup'}</strong></div>
          </div>}
         {health.data?.database_expiry_declared_at&&<p className="nba-ops-warning">
           Current free staging database expiry: {wat(health.data.database_expiry_declared_at)}.
           The private backup workflow is independently checked; database migration and disaster-recovery cutover are not yet tested.
         </p>}
+        {health.data?.job_readiness&&<div className="nba-ops-runs"
+          aria-label="Scheduled research job freshness">
+          <strong>Cloud schedule health · last observed execution</strong>
+          {(['settlement','forecast','market','backup'] as const).map(kind=>{
+            const job=health.data!.job_readiness![kind];
+            return <div key={kind}><span>{kind}</span>
+              <span>{job?.state??'not_observed'}{job?.last_status?
+                ' · '+job.last_status:''}</span>
+              <small>{job?.last_observed_at?wat(job.last_observed_at):
+                'No recorded invocation'}</small></div>;
+          })}
+          <small>Daily free-tier schedules cannot guarantee immediate final-score settlement.
+            An unobserved, delayed or degraded run is not a successful result check.</small>
+        </div>}
         <div className="nba-ops-runs">
           <strong>Recent unattended job outcomes</strong>
           {!health.data?.jobs.length?<small>No verified unattended job execution logged in the private database yet.</small>:
