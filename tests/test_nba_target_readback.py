@@ -122,3 +122,14 @@ def test_original_render_source_required_and_not_inferred_from_active_session():
     for bad in (None, "", "sqlite:///nba", "postgresql://"):
         with pytest.raises((ValueError, TypeError)):
             rec.export_original_render_source(bad, exporter=lambda **kw: None)
+
+
+
+def test_target_keeps_newer_supabase_job_history_after_original_render_cutover():
+    original = [(1, "forecast"), (2, "settlement")]
+    target = original + [(3, "market"), (4, "settlement")]
+    assert rec.verified_original_source_prefix(target, original) == 2
+    with pytest.raises(ValueError, match="SOURCE_PREFIX_NOT_PRESERVED"):
+        rec.verified_original_source_prefix(target, original + [(5, "backup"), (6, "forecast"), (7, "market")])
+    with pytest.raises(ValueError, match="SOURCE_PREFIX_NOT_PRESERVED"):
+        rec.verified_original_source_prefix([(1, "changed")] + target[1:], original)
