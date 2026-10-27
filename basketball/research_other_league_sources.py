@@ -107,3 +107,34 @@ def audit_candidate_payload(league: str, body: dict) -> dict:
         "approved_for_non_nba_booking_settlement": False,
         "reason": "Cross-source comparison, team identity mapping and longitudinal completeness not yet proven.",
     }
+
+
+def probe_candidate_source(league: str, day: str, *, get=None) -> dict:
+    """One bounded, non-mutating live source read for an approved league/date.
+
+    No silent retries, no season-wide scraper, no NBA training archive writes.
+    """
+    import requests
+    request = get or requests.get
+    url = source_url(league, day)
+    response = request(url, timeout=12, allow_redirects=False)
+    if response.status_code != 200:
+        raise ValueError("CANDIDATE_PROVIDER_UNAVAILABLE")
+    if len(response.content) > 2_000_000:
+        raise ValueError("CANDIDATE_PROVIDER_TOO_LARGE")
+    data = response.json()
+    result = audit_candidate_payload(league, data)
+    return {**result, "requested_date": day, "source_status": "one_day_probed"}
+
+
+if __name__ == "__main__":
+    # Explicit operator-only audit. Never launch an unbounded historical crawl.
+    import argparse
+    import json
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--league", choices=sorted(CANDIDATES), required=True)
+    parser.add_argument("--date", required=True)
+    args = parser.parse_args()
+    result = probe_candidate_source(args.league, args.date)
+    print(json.dumps({key: value for key, value in result.items()
+                      if key != "candidate_finals"}, sort_keys=True))
