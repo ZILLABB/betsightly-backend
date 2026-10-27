@@ -3,10 +3,8 @@ name: NBA staging - isolated Supabase migration
 # Read-only automatic probe rerun 2026-10-27 after private-schema pin deployment.
 # No source archive or PostgreSQL password enters GitHub.
 "on":
-  push:
-    branches: [dev]
-    paths:
-      - ".github/workflows/nba-private-stage-migration.yml"
+  # Deliberately prohibit push-triggered DB actions; staging verifier only
+  # allows a GitHub-signed explicit workflow_dispatch from the exact workflow.
   workflow_dispatch:
     inputs:
       mode:
