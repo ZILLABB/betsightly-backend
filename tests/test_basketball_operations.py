@@ -186,8 +186,11 @@ def test_cycle_enforces_readiness_gate_before_model_predictions_are_saved(
             "through": (instant-timedelta(days=1)).date().isoformat()
         }
     }))
+    # At late UTC hours the scheduled 6-hour-ahead tipoff falls on the
+    # following day. Use the *actual fixture date*, not UTC test-run day.
+    fixture_date = next(g["date"] for g in games if g["game_id"] == "555")
     def model_output(games, model, day, as_of):
-        if day != instant.date().isoformat():
+        if day != fixture_date:
             return []
         output = []
         for ident in ("555", "556"):
