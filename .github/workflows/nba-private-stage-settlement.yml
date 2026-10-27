@@ -8,6 +8,8 @@ name: NBA private staging - verified finals monitor
       - ".github/workflows/nba-private-stage-settlement.yml"
       - "scripts/nba_stage_settlement_ping.py"
       - "tests/test_nba_stage_settlement_ping.py"
+      - "scripts/nba_stage_oidc_ping.py"
+      - "tests/test_nba_stage_oidc_ping.py"
   workflow_dispatch:
   schedule:
     # Every 30 minutes, 02:13-13:43 WAT. UTC, away from top-of-hour peaks.
@@ -32,17 +34,22 @@ jobs:
         uses: actions/checkout@v4
       - name: Run network-free settlement failure-mode tests
         run: python3 -m unittest discover -s tests -p test_nba_stage_settlement_ping.py -v
+      - name: Run signed identity request tests
+        run: python3 -m unittest discover -s tests -p test_nba_stage_oidc_ping.py -v
 
   verify-private-finals:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-slim
     timeout-minutes: 8
-    env:
-      NBA_STAGE_SETTLEMENT_JOB_TOKEN: ${{ secrets.NBA_STAGE_SETTLEMENT_JOB_TOKEN }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout read-only settlement trigger
         uses: actions/checkout@v4
       - name: Verify failure modes without network access
         run: python3 -m unittest discover -s tests -p test_nba_stage_settlement_ping.py -q
+      - name: Verify signed identity workflow failure modes
+        run: python3 -m unittest discover -s tests -p test_nba_stage_oidc_ping.py -q
       - name: Verify and settle isolated NBA staging archive
-        run: python3 scripts/nba_stage_settlement_ping.py
+        run: python3 scripts/nba_stage_oidc_ping.py settlement
