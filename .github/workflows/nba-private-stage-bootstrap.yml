@@ -1,0 +1,42 @@
+name: NBA private research - one-time authenticated smoke dispatch
+# Bootstrap the existing jobs once after this file is merged to default dev.
+# Only GITHUB_TOKEN (GitHub-owned short-lived credential) can dispatch runs.
+# The *target* workflows must independently obtain their own signed OIDC JWT,
+# and the staging service validates the source workflow and exact repo identity.
+"on":
+  push:
+    branches: [dev]
+    paths:
+      - ".github/workflows/nba-private-stage-bootstrap.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  one-time-smoke-dispatch:
+    if: github.repository == 'ZILLABB/betsightly-backend' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch independent protected settle, forecast and market checks
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const requests = [
+              {workflow_id: 'nba-private-stage-settlement.yml'},
+              {workflow_id: 'nba-private-stage-research.yml', inputs: {job: 'forecast'}},
+              {workflow_id: 'nba-private-stage-research.yml', inputs: {job: 'market'}},
+            ];
+            for (const request of requests) {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: 'dev', ...request,
+              });
+              core.notice('Dispatched private NBA staging contract: ' +
+                request.workflow_id + (request.inputs ? ':' + request.inputs.job : ':settlement') +
+                ' — outcome requires independent run and staging receipt verification');
+            }
