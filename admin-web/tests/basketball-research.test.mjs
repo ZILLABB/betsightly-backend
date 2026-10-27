@@ -46,3 +46,16 @@ test('archived NBA imports require server-confirmed digest readback',()=>{
   assert.match(proxy,/route === 'admin\/nba-research\/import' \? 2800000 : 16384/);
   assert.match(page,/No data was uploaded/);
 });
+
+
+test('cloud staging explicitly surfaces overdue completed games without guessing scores',()=>{
+  assert.match(page,/overdueUnverified>0/);
+  assert.match(page,/Date\.now\(\)-kickoff>5\*60\*60\*1000/);
+  assert.match(page,/identity-verified settlement/);
+  assert.match(page,/No recorded invocation/);
+  assert.match(page,/job_readiness/);
+  assert.match(page,/Cloud schedule health/);
+  assert.match(page,/backup_recent_for_current_archive/);
+  assert.match(page,/Previous backup only/);
+  assert.match(page,/health\.refetch\(\),frozen\.refetch\(\)/);
+});
