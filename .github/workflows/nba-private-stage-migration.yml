@@ -1,5 +1,6 @@
 name: NBA staging - isolated Supabase migration
 # Exact GitHub-signed source workflow identity is checked by the stage service.
+# Read-only automatic probe rerun 2026-10-27 after private-schema pin deployment.
 # No source archive or PostgreSQL password enters GitHub.
 "on":
   push:
