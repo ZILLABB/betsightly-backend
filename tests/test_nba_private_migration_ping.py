@@ -66,5 +66,22 @@ class Tests(unittest.TestCase):
                       "source_unchanged":True,"research_only":True,
                       "not_bookable":True}))
 
+
+    def test_history_receipt_requires_verified_identity_and_source_preservation(self):
+        import json
+        def accept(req, *, timeout):
+            self.assertEqual(json.loads(req.data), {"mode": "history"})
+            return Reply({"job": "migration", "status": "audit_history_mirrored",
+                "source_unchanged": True, "research_only": True,
+                "not_bookable": True, "rows_verified": 4})
+        res=invoke("history", identity_provider=lambda:"opaque", opener=accept)
+        self.assertEqual(res["audit_rows_verified"],4)
+        with self.assertRaises(JobFailure):
+            invoke("history", identity_provider=lambda:"opaque",
+                   opener=lambda *a,**k:Reply({
+                      "job":"migration","status":"audit_history_mirrored",
+                      "source_unchanged":False,"research_only":True,
+                      "not_bookable":True}))
+
 if __name__=="__main__":
     unittest.main()
