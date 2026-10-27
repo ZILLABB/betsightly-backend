@@ -2,6 +2,7 @@ name: NBA staging - one-time safe migration probe bootstrap
 # Triggers ONLY if this bootstrap workflow itself changes on default branch.
 # The protected migration runner is workflow_dispatch-only, signed by OIDC,
 # and this bootstrap always sends probe, never restore or a database URL.
+# Confirm the target connection configured by the operator: read-only probe after 18:30 WAT.
 "on":
   push:
     branches: [dev]
