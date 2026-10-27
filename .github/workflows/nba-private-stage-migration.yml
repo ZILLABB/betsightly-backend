@@ -8,11 +8,12 @@ name: NBA staging - isolated Supabase migration
   workflow_dispatch:
     inputs:
       mode:
-        description: "Probe empty target (safe) or restore signed archive (one-time)"
+        description: "Probe (read only), compare current source to target (read only), or one-time restore"
         type: choice
         required: true
         options:
           - probe
+          - compare
           - restore
 permissions:
   contents: read

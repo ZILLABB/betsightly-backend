@@ -47,5 +47,24 @@ class Tests(unittest.TestCase):
             with self.subTest(mode=mode),self.assertRaises(JobFailure):
                 invoke(mode, identity_provider=lambda:self.fail("token requested"))
 
+
+    def test_compare_mode_requires_exact_source_to_target_proof(self):
+        import json
+        def opener(req, *, timeout):
+            self.assertEqual(json.loads(req.data), {"mode": "compare"})
+            return Reply({"job": "migration", "status": "source_target_identical",
+                "source_unchanged": True, "research_only": True,
+                "not_bookable": True, "archive_sha256": "a"*64,
+                "market_receipt_count": 2})
+        receipt=invoke("compare", identity_provider=lambda:"opaque", opener=opener)
+        self.assertEqual(receipt["status"],"source_target_identical")
+        self.assertEqual(receipt["market_receipt_count"],2)
+        with self.assertRaises(JobFailure):
+            invoke("compare", identity_provider=lambda:"opaque",
+                   opener=lambda *a,**k:Reply({
+                      "job":"migration","status":"restored_and_verified",
+                      "source_unchanged":True,"research_only":True,
+                      "not_bookable":True}))
+
 if __name__=="__main__":
     unittest.main()

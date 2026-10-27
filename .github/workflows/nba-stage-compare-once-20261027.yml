@@ -1,0 +1,29 @@
+name: NBA staging - one-time read-only live archive reconciliation
+"on":
+  push:
+    branches: [dev]
+    paths:
+      - ".github/workflows/nba-stage-compare-once-20261027.yml"
+permissions:
+  contents: read
+jobs:
+  compare-live-archive:
+    if: github.repository == 'ZILLABB/betsightly-backend' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch signed comparison only, no archive write or source cutover
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nba-private-stage-migration.yml',
+              ref: 'dev',
+              inputs: { mode: 'compare' }
+            });
+            core.notice('Requested read-only live NBA source-to-Supabase comparison; inspect child run receipt for actual outcome.');
