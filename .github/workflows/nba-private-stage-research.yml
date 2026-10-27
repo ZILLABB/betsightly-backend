@@ -8,6 +8,8 @@ name: NBA private staging - forecast and market research
       - ".github/workflows/nba-private-stage-research.yml"
       - "scripts/nba_stage_cloud_research_ping.py"
       - "tests/test_nba_stage_cloud_research_ping.py"
+      - "scripts/nba_stage_oidc_ping.py"
+      - "tests/test_nba_stage_oidc_ping.py"
   workflow_dispatch:
     inputs:
       job:
@@ -36,29 +38,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 -m unittest discover -s tests -p test_nba_stage_cloud_research_ping.py -v
+      - run: python3 -m unittest discover -s tests -p test_nba_stage_oidc_ping.py -v
 
   private-forecast:
     if: (github.event_name == 'schedule' && github.event.schedule == '16 15,18 * * *') || (github.event_name == 'workflow_dispatch' && inputs.job == 'forecast')
     runs-on: ubuntu-slim
     timeout-minutes: 8
-    env:
-      NBA_STAGE_FORECAST_JOB_TOKEN: ${{ secrets.NBA_STAGE_FORECAST_JOB_TOKEN }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Validate forecast receipt failure modes
         run: python3 -m unittest discover -s tests -p test_nba_stage_cloud_research_ping.py -q
+      - name: Validate ephemeral identity and audience
+        run: python3 -m unittest discover -s tests -p test_nba_stage_oidc_ping.py -q
       - name: Capture eligible signed before-tipoff NBA models
-        run: python3 scripts/nba_stage_cloud_research_ping.py forecast
+        run: python3 scripts/nba_stage_oidc_ping.py forecast
 
   private-market:
     if: (github.event_name == 'schedule' && github.event.schedule == '21 17,20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.job == 'market')
     runs-on: ubuntu-slim
     timeout-minutes: 8
-    env:
-      NBA_STAGE_MARKET_JOB_TOKEN: ${{ secrets.NBA_STAGE_MARKET_JOB_TOKEN }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Validate research receipt failure modes
         run: python3 -m unittest discover -s tests -p test_nba_stage_cloud_research_ping.py -q
+      - name: Validate ephemeral identity and audience
+        run: python3 -m unittest discover -s tests -p test_nba_stage_oidc_ping.py -q
       - name: Capture and save independent NBA bookmaker market evidence
-        run: python3 scripts/nba_stage_cloud_research_ping.py market
+        run: python3 scripts/nba_stage_oidc_ping.py market
