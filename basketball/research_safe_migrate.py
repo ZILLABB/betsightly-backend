@@ -61,6 +61,27 @@ def isolated_target_is_safe(target: str, source_url: str | None = None):
     return url
 
 
+def probe_empty_target(target_url: str, *, source_url: str | None = None,
+                       engine_factory=create_engine) -> dict:
+    """Read-only test of distinct, empty, private PostgreSQL destination."""
+    from sqlalchemy import text
+    target = isolated_target_is_safe(target_url, source_url)
+    engine = engine_factory(target, pool_pre_ping=True)
+    try:
+        with engine.connect() as conn:
+            schema = str(conn.execute(text("SELECT current_schema()")).scalar() or "")
+            if schema != "nba_research":
+                raise ValueError("NBA_RESTORE_PRIVATE_SCHEMA_REQUIRED")
+            tables = inspect(conn).get_table_names(schema=schema)
+            if tables:
+                raise ValueError("NBA_RESTORE_TARGET_NOT_EMPTY")
+        return {"status": "target_empty", "schema": schema,
+                "research_only": True, "not_bookable": True,
+                "source_unchanged": True}
+    finally:
+        engine.dispose()
+
+
 def restore_into_empty_target(backup: dict, target_url: str, *,
                               source_url: str | None = None, engine_factory=create_engine):
     """Atomic import into a freshly empty destination; never overwrite tables."""
@@ -69,7 +90,12 @@ def restore_into_empty_target(backup: dict, target_url: str, *,
     engine = engine_factory(target, pool_pre_ping=True)
     try:
         with engine.begin() as conn:
-            if inspect(conn).get_table_names(schema="public"):
+            schema = str(conn.exec_driver_sql("SELECT current_schema()").scalar() or "")
+            if schema not in ("nba_research", "public"):
+                raise ValueError("NBA_RESTORE_SCHEMA_NOT_ALLOWED")
+            if os.getenv("NBA_RESTORE_REQUIRE_PRIVATE_SCHEMA") == "1" and schema != "nba_research":
+                raise ValueError("NBA_RESTORE_PRIVATE_SCHEMA_REQUIRED")
+            if inspect(conn).get_table_names(schema=schema):
                 raise ValueError("NBA_RESTORE_TARGET_NOT_EMPTY")
             session = sessionmaker(bind=conn)()
             try:
