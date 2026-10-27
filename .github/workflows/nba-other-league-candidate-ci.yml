@@ -4,6 +4,8 @@ name: NBA additional league candidate contract
     paths:
       - "basketball/research_other_league_sources.py"
       - "tests/test_basketball_other_league_candidates.py"
+      - "basketball/research_europe_sources.py"
+      - "tests/test_basketball_europe_candidates.py"
       - ".github/workflows/nba-other-league-candidate-ci.yml"
   workflow_dispatch:
 permissions:
@@ -18,5 +20,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install pytest requests
-      - run: python -m pytest --noconftest tests/test_basketball_other_league_candidates.py -q
-      - run: python -m py_compile basketball/research_other_league_sources.py
+      - run: python -m pytest --noconftest tests/test_basketball_other_league_candidates.py tests/test_basketball_europe_candidates.py -q
+      - run: python -m py_compile basketball/research_other_league_sources.py basketball/research_europe_sources.py
