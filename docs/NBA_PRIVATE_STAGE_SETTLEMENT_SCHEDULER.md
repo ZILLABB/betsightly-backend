@@ -61,3 +61,30 @@ python3 -m unittest discover -s tests -p test_nba_stage_settlement_ping.py -v
 This deployment is **not active** merely because a GitHub branch/PR builds
 successfully. The secret, default-branch merge, and one real authenticated run
 must all be confirmed before marking automatic settlement operational.
+
+## Before-tipoff forecast + market snapshot automation
+
+Additional workflow `.github/workflows/nba-private-stage-research.yml` also runs
+from **default branch dev only**, and has an **offline-only PR test**:
+
+- Forecast: 15:16 and 18:16 UTC daily (16:16 and 19:16 WAT).
+- Market capture: 17:21 and 20:21 UTC daily (18:21 and 21:21 WAT).
+- Actions secret `NBA_STAGE_FORECAST_JOB_TOKEN`: the existing private Render
+  staging `NBA_FORECAST_JOB_TOKEN` value, at least 48 characters.
+- Actions secret `NBA_STAGE_MARKET_JOB_TOKEN`: the existing private Render
+  staging `NBA_MARKET_JOB_TOKEN` value, at least 48 characters.
+- After merging, test one **workflow_dispatch** invocation of each job and verify
+  independent private staging `job_readiness` receipt timestamps. Do not interpret
+  a provider outage or a stale source as valid prediction evidence.
+
+The forecast trigger can only add eligible before-tipoff **moneyline and
+original-score** research forecasts, not recompute the independent advanced
+score model; advanced model work remains a separately controlled experiment.
+The market trigger archives quoted NBA totals for paper research only, with no
+public tips, odds recommendations, stakes, or bookmaker booking codes.
+Historical bookmaker observations are immutable; the first observation is the
+only frozen reference eligible for paper outcome grading.
+
+The existing Vercel daily cron stays as a backup. No claim of guaranteed cron
+minute precision or public ROI is made. All three new Actions secrets must be
+configured by the repo owner; never use GitHub workflow source to store tokens.
