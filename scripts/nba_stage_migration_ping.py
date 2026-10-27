@@ -22,7 +22,7 @@ MIGRATION_ENDPOINT = (
 
 
 def invoke(mode: str, *, identity_provider=github_identity, opener=strict_open):
-    if mode not in ("probe", "restore"):
+    if mode not in ("probe", "restore", "compare"):
         raise JobFailure("NBA_MIGRATION_MODE_REFUSED")
     bearer = identity_provider()
     request = Request(
@@ -43,20 +43,21 @@ def invoke(mode: str, *, identity_provider=github_identity, opener=strict_open):
         result.get("not_bookable") is not True or
         result.get("source_unchanged") is not True or
         result.get("status") != ("target_empty" if mode == "probe"
+                                 else "source_target_identical" if mode == "compare"
                                  else "restored_and_verified")):
         raise JobFailure("NBA_MIGRATION_RECEIPT_INVALID")
     return {
         "status": result["status"], "job": "migration",
         "source_unchanged": True,
         "target_schema": result.get("schema", "nba_research"),
-        "archive_digest": result.get("archive_sha256") if mode == "restore" else None,
-        "market_receipt_count": result.get("market_receipt_count") if mode == "restore" else None,
+        "archive_digest": result.get("archive_sha256") if mode in ("restore", "compare") else None,
+        "market_receipt_count": result.get("market_receipt_count") if mode in ("restore", "compare") else None,
     }
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] not in ("probe", "restore"):
-        print("::error::Private NBA migration requires probe or restore", file=sys.stderr)
+    if len(sys.argv) != 2 or sys.argv[1] not in ("probe", "restore", "compare"):
+        print("::error::Private NBA migration requires probe, compare or restore", file=sys.stderr)
         raise SystemExit(2)
     try:
         result = invoke(sys.argv[1])
