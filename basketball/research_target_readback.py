@@ -112,6 +112,13 @@ def verified_audit_prefix(existing, source):
     return source[len(existing):]
 
 
+def verified_original_source_prefix(existing, source):
+    """After cutover, forbid overwriting newer target-only job history."""
+    if len(source) > len(existing) or existing[:len(source)] != source:
+        raise ValueError("NBA_AUDIT_SOURCE_PREFIX_NOT_PRESERVED")
+    return len(existing) - len(source)
+
+
 def mirror_verified_job_history(target_url, *, source_url=None,
                                 engine_factory=create_engine):
     """Mirror only sanitized existing NBA scheduler receipts; no football rows.
@@ -157,8 +164,7 @@ def mirror_verified_job_history(target_url, *, source_url=None,
             existing = [tuple(x) for x in conn.execute(sql).all()]
             if already_cut_over:
                 # Target has new after-cutover events. Preserve them exactly.
-                if existing[:len(verified)] != verified:
-                    raise ValueError("NBA_AUDIT_SOURCE_PREFIX_NOT_PRESERVED")
+                verified_original_source_prefix(existing, verified)
                 fresh = []
             else:
                 fresh = verified_audit_prefix(existing, verified)
