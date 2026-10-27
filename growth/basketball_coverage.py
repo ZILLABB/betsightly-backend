@@ -39,7 +39,7 @@ def summarize(board: dict) -> dict:
     return {"status": "success", "source": "complete_sportybet_basketball_board",
             "research": "nba_private_only",
             "leagues": competitions[:80], "teams": sorted(all_teams)[:500],
-            "total_games": sum(item["games"] for item in competitions),
+            "total_games": sum(item["upcoming_games"] for item in competitions),
             "market_counts": dict(sorted(market_counts.items())),
             "fetched_at": board.get("fetched_at"),
             "note": "Bookmaker listings are not evidence of a trained or calibrated model."}
