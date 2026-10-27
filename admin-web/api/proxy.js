@@ -2,7 +2,9 @@
 // The browser NEVER receives the Render origin or a backend credential.
 const GET = new Set([
  'admin/config','admin/me','analytics','status','market-readiness','daily',
- 'manual-tiers','basketball-jackpot/board','basketball-jackpot/history','homepage-campaign','content','publications','settings','referrals'
+ 'manual-tiers','basketball-jackpot/board','basketball-jackpot/history',
+ 'admin/nba-research','admin/nba-research/markets',
+ 'admin/nba-research/health','admin/nba-research/history','admin/nba-research/backup','homepage-campaign','content','publications','settings','referrals'
 ]);
 const POST = new Set([
  'admin/login','admin/logout','generate','retry','manual-tiers/import-code',
@@ -12,7 +14,8 @@ const POST = new Set([
  'private-jackpot/optimize','private-jackpot/auto-book',
  'private-jackpot/paste-preview','private-jackpot/paste-book','private-jackpot/market-catalog',
  'basketball-jackpot/refresh','basketball-jackpot/preview','basketball-jackpot/book',
- 'basketball-jackpot/paste-preview','basketball-jackpot/paste-book','basketball-jackpot/settle','basketball-jackpot/recover'
+ 'basketball-jackpot/paste-preview','basketball-jackpot/paste-book','basketball-jackpot/settle','basketball-jackpot/recover',
+ 'admin/nba-research/import','admin/nba-research/settle','admin/nba-research/markets/refresh','admin/nba-research/forecast'
 ]);
 function allowed(method, route) {
  return method === 'GET' ? GET.has(route) :
@@ -22,23 +25,25 @@ function allowed(method, route) {
 // Vercel normally parses JSON into req.body. Some adapters surface it as
 // a UTF-8 Buffer or JSON string. Normalize those formats explicitly rather
 // than silently forwarding {} and reporting a real password as incorrect.
-async function decodeBody(req) {
+async function decodeBody(req, maxBytes = 16384) {
   let value = req.body;
   if (value == null && typeof req[Symbol.asyncIterator] === 'function') {
     const chunks = [];
     let size = 0;
     for await (const chunk of req) {
       size += Buffer.byteLength(chunk);
-      if (size > 16384) throw Error('Request body too large');
+      if (size > maxBytes) throw Error('Request body too large');
       chunks.push(Buffer.from(chunk));
     }
     value = Buffer.concat(chunks).toString('utf8');
   }
   if (Buffer.isBuffer(value)) value = value.toString('utf8');
   if (typeof value === 'string') {
-    if (value.length > 16384) throw Error('Request body too large');
+    if (value.length > maxBytes) throw Error('Request body too large');
     try {value = JSON.parse(value);} catch {throw Error('Request body is not valid JSON');}
   }
+  if (value != null && typeof value === 'object' &&
+      Buffer.byteLength(JSON.stringify(value)) > maxBytes) throw Error('Request body too large');
   if (value == null) throw Error('Missing request body');
   if (typeof value !== 'object' || Array.isArray(value)) throw Error('Expected JSON object');
   return value;
@@ -51,13 +56,29 @@ export default async function handler(req, res) {
   let backend;
   try {
     backend = new URL(originText);
-    if(backend.protocol !== 'https:' || backend.pathname !== '/' || backend.search || backend.hash || backend.username || backend.password || !/^(betsightly-api|betsightly-backend)\.onrender\.com$/.test(backend.hostname)) throw Error('invalid');
+    const isProductionBackend = /^(betsightly-api|betsightly-backend)\.onrender\.com$/.test(backend.hostname);
+    const isNbaPreviewBackend = process.env.VERCEL_ENV === 'preview' &&
+      backend.hostname === 'betsightly-nba-research-stage-20261025.onrender.com';
+    if (backend.protocol !== 'https:' || backend.pathname !== '/' ||
+      backend.search || backend.hash || backend.username || backend.password ||
+      backend.port || !(isProductionBackend || isNbaPreviewBackend)) throw Error('invalid');
   } catch {return res.status(503).json({detail:'Admin API proxy origin is invalid.'});}
   const incoming = new URL(req.url, 'https://' + req.headers.host);
   const raw = incoming.searchParams.get('path') || '';
   const [route, query = ''] = raw.split('?');
   if (!/^[a-z0-9/_-]{1,100}$/.test(route) || !allowed(req.method,route) || raw.split('?').length > 2) {
     return res.status(404).json({detail:'Unknown admin operation.'});
+  }
+  // A staging preview cannot access live football or bookmaker publishing, even
+  // if its admin session would otherwise allow those routes.
+  if (process.env.VERCEL_ENV === 'preview' &&
+      backend.hostname === 'betsightly-nba-research-stage-20261025.onrender.com' &&
+      !new Set(['admin/config','admin/me','admin/login','admin/logout',
+        'admin/nba-research','admin/nba-research/import','admin/nba-research/settle',
+        'admin/nba-research/markets','admin/nba-research/markets/refresh',
+        'admin/nba-research/forecast','admin/nba-research/health',
+        'admin/nba-research/history','admin/nba-research/backup']).has(route)) {
+    return res.status(404).json({detail:'Private NBA staging has no football or booking operations.'});
   }
   // Every browser mutation MUST originate from the exact Vercel admin host.
   if (req.method !== 'GET') {
@@ -75,7 +96,7 @@ export default async function handler(req, res) {
   }
   let payload;
   if (req.method === 'POST') {
-    try { payload = await decodeBody(req); }
+    try { payload = await decodeBody(req, route === 'admin/nba-research/import' ? 2800000 : 16384); }
     catch { return res.status(400).json({detail:'Invalid request format. No change was submitted.'}); }
     if (route === 'admin/login' && (typeof payload.password !== 'string' || payload.password.length === 0)) {
       return res.status(400).json({detail:'The admin password was not received. Please refresh and retry once.'});
