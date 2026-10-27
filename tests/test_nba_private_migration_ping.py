@@ -67,6 +67,27 @@ class Tests(unittest.TestCase):
                       "not_bookable":True}))
 
 
+    def test_postcutover_source_prefix_receipt_is_not_labeled_exact(self):
+        good = {"job": "migration", "status": "source_target_prefix_verified",
+                "source_unchanged": True, "research_only": True,
+                "not_bookable": True, "archive_sha256": "a"*64,
+                "market_receipt_count": 4,
+                "original_source_market_receipts": 2,
+                "new_target_market_receipts": 2}
+        res = invoke("compare", identity_provider=lambda: "opaque",
+                     opener=lambda *a, **kw: Reply(good))
+        self.assertEqual(res["status"], "source_target_prefix_verified")
+        self.assertEqual(res["new_target_market_receipts"], 2)
+        for bad in (
+            {**good, "new_target_market_receipts": 3},
+            {**good, "new_target_market_receipts": 0},
+            {**good, "source_unchanged": False},
+            {**good, "archive_sha256": "not-hash"},
+        ):
+            with self.subTest(bad=bad), self.assertRaises(JobFailure):
+                invoke("compare", identity_provider=lambda: "opaque",
+                       opener=lambda *a, **kw: Reply(bad))
+
     def test_history_receipt_requires_verified_identity_and_source_preservation(self):
         import json
         def accept(req, *, timeout):
