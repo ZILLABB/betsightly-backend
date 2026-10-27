@@ -63,3 +63,32 @@ def test_oversized_and_missing_provider_pages_not_claimed():
         audit_candidate_payload("wnba", {"events": None})
     with pytest.raises(ValueError):
         audit_candidate_payload("wnba", {"events": [fixture()] * 101})
+
+
+def test_single_day_source_probe_uses_only_fixed_host_and_no_storage():
+    from basketball.research_other_league_sources import probe_candidate_source
+    seen = []
+    class Response:
+        status_code = 200
+        content = b'{"events":[]}'
+        def json(self):
+            return {"events": [fixture()]}
+    def get(url, *, timeout, allow_redirects):
+        seen.append((url, timeout, allow_redirects))
+        return Response()
+    result = probe_candidate_source("wnba", "20261027", get=get)
+    assert result["exact_completed"] == 1
+    assert result["approved_for_model_training"] is False
+    assert len(seen) == 1
+    assert seen[0][0] == source_url("wnba", "20261027")
+    assert seen[0][2] is False
+
+
+def test_provider_failure_does_not_approve_other_leagues():
+    from basketball.research_other_league_sources import probe_candidate_source
+    class Unavailable:
+        status_code = 503
+        content = b''
+    with pytest.raises(ValueError, match="UNAVAILABLE"):
+        probe_candidate_source("ncaa_men", "20261027",
+            get=lambda *args, **kwargs: Unavailable())
