@@ -222,3 +222,10 @@
 .bj-history-leg strong{text-transform:capitalize;color:#9ae4d8;white-space:nowrap}
 .bj-history-note{margin:15px 0 0}
 @media(max-width:800px){.bj-history-head{flex-direction:column}.bj-history-ticket summary{grid-template-columns:1fr 1fr;font-size:11px}.bj-history{padding:16px}}
+
+/* Data-backed basketball league discovery; never imply all teams are modelled. */
+.bj-coverage{display:grid;gap:12px;padding:16px 18px;border:1px solid var(--line,#385267);border-radius:15px;margin:13px 0;background:rgba(6,27,45,.45)}
+.bj-coverage strong{font-size:.94rem;letter-spacing:.01em}
+.bj-coverage p{font-size:.82rem;opacity:.76;line-height:1.45;margin:6px 0 0}
+.bj-coverage-leagues{display:flex;flex-wrap:wrap;gap:7px}
+.bj-coverage-leagues span{border:1px solid rgba(137,182,212,.24);background:rgba(121,162,187,.09);padding:6px 9px;border-radius:8px;font-size:.76rem;white-space:normal}
