@@ -49,7 +49,11 @@ def _read_original_render(source_url, reader, *, engine_factory=create_engine):
     """Use ORIGINAL Render URL in a read-only rollback-only transaction."""
     if not source_url:
         raise ValueError("NBA_RECONCILE_ORIGINAL_SOURCE_URL_REQUIRED")
-    url = make_url(source_url)
+    # Render may supply the legacy postgres:// alias, normalized elsewhere by
+    # database.py before SQLAlchemy creates its engine.
+    normalized = source_url.replace("postgres://", "postgresql://", 1) if (
+        source_url.startswith("postgres://")) else source_url
+    url = make_url(normalized)
     if url.get_backend_name() != "postgresql" or not url.host or not url.database:
         raise ValueError("NBA_RECONCILE_ORIGINAL_SOURCE_MUST_BE_POSTGRES")
     engine = engine_factory(url, pool_pre_ping=True)
