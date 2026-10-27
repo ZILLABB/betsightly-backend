@@ -1,0 +1,35 @@
+name: NBA staging - one-time restore verified research archive
+# This bootstrap is deliberately one-use and cannot accept SQL, URLs or data.
+# The target already passed a signed and read-only private-schema probe.
+# All database credentials and original evidence stay on the Render service.
+"on":
+  push:
+    branches: [dev]
+    paths:
+      - ".github/workflows/nba-private-stage-restore-once-20261027.yml"
+permissions:
+  contents: read
+jobs:
+  dispatch-verified-archive-restore:
+    if: >-
+      github.repository == 'ZILLABB/betsightly-backend' &&
+      github.ref == 'refs/heads/dev' &&
+      github.event.head_commit.message == 'ops(nba): authorize one-time signed backup restore into empty Supabase target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch protected migration runner in restore mode
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nba-private-stage-migration.yml',
+              ref: 'dev',
+              inputs: { mode: 'restore' }
+            });
+            core.notice('Dispatched one-time signed NBA archive restore; child job and SQL readback are required for success.');
