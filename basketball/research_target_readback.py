@@ -70,6 +70,13 @@ def compare_live_source_to_target(target_url, *, source_url=None,
         engine.dispose()
 
 
+def verified_audit_prefix(existing, source):
+    """Only append if every existing ordered target row exactly matches source."""
+    if len(existing) > len(source) or existing != source[:len(existing)]:
+        raise ValueError("NBA_AUDIT_EXISTING_HISTORY_MISMATCH")
+    return source[len(existing):]
+
+
 def mirror_verified_job_history(target_url, *, source_url=None,
                                 engine_factory=create_engine):
     """Mirror only sanitized existing NBA scheduler receipts; no football rows.
@@ -109,12 +116,11 @@ def mirror_verified_job_history(target_url, *, source_url=None,
             sql = text("SELECT id, kind, status, summary_json, recorded_at "
                        "FROM nba_private_job_runs ORDER BY id ASC")
             existing = [tuple(x) for x in conn.execute(sql).all()]
-            if existing != verified[:len(existing)]:
-                raise ValueError("NBA_AUDIT_EXISTING_HISTORY_MISMATCH")
-            if len(verified) > len(existing):
+            fresh = verified_audit_prefix(existing, verified)
+            if fresh:
                 conn.execute(table.insert(), [
                     dict(zip(("id", "kind", "status", "summary_json", "recorded_at"), row))
-                    for row in verified[len(existing):]
+                    for row in fresh
                 ])
             if [tuple(x) for x in conn.execute(sql).all()] != verified:
                 raise ValueError("NBA_AUDIT_TARGET_READBACK_MISMATCH")
