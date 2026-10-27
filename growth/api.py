@@ -251,6 +251,13 @@ def basketball_jackpot_history(limit: int = Query(default=30, ge=1, le=100)):
     return list_recent(limit=limit)
 
 
+@router.get("/basketball-jackpot/settlement-health", dependencies=[Depends(require_admin)])
+def basketball_private_result_checks():
+    """Saved cron observations, never synthetic results or unsigned status."""
+    from growth.basketball_result_checks import snapshot
+    return snapshot()
+
+
 @router.post("/basketball-jackpot/settle", dependencies=[Depends(require_admin)])
 def basketball_jackpot_settle():
     """Explicit, bounded NBA final-score reconciliation; never invent finals."""
