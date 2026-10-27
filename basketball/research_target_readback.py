@@ -8,6 +8,8 @@ import hashlib
 import json
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.orm import Session
 from basketball.research_coldstart import _json
 from basketball.research_restore_drill import verify_portable_backup
 from basketball.research_safe_migrate import isolated_target_is_safe
@@ -43,12 +45,43 @@ def compare_archive_and_markets(backup, latest_digest, latest_body, rows):
     }
 
 
+def export_original_render_source(source_url, *, engine_factory=create_engine,
+                                  exporter=None):
+    """Export explicitly from immutable original DATABASE_URL, never SessionLocal.
+
+    SessionLocal may already point to the restored Supabase target after a
+    stage-only cutover; using it would compare the target against itself.
+    The Render source transaction is forced READ ONLY and rolled back.
+    """
+    if not source_url:
+        raise ValueError("NBA_RECONCILE_ORIGINAL_SOURCE_URL_REQUIRED")
+    url = make_url(source_url)
+    if url.get_backend_name() != "postgresql" or not url.host or not url.database:
+        raise ValueError("NBA_RECONCILE_ORIGINAL_SOURCE_MUST_BE_POSTGRES")
+    if exporter is None:
+        from basketball.research_ops_health import export_verified_backup
+        exporter = export_verified_backup
+    engine = engine_factory(url, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            transaction = connection.begin()
+            try:
+                connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+                with Session(bind=connection) as db:
+                    return exporter(db=db)
+            finally:
+                transaction.rollback()
+    finally:
+        engine.dispose()
+
+
 def compare_live_source_to_target(target_url, *, source_url=None,
                                   engine_factory=create_engine):
-    """Export live source NOW, then verify full target research evidence."""
-    from basketball.research_ops_health import export_verified_backup
-    backup = export_verified_backup()
+    """Compare original Render source against Supabase, NEVER target-to-self."""
     target = isolated_target_is_safe(target_url, source_url)
+    backup = export_original_render_source(
+        source_url, engine_factory=engine_factory
+    )
     engine = engine_factory(target, pool_pre_ping=True)
     try:
         with engine.begin() as conn:
