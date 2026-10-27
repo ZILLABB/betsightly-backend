@@ -50,10 +50,10 @@ def github_identity(*, environ=os.environ, opener=strict_open) -> str:
     url = environ.get("ACTIONS_ID_TOKEN_REQUEST_URL", "")
     token = environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
     parsed = urlsplit(url)
-    if parsed.scheme != "https" or parsed.hostname not in (
-        "pipelines.actions.githubusercontent.com",
-        "token.actions.githubusercontent.com",
-    ) or parsed.username or parsed.password or parsed.fragment or not parsed.path:
+    if (parsed.scheme != "https" or not parsed.hostname or
+        not parsed.hostname.endswith(".actions.githubusercontent.com") or
+        parsed.username or parsed.password or parsed.fragment or not parsed.path or
+        parsed.port not in (None, 443)):
         raise JobFailure("NBA_GITHUB_OIDC_URL_DENIED")
     if len(token) < 25 or any(c in token for c in "\r\n"):
         raise JobFailure("NBA_GITHUB_IDENTITY_UNAVAILABLE")
