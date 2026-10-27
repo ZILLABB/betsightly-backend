@@ -130,6 +130,16 @@ export default function BasketballResearch(){
     queryFn:()=>api<NbaFrozenMarketHistory>('admin/nba-research/history'),
     retry:false,refetchOnWindowFocus:false,staleTime:30000,
   });
+  // The immutable first-observation ledger is authoritative for the paper grade.
+  // A stored market snapshot can still contain its original "pending" value
+  // after server-confirmed final-score settlement.
+  const frozenByGame=useMemo(()=>new Map(
+    (frozen.data?.results??[]).map(game=>[game.game_id,game])
+  ),[frozen.data]);
+  function displayPaperGrade(grade:string|null|undefined){
+    return grade==='correct'?'Correct':grade==='incorrect'?'Incorrect':
+      grade==='push'?'Push':grade==='pending'?'Pending':'Not evaluated';
+  }
   async function downloadFullEvidence(){
     if(backupBusy||!verified)return;
     setBackupBusy(true);setBackupNotice('');
@@ -504,6 +514,14 @@ export default function BasketballResearch(){
         </div>
         {(markets.data?.reference_games??[]).map(g=>{
           const alternatives=(markets.data?.quoted_totals??[]).filter(x=>x.game_id===g.game_id);
+          const original=frozenByGame.get(g.game_id);
+          // Never apply a grade to a different bookmaker observation, line,
+          // model direction or a later repricing of this same NBA game.
+          const isExactFrozenReference=original?.observed_at===g.observed_at&&
+            original?.reference_total===g.reference_total&&
+            original?.paper_direction===g.paper_direction;
+          const reportedGrade=isExactFrozenReference
+            ?original?.paper_grade:'not_evaluated';
           const expanded=expandedMarketGame===g.game_id;
           return <article className="nba-market-game" key={g.game_id}>
             <div className="nba-market-game-head">
@@ -521,20 +539,22 @@ export default function BasketballResearch(){
               <div><small>Over / Under prices</small><strong>{g.over_odds.toFixed(2)}x / {g.under_odds.toFixed(2)}x</strong></div>
               <div><small>Advanced projection</small><strong>{num(g.projected_total)}</strong></div>
               <div><small>Projection difference</small><strong>{g.difference==null?'—':num(g.difference)}</strong></div>
-              <div><small>Paper result</small><strong>{g.paper_grade==='correct'?'Correct':
-                g.paper_grade==='incorrect'?'Incorrect':g.paper_grade==='push'?'Push':'Pending'}</strong></div>
+              <div><small>Frozen paper result</small><strong>{frozen.isPending?'Loading evaluation…':
+                frozen.isError?'Evidence unavailable':displayPaperGrade(reportedGrade)}</strong></div>
             </div>
             {expanded&&<div className="nba-market-expanded">
               <p>Alternative totals as captured at {wat(g.observed_at)}.
-                Reference is the middle offered line, not an official main line or recommendation.</p>
+                Reference is the middle offered line, not an official main line or recommendation.
+                Only the exact first-observation reference is graded; other quoted lines are not evaluated.</p>
               <div className="nba-table-wrap"><table className="nba-table">
                 <thead><tr><th>Line</th><th>Over</th><th>Under</th><th>Projected total</th><th>Difference</th><th>Paper grade</th></tr></thead>
                 <tbody>{alternatives.map(m=><tr key={m.game_id+'-'+m.line}>
                   <td>{num(m.line)}</td><td>{m.over_odds.toFixed(2)}x</td>
                   <td>{m.under_odds.toFixed(2)}x</td>
                   <td>{num(m.projected_total)}</td><td>{num(m.difference)}</td>
-                  <td>{m.paper_grade==='correct'?'Correct':m.paper_grade==='incorrect'?'Incorrect':
-                    m.paper_grade==='push'?'Push':'Pending'}</td>
+                  <td>{isExactFrozenReference&&m.observed_at===original?.observed_at&&
+                    m.line===original?.reference_total?
+                    displayPaperGrade(original?.paper_grade):'Not evaluated'}</td>
                 </tr>)}</tbody>
               </table></div>
               {alternatives.length!==g.available_lines&&<p>
