@@ -25,19 +25,38 @@ def compare_archive_and_markets(backup, latest_digest, latest_body, rows):
             != latest_digest):
         raise ValueError("NBA_RECONCILE_ARCHIVE_DRIFT")
     original = backup["market_receipts"]
-    if len(rows) != len(original):
+    # After a stage-only cutover the target can have *newer* observations.
+    # The original source must be an exact immutable prefix, never an
+    # independently regenerated or overwritten ledger.
+    if len(rows) < len(original) or len(rows) > 600:
         raise ValueError("NBA_RECONCILE_MARKET_COUNT_DIFFERS")
-    for (digest, raw), expected in zip(rows, original):
+    known_games = {str(f["game_id"]) for f in backup["archive"]["fixtures"]}
+    for index, (digest, raw) in enumerate(rows):
         actual = json.loads(raw)
-        if (digest != expected["digest"] or actual != expected or
+        if (not isinstance(actual, dict) or actual.get("digest") != digest or
             hashlib.sha256(_json({k: v for k, v in actual.items()
                                   if k != "digest"}).encode("utf-8")).hexdigest()
                 != digest):
             raise ValueError("NBA_RECONCILE_MARKET_HISTORY_DIFFERS")
+        if index < len(original):
+            expected = original[index]
+            if digest != expected["digest"] or actual != expected:
+                raise ValueError("NBA_RECONCILE_MARKET_HISTORY_DIFFERS")
+        else:
+            fixtures = actual.get("fixtures")
+            if not isinstance(fixtures, list) or any(
+                str(item.get("game_id")) not in known_games
+                for item in fixtures if isinstance(item, dict)
+            ) or any(not isinstance(item, dict) for item in fixtures):
+                raise ValueError("NBA_RECONCILE_TARGET_NEW_MARKET_INVALID")
+    added = len(rows) - len(original)
     return {
-        "status": "source_target_identical",
+        "status": ("source_target_prefix_verified" if added
+                   else "source_target_identical"),
         "archive_sha256": latest_digest,
         "market_receipt_count": len(rows),
+        "original_source_market_receipts": len(original),
+        "new_target_market_receipts": added,
         "source_unchanged": True,
         "research_only": True,
         "not_bookable": True,
