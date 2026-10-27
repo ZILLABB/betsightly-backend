@@ -1,6 +1,7 @@
 name: NBA private research - one-time authenticated smoke dispatch
 # Bootstrap the existing jobs once after this file is merged to default dev.
 # Post-cutover Supabase smoke: verify signed settle, forecast and market receipts.
+# Supabase isolated post-cutover acceptance run on 27 October 2026: observe new DB receipts.
 # Only GITHUB_TOKEN (GitHub-owned short-lived credential) can dispatch runs.
 # The *target* workflows must independently obtain their own signed OIDC JWT,
 # and the staging service validates the source workflow and exact repo identity.
