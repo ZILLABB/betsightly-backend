@@ -4,6 +4,7 @@ name: NBA staging - one-time signed audit receipt preservation
     branches: [dev]
     paths:
       - ".github/workflows/nba-audit-history-once-20261027.yml"
+# Re-run after fixing exact history-mode CLI argument validation.
 permissions:
   contents: read
 jobs:
