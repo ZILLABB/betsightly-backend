@@ -1,0 +1,32 @@
+name: NBA staging - one-time safe migration probe bootstrap
+# Triggers ONLY if this bootstrap workflow itself changes on default branch.
+# The protected migration runner is workflow_dispatch-only, signed by OIDC,
+# and this bootstrap always sends probe, never restore or a database URL.
+"on":
+  push:
+    branches: [dev]
+    paths:
+      - ".github/workflows/nba-private-stage-migration-probe-bootstrap.yml"
+permissions:
+  contents: read
+jobs:
+  dispatch-probe:
+    if: github.repository == 'ZILLABB/betsightly-backend' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch only an authorized read-only private target probe
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nba-private-stage-migration.yml',
+              ref: 'dev',
+              inputs: { mode: 'probe' },
+            });
+            core.notice('Requested signed NBA staging empty-target probe; review the child run for its actual receipt.');
