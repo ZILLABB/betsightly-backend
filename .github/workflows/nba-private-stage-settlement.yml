@@ -1,0 +1,32 @@
+name: NBA private staging - verified finals monitor
+
+# Research-only, isolated NBA PostgreSQL. Never touches football or betting.
+# Scheduled GitHub Actions run only from the repository default branch (dev).
+"on":
+  workflow_dispatch:
+  schedule:
+    # Every 30 minutes, 02:13-13:43 WAT. UTC, away from top-of-hour peaks.
+    - cron: '13,43 1-12 * * *'
+    # Late-day catch-up when providers are temporarily unavailable.
+    - cron: '27 16,20 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nba-private-staging-settlement
+  cancel-in-progress: false
+
+jobs:
+  verify-private-finals:
+    runs-on: ubuntu-slim
+    timeout-minutes: 8
+    env:
+      NBA_STAGE_SETTLEMENT_JOB_TOKEN: ${{ secrets.NBA_STAGE_SETTLEMENT_JOB_TOKEN }}
+    steps:
+      - name: Checkout read-only settlement trigger
+        uses: actions/checkout@v4
+      - name: Verify failure modes without network access
+        run: python3 -m unittest discover -s tests -p test_nba_stage_settlement_ping.py -q
+      - name: Verify and settle isolated NBA staging archive
+        run: python3 scripts/nba_stage_settlement_ping.py
