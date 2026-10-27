@@ -814,6 +814,33 @@ def nba_research_private_health(response: Response):
     return result
 
 
+@router.get("/admin/nba-research/validation",
+            dependencies=[Depends(require_admin)])
+def nba_research_model_validation(response: Response):
+    """Private read-only model evaluation; never an automatic release gate override."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA model validation unavailable.")
+    from basketball.research_private_store import SessionLocal, latest_bundle
+    from basketball.research_release_gates import grade_models
+    db = SessionLocal()
+    try:
+        archive = latest_bundle(db)
+        if archive is None:
+            raise ValueError("NBA_MODEL_ARCHIVE_NOT_FOUND")
+        result = grade_models(archive)
+    except ValueError as exc:
+        logger.warning("NBA model validation rejected: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA model validation evidence rejected.") from None
+    except Exception as exc:
+        logger.warning("NBA model validation unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA model validation unavailable.") from None
+    finally:
+        db.close()
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.get("/admin/nba-research/history",
             dependencies=[Depends(require_admin)])
 def nba_research_market_history(response: Response):
@@ -1040,7 +1067,7 @@ def nba_private_oidc_migration(request: Request, response: Response,
         raise HTTPException(404, "Not found.")
     mode = body.get("mode")
     auth = request.headers.get("authorization", "")
-    if (mode not in ("probe", "restore") or
+    if (mode not in ("probe", "restore", "compare") or
         not auth.startswith("Bearer ") or len(auth) > 10020):
         raise HTTPException(404, "Not found.")
     try:
@@ -1054,6 +1081,9 @@ def nba_private_oidc_migration(request: Request, response: Response,
     try:
         if mode == "probe":
             receipt = probe_empty_target(target, source_url=source)
+        elif mode == "compare":
+            from basketball.research_target_readback import compare_live_source_to_target
+            receipt = compare_live_source_to_target(target, source_url=source)
         else:
             from basketball.research_ops_health import export_verified_backup
             from basketball.research_restore_drill import verify_portable_backup
