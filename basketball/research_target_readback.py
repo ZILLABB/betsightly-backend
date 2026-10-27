@@ -68,3 +68,64 @@ def compare_live_source_to_target(target_url, *, source_url=None,
             return compare_archive_and_markets(backup, latest[0], latest[1], rows)
     finally:
         engine.dispose()
+
+
+def mirror_verified_job_history(target_url, *, source_url=None,
+                                engine_factory=create_engine):
+    """Mirror only sanitized existing NBA scheduler receipts; no football rows.
+
+    Target must contain a byte-for-byte ordered prefix or be empty. On retry,
+    append only new receipts. Preserve identifiers; fix Postgres sequence.
+    """
+    from basketball.research_ops_health import NBAPrivateJobRun, JOB_KINDS
+    from database import SessionLocal
+
+    source_db = SessionLocal()
+    try:
+        source_rows = source_db.query(NBAPrivateJobRun).order_by(
+            NBAPrivateJobRun.id.asc()).all()
+        if len(source_rows) > 10000:
+            raise ValueError("NBA_AUDIT_HISTORY_LIMIT_REACHED")
+        verified = []
+        for item in source_rows:
+            if (item.kind not in JOB_KINDS or len(item.status) > 40
+                or len(item.summary_json) > 5000):
+                raise ValueError("NBA_AUDIT_HISTORY_UNSAFE_ROW")
+            json.loads(item.summary_json)
+            verified.append((item.id, item.kind, item.status,
+                             item.summary_json, item.recorded_at))
+    finally:
+        source_db.close()
+
+    target = isolated_target_is_safe(target_url, source_url)
+    engine = engine_factory(target, pool_pre_ping=True)
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("SET LOCAL search_path TO nba_research")
+            if conn.execute(text("SELECT current_schema()")).scalar() != "nba_research":
+                raise ValueError("NBA_AUDIT_PRIVATE_SCHEMA_REQUIRED")
+            table = NBAPrivateJobRun.__table__
+            table.create(bind=conn, checkfirst=True)
+            sql = text("SELECT id, kind, status, summary_json, recorded_at "
+                       "FROM nba_private_job_runs ORDER BY id ASC")
+            existing = [tuple(x) for x in conn.execute(sql).all()]
+            if existing != verified[:len(existing)]:
+                raise ValueError("NBA_AUDIT_EXISTING_HISTORY_MISMATCH")
+            if len(verified) > len(existing):
+                conn.execute(table.insert(), [
+                    dict(zip(("id", "kind", "status", "summary_json", "recorded_at"), row))
+                    for row in verified[len(existing):]
+                ])
+            if [tuple(x) for x in conn.execute(sql).all()] != verified:
+                raise ValueError("NBA_AUDIT_TARGET_READBACK_MISMATCH")
+            if verified:
+                conn.exec_driver_sql(
+                    "SELECT setval(pg_get_serial_sequence('nba_private_job_runs',"
+                    "'id'), (SELECT max(id) FROM nba_private_job_runs), true)"
+                )
+        return {"status": "audit_history_mirrored", "rows_verified": len(verified),
+                "new_rows_mirrored": len(verified)-len(existing),
+                "source_unchanged": True, "research_only": True,
+                "not_bookable": True, "cutover_approved": False}
+    finally:
+        engine.dispose()
