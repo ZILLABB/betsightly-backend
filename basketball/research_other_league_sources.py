@@ -1,0 +1,109 @@
+"""Read-only candidate scoreboard discovery for *other* basketball leagues.
+
+Not an approved NBA forecast input, no mutation of the NBA archive and
+no automatic non-NBA ticket settlement. Providers require separate acceptance
+for names, missing dates, competition rules and player statistics.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import re
+
+CANDIDATES = {
+    "wnba": {
+        "espn_slug": "wnba", "research_state": "source_candidate",
+        "period_length_minutes": 10,
+    },
+    "ncaa_men": {
+        "espn_slug": "mens-college-basketball", "research_state": "source_candidate",
+        "period_length_minutes": 20,
+    },
+    "ncaa_women": {
+        "espn_slug": "womens-college-basketball", "research_state": "source_candidate",
+        "period_length_minutes": 10,
+    },
+}
+HOST = "https://site.api.espn.com/apis/site/v2/sports/basketball"
+MAX_EVENTS = 100
+
+
+def source_url(league: str, day: str) -> str:
+    if league not in CANDIDATES or not re.fullmatch(r"20\d{6}", day):
+        raise ValueError("LEAGUE_OR_DATE_NOT_SUPPORTED")
+    return HOST + "/" + CANDIDATES[league]["espn_slug"] + "/scoreboard?dates=" + day + "&limit=100"
+
+
+def parse_candidate_final(league: str, event: dict):
+    """Verify bare score identities; make *no* model or bookmaker claims."""
+    if league not in CANDIDATES or not isinstance(event, dict):
+        return None
+    if (event.get("status") or {}).get("type", {}).get("completed") is not True:
+        return None
+    competitions = event.get("competitions") or []
+    if len(competitions) != 1:
+        return None
+    comps = competitions[0].get("competitors") or []
+    if len(comps) != 2:
+        return None
+    away = next((c for c in comps if c.get("homeAway") == "away"), None)
+    home = next((c for c in comps if c.get("homeAway") == "home"), None)
+    if not away or not home or away is home:
+        return None
+    def unpack(row):
+        team = row.get("team") or {}
+        identifier = str(team.get("id") or "")
+        name = str(team.get("displayName") or "")
+        raw = str(row.get("score") or "")
+        if not identifier or not name or not raw.isdecimal():
+            return None
+        score = int(raw)
+        if not 0 <= score < 400:
+            return None
+        return {"team_id": identifier, "team": name, "score": score}
+    h, a = unpack(home), unpack(away)
+    if not h or not a or h["team_id"] == a["team_id"]:
+        return None
+    raw_dt = str(event.get("date") or "")
+    try:
+        tipoff = datetime.fromisoformat(raw_dt.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if tipoff.tzinfo is None:
+        return None
+    event_id = str(event.get("id") or "")
+    if not event_id.isdecimal():
+        return None
+    return {
+        "competition": league, "provider": "espn_site_scoreboard_candidate",
+        "provider_event_id": event_id,
+        "tipoff_utc": tipoff.astimezone(timezone.utc).isoformat(),
+        "home": h, "away": a,
+        "total": h["score"] + a["score"],
+        "research_only": True, "not_bookable": True,
+        "validation_status": "source_candidate_not_model_approved",
+    }
+
+
+def audit_candidate_payload(league: str, body: dict) -> dict:
+    if league not in CANDIDATES or not isinstance(body, dict):
+        raise ValueError("INVALID_CANDIDATE_PAYLOAD")
+    events = body.get("events")
+    if not isinstance(events, list) or len(events) > MAX_EVENTS:
+        raise ValueError("CANDIDATE_SOURCE_INCOMPLETE")
+    finals = []
+    for event in events:
+        item = parse_candidate_final(league, event)
+        if item is not None:
+            finals.append(item)
+    ids = [e["provider_event_id"] for e in finals]
+    if len(set(ids)) != len(ids):
+        raise ValueError("DUPLICATED_PROVIDER_GAME")
+    return {
+        "league": league, "research_only": True, "not_bookable": True,
+        "source": "espn_site_scoreboard_candidate",
+        "events_observed": len(events), "exact_completed": len(finals),
+        "candidate_finals": finals,
+        "approved_for_model_training": False,
+        "approved_for_non_nba_booking_settlement": False,
+        "reason": "Cross-source comparison, team identity mapping and longitudinal completeness not yet proven.",
+    }
