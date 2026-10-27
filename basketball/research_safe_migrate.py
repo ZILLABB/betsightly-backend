@@ -68,7 +68,11 @@ def probe_empty_target(target_url: str, *, source_url: str | None = None,
     target = isolated_target_is_safe(target_url, source_url)
     engine = engine_factory(target, pool_pre_ping=True)
     try:
-        with engine.connect() as conn:
+        # Supabase pooler connections default to public; change the search path
+        # ONLY for this transaction, never globally or on the live source.
+        # No caller input can become part of this fixed SQL statement.
+        with engine.begin() as conn:
+            conn.exec_driver_sql("SET LOCAL search_path TO nba_research")
             schema = str(conn.execute(text("SELECT current_schema()")).scalar() or "")
             if schema != "nba_research":
                 raise ValueError("NBA_RESTORE_PRIVATE_SCHEMA_REQUIRED")
@@ -90,10 +94,11 @@ def restore_into_empty_target(backup: dict, target_url: str, *,
     engine = engine_factory(target, pool_pre_ping=True)
     try:
         with engine.begin() as conn:
+            # Pin ALL SQLAlchemy model imports and readbacks to the private
+            # Supabase schema for this transaction only, even via Supavisor.
+            conn.exec_driver_sql("SET LOCAL search_path TO nba_research")
             schema = str(conn.exec_driver_sql("SELECT current_schema()").scalar() or "")
-            if schema not in ("nba_research", "public"):
-                raise ValueError("NBA_RESTORE_SCHEMA_NOT_ALLOWED")
-            if os.getenv("NBA_RESTORE_REQUIRE_PRIVATE_SCHEMA") == "1" and schema != "nba_research":
+            if schema != "nba_research":
                 raise ValueError("NBA_RESTORE_PRIVATE_SCHEMA_REQUIRED")
             if inspect(conn).get_table_names(schema=schema):
                 raise ValueError("NBA_RESTORE_TARGET_NOT_EMPTY")

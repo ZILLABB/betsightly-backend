@@ -70,9 +70,11 @@ def test_private_supabase_target_never_uses_source_or_public_schema():
     class FakeConn:
         def __enter__(self): return self
         def __exit__(self,*args): return None
+        def exec_driver_sql(self, sql):
+            assert sql == "SET LOCAL search_path TO nba_research"
         def execute(self,*args,**kwargs): return FakeResult()
     class FakeEngine:
-        def connect(self): return FakeConn()
+        def begin(self): return FakeConn()
         def dispose(self): pass
     with pytest.raises(ValueError,match="PRIVATE_SCHEMA_REQUIRED"):
         probe_empty_target(target,source_url=source,
@@ -91,3 +93,32 @@ def test_signed_migration_identity_is_separate_from_forecast_and_settle():
     assert WORKFLOWS["migration"] not in (
       WORKFLOWS["settlement"],WORKFLOWS["forecast"],WORKFLOWS["market"]
     )
+
+
+def test_private_schema_probe_does_not_modify_global_search_path(monkeypatch):
+    calls=[]
+    class FakeResult:
+        def scalar(self): return "nba_research"
+    class Conn:
+        dialect=type("Dialect", (), {"name":"postgresql"})()
+        def __enter__(self): return self
+        def __exit__(self,*args): return None
+        def exec_driver_sql(self, sql): calls.append(sql)
+        def execute(self, sql): calls.append(str(sql)); return FakeResult()
+    class Engine:
+        def begin(self): return Conn()
+        def dispose(self): calls.append("disposed")
+    class Inspection:
+        def get_table_names(self, *, schema):
+            assert schema=="nba_research"
+            return []
+    monkeypatch.setattr(migration, "inspect", lambda conn: Inspection())
+    result=migration.probe_empty_target(
+        "postgresql://private@new.example/postgres",
+        source_url="postgresql://previous@render.example/old",
+        engine_factory=lambda *args,**kwargs: Engine(),
+    )
+    assert result["status"]=="target_empty"
+    assert result["source_unchanged"] is True
+    assert calls[0]=="SET LOCAL search_path TO nba_research"
+    assert "disposed" in calls
