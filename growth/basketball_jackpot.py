@@ -235,6 +235,9 @@ def _select(request: dict, board: dict) -> dict:
             unavailable.append({"line": position, "reason": "DUPLICATE_OR_UNAVAILABLE_FIXTURE"})
             continue
         used.add(eid)
+        if mid not in MARKET_IDS:
+            unavailable.append({"line": position, "reason": "MARKET_SETTLEMENT_NOT_VERIFIED"})
+            continue
         outcomes = [o for market in event["markets"] if
                     (market["market_id"], market["specifier"]) == (mid, spec)
                     for o in market["outcomes"] if o["outcome_id"] == oid]
