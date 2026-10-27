@@ -11,7 +11,7 @@ def _sample(n, *, strong=False):
         fixtures.append({"game_id": gid, "status": "final",
                          "home_score": 110, "away_score": 105})
         records["moneyline"].append({
-            "game_id": gid, "probability_home_win": .8 if strong else .45,
+            "game_id": gid, "probability_home_win": .96 if strong else .45,
             "previous_season_home_baseline": .55})
         records["opening_score"].append({
             "game_id": gid, "predicted_total": 217.,
