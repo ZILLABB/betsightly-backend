@@ -24,6 +24,45 @@ from basketball.research_market_presentation import present_market_snapshot
 MAX_HISTORY = 600
 MAX_BACKUP_BYTES = 10_000_000
 MAX_RUNS = 20
+JOB_EXPECTED_INTERVAL_HOURS = 36
+JOB_KINDS = ("forecast", "settlement", "market", "backup")
+
+
+def _utc_naive(instant: datetime) -> datetime:
+    if instant.tzinfo is not None:
+        return instant.astimezone(timezone.utc).replace(tzinfo=None)
+    return instant
+
+
+def _job_readiness(jobs, *, now: datetime) -> dict:
+    """Last observed cron invocation, not proof that its work succeeded."""
+    latest = {}
+    for item in jobs:
+        latest.setdefault(item.kind, item)
+    summary = {}
+    for kind in JOB_KINDS:
+        item = latest.get(kind)
+        if item is None:
+            summary[kind] = {
+                "state": "not_observed", "last_status": None,
+                "last_observed_at": None, "age_hours": None,
+            }
+            continue
+        seconds = (_utc_naive(now) - _utc_naive(item.recorded_at)).total_seconds()
+        degraded = (item.status.startswith("http_") or
+                    item.status in ("provider_partial", "source_not_fresh",
+                                    "archive_capacity_reached"))
+        state = (
+            "clock_skew" if seconds < -300 else
+            "stale" if seconds > JOB_EXPECTED_INTERVAL_HOURS * 3600 else
+            "degraded" if degraded else "observed"
+        )
+        summary[kind] = {
+            "state": state, "last_status": item.status,
+            "last_observed_at": _utc_naive(item.recorded_at).isoformat() + "Z",
+            "age_hours": round(max(0, seconds) / 3600, 2),
+        }
+    return summary
 
 
 class NBAPrivateJobRun(Base):
@@ -60,6 +99,18 @@ def record_run(kind, status, *, detail=None):
         value = (detail or {}).get(key)
         if isinstance(value, (int, dict)) and not isinstance(value, bool):
             safe[key] = value
+    if kind == "settlement":
+        provider = (detail or {}).get("provider_status")
+        if provider in ("ok", "partial", "idle"):
+            safe["provider_status"] = provider
+        failed = (detail or {}).get("failed_dates")
+        if isinstance(failed, list):
+            safe["failed_date_count"] = min(len(failed), 12)
+    if kind == "backup":
+        digest = (detail or {}).get("archive_digest")
+        if isinstance(digest, str) and len(digest) == 64 and all(
+                ch in "0123456789abcdef" for ch in digest):
+            safe["archive_digest"] = digest
     db = SessionLocal()
     try:
         _session_tables(db)
@@ -75,7 +126,10 @@ def record_run(kind, status, *, detail=None):
         db.close()
 
 
-def read_health(*, db=None):
+def read_health(*, db=None, now: datetime | None = None):
+    clock = now or datetime.now(timezone.utc)
+    if clock.tzinfo is None or clock.utcoffset() is None:
+        raise ValueError("NBA_HEALTH_CLOCK_MUST_BE_UTC_AWARE")
     owned = db is None
     db = db or SessionLocal()
     try:
@@ -94,11 +148,25 @@ def read_health(*, db=None):
             NBAPrivateJobRun.id.desc()).limit(MAX_RUNS).all()
         backups = [row for row in jobs if row.kind == "backup"
                    and row.status == "verified_private_blob_readback"]
+        archive_digest = _digest(archive)
+        latest_backup = backups[0] if backups else None
+        backup_summary = json.loads(latest_backup.summary_json) if latest_backup else {}
+        backup_age = (
+            (_utc_naive(clock) - _utc_naive(latest_backup.recorded_at)).total_seconds()
+            if latest_backup else None
+        )
+        # Receipt must be recent and match the *current* signed archive.
+        # Market-history completeness requires its own separate readback proof.
+        recent_archive_backup = bool(
+            latest_backup is not None and backup_age is not None
+            and 0 <= backup_age <= JOB_EXPECTED_INTERVAL_HOURS * 3600
+            and backup_summary.get("archive_digest") == archive_digest
+        )
         return {
             "status": "private_research_health",
             "research_only": True,
             "public_publishing_enabled": False,
-            "archive_digest": _digest(archive),
+            "archive_digest": archive_digest,
             "fixtures": board["summary"]["fixtures"],
             "pending_fixtures": board["summary"]["pending_fixtures"],
             "verified_settlements": board["summary"]["verified_settlements"],
@@ -116,10 +184,12 @@ def read_health(*, db=None):
                  "summary": json.loads(item.summary_json)}
                 for item in jobs
             ],
+            "job_readiness": _job_readiness(jobs, now=clock),
             "database_expiry_declared_at": os.getenv(
                 "NBA_RESEARCH_DATABASE_EXPIRES_AT") or None,
             "backup_policy": "private_vercel_blob_daily_snapshot_with_hash_readback",
             "automatic_backup_proven": bool(backups),
+            "backup_recent_for_current_archive": recent_archive_backup,
             "last_backup_audit": backups[0].recorded_at.isoformat() + "Z" if backups else None,
         }
     finally:
