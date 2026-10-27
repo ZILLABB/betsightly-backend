@@ -120,7 +120,10 @@ def settle_leg(leg, event):
                 won = (h + a > line) if outcome == "12" else (h + a < line)
                 result = "won" if won else "lost"
         else:
-            return candidate
+            from growth.basketball_market_grades import grade_team_total
+            result = grade_team_total(leg, home_points=h, away_points=a)
+            if result is None:
+                return candidate
     except (KeyError, TypeError, ValueError):
         return candidate
     candidate["result"] = result
