@@ -145,3 +145,46 @@ def test_machine_settlement_requires_staging_secret_and_same_flag(monkeypatch):
     assert client.post(path, headers={
         "x-betsightly-nba-settle-token": token}).status_code == 404
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "provider_status,failed_dates,expected_http,expected_audit",
+    [
+        ("ok", [], 200, "settled_and_verified"),
+        ("partial", [{"date": "2026-10-26"}], 503, "provider_partial"),
+        ("ok", [{"date": "2026-10-26"}], 503, "provider_partial"),
+    ],
+)
+def test_machine_settlement_never_acknowledges_partial_provider_as_success(
+        monkeypatch, provider_status, failed_dates, expected_http, expected_audit):
+    """Authenticated cron must surface degraded verification even after a safe commit."""
+    from growth import api as growth
+
+    token = "synthetic-stage-settlement-machine-token-longer-than-32"
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("NBA_SETTLEMENT_JOB_TOKEN", token)
+    calls = []
+    monkeypatch.setattr(
+        growth, "nba_admin_research_settle",
+        lambda response: {
+            "status": "settled_and_verified",
+            "provider_status": provider_status,
+            "failed_dates": failed_dates,
+            "new_finals": 1,
+            "research_only": True,
+        },
+    )
+    monkeypatch.setattr(
+        growth, "_record_nba_machine_job",
+        lambda kind, status, result=None: calls.append((kind, status)),
+    )
+    app = FastAPI()
+    app.include_router(growth.router, prefix="/api/growth")
+    response = TestClient(app).post(
+        "/api/growth/internal/nba-research/settle",
+        headers={"x-betsightly-nba-settle-token": token},
+    )
+    assert response.status_code == expected_http
+    assert calls == [("settlement", expected_audit)]
+    if expected_http != 200:
+        assert response.json()["detail"] == "NBA scoreboard verification incomplete."
