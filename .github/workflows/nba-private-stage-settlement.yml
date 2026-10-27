@@ -3,6 +3,11 @@ name: NBA private staging - verified finals monitor
 # Research-only, isolated NBA PostgreSQL. Never touches football or betting.
 # Scheduled GitHub Actions run only from the repository default branch (dev).
 "on":
+  pull_request:
+    paths:
+      - ".github/workflows/nba-private-stage-settlement.yml"
+      - "scripts/nba_stage_settlement_ping.py"
+      - "tests/test_nba_stage_settlement_ping.py"
   workflow_dispatch:
   schedule:
     # Every 30 minutes, 02:13-13:43 WAT. UTC, away from top-of-hour peaks.
@@ -18,7 +23,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  nba-trigger-contract-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-slim
+    timeout-minutes: 3
+    steps:
+      - name: Checkout isolated private NBA trigger
+        uses: actions/checkout@v4
+      - name: Run network-free settlement failure-mode tests
+        run: python3 -m unittest discover -s tests -p test_nba_stage_settlement_ping.py -v
+
   verify-private-finals:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-slim
     timeout-minutes: 8
     env:
