@@ -27,3 +27,6 @@ jobs:
               inputs: { mode: 'compare' }
             });
             core.notice('Requested read-only live NBA source-to-Supabase comparison; inspect child run receipt for actual outcome.');
+
+# Recheck on 2026-10-27 only after staging source-versus-target correction (#207).
+# The child signed workflow result, not this dispatch, proves parity.
