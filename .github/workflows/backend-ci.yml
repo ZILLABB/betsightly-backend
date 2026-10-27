@@ -64,3 +64,52 @@ jobs:
         run: |
           pip install flake8
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+
+  replay-review:
+    # Only the dedicated PR that repairs missing historical market evidence.
+    # No production deployment, publication, settlement or current odds mutation.
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/market-replay-readiness-20261021'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install exact production replay dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Refresh absent/stale market replay from scored history
+        shell: bash
+        run: |
+          if python scripts/check_market_replay.py >/tmp/market-check.log 2>&1; then
+            echo "Replay already current; no write needed."
+          else
+            python scripts/replay_market_evidence.py
+            python scripts/check_market_replay.py
+          fi
+      - name: Commit reproducible evidence for PR review only
+        shell: bash
+        run: |
+          git add data/replay/market_summary.json \
+            data/replay/calibration_buckets.json \
+            data/replay/league_market_summary.json \
+            data/replay/season_market_summary.json \
+            data/replay/recency_market_summary.json \
+            data/replay/replay_metadata.json
+          if git diff --cached --quiet; then
+            echo "No refreshed files"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "data(replay): measured current Over 0.5 and goal market evidence"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
