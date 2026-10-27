@@ -63,6 +63,16 @@ class BasketballPredictionService:
         Returns:
             Dictionary with predictions and metadata
         """
+        # The legacy service uses random feature engineering; it must not
+        # produce apparently confident picks even in a private notebook.
+        return {
+            "status": "disabled",
+            "message": "Legacy basketball predictor is unsafe. "
+                       "Use the offline research_cli paper command.",
+            "predictions": [],
+            "research_only": True,
+        }
+
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
@@ -563,6 +573,8 @@ class BasketballPredictionService:
         return None
     
     def train_models(self, data_path: Optional[str] = None) -> Dict[str, Any]:
+        raise RuntimeError("Legacy NBA code generates synthetic training inputs; use "
+                           "python -m basketball.research_cli instead.")
         """
         Train basketball prediction models.
         
