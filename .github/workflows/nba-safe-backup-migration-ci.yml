@@ -1,0 +1,24 @@
+name: NBA private backup migration acceptance
+"on":
+  pull_request:
+    paths:
+      - "basketball/research_safe_migrate.py"
+      - "tests/test_nba_safe_backup_migration.py"
+      - ".github/workflows/nba-safe-backup-migration-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  immutable-export-and-isolated-target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install repository dependencies (no credentials)
+        run: python -m pip install -r requirements.txt
+      - name: Prove failed export cannot connect to a target database
+        run: python -m pytest --noconftest tests/test_nba_safe_backup_migration.py -q
+      - run: python -m py_compile basketball/research_safe_migrate.py basketball/research_restore_drill.py
