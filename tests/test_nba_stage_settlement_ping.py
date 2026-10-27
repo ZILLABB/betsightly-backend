@@ -51,7 +51,7 @@ class PrivateScheduledSettlements(unittest.TestCase):
     def test_no_token_no_network_request(self):
         def forbidden(*args, **kwargs):
             self.fail("Tokenless workflow must never call staging.")
-        for token in ("", "too-short", "x" * 32 + "\\n"):
+        for token in ("", "too-short", "x" * 32 + "\n"):
             with self.subTest(token_length=len(token)):
                 with self.assertRaisesRegex(VerificationFailure, "NOT_CONFIGURED"):
                     invoke(token, opener=forbidden)
