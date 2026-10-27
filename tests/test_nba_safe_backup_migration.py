@@ -59,3 +59,35 @@ def test_timestamp_must_be_aware():
     assert checked.tzinfo is None
     with pytest.raises(ValueError,match="TIMESTAMP"):
         migration.__parse_utc("2026-10-27T14:00:00")
+
+
+def test_private_supabase_target_never_uses_source_or_public_schema():
+    from basketball.research_safe_migrate import probe_empty_target
+    target="postgresql://nba_research:example@supabase.example/postgres"
+    source="postgresql://source:example@render.example/staging"
+    class FakeResult:
+        def scalar(self): return "public"
+    class FakeConn:
+        def __enter__(self): return self
+        def __exit__(self,*args): return None
+        def execute(self,*args,**kwargs): return FakeResult()
+    class FakeEngine:
+        def connect(self): return FakeConn()
+        def dispose(self): pass
+    with pytest.raises(ValueError,match="PRIVATE_SCHEMA_REQUIRED"):
+        probe_empty_target(target,source_url=source,
+                           engine_factory=lambda *args,**kwargs: FakeEngine())
+    with pytest.raises(ValueError,match="SOURCE_DATABASE"):
+        probe_empty_target(source,source_url=source,
+                           engine_factory=lambda *args,**kwargs: pytest.fail("no SQL"))
+
+
+def test_signed_migration_identity_is_separate_from_forecast_and_settle():
+    from basketball.research_oidc import WORKFLOWS
+    assert "migration" in WORKFLOWS
+    assert WORKFLOWS["migration"].endswith(
+      "/.github/workflows/nba-private-stage-migration.yml@refs/heads/dev"
+    )
+    assert WORKFLOWS["migration"] not in (
+      WORKFLOWS["settlement"],WORKFLOWS["forecast"],WORKFLOWS["market"]
+    )

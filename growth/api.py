@@ -1021,6 +1021,66 @@ def nba_private_cron_forecast(request: Request, response: Response):
     return result
 
 
+@router.post("/internal/nba-research/github-oidc-migration")
+def nba_private_oidc_migration(request: Request, response: Response,
+                               body: dict = Body(...)):
+    """Only the separately signed NBA staging migration workflow may invoke.
+
+    Target is provided ONLY by the staging service environment, never caller
+    input. Source remains unchanged and football databases are inaccessible.
+    """
+    import os
+    from basketball.research_oidc import verify_github_job
+    from basketball.research_safe_migrate import (
+        probe_empty_target, restore_into_empty_target,
+    )
+    if (not _nba_health_enabled()
+        or os.getenv("NBA_PRIVATE_MIGRATION_ENABLED") != "1"
+        or os.getenv("NBA_RESTORE_REQUIRE_PRIVATE_SCHEMA") != "1"):
+        raise HTTPException(404, "Not found.")
+    mode = body.get("mode")
+    auth = request.headers.get("authorization", "")
+    if (mode not in ("probe", "restore") or
+        not auth.startswith("Bearer ") or len(auth) > 10020):
+        raise HTTPException(404, "Not found.")
+    try:
+        verify_github_job(auth[7:], "migration")
+    except ValueError:
+        raise HTTPException(404, "Not found.") from None
+    source = os.getenv("DATABASE_URL", "")
+    target = os.getenv("NBA_RESTORE_TARGET_DATABASE_URL", "")
+    if not target:
+        raise HTTPException(503, "Isolated recovery target unavailable.")
+    try:
+        if mode == "probe":
+            receipt = probe_empty_target(target, source_url=source)
+        else:
+            from basketball.research_ops_health import export_verified_backup
+            from basketball.research_restore_drill import verify_portable_backup
+            backup = export_verified_backup()
+            proof = verify_portable_backup(backup)
+            if proof.get("restore_drill_passed") is not True:
+                raise ValueError("NBA_SOURCE_BACKUP_DRILL_FAILED")
+            receipt = restore_into_empty_target(
+                backup, target, source_url=source
+            )
+            if receipt.get("archive_sha256") != backup["archive_digest"]:
+                raise ValueError("NBA_TARGET_ARCHIVE_MISMATCH")
+            _record_nba_machine_job("backup", "verified_secondary_restore",
+                                    {"archive_digest": backup["archive_digest"]})
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("NBA isolated target migration denied: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "Isolated NBA restore refused.") from None
+    except Exception as exc:
+        logger.warning("NBA isolated target connectivity unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Isolated NBA migration unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    return {**receipt, "job": "migration", "research_only": True,
+            "not_bookable": True}
+
+
 @router.post("/internal/nba-research/github-oidc")
 def nba_private_github_oidc_job(request: Request, response: Response,
                                  body: dict = Body(...)):

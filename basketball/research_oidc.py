@@ -22,6 +22,7 @@ WORKFLOWS = {
     "settlement": REPOSITORY + "/.github/workflows/nba-private-stage-settlement.yml@" + BRANCH,
     "forecast": REPOSITORY + "/.github/workflows/nba-private-stage-research.yml@" + BRANCH,
     "market": REPOSITORY + "/.github/workflows/nba-private-stage-research.yml@" + BRANCH,
+    "migration": REPOSITORY + "/.github/workflows/nba-private-stage-migration.yml@" + BRANCH,
 }
 
 

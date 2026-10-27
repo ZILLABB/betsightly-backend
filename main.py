@@ -115,7 +115,12 @@ logging.getLogger("telegram").setLevel(logging.WARNING)
 # Initialize database (skip for Railway deployment if no DATABASE_URL)
 try:
     database_url = os.getenv("DATABASE_URL")
-    if database_url:
+    if (os.getenv("ENVIRONMENT") == "staging"
+            and os.getenv("NBA_PRIVATE_DATABASE_ONLY") == "1"):
+        # Dedicated isolated NBA archive. The football Base contains customer
+        # and ticket tables; never materialise those on the new private schema.
+        logger.info("Private NBA research mode: football DB initialization skipped")
+    elif database_url:
         init_db()
         logger.info("Database initialized successfully")
     else:
