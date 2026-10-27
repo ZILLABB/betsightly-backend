@@ -628,6 +628,17 @@ def _start_daily_generation_loop():
                 if allow_general_refresh:
                     _ensure_today_generated()
 
+                # Keep the private basketball booking ledger current on the
+                # existing scheduler process (15-minute tick). This is wholly
+                # separate from isolated NBA model research and never creates
+                # a SportyBet code or publishes a football selection.
+                try:
+                    from growth.basketball_scheduler import tick as settle_basketball
+                    settle_basketball()
+                except Exception as e:
+                    logger.warning("NBA basketball ledger tick unavailable: %s",
+                                   type(e).__name__)
+
                 # Catch up an opt-in AI research shadow even when today's
                 # official daily job was already completed before key setup.
                 # Never re-publish slips, create codes, or retry costly API
