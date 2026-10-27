@@ -22,7 +22,7 @@ MIGRATION_ENDPOINT = (
 
 
 def invoke(mode: str, *, identity_provider=github_identity, opener=strict_open):
-    if mode not in ("probe", "restore", "compare"):
+    if mode not in ("probe", "restore", "compare", "history"):
         raise JobFailure("NBA_MIGRATION_MODE_REFUSED")
     bearer = identity_provider()
     request = Request(
@@ -44,6 +44,7 @@ def invoke(mode: str, *, identity_provider=github_identity, opener=strict_open):
         result.get("source_unchanged") is not True or
         result.get("status") != ("target_empty" if mode == "probe"
                                  else "source_target_identical" if mode == "compare"
+                                 else "audit_history_mirrored" if mode == "history"
                                  else "restored_and_verified")):
         raise JobFailure("NBA_MIGRATION_RECEIPT_INVALID")
     return {
@@ -52,6 +53,7 @@ def invoke(mode: str, *, identity_provider=github_identity, opener=strict_open):
         "target_schema": result.get("schema", "nba_research"),
         "archive_digest": result.get("archive_sha256") if mode in ("restore", "compare") else None,
         "market_receipt_count": result.get("market_receipt_count") if mode in ("restore", "compare") else None,
+        "audit_rows_verified": result.get("rows_verified") if mode == "history" else None,
     }
 
 
