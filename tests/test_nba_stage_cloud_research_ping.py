@@ -71,7 +71,7 @@ class NbaCloudResearchContractTests(unittest.TestCase):
             def fetch(request, timeout):
                 self.assertEqual(request.full_url, HOST+path)
                 self.assertEqual(request.get_method(),"POST")
-                self.assertEqual(request.get_header(header),TOKEN)
+                self.assertEqual(request.get_header(header.capitalize()),TOKEN)
                 self.assertGreater(timeout,100)
                 if kind=="forecast":
                     return Reply({"status":"no_new_eligible_forecasts",
