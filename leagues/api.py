@@ -49,7 +49,7 @@ async def replay_decision_snapshot(snapshot_id: str,
 
 
 @router.get("/daily-accumulators")
-def get_daily_accumulators():
+async def get_daily_accumulators():
     """Daily accumulator picks (2 odds / 5 odds / 10 odds / over 1.5 / rollover)."""
     try:
         from leagues.daily_feed import build_daily_accumulators
