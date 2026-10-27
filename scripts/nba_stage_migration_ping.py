@@ -38,14 +38,34 @@ def invoke(mode: str, *, identity_provider=github_identity, opener=strict_open):
         raise JobFailure("NBA_MIGRATION_HTTP_" + str(exc.code)) from None
     except (URLError, TimeoutError, OSError) as exc:
         raise JobFailure("NBA_MIGRATION_TRANSPORT_UNAVAILABLE") from None
+    expected_status = ("target_empty" if mode == "probe"
+                       else "audit_history_mirrored" if mode == "history"
+                       else "restored_and_verified")
+    status = result.get("status")
+    if mode == "compare":
+        # After an independently verified cutover the target may have
+        # legitimate newer observations. Never mistake this for equality.
+        if status == "source_target_prefix_verified":
+            source_n = result.get("original_source_market_receipts")
+            appended = result.get("new_target_market_receipts")
+            total = result.get("market_receipt_count")
+            valid_status = (type(source_n) is int and source_n >= 0
+                            and type(appended) is int and appended > 0
+                            and type(total) is int
+                            and total == source_n + appended)
+        else:
+            valid_status = status == "source_target_identical"
+        digest = result.get("archive_sha256")
+        valid_status = (valid_status and isinstance(digest, str)
+                        and len(digest) == 64
+                        and all(c in "0123456789abcdef" for c in digest))
+    else:
+        valid_status = status == expected_status
     if (result.get("job") != "migration" or
         result.get("research_only") is not True or
         result.get("not_bookable") is not True or
         result.get("source_unchanged") is not True or
-        result.get("status") != ("target_empty" if mode == "probe"
-                                 else "source_target_identical" if mode == "compare"
-                                 else "audit_history_mirrored" if mode == "history"
-                                 else "restored_and_verified")):
+        not valid_status):
         raise JobFailure("NBA_MIGRATION_RECEIPT_INVALID")
     return {
         "status": result["status"], "job": "migration",
@@ -53,6 +73,8 @@ def invoke(mode: str, *, identity_provider=github_identity, opener=strict_open):
         "target_schema": result.get("schema", "nba_research"),
         "archive_digest": result.get("archive_sha256") if mode in ("restore", "compare") else None,
         "market_receipt_count": result.get("market_receipt_count") if mode in ("restore", "compare") else None,
+        "original_source_market_receipts": result.get("original_source_market_receipts") if mode == "compare" else None,
+        "new_target_market_receipts": result.get("new_target_market_receipts") if mode == "compare" else None,
         "audit_rows_verified": result.get("rows_verified") if mode == "history" else None,
     }
 
