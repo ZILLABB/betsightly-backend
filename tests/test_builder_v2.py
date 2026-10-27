@@ -1439,6 +1439,9 @@ def test_game_count_reports_zero_candidate_market_reason(monkeypatch):
         "selected": 0,
         "shortfall": 1,
         "primary_reason": "NO_RAW_CANDIDATES",
+        "registry_activation": "ACTIVE",
+        "automatic_builder_eligible": True,
+        "exact_bookmaker_market_mapped": True,
     }
 
 
@@ -1498,9 +1501,8 @@ def test_game_count_reports_policy_rejected_market_reason(monkeypatch):
     assert availability["under_3_5"]["after_trust_and_policy"] == 0
     assert availability["under_3_5"]["approved"] == 0
     assert availability["under_3_5"]["selected"] == 0
-    assert availability["under_3_5"]["primary_reason"] == (
-        "TRUST_OR_MARKET_POLICY_REJECTED"
-    )
+    assert availability["under_3_5"]["primary_reason"] == "MARKET_NOT_ACTIVE"
+    assert availability["under_3_5"]["registry_activation"] == "SHADOW"
 
 
 def test_game_count_fallback_keeps_all_final_gates(monkeypatch):
