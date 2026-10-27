@@ -124,7 +124,7 @@ def refresh_board(*, _retried: bool = False) -> dict:
     try:
         for page in range(1, MAX_PAGES + 1):
             url = (f"{sportybet.BASE_URL}/api/ng/factsCenter/pcUpcomingEvents"
-                   f"?sportId=sr%3Asport%3A2&marketId={%27%2C%27.join(extra_markets.market_ids())}"
+                   f"?sportId=sr%3Asport%3A2&marketId={','.join(extra_markets.market_ids())}"
                    f"&pageSize={PAGE_SIZE}&pageNum={page}")
             response = sportybet._get_json(url, timeout=20)
             if response.get("bizCode") not in (None, 10000):
