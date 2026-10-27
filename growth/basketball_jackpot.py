@@ -248,6 +248,7 @@ def _select(request: dict, board: dict) -> dict:
                           "competition": event["competition"],
                           "market_id": mid, "specifier": spec,
                           "outcome_id": oid, "selection": outcome["label"],
+                          "side": outcome.get("side"),
                           "odds": outcome["odds"], "kickoff_ms": event["kickoff_ms"]})
     complete = len(validated) == len(submitted) and not unavailable
     return {"status": ("EXACT_MARKETS_UNAVAILABLE" if not complete else
