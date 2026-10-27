@@ -2,7 +2,7 @@
 // The browser NEVER receives the Render origin or a backend credential.
 const GET = new Set([
  'admin/config','admin/me','analytics','status','market-readiness','daily',
- 'manual-tiers','basketball-jackpot/board','basketball-jackpot/history',
+ 'manual-tiers','basketball-jackpot/board','basketball-jackpot/history','basketball-jackpot/coverage',
  'admin/nba-research','admin/nba-research/markets',
  'admin/nba-research/health','admin/nba-research/history','admin/nba-research/backup','homepage-campaign','content','publications','settings','referrals'
 ]);
