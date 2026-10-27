@@ -8,6 +8,7 @@ name: NBA private backup migration acceptance
       - "growth/api.py"
       - "main.py"
       - "tests/test_nba_stage_route_isolation.py"
+      - "tests/test_nba_league_evidence_desk.py"
       - "tests/test_nba_safe_backup_migration.py"
       - "tests/test_nba_target_readback.py"
       - "tests/test_nba_research_release_gates.py"
@@ -27,5 +28,5 @@ jobs:
       - name: Install repository dependencies (no credentials)
         run: python -m pip install -r requirements.txt pytest
       - name: Prove failed export cannot connect to a target database
-        run: python -m pytest --noconftest tests/test_nba_safe_backup_migration.py tests/test_nba_target_readback.py tests/test_nba_research_release_gates.py tests/test_nba_stage_route_isolation.py -q
+        run: python -m pytest --noconftest tests/test_nba_safe_backup_migration.py tests/test_nba_target_readback.py tests/test_nba_research_release_gates.py tests/test_nba_stage_route_isolation.py tests/test_nba_league_evidence_desk.py -q
       - run: python -m py_compile basketball/research_safe_migrate.py basketball/research_target_readback.py basketball/research_release_gates.py basketball/research_restore_drill.py
