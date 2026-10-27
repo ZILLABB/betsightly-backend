@@ -133,3 +133,41 @@ def test_target_keeps_newer_supabase_job_history_after_original_render_cutover()
         rec.verified_original_source_prefix(target, original + [(5, "backup"), (6, "forecast"), (7, "market")])
     with pytest.raises(ValueError, match="SOURCE_PREFIX_NOT_PRESERVED"):
         rec.verified_original_source_prefix([(1, "changed")] + target[1:], original)
+
+
+
+def test_original_receipts_remain_verified_prefix_after_target_collects_more():
+    body = {"version": "test", "fixtures": [{"game_id": "77"}]}
+    digest = hashlib.sha256(_json(body).encode()).hexdigest()
+    def signed(unsigned):
+        return {**unsigned, "digest": hashlib.sha256(_json(unsigned).encode()).hexdigest()}
+    first = signed({"fixtures": [{"game_id": "77"}], "observed_at": "2026-10-27T10:00:00Z"})
+    later = signed({"fixtures": [{"game_id": "77"}], "observed_at": "2026-10-27T20:00:00Z"})
+    backup = {"archive": body, "archive_digest": digest, "market_receipts": [first]}
+    old_verifier = rec.verify_portable_backup
+    try:
+        rec.verify_portable_backup = lambda _: {"restore_drill_passed": True}
+        report = rec.compare_archive_and_markets(
+            backup, digest, _json(body),
+            [(first["digest"], _json(first)), (later["digest"], _json(later))]
+        )
+        assert report["status"] == "source_target_prefix_verified"
+        assert report["original_source_market_receipts"] == 1
+        assert report["market_receipt_count"] == 2
+        assert report["new_target_market_receipts"] == 1
+        assert report["cutover_approved"] is False
+
+        changed_first = signed({"fixtures": [{"game_id": "77"}], "observed_at": "2026-10-27T11:00:00Z"})
+        with pytest.raises(ValueError, match="MARKET_HISTORY"):
+            rec.compare_archive_and_markets(
+                backup, digest, _json(body),
+                [(changed_first["digest"], _json(changed_first)), (later["digest"], _json(later))]
+            )
+        wrong_game = signed({"fixtures": [{"game_id": "unknown"}], "observed_at": "2026-10-27T20:00:00Z"})
+        with pytest.raises(ValueError, match="TARGET_NEW_MARKET"):
+            rec.compare_archive_and_markets(
+                backup, digest, _json(body),
+                [(first["digest"], _json(first)), (wrong_game["digest"], _json(wrong_game))]
+            )
+    finally:
+        rec.verify_portable_backup = old_verifier
