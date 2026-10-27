@@ -1067,7 +1067,7 @@ def nba_private_oidc_migration(request: Request, response: Response,
         raise HTTPException(404, "Not found.")
     mode = body.get("mode")
     auth = request.headers.get("authorization", "")
-    if (mode not in ("probe", "restore", "compare") or
+    if (mode not in ("probe", "restore", "compare", "history") or
         not auth.startswith("Bearer ") or len(auth) > 10020):
         raise HTTPException(404, "Not found.")
     try:
@@ -1084,6 +1084,9 @@ def nba_private_oidc_migration(request: Request, response: Response,
         elif mode == "compare":
             from basketball.research_target_readback import compare_live_source_to_target
             receipt = compare_live_source_to_target(target, source_url=source)
+        elif mode == "history":
+            from basketball.research_target_readback import mirror_verified_job_history
+            receipt = mirror_verified_job_history(target, source_url=source)
         else:
             from basketball.research_ops_health import export_verified_backup
             from basketball.research_restore_drill import verify_portable_backup

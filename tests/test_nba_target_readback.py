@@ -49,3 +49,18 @@ def test_reconciliation_always_refuses_same_database():
         isolated_target_is_safe(
             "postgresql://nba:test@same.example/postgres",
             "postgresql://nba:test@same.example/postgres")
+
+
+def test_audit_history_is_append_only_exact_prefix():
+    assert rec.verified_audit_prefix([], [(1, "forecast"), (2, "settlement")]) == [
+        (1, "forecast"), (2, "settlement")]
+    assert rec.verified_audit_prefix([(1, "forecast")],
+                                     [(1, "forecast"), (2, "settlement")]) == [
+        (2, "settlement")]
+    assert rec.verified_audit_prefix([(1, "forecast")],
+                                     [(1, "forecast")]) == []
+    with pytest.raises(ValueError, match="EXISTING_HISTORY_MISMATCH"):
+        rec.verified_audit_prefix([(1, "modified")], [(1, "forecast")])
+    with pytest.raises(ValueError, match="EXISTING_HISTORY_MISMATCH"):
+        rec.verified_audit_prefix([(1, "forecast"), (2, "extra")],
+                                  [(1, "forecast")])

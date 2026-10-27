@@ -33,6 +33,20 @@ if DATABASE_URL.startswith("postgres://"):
 _NBA_PRIVATE = os.getenv("NBA_PRIVATE_DATABASE_ONLY") == "1"
 if _NBA_PRIVATE and os.getenv("ENVIRONMENT") != "staging":
     raise RuntimeError("NBA_PRIVATE_DATABASE_REQUIRES_STAGING")
+# Explicit, reversible cutover. Keep the original DATABASE_URL private and
+# untouched for immediate rollback; ONLY isolated NBA staging can opt in.
+if os.getenv("NBA_USE_RESTORE_TARGET_AS_PRIMARY") == "1":
+    if not _NBA_PRIVATE:
+        raise RuntimeError("NBA_PRIMARY_CUTOVER_REQUIRES_PRIVATE_MODE")
+    candidate = os.getenv("NBA_RESTORE_TARGET_DATABASE_URL", "")
+    if not candidate.startswith(("postgresql://", "postgres://")):
+        raise RuntimeError("NBA_PRIMARY_CUTOVER_TARGET_UNCONFIGURED")
+    from sqlalchemy.engine import make_url
+    if make_url(candidate).host == make_url(DATABASE_URL).host:
+        raise RuntimeError("NBA_PRIMARY_CUTOVER_REFUSES_SOURCE_HOST")
+    DATABASE_URL = candidate
+    logger.info("NBA staging using isolated recovered database")
+
 
 # Determine if we're using SQLite or PostgreSQL
 if DATABASE_URL.startswith("sqlite") and _NBA_PRIVATE:
