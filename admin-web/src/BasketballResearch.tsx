@@ -3,6 +3,7 @@ import {useQuery} from '@tanstack/react-query';
 import {AlertTriangle, ArrowDownToLine, CheckCheck, ClipboardCopy, Clock3,
   Database, Loader2, RefreshCcw, ShieldCheck, SlidersHorizontal} from 'lucide-react';
 import {api, ApiError} from './api';
+import {frozenMarketGrade, frozenAlternativeGrade, paperGradeLabel} from './nbaMarketPaperGrade';
 
 type State='upcoming'|'awaiting_verified_final'|'final_pending_grade'|'verified_settled';
 export type ResearchGame={
@@ -136,10 +137,6 @@ export default function BasketballResearch(){
   const frozenByGame=useMemo(()=>new Map(
     (frozen.data?.results??[]).map(game=>[game.game_id,game])
   ),[frozen.data]);
-  function displayPaperGrade(grade:string|null|undefined){
-    return grade==='correct'?'Correct':grade==='incorrect'?'Incorrect':
-      grade==='push'?'Push':grade==='pending'?'Pending':'Not evaluated';
-  }
   async function downloadFullEvidence(){
     if(backupBusy||!verified)return;
     setBackupBusy(true);setBackupNotice('');
@@ -515,13 +512,8 @@ export default function BasketballResearch(){
         {(markets.data?.reference_games??[]).map(g=>{
           const alternatives=(markets.data?.quoted_totals??[]).filter(x=>x.game_id===g.game_id);
           const original=frozenByGame.get(g.game_id);
-          // Never apply a grade to a different bookmaker observation, line,
-          // model direction or a later repricing of this same NBA game.
-          const isExactFrozenReference=original?.observed_at===g.observed_at&&
-            original?.reference_total===g.reference_total&&
-            original?.paper_direction===g.paper_direction;
-          const reportedGrade=isExactFrozenReference
-            ?original?.paper_grade:'not_evaluated';
+          // Never grade a re-priced observation or a different market direction.
+          const reportedGrade=frozenMarketGrade(g,original);
           const expanded=expandedMarketGame===g.game_id;
           return <article className="nba-market-game" key={g.game_id}>
             <div className="nba-market-game-head">
@@ -540,7 +532,7 @@ export default function BasketballResearch(){
               <div><small>Advanced projection</small><strong>{num(g.projected_total)}</strong></div>
               <div><small>Projection difference</small><strong>{g.difference==null?'—':num(g.difference)}</strong></div>
               <div><small>Frozen paper result</small><strong>{frozen.isPending?'Loading evaluation…':
-                frozen.isError?'Evidence unavailable':displayPaperGrade(reportedGrade)}</strong></div>
+                frozen.isError?'Evidence unavailable':paperGradeLabel(reportedGrade)}</strong></div>
             </div>
             {expanded&&<div className="nba-market-expanded">
               <p>Alternative totals as captured at {wat(g.observed_at)}.
@@ -552,9 +544,7 @@ export default function BasketballResearch(){
                   <td>{num(m.line)}</td><td>{m.over_odds.toFixed(2)}x</td>
                   <td>{m.under_odds.toFixed(2)}x</td>
                   <td>{num(m.projected_total)}</td><td>{num(m.difference)}</td>
-                  <td>{isExactFrozenReference&&m.observed_at===original?.observed_at&&
-                    m.line===original?.reference_total?
-                    displayPaperGrade(original?.paper_grade):'Not evaluated'}</td>
+                  <td>{paperGradeLabel(frozenAlternativeGrade(g,original,m))}</td>
                 </tr>)}</tbody>
               </table></div>
               {alternatives.length!==g.available_lines&&<p>
