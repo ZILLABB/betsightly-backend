@@ -1,0 +1,23 @@
+name: NBA staging - secretless OIDC contract
+"on":
+  pull_request:
+    paths:
+      - "basketball/research_oidc.py"
+      - "growth/api.py"
+      - "tests/test_nba_stage_github_oidc.py"
+      - ".github/workflows/nba-stage-oidc-contract.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-signed-identity:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "python-jose[cryptography]==3.3.0" "requests==2.31.0"
+      - run: python -m unittest discover -s tests -p test_nba_stage_github_oidc.py -v
+      - run: python -m py_compile growth/api.py basketball/research_oidc.py
