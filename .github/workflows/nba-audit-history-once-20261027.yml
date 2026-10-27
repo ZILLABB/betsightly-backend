@@ -28,3 +28,5 @@ jobs:
               inputs: { mode: 'history' }
             });
             core.notice('History mirror requested; verified child run readback is mandatory before cutover.');
+
+# Post-cutover original Render audit prefix verification; preserve newer Supabase receipts.
