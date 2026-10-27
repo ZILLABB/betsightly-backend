@@ -4,7 +4,9 @@ import unittest
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
-from scripts.nba_stage_settlement_ping import STAGING_URL, VerificationFailure, invoke
+from scripts.nba_stage_settlement_ping import (
+    STAGING_URL, VerificationFailure, RejectRedirect, invoke,
+)
 
 TOKEN = "synthetic-nba-staging-token" + "x" * 50
 
@@ -103,6 +105,15 @@ class PrivateScheduledSettlements(unittest.TestCase):
         with self.assertRaisesRegex(VerificationFailure, "TRANSPORT_UNAVAILABLE"):
             invoke(TOKEN, opener=fetch, sleeper=lambda _: None)
         self.assertEqual(len(attempts), 2)
+
+    def test_redirect_handler_fails_before_credential_forwarding(self):
+        handler = RejectRedirect()
+        with self.assertRaisesRegex(VerificationFailure, "NBA_UNEXPECTED_REDIRECT"):
+            handler.redirect_request(
+                Request(STAGING_URL, data=b""),
+                None, 302, "Moved Temporarily", {},
+                "https://untrusted.example/steal-token",
+            )
 
     def test_healthy_idle(self):
         empty = payload(
