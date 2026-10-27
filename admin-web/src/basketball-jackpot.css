@@ -229,3 +229,8 @@
 .bj-coverage p{font-size:.82rem;opacity:.76;line-height:1.45;margin:6px 0 0}
 .bj-coverage-leagues{display:flex;flex-wrap:wrap;gap:7px}
 .bj-coverage-leagues span{border:1px solid rgba(137,182,212,.24);background:rgba(121,162,187,.09);padding:6px 9px;border-radius:8px;font-size:.76rem;white-space:normal}
+
+.bj-settlement-health{display:grid;gap:5px;padding:14px 16px;margin:12px 0;border:1px solid rgba(133,172,196,.25);background:rgba(32,71,97,.12);border-radius:12px}
+.bj-settlement-health strong{font-size:.87rem}
+.bj-settlement-health span{font-size:.83rem;line-height:1.6}
+.bj-settlement-health small{font-size:.75rem;opacity:.75;line-height:1.5}

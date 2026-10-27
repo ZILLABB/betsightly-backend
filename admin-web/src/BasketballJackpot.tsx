@@ -15,6 +15,9 @@ type HistoricalTicket={fingerprint:string;share_code?:string|null;status:string;
   target_odds:number;verified_odds?:number|null;verified_odds_source?:string;legs:HistoricalLeg[];
   leg_count:number;detail?:{ticket_status?:string;reason?:string};last_checked_at?:string|null;};
 type HistoryList={status:string;tickets:HistoricalTicket[];count:number;};
+type SettlementHealth={status:string;state:string;last_checked_at?:string|null;
+  last_status?:string;age_minutes?:number;recent_checks?:number;
+  verified_final_legs?:number;tickets_updated?:number;last_issue?:string|null;};
 type Quote={status:string;reason?:string;indicative_odds?:number;verified_odds?:number;matched_fixture_count?:number;
   pasted_fixture_count?:number;full_ticket_complete?:boolean;share_code?:string|null;readback_status?:string;
   verified_odds_source?:string;
@@ -72,6 +75,11 @@ export default function BasketballJackpot(){
  const [historyBusy,setHistoryBusy]=useState<'loading'|'settling'|null>(null);
  const [historyError,setHistoryError]=useState('');
  const [historyInfo,setHistoryInfo]=useState('');
+ const [settlementHealth,setSettlementHealth]=useState<SettlementHealth|null>(null);
+ const loadJobHealth=async()=>{
+   try{setSettlementHealth(await api<SettlementHealth>('basketball-jackpot/settlement-health'));}
+   catch{setSettlementHealth({status:'unavailable',state:'unavailable'});}
+ };
  const [recovering,setRecovering]=useState<string|null>(null);
  const lock=useRef(false);
  const load=async()=>{
@@ -115,9 +123,13 @@ export default function BasketballJackpot(){
      if(result.status!=='success')setHistoryError('Result source incomplete. Unverified games remain pending.');
      const saved=await api<HistoryList>('basketball-jackpot/history');setHistoryRows(saved.tickets);
    }catch(e){setHistoryError(errorText(e));}
-   finally{setHistoryBusy(null);}
+   finally{setHistoryBusy(null);void loadJobHealth();}
  };
- useEffect(()=>{void load();void loadHistory();},[]);
+ useEffect(()=>{
+   void load();void loadHistory();void loadJobHealth();
+   const poll=window.setInterval(()=>{void loadJobHealth();},60000);
+   return ()=>window.clearInterval(poll);
+ },[]);
  // Only unsent draft inputs survive a same-tab reload. Never persist a booking
  // code, unverified quote, or approval flag; every reload needs fresh preview.
  useEffect(()=>{
@@ -358,6 +370,20 @@ export default function BasketballJackpot(){
          <button type="button" disabled={historyBusy!==null} onClick={()=>void settleHistory()}>
            {historyBusy==='settling'?<Loader2 size={15} className="spin"/>:<ShieldCheck size={15}/>} Verify NBA finals</button>
        </div>
+     </div>
+     <div className="bj-settlement-health" role="status">
+       <strong>Automatic NBA results: {settlementHealth?.state==='observed'?'Observed':
+         settlementHealth?.state==='degraded'?'Needs attention':
+         settlementHealth?.state==='stale'?'Last check stale':
+         settlementHealth?.state==='unavailable'?'Status unavailable':'No unattended run observed yet'}</strong>
+       <span>{settlementHealth?.last_checked_at
+         ?'Last recorded check '+new Date(settlementHealth.last_checked_at)
+             .toLocaleString('en-NG',{timeZone:'Africa/Lagos'})+' WAT'
+         :'No stored result-check receipt yet.'}
+         {settlementHealth?.verified_final_legs
+           ?' · '+settlementHealth.verified_final_legs+' NBA legs verified in recent checks':' · No newly verified legs in reported checks'}</span>
+       {settlementHealth?.last_issue&&<small>Latest issue: {settlementHealth.last_issue}</small>}
+       <small>A successful empty check does not mean a game has finished. Other leagues remain pending until verified sources are approved.</small>
      </div>
      {historyBusy&&<div className="bj-progress" role="status">
        <Loader2 size={16} className="spin"/>{historyBusy==='settling'?'Checking confirmed NBA final scores…':'Loading saved codes…'}</div>}

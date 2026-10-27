@@ -10,7 +10,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def tick(*, settle=None) -> dict:
+def tick(*, settle=None, recorder=None) -> dict:
+    production_tick = settle is None
+    if recorder is None and production_tick:
+        from growth.basketball_result_checks import record
+        recorder = record
+
+    def finish(outcome):
+        if recorder is not None:
+            try:
+                recorder(outcome)
+            except Exception as exc:
+                logger.warning("Basketball result audit unavailable: %s",
+                               type(exc).__name__)
+        return outcome
+
     if settle is None:
         from growth.basketball_settlement import settle_due
         settle = settle_due
@@ -19,19 +33,19 @@ def tick(*, settle=None) -> dict:
     except Exception as exc:
         logger.warning("Private basketball final score check failed closed: %s",
                        type(exc).__name__)
-        return {"status": "unavailable", "reason": type(exc).__name__}
+        return finish({"status": "unavailable", "reason": type(exc).__name__})
     if not isinstance(result, dict):
-        return {"status": "unavailable", "reason": "invalid_receipt"}
+        return finish({"status": "unavailable", "reason": "invalid_receipt"})
     if result.get("status") != "success":
         logger.warning("Basketball settlement provider incomplete: %s",
                        str(result.get("status", "unknown"))[:80])
-        return {"status": "unavailable", "reason": str(result.get("status"))[:80]}
+        return finish({"status": "unavailable", "reason": str(result.get("status"))[:80]})
     count = result.get("nba_final_legs", 0)
     changed = result.get("tickets_updated", 0)
     if type(count) is not int or type(changed) is not int or count < 0 or changed < 0:
-        return {"status": "unavailable", "reason": "invalid_counts"}
+        return finish({"status": "unavailable", "reason": "invalid_counts"})
     if changed:
         logger.info("Verified NBA booking settlement: %d tickets; %d legs",
                     changed, count)
-    return {"status": "success", "nba_final_legs": count,
-            "tickets_updated": changed}
+    return finish({"status": "success", "nba_final_legs": count,
+                   "tickets_updated": changed})
