@@ -15,9 +15,11 @@ MAX_AGE_MINUTES = 35
 
 
 def _ensure(conn):
+    primary_key = ("BIGSERIAL PRIMARY KEY" if conn.dialect.name=="postgresql"
+                   else "INTEGER PRIMARY KEY AUTOINCREMENT")
     conn.execute(text("""
       CREATE TABLE IF NOT EXISTS basketball_private_result_checks (
-        id BIGSERIAL PRIMARY KEY,
+        id """ + primary_key + """,
         checked_at TIMESTAMPTZ NOT NULL,
         state VARCHAR(32) NOT NULL,
         tickets_updated INTEGER NOT NULL,
@@ -65,13 +67,17 @@ def snapshot(*, engine=None, now=None):
         from database import engine as live_engine
         engine = live_engine
     instant = now or datetime.now(timezone.utc)
-    with engine.begin() as conn:
-        _ensure(conn)
+    try:
+      with engine.connect() as conn:
         rows = conn.execute(text("""
           SELECT checked_at, state, tickets_updated, final_legs, issue
           FROM basketball_private_result_checks
           ORDER BY id DESC LIMIT 12
         """)).mappings().all()
+    except Exception:
+      return {"status":"not_observed","state":"not_observed",
+              "last_checked_at":None,"recent_checks":0,
+              "verified_final_legs":0,"tickets_updated":0}
     if not rows:
         return {"status":"not_observed","state":"not_observed",
                 "last_checked_at":None,"recent_checks":0,
