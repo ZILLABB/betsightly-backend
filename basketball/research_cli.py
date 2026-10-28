@@ -308,6 +308,11 @@ def build_parser() -> argparse.ArgumentParser:
     ledger.add_argument("--home", type=Path,
                         default=Path("data/basketball/research"))
 
+    jev = commands.add_parser("jev-readiness",
+                               help="Read-only private NBA Jev evidence readiness; no Jev call")
+    jev.add_argument("--db", type=Path, default=DEFAULT_DATA.parent / "nba_paper.sqlite")
+    jev.add_argument("--home", type=Path, default=DEFAULT_DATA.parent)
+
     dashboard = commands.add_parser("dashboard",
                                     help="Read-only Atlantic view (localhost only)")
     dashboard.add_argument("--db", type=Path,
@@ -543,6 +548,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "ledger":
         from basketball.research_cycle import ledger_report
         result = ledger_report(home=args.home)
+    elif args.command == "jev-readiness":
+        from basketball.research_jev_readiness import jev_research_readiness
+        result = jev_research_readiness(args.db, home=args.home)
     elif args.command == "dashboard":
         from basketball.research_dashboard import serve_dashboard
         serve_dashboard(db_path=args.db, port=args.port)
