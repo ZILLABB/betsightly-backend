@@ -298,11 +298,21 @@ def infer_published_competition_slugs(games: list[dict]) -> tuple[set[str], int]
     slugs: set[str] = set()
     unresolved = 0
     for game in games:
+        league = _normalize_name(game.get("league") or "")
         slug = str(game.get("league_slug") or "")
+        # Many unrelated bookmaker competitions are called "Premier League":
+        # Singapore, Armenia, Israel, Jamaica and Uganda all have historic
+        # manual receipts mistakenly tagged as ESPN's English eng.1. Even
+        # a PERSISTED slug is not proof of country in these legacy records.
+        # Require an explicitly country-qualified competition name instead.
+        # Official-engine fixtures are unaffected: this is specific to manual
+        # SportyBet receipts with the globally ambiguous generic label.
+        if game.get("editorial_manual") is True and league == "premier league":
+            unresolved += 1
+            continue
         if slug in known:
             slugs.add(slug)
             continue
-        league = _normalize_name(game.get("league") or "")
         candidates = by_name.get(league, set())
         if len(candidates) == 1:
             slugs.update(candidates)
