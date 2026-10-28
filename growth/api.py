@@ -913,6 +913,29 @@ def nba_research_export_backup(response: Response):
     return result
 
 
+@router.get("/admin/nba-research/forward-scorecard",
+            dependencies=[Depends(require_admin)])
+def nba_private_forward_scorecard(response: Response):
+    """Original before-tipoff NBA performance; no bookmakers or model training."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA scorecard unavailable.")
+    from basketball.research_private_store import SessionLocal, latest_bundle
+    from basketball.research_forward_scorecard import scorecard
+    with SessionLocal() as db:
+        archive = latest_bundle(db)
+        if archive is None:
+            raise HTTPException(404, "NBA research archive unavailable.")
+        try:
+            result = scorecard(archive)
+        except ValueError as exc:
+            logger.warning("NBA forward scorecard validation rejected: %s",
+                           type(exc).__name__)
+            raise HTTPException(409, "NBA forward research integrity blocked.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.get("/admin/nba-research/backup-full",
             dependencies=[Depends(require_admin)])
 def nba_research_export_backup_full(response: Response):
@@ -1035,6 +1058,28 @@ def nba_private_machine_backup_full(request: Request, response: Response):
     if not _nba_backup_machine_allowed(request):
         raise HTTPException(404, "Not found.")
     return nba_research_export_backup_full(response)
+
+
+@router.post("/internal/nba-research/backup-full/ack")
+def nba_private_machine_full_backup_ack(request: Request, body: dict = Body(...)):
+    """V2 receipt only after offsite private Blob raw-byte readback.
+
+    The signed current archive, market count and complete job ledger must
+    still match the archived copy. The acknowledgement itself adds a new
+    audit entry, so the *next* V2 backup will include that receipt.
+    """
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    from basketball.research_full_recovery_ack import verify_v2_backup_ack
+    from basketball.research_ops_health import record_run
+    try:
+        receipt = verify_v2_backup_ack(body)
+    except ValueError as exc:
+        logger.warning("NBA V2 offsite receipt rejected: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA offsite full recovery receipt invalid.") from None
+    record_run("backup", "verified_full_private_blob_readback",
+               detail={"archive_digest": receipt["archive_digest"]})
+    return receipt
 
 
 @router.post("/internal/nba-research/backup/ack")

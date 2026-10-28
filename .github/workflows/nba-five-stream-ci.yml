@@ -1,0 +1,31 @@
+name: NBA five-stream private release acceptance
+"on":
+  pull_request:
+    paths:
+      - "basketball/research_forward_scorecard.py"
+      - "basketball/research_market_settlement_contract.py"
+      - "basketball/research_multileague_release_gates.py"
+      - "basketball/research_full_recovery_ack.py"
+      - "growth/api.py"
+      - "tests/test_nba_five_stream_gates.py"
+      - "ops/nba_vercel_scheduler/**"
+      - ".github/workflows/nba-five-stream-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  five-stream-offline-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: python -m pip install -r requirements.txt pytest
+      - run: python -m py_compile basketball/research_forward_scorecard.py basketball/research_market_settlement_contract.py basketball/research_multileague_release_gates.py basketball/research_full_recovery_ack.py
+      - run: python -m pytest --noconftest tests/test_nba_five_stream_gates.py tests/test_basketball_full_recovery.py tests/test_basketball_hosted_forecast.py tests/test_nba_stage_route_isolation.py -q
+      - run: node --check ops/nba_vercel_scheduler/api/backup-v2.js
