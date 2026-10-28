@@ -876,6 +876,26 @@ def nba_private_league_sources(response: Response, league: str, day: str):
     return result
 
 
+@router.get("/admin/nba-research/europe-sources",
+            dependencies=[Depends(require_admin)])
+def nba_private_europe_source(response: Response, league: str, start_year: int):
+    """One bounded EuroLeague/EuroCup season source probe, research-only."""
+    from datetime import datetime, timezone
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA private research unavailable.")
+    if league not in ("euroleague", "eurocup") or not (
+        2000 <= start_year <= datetime.now(timezone.utc).year):
+        raise HTTPException(422, "League or season not supported.")
+    from basketball.research_europe_sources import probe_season
+    try:
+        result = probe_season(league, start_year)
+    except (ValueError, RuntimeError):
+        raise HTTPException(503, "European league source unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.get("/admin/nba-research/history",
             dependencies=[Depends(require_admin)])
 def nba_research_market_history(response: Response):

@@ -59,7 +59,7 @@ def scorecard(archive):
                 outcome = float(home > away)
                 brier = (p - outcome) ** 2
                 loss = -(outcome * log(p) + (1-outcome) * log(1-p))
-                rows.append((brier, loss, float(int(p >= 0.5) == int(outcome))))
+                rows.append((brier, loss, float(int(p >= 0.5) == int(outcome)), p, outcome))
             else:
                 h = _num(prediction["predicted_home_points"])
                 a = _num(prediction["predicted_away_points"])
@@ -69,7 +69,18 @@ def scorecard(archive):
         if model == "moneyline":
             metrics = {"brier": round(sum(x[0] for x in rows)/n, 5) if n else None,
                        "log_loss": round(sum(x[1] for x in rows)/n, 5) if n else None,
-                       "accuracy": round(sum(x[2] for x in rows)/n, 5) if n else None}
+                       "accuracy": round(sum(x[2] for x in rows)/n, 5) if n else None,
+                       "chance_brier_baseline": 0.25 if n else None,
+                       "brier_skill_vs_chance": round(1 - 4 * sum(x[0] for x in rows)/n, 5) if n else None,
+                       "home_win_frequency": round(sum(x[4] for x in rows)/n, 5) if n else None,
+                       "always_home_accuracy": round(sum(x[4] for x in rows)/n, 5) if n else None,
+                       "calibration_bins": [
+                           {"bin": i, "n": len(group),
+                            "mean_probability": round(sum(x[3] for x in group)/len(group),4) if group else None,
+                            "observed_home_win_rate": round(sum(x[4] for x in group)/len(group),4) if group else None}
+                           for i in range(5)
+                           for group in [[x for x in rows if min(int(x[3]*5),4)==i]]
+                       ]}
         else:
             metrics = {"home_mae": round(sum(x[0] for x in rows)/n, 4) if n else None,
                        "away_mae": round(sum(x[1] for x in rows)/n, 4) if n else None,

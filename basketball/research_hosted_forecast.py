@@ -26,6 +26,7 @@ from basketball.research_private_store import (
     SessionLocal, latest_bundle, import_bundle, hosted_board,
 )
 from basketball.research_public_data import fetch_public_seasons
+from basketball.research_schedule_coverage import audit_nba_coverage
 
 
 def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
@@ -70,6 +71,13 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
     upcoming = [g for g in joined if
                 g["season"] == current_year and g["status"] == "scheduled"
                 and not g.get("postseason") and g.get("start_utc")]
+    # Source completeness is not the same as being eligible for this model.
+    # Provider manifests from old pre-coverage fixtures may omit quality.
+    current_manifests=[m for m in manifests if isinstance(m,dict)
+                       and m.get("season")==current_year]
+    coverage=(audit_nba_coverage(
+        prior,dataset,now=instant,season=current_year,manifests=manifests)
+        if len(current_manifests)==1 else None)
     if len(previous) < 200:
         raise ValueError("NBA_PREVIOUS_SEASON_FINAL_SAMPLE_INCOMPLETE")
     if not any(
@@ -81,6 +89,7 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
             "status": "no_upcoming_eligible_source_window",
             "new_forecasts": {}, "archive_digest": _digest(prior),
             "research_only": True, "not_bookable": True,
+            "coverage": coverage,
         }
 
     with TemporaryDirectory(prefix="nba-hosted-forecast-") as folder:
@@ -106,7 +115,7 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
             return {
                 "status": "source_not_fresh", "new_forecasts": {},
                 "archive_digest": _digest(prior), "research_only": True,
-                "not_bookable": True,
+                "not_bookable": True, "coverage": coverage,
             }
         updated = export_bundle(root)
         changed = {
@@ -140,7 +149,7 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
                        else "no_model_eligible_fixture_in_window"),
             "readiness": readiness,
             "archive_digest": _digest(prior), "research_only": True,
-            "not_bookable": True,
+            "not_bookable": True, "coverage": coverage,
         }
     stored = import_bundle(updated)
     reread = hosted_board()
@@ -153,5 +162,5 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
         "research_only": True, "not_bookable": True,
         "advanced_model_recomputed": False,
         "historical_provider_manifest_count": len(manifests),
-        "readiness": readiness,
+        "readiness": readiness, "coverage": coverage,
     }

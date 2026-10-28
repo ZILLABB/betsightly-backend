@@ -27,7 +27,7 @@ MAX_RECOVERY_BYTES = 30_000_000
 ALLOWED_SUMMARY_KEYS = frozenset({
     "outcome", "new_finals", "fixture_count", "fixture_matches",
     "new_forecasts", "provider_status", "failed_date_count", "archive_digest",
-    "reason", "readiness",
+    "reason", "readiness", "coverage",
 })
 
 
