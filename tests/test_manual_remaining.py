@@ -252,9 +252,11 @@ def test_real_editorial_publication_is_primary_manual_rebooking_source(monkeypat
     # The legacy tier store has an unrelated automated ticket under same key.
     monkeypatch.setattr(B, "bookings_for", lambda day: {
         "10_odds": _verified_record([_leg(8, 2), _leg(9, 3)])})
-    monkeypatch.setattr(B, "booking_editions_for",
-                        lambda day, tier: (_ for _ in ()).throw(
-                            AssertionError("Must not use legacy edition")))
+    def legacy_editions(day, tier):
+        if tier == "10_odds":
+            raise AssertionError("Must not use legacy edition for the published tier")
+        return []
+    monkeypatch.setattr(B, "booking_editions_for", legacy_editions)
     monkeypatch.setattr(sportybet, "fetch_board", lambda: {})
     result = M.build_manual_remainders(now=NOW)
     assert result["available"] is True
