@@ -261,3 +261,34 @@ def test_oct15_oct22_official_conference_finals_recover_only_matching_receipts()
         assert incident_finals([{**game, "sportybet_event_id": "sr:match:wrong"}]) == []
         assert incident_finals([{**game, "away_team": "Another Club"}]) == []
         assert incident_finals([{**game, "kickoff": "2026-10-23T19:00:00Z"}]) == []
+
+
+def test_oct25_english_premier_league_official_finals_are_exact_by_event():
+    """Only the two verified English fixtures, not generic overseas leagues."""
+    from services.verified_incident_finals import incident_finals
+    from leagues.results_checker import _index_free_finals
+    cases = [
+        ("sr:match:72221346", "Liverpool", "Brighton", 2, 0),
+        ("sr:match:72221348", "Man Utd", "Bournemouth", 0, 3),
+    ]
+    for event_id, home, away, h, a in cases:
+        pick = {
+            "sportybet_event_id": event_id, "home_team": home,
+            "away_team": away, "kickoff": "2026-10-25T14:00:00+00:00",
+            "market": "over_1_5", "status": "pending",
+            "league": "Premier League", "editorial_manual": True,
+            "league_slug": "eng.1",
+        }
+        evidence = incident_finals([pick])
+        assert len(evidence) == 1
+        assert (evidence[0]["home_score"], evidence[0]["away_score"]) == (h, a)
+        record = {"games": [pick], "booking": {"share_code": "IMMUTABLE"}}
+        result = grade_manual_slip(
+            record, _index_free_finals(evidence),
+            now=datetime(2026, 10, 28, 9, tzinfo=timezone.utc),
+        )
+        assert result["result_status"] == "won"
+        assert result["booking"] == record["booking"]
+        assert incident_finals([{**pick, "home_team": "Other FC"}]) == []
+        assert incident_finals([{**pick, "kickoff": "2026-10-26T14:00:00Z"}]) == []
+        assert incident_finals([{**pick, "sportybet_event_id": "sr:match:nope"}]) == []
