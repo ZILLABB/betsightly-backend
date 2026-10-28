@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {useIsFetching, useQuery, useQueryClient} from '@tanstack/react-query';
 import {
- Activity, BarChart3, CheckCircle2, ChevronRight, Clock3, Database, FileCheck2,
+ Activity, BarChart3, CheckCircle2, ChevronRight, Clock3, ClipboardCheck, Database, FileCheck2,
  Globe2, LayoutDashboard, Loader2, LockKeyhole, LogOut, Megaphone, Menu, PanelLeftClose, PanelLeftOpen, Search, RefreshCcw,
  Send, Settings2, ShieldCheck, Ticket, UploadCloud, Users, X, AlertTriangle, type LucideIcon
 } from 'lucide-react';
@@ -10,9 +10,10 @@ import Insights from './Insights';
 import PrivateJackpot from './PrivateJackpot';
 import BasketballJackpot from './BasketballJackpot';
 import BasketballResearch from './BasketballResearch';
+import SettlementReview from './SettlementReview';
 import {AdminActionDialog, AdminCommandPalette, PremiumOperationsOverview} from './PremiumComponents';
 
-type Page = 'overview' | 'audience' | 'predictions' | 'analytics-health' | 'manual' | 'jackpot' | 'basketball-jackpot' | 'nba-research' | 'sporty' | 'readiness' | 'content' | 'campaign' | 'publishing' | 'referrals' | 'settings';
+type Page = 'overview' | 'audience' | 'predictions' | 'analytics-health' | 'manual' | 'settlement-review' | 'jackpot' | 'basketball-jackpot' | 'nba-research' | 'sporty' | 'readiness' | 'content' | 'campaign' | 'publishing' | 'referrals' | 'settings';
 const NBA_RESEARCH_ADMIN_ENABLED = import.meta.env.VITE_NBA_RESEARCH_ADMIN_ENABLED === 'true';
 const NBA_RESEARCH_STAGING_ONLY = NBA_RESEARCH_ADMIN_ENABLED &&
   import.meta.env.VITE_NBA_RESEARCH_STAGING_ONLY === 'true';
@@ -22,6 +23,7 @@ const nav: {id: Page; label: string; icon: LucideIcon; group: string}[] = [
  {id:'predictions',label:'Predictions & builder',icon:BarChart3,group:'COMMAND CENTER'},
  {id:'analytics-health',label:'Analytics health',icon:Activity,group:'COMMAND CENTER'},
  {id:'manual',label:'Manual SportyBet',icon:Ticket,group:'COMMAND CENTER'},
+ {id:'settlement-review',label:'Settlement review',icon:ClipboardCheck,group:'COMMAND CENTER'},
  {id:'jackpot',label:'Private Jackpot',icon:Ticket,group:'COMMAND CENTER'},
  {id:'basketball-jackpot',label:'Basketball Jackpot',icon:Ticket,group:'COMMAND CENTER'},
  ...(NBA_RESEARCH_ADMIN_ENABLED ? [{id:'nba-research' as Page,label:'NBA Research',icon:Database,group:'COMMAND CENTER'}] : []),
@@ -71,12 +73,13 @@ function Overview({onNavigate}:{onNavigate:(page:Page)=>void}) {
  </>;
 }
 
-type ManualRequest={tier:string;lines:string;replace_official_display:boolean};
+type ManualRequest={tier:string;lines:string;replace_official_display:boolean;manual_review_override:boolean;manual_review_reason:string};
 type Imported={code:string;tier:string;lines:string;original_leg_count:number;unresolved_count?:number;status?:string;games?:any[];warnings?:string[];converted_features?:any[];total_odds?:number};
 function ManualStudio() {
  const qc=useQueryClient();
  const [tier,setTier]=useState<string>('2_odds'),[code,setCode]=useState(''),[lines,setLines]=useState(''),[convert,setConvert]=useState(false);
- const [replace,setReplace]=useState(false),[imported,setImported]=useState<Imported|null>(null),[preview,setPreview]=useState<{request:ManualRequest;data:any}|null>(null);
+ const [replace,setReplace]=useState(false),[manualReview,setManualReview]=useState(false),[manualReason,setManualReason]=useState('');
+ const [imported,setImported]=useState<Imported|null>(null),[preview,setPreview]=useState<{request:ManualRequest;data:any}|null>(null);
  const [stage,setStage]=useState(0),[busy,setBusy]=useState(''),[note,setNote]=useState<{kind:'error'|'success'|'info';text:string}|null>(null);
  const [publishReview,setPublishReview]=useState(false);
  const [uncertain,setUncertain]=useState(!!sessionStorage.getItem('bs_admin_uncertain'));
@@ -85,7 +88,10 @@ function ManualStudio() {
  const current=useQuery({queryKey:['manual-tiers'],queryFn:()=>api<any>('manual-tiers'),refetchOnMount:'always'});
  const saved=current.data?.published||{};
  const normalized=lines.trim().replace(/\r\n/g,'\n');
- const request=useMemo<ManualRequest>(()=>({tier,lines:normalized,replace_official_display:replace}),[tier,normalized,replace]);
+ const request=useMemo<ManualRequest>(()=>({
+   tier,lines:normalized,replace_official_display:replace,
+   manual_review_override:manualReview,manual_review_reason:manualReason.trim(),
+ }),[tier,normalized,replace,manualReview,manualReason]);
  const ready=!!preview && JSON.stringify(preview.request)===JSON.stringify(request);
  const importedExact=!!imported && imported.code===code.trim() && imported.tier===tier && imported.lines.trim()===normalized && !convert && !imported.unresolved_count && !imported.converted_features?.length && imported.status==='IMPORTED_NOT_PUBLISHED';
  const active=!!busy;
@@ -143,17 +149,23 @@ function ManualStudio() {
   const result=await api<any>('manual-tiers/preview',request);
   if(!Array.isArray(result.games)||!result.games.length||result.games.length!==normalized.split('\n').filter(Boolean).length)throw Error('Live preview did not verify every selection.');
   setPreview({request,data:result});setStage(3);
-  setNote({kind:'success',text:'Live preview confirmed '+result.games.length+' legs at '+result.total_odds+'x. No ticket published yet.'});
+  setNote(result.publish_ready?
+    {kind:'success',text:'Live preview confirmed '+result.games.length+' legs at '+result.total_odds+'x. No ticket published yet.'}:
+    {kind:'error',text:String(result.settlement_publication_policy?.reason||'Score verification coverage blocked publication; replace unsupported games or record a review plan.')});
  });
  const publish=()=>run('Publishing verified ticket',async()=>{
   if(!ready || !preview)throw Error('Recheck live prices after every change before publishing.');
+  if(!preview.data.publish_ready)throw Error('Score coverage gate has blocked publication. Replace unsupported fixtures or explicitly accept and document manual review.');
   if(uncertain)throw Error('Earlier publication outcome uncertain. Check saved tickets before any new POST.');
   // The review dialog requires explicit confirmation before this mutation.
   const previousCode=String(saved[tier]?.share_code||'');
   setStage(4);sessionStorage.setItem('bs_admin_uncertain',JSON.stringify({tier,previousCode}));
   try{
    const path=importedExact?'manual-tiers/publish-imported':'manual-tiers/publish';
-   const payload=importedExact?{tier,code:code.trim(),replace_official_display:replace}:request;
+   const payload=importedExact?{
+     tier,code:code.trim(),replace_official_display:replace,
+     manual_review_override:manualReview,manual_review_reason:manualReason.trim(),
+   }:request;
    const result=await api<any>(path,payload);
    const checkResult=await current.refetch();
    const persisted=checkResult.data?.published?.[tier];
@@ -179,7 +191,7 @@ function ManualStudio() {
    if(newTicket){setUncertain(false);sessionStorage.removeItem('bs_admin_uncertain');}
   }
  });
- const tierChange=(v:string)=>{setTier(v);setImported(null);edit();setReplace(false)};
+ const tierChange=(v:string)=>{setTier(v);setImported(null);edit();setReplace(false);setManualReview(false);setManualReason('')};
  const codeChange=(v:string)=>{setCode(v);setImported(null);edit()};
  const lineChange=(v:string)=>{setLines(v);setImported(null);edit()};
  const marketOptions=['home_win','away_win','draw','home_or_draw','away_or_draw','home_or_away','over_0_5','over_1_5','over_2_5','over_3_5','over_4_5','btts_yes'];
@@ -205,12 +217,16 @@ function ManualStudio() {
      <label>Event ID,market — one per line<textarea rows={10} spellCheck={false} value={lines} onChange={e=>lineChange(e.target.value)} placeholder={'52587,home_win\n17187,over_1_5'}/></label>
      <label className="file-import">Import CSV or TXT (16 KB maximum)<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={importFile}/></label>
      {['2_odds','5_odds','10_odds','over_1_5'].includes(tier)&&<label className="check"><input type="checkbox" checked={replace} onChange={e=>{setReplace(e.target.checked);edit()}}/>Replace the PUBLIC display for this tier; preserve the original model result</label>}
-     <div className="toolbar"><button type="button" className="button secondary" onClick={check} disabled={!!imported?.unresolved_count||!normalized}>{busy==='Checking live SportyBet prices'?<Loader2 size={16} className="spin"/>:<FileCheck2 size={16}/>} {busy==='Checking live SportyBet prices'?'Checking every price…':'Check live prices'}</button><button type="button" className="button primary" disabled={!ready||uncertain} onClick={()=>setPublishReview(true)}>{busy==='Publishing verified ticket'?<Loader2 size={16} className="spin"/>:<Send size={16}/>} {busy==='Publishing verified ticket'?'Publishing and confirming…':'Publish verified ticket'}</button></div>
+     <label className="check"><input type="checkbox" checked={manualReview} onChange={e=>{setManualReview(e.target.checked);edit();}}/>Explicitly accept manual evidence review if a competition has no automatic score source</label>
+     {manualReview&&<label>Manual final-score evidence plan<textarea rows={3} minLength={25} maxLength={500}
+       value={manualReason} onChange={e=>{setManualReason(e.target.value);edit()}}
+       placeholder="Explain which official league or federation results you will verify after full time and how the evidence will be recorded." /></label>}
+     <div className="toolbar"><button type="button" className="button secondary" onClick={check} disabled={!!imported?.unresolved_count||!normalized}>{busy==='Checking live SportyBet prices'?<Loader2 size={16} className="spin"/>:<FileCheck2 size={16}/>} {busy==='Checking live SportyBet prices'?'Checking every price…':'Check live prices'}</button><button type="button" className="button primary" disabled={!ready||!preview?.data?.publish_ready||uncertain} onClick={()=>setPublishReview(true)}>{busy==='Publishing verified ticket'?<Loader2 size={16} className="spin"/>:<Send size={16}/>} {busy==='Publishing verified ticket'?'Publishing and confirming…':'Publish verified ticket'}</button></div>
      {ready&&Number(preview?.data?.settlement_source_coverage?.unmapped||0)>0&&<Warning>
-      <strong>Final-score verification coverage warning:</strong> {n(preview?.data?.settlement_source_coverage?.unmapped)} of {n(preview?.data?.games?.length)} fixtures lack a verified ESPN competition mapping. A bookmaker code may still be valid, but those results could remain unverified after full time. Unsupported competitions are not automatically marked won, lost or void.
+      <strong>Final-score coverage gate:</strong> {n(preview?.data?.settlement_source_coverage?.unmapped)} of {n(preview?.data?.games?.length)} fixtures have no registered verified score provider. {preview?.data?.publish_ready?'Manual-review exception is recorded; official 90-minute evidence is required after full time.':'Publication is blocked. Replace these fixtures, or explicitly opt into a documented evidence-review plan before checking prices again.'}
       {(preview?.data?.settlement_source_warnings||[]).slice(0,8).map((warning:any,i:number)=><div key={i}>{n(warning.fixture)} · {n(warning.league)}</div>)}
      </Warning>}
-     {ready&&<div className="notice success" role="status"><CheckCircle2 size={17}/><div><strong>Ready for your confirmation</strong><p>{n(preview?.data?.games?.length)} exact games verified at {n(preview?.data?.total_odds)}x. A fresh bookmaker code is issued only after confirmation and saved readback.</p></div></div>}
+     {ready&&preview?.data?.publish_ready&&<div className="notice success" role="status"><CheckCircle2 size={17}/><div><strong>Ready for your confirmation</strong><p>{n(preview?.data?.games?.length)} exact games verified at {n(preview?.data?.total_odds)}x. A fresh bookmaker code is issued only after confirmation and saved readback.</p></div></div>}
     </fieldset>
    </Panel>
    <div className="panel-stack">
@@ -370,7 +386,7 @@ function App() {
  const signOut=async()=>{try{await api('admin/logout',{},'POST')}catch{}qc.clear();setSession('guest')};
  if(session==='checking')return <div className="auth-screen"><Loading label="Verifying protected admin session…"/></div>;
  if(session==='guest')return <div className="auth-screen"><form className="auth-card" onSubmit={signIn}><div className="brand-mark">B<span>.</span></div><span className="eyebrow">PRIVATE COMMAND CENTER</span><h1>Sign in to BetSightly.</h1><p>{NBA_RESEARCH_STAGING_ONLY ? 'Private NBA research staging. Football operations and live audience statistics are available in the production admin.' : 'Protected football and basketball operations, data intelligence and verified publishing.'}</p><label>Administrator password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required autoFocus/></label>{loginError&&<ResultNote kind="error" text={loginError}/>}<button className="button primary wide" type="submit" disabled={signing}>{signing?<Loader2 className="spin" size={18}/>:<LockKeyhole size={17}/>} Secure sign in</button><small>Signed sessions are HttpOnly, Secure and SameSite=Strict. Nothing is stored in the browser beyond the protected session cookie.</small></form></div>;
- const sections:{[key in Page]:React.ReactNode}={overview:<Overview onNavigate={setPage}/>,audience:<Insights page="audience"/>,predictions:<Insights page="predictions"/>, 'analytics-health':<Insights page="analytics-health"/>,manual:<ManualStudio/>,jackpot:<PrivateJackpot/>, 'basketball-jackpot':<BasketballJackpot/>, 'nba-research':<BasketballResearch/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
+ const sections:{[key in Page]:React.ReactNode}={overview:<Overview onNavigate={setPage}/>,audience:<Insights page="audience"/>,predictions:<Insights page="predictions"/>, 'analytics-health':<Insights page="analytics-health"/>,manual:<ManualStudio/>, 'settlement-review':<SettlementReview/>,jackpot:<PrivateJackpot/>, 'basketball-jackpot':<BasketballJackpot/>, 'nba-research':<BasketballResearch/>,sporty:<Operations mode="sporty"/>,readiness:<Operations mode="readiness"/>,content:<Content/>,campaign:<CampaignEditor/>,publishing:<Publishing/>,referrals:<Referrals/>,settings:<Settings/>};
  return <div className="shell"><aside className={'sidebar '+(mobile?'shown ':'')+(sidebarCompact?'compact':'')}><div className="sidebar-brand"><div className="brand-mark">B<span>.</span></div><div className="sidebar-brand-name"><strong>BetSightly</strong><small>COMMAND CENTER</small></div><button className="mobile-close" onClick={()=>setMobile(false)} aria-label="Close menu"><X/></button></div><button type="button" className="sidebar-collapse-toggle" aria-label={sidebarCompact?'Expand sidebar':'Collapse sidebar'} onClick={()=>setSidebarCompact(v=>!v)}>{sidebarCompact?<PanelLeftOpen size={18}/>:<PanelLeftClose size={18}/>}<span>{sidebarCompact?'':'Collapse menu'}</span></button><nav aria-label="Admin navigation">{workspaceNav.map((item,i)=>{const Icon=item.icon;return <React.Fragment key={item.id}>{(i===0||item.group!==workspaceNav[i-1].group)&&<div className="nav-group">{item.group}</div>}<button className={'nav-item '+(page===item.id?'active':'')} aria-current={page===item.id?'page':undefined} onClick={()=>{setPage(item.id);setMobile(false)}} aria-label={item.label} title={sidebarCompact?item.label:undefined}><Icon size={18}/><span>{item.label}</span>{page===item.id&&<ChevronRight size={14}/>}</button></React.Fragment>})}</nav><div className="sidebar-bottom"><div className="session"><ShieldCheck size={18}/><div><strong>Protected session</strong><span>Render-backed authentication</span></div></div><button onClick={signOut} className="sign-out"><LogOut size={17}/> Sign out</button></div></aside><div className="workspace"><header className="topbar"><div className="topbar-left"><button className="menu-toggle" onClick={()=>setMobile(true)} aria-label="Open menu"><Menu/></button><div className="breadcrumb">BET SIGHTLY <ChevronRight size={13}/> <strong>{workspaceNav.find(x=>x.id===page)?.label}</strong></div></div><div className="topbar-right"><button type="button" className="premium-search-trigger" onClick={()=>setCommandOpen(true)} aria-label="Search admin pages"><Search size={16}/><span>Search workspace</span><kbd>Ctrl K</kbd></button><span className={'workspace-activity '+(fetching?'syncing':'')} role="status" aria-live="polite"><span className="workspace-activity-dot" aria-hidden="true"/>{fetching?'Refreshing data…':'Protected workspace'}</span><span className="clock">{new Date().toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric',timeZone:'Africa/Lagos'})}</span></div></header>{NBA_RESEARCH_STAGING_ONLY&&
   <div className="notice info nba-staging-scope" role="note">
     <ShieldCheck size={19}/>

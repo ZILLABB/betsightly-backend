@@ -366,7 +366,8 @@ def _manual_rollover_publish_db(monkeypatch, prior_status=None):
     }]
     monkeypatch.setattr(editor, "_engine", lambda: engine)
     monkeypatch.setattr(editor, "preview", lambda *args, **kwargs: {
-        "date": "2026-10-14", "games": games,
+        "date": "2026-10-14", "games": games, "publish_ready": True,
+        "settlement_publication_policy": {"allowed": True},
     })
     monkeypatch.setattr(editor, "_current_bookable_games",
                         lambda *args, **kwargs: games)

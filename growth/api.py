@@ -42,6 +42,9 @@ class ManualTierRequest(BaseModel):
     # Explicit replacement for a selected 2/5/10 Odds or Over Goals tier.
     # No Rollover or Banker override. Model records remain immutable.
     replace_official_display: bool = False
+    # Explicitly accept responsibility for an unsupported score source.
+    manual_review_override: bool = False
+    manual_review_reason: str = Field(default="", max_length=500)
 
 
 @router.get("/manual-tiers", dependencies=[Depends(require_admin)])
@@ -65,6 +68,54 @@ def get_manual_settlement_review(limit: int = Query(250, ge=1, le=1000)):
     """Admin-only unresolved fixture queue; never grades a manual ticket."""
     from leagues.manual_settlement_review import manual_settlement_review
     return manual_settlement_review(limit=limit)
+
+
+@router.get("/manual-tiers/settlement-review/desk",
+            dependencies=[Depends(require_admin)], response_class=HTMLResponse)
+def manual_settlement_review_desk():
+    from growth.manual_review_desk import page
+    return HTMLResponse(page(), headers={"Cache-Control": "no-store"})
+
+
+class ManualSettlementEvidenceProposal(BaseModel):
+    publish_date: str = Field(pattern=r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$")
+    tier: str = Field(min_length=2, max_length=30)
+    event_id: str = Field(min_length=3, max_length=100)
+    home_score: int = Field(ge=0, le=30)
+    away_score: int = Field(ge=0, le=30)
+    evidence_url: str = Field(min_length=12, max_length=700)
+    evidence_note: str = Field(min_length=45, max_length=1000)
+
+
+class ManualSettlementEvidenceApproval(BaseModel):
+    review_id: str = Field(min_length=36, max_length=36)
+    confirmed_event_id: str = Field(min_length=3, max_length=100)
+    attest_regulation_90: bool = False
+
+
+@router.post("/manual-tiers/settlement-review/propose")
+def propose_manual_settlement_evidence(
+    body: ManualSettlementEvidenceProposal,
+    actor: str = Depends(require_admin),
+):
+    from leagues.manual_settlement_evidence import propose_evidence
+    try:
+        return propose_evidence(**body.model_dump(), actor=actor)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/manual-tiers/settlement-review/approve")
+def approve_manual_settlement_evidence(
+    body: ManualSettlementEvidenceApproval,
+    actor: str = Depends(require_admin),
+):
+    from leagues.manual_settlement_evidence import approve_evidence
+    try:
+        return approve_evidence(**body.model_dump(), actor=actor)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
 
 
 # Private jackpot booking uses the same signed admin cookie as publishing.
@@ -299,6 +350,8 @@ def preview_manual_tier(body: ManualTierRequest):
             body.tier, body.lines,
             replace_official_over=body.replace_official_over,
             replace_official_display=body.replace_official_display,
+            manual_review_override=body.manual_review_override,
+            manual_review_reason=body.manual_review_reason,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
@@ -326,6 +379,8 @@ def publish_manual_tier(body: ManualTierRequest):
             body.tier, body.lines,
             replace_official_over=body.replace_official_over,
             replace_official_display=body.replace_official_display,
+            manual_review_override=body.manual_review_override,
+            manual_review_reason=body.manual_review_reason,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
@@ -335,6 +390,8 @@ class ManualExistingCodePublishRequest(BaseModel):
     tier: str = Field(min_length=3, max_length=20)
     code: str = Field(min_length=4, max_length=32)
     replace_official_display: bool = False
+    manual_review_override: bool = False
+    manual_review_reason: str = Field(default="", max_length=500)
 
 
 @router.post("/manual-tiers/publish-imported", dependencies=[Depends(require_admin)])
@@ -358,6 +415,8 @@ def publish_imported_manual_code(body: ManualExistingCodePublishRequest):
         result = publish(
             body.tier, imported["lines"],
             replace_official_display=body.replace_official_display,
+            manual_review_override=body.manual_review_override,
+            manual_review_reason=body.manual_review_reason,
         )
         return {
             **result, "imported_share_code": body.code,

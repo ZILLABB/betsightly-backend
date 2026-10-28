@@ -414,3 +414,29 @@ button:active:not(:disabled){transform:translateY(1px)}
 .nba-ops-runs>div small{color:#9abbd2}
 @media(max-width:950px){.nba-ops-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.nba-ops-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.nba-ops-runs>div{grid-template-columns:1fr 1fr}.nba-ops-runs>div small{grid-column:1/-1}}
+
+
+/* Verified manual settlement desk — restrained Atlantic operations styling. */
+.settlement-review-desk .settlement-review-metrics{margin-bottom:22px}
+.settlement-review-layout{grid-template-columns:minmax(0,1.1fr) minmax(330px,.9fr);align-items:start}
+.settlement-review-layout .panel{min-width:0}
+.settlement-review-search{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.settlement-review-search input{width:100%;min-width:0;min-height:42px;background:#0b2336;color:#e7f4fa;border:1px solid #315872;border-radius:9px;padding:10px 12px}
+.settlement-review-search span{font-size:12px;color:#aec2d5;white-space:nowrap}
+.settlement-review-scroll{max-height:720px;overflow:auto;scrollbar-width:thin;padding-right:3px;display:flex;flex-direction:column;gap:9px}
+.settlement-review-row{background:#0c283e;color:#eaf5fc;border:1px solid #315875;border-radius:12px;display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;padding:13px 14px;gap:8px;transition:background .18s,border-color .18s}
+.settlement-review-row:hover{background:#17425b;border-color:#5799b9}
+.settlement-review-row.selected,.settlement-review-row:focus-visible{outline:2px solid #69b6d2;outline-offset:1px;background:#174a65}
+.settlement-review-row b{font-size:13px;font-weight:750;display:block}
+.settlement-review-row small{display:block;font-size:11px;color:#aec9d9;line-height:1.6}
+.settlement-review-overdue{border:1px solid #9c7659;color:#f0c3a4;border-radius:20px;padding:3px 8px;font-size:11px;flex-shrink:0}
+.settlement-review-identity{display:flex;flex-direction:column;gap:3px;background:#0b2a40;border-left:3px solid #69b6d2;padding:12px 14px;margin-bottom:18px}
+.settlement-review-identity b{font-size:15px}.settlement-review-identity small{color:#b5cbda;font-size:12px}
+.settlement-review-form .editor{border:0;padding:0}
+.settlement-review-score{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.settlement-review-approval{margin-top:22px;padding-top:20px;border-top:1px solid #315872}
+.settlement-review-approval h3{font-size:17px;margin:0 0 12px}
+.settlement-review-approval .notice a{display:inline-flex;align-items:center;gap:5px;color:#b9e9fa;text-decoration:underline}
+.settlement-review-form .toolbar{flex-wrap:wrap}
+@media(max-width:1000px){.settlement-review-layout{grid-template-columns:minmax(0,1fr)}.settlement-review-scroll{max-height:420px}}
+@media(max-width:480px){.settlement-review-score{grid-template-columns:1fr}.settlement-review-search{flex-direction:column;align-items:stretch}}

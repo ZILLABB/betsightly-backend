@@ -2,13 +2,14 @@
 // The browser NEVER receives the Render origin or a backend credential.
 const GET = new Set([
  'admin/config','admin/me','analytics','status','market-readiness','daily',
- 'manual-tiers','basketball-jackpot/board','basketball-jackpot/history','basketball-jackpot/coverage','basketball-jackpot/settlement-health',
+ 'manual-tiers','manual-tiers/settlement-review','basketball-jackpot/board','basketball-jackpot/history','basketball-jackpot/coverage','basketball-jackpot/settlement-health',
  'admin/nba-research','admin/nba-research/markets',
  'admin/nba-research/health','admin/nba-research/history','admin/nba-research/backup','homepage-campaign','content','publications','settings','referrals'
 ]);
 const POST = new Set([
  'admin/login','admin/logout','generate','retry','manual-tiers/import-code',
  'manual-tiers/preview','manual-tiers/inspect','manual-tiers/publish','manual-tiers/publish-imported',
+ 'manual-tiers/settlement-review/propose','manual-tiers/settlement-review/approve',
  'homepage-campaign','settings','referrals',
  'private-jackpot/candidates','private-jackpot/book',
  'private-jackpot/optimize','private-jackpot/auto-book',
