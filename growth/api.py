@@ -913,6 +913,31 @@ def nba_research_export_backup(response: Response):
     return result
 
 
+@router.get("/admin/nba-research/backup-full",
+            dependencies=[Depends(require_admin)])
+def nba_research_export_backup_full(response: Response):
+    """V2 private recovery: signed archive, market receipts and job history.
+
+    Separate from the existing v1 Vercel cron route; cannot overwrite live
+    Supabase or original Render data and never enables public publication.
+    """
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA full recovery unavailable.")
+    from basketball.research_full_recovery import build_full_recovery
+    try:
+        bundle = build_full_recovery()
+    except ValueError as exc:
+        logger.warning("NBA full recovery integrity blocked: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "Complete NBA recovery unavailable.") from None
+    except Exception as exc:
+        logger.warning("NBA full recovery unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA recovery source unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return bundle
+
+
 @router.post("/admin/nba-research/forecast",
              dependencies=[Depends(require_admin)])
 def nba_admin_forecast_research(response: Response):
@@ -1002,6 +1027,14 @@ def nba_private_machine_backup(request: Request, response: Response):
     if not _nba_backup_machine_allowed(request):
         raise HTTPException(404, "Not found.")
     return nba_research_export_backup(response)
+
+
+@router.get("/internal/nba-research/backup-full")
+def nba_private_machine_backup_full(request: Request, response: Response):
+    """Private token only; V1 backup endpoint and existing cron are unchanged."""
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    return nba_research_export_backup_full(response)
 
 
 @router.post("/internal/nba-research/backup/ack")
