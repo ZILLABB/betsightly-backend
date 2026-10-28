@@ -25,7 +25,7 @@ def probe_sources(*, now=None, fetcher=None):
             )
             checks.append({
                 "league": league,
-                "status": str(result.get("status") or "unavailable"),
+                "status": ("empty" if result.get("status") == "ok" and not result.get("fixtures") else str(result.get("status") or "unavailable")),
                 "reported_matches": len(result.get("fixtures") or []),
                 "reported_pregame_evidence": len(result.get("evidence") or []),
                 "reported_group": result.get("auto_discovered_group"),
