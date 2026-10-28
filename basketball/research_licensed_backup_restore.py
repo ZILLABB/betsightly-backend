@@ -15,6 +15,9 @@ from basketball.research_safe_migrate import isolated_target_is_safe
 _SCHEMA_SQL = Path(__file__).resolve().parents[1] / (
     "sql/nba_private_licensed_history_20261028.sql"
 )
+_PROBE_SQL = Path(__file__).resolve().parents[1] / (
+    "sql/nba_private_six_league_source_probes_20261028.sql"
+)
 _SOURCE_SQL = Path(__file__).resolve().parents[1] / (
     "sql/nba_private_licensed_backup_receipts_20261028.sql"
 )
@@ -43,7 +46,7 @@ def restore_licensed_history_empty_postgres(
                 raise ValueError("BASKETBALL_HISTORY_RESTORE_SCHEMA_REQUIRED")
             if inspect(conn).get_table_names(schema="nba_research"):
                 raise ValueError("BASKETBALL_HISTORY_RESTORE_TARGET_NOT_EMPTY")
-            for filepath in (_SCHEMA_SQL,_SOURCE_SQL):
+            for filepath in (_SCHEMA_SQL,_PROBE_SQL,_SOURCE_SQL):
                 for statement in filepath.read_text(encoding="utf-8").split(";"):
                     if statement.strip():
                         conn.exec_driver_sql(statement)
