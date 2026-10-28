@@ -40,6 +40,16 @@ def evaluate_closeout(health: dict, archive: dict) -> dict:
         # V2 acknowledges itself AFTER saving the prior job history.
         service_blockers.append("post_backup_audit_rows_not_yet_offsite")
 
+    recent_coverage = next((
+        j["summary"]["coverage"] for j in health.get("jobs", [])
+        if j.get("kind")=="forecast"
+        and isinstance(j.get("summary"),dict)
+        and isinstance(j["summary"].get("coverage"),dict)
+    ), None)
+    if recent_coverage is None:
+        service_blockers.append("source_schedule_coverage_not_yet_audited")
+    elif recent_coverage.get("next_48h_missing_original_model",0)>0:
+        service_blockers.append("source_fixtures_missing_signed_forecasts")
     league_summary = {
         league: assess_league(league, {
             "independent_verified_finals": 0,
@@ -63,6 +73,8 @@ def evaluate_closeout(health: dict, archive: dict) -> dict:
             "remaining_fixture_slots": health["remaining_fixture_slots"],
             "archived_future_coverage": cohort,
             "all_nba_schedule_coverage_proven": False,
+            "latest_provider_source_coverage": recent_coverage,
+            "provider_source_not_independently_crosschecked": True,
         },
         "offsite_recovery": {
             "v2_blob_readback_verified": bool(
