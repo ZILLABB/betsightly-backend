@@ -55,11 +55,6 @@ def runtime_status(environ=None):
     if role != "staging":
         return {**base, "status": "staging_role_required",
                 "network_allowed": False}
-    if str(env.get("BETSIGHTLY_JEV_PROVIDER_BUDGET_APPROVED", "")).lower() not in {
-        "1", "true", "yes",
-    }:
-        return {**base, "status": "provider_budget_not_approved",
-                "network_allowed": False}
     return {**base, "status": "shadow_network_eligible",
             "network_allowed": True, "daily_worker_cap": MAX_CALLS_PER_DAY}
 
@@ -181,6 +176,14 @@ def evaluate_shadow(envelope, *, environ=None, transport=None,
     if not readiness["network_allowed"]:
         return {"status": readiness["status"], "shadow_only": True,
                 "publication_authority": False, "network_called": False}
+    # Only real billable Gateway calls require the external provider's spend
+    # budget to be pre-approved. Offline injected transports stay testable.
+    if transport is None and str(env.get("BETSIGHTLY_JEV_PROVIDER_BUDGET_APPROVED", "")).lower() not in {
+        "1", "true", "yes",
+    }:
+        return {"status": "provider_budget_not_approved",
+                "shadow_only": True, "publication_authority": False,
+                "network_called": False}
     try:
         payload = build_request(envelope)
     except (ValueError, TypeError, OverflowError) as exc:
