@@ -63,7 +63,7 @@ def test_fixture_result_winner_and_overtime_totals_unchanged():
     total = {**winner, "market_id": "225", "outcome_id": "12", "specifier": "total=158.5"}
     assert bs.settle_leg(total, event)["result"] == "won"
     assert bs.settle_leg({**total, "specifier": "total=173"}, event)["result"] == "void"
-    assert bs.settle_leg({**total, "specifier": "total=invalid"}, event) == {**total}
+    assert bs.settle_leg({**total, "specifier": "total=invalid"}, event) == {**total, "specifier": "total=invalid"}
 
 
 def test_eight_leg_wzyhhv_research_example_settles_from_unique_official_european_finals(monkeypatch):
