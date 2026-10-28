@@ -1,4 +1,4 @@
-"""Private, capped receipts for NBA basketball bookmaker-code result checks.
+"""Private, capped receipts for basketball bookmaker-code result checks.
 
 An HTTP 200 from a scheduler is not evidence of a verified final. Each
 scheduled evaluation stores a bounded operational receipt, not personal data,
@@ -34,7 +34,7 @@ def record(result: dict, *, engine=None, now=None):
         from database import engine as live_engine
         engine = live_engine
     status = result.get("status")
-    count = result.get("nba_final_legs", 0)
+    count = result.get("verified_final_legs", result.get("nba_final_legs", 0))
     updated = result.get("tickets_updated", 0)
     if status not in ("success", "unavailable") or (
         type(count) is not int or type(updated) is not int or
