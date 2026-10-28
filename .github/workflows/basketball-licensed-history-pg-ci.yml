@@ -1,0 +1,44 @@
+name: Basketball licensed historical data PostgreSQL acceptance
+"on":
+  pull_request:
+    paths:
+      - "sql/nba_private_licensed_history_20261028.sql"
+      - "basketball/research_licensed_history.py"
+      - "scripts/nba_import_licensed_history.py"
+      - "growth/api.py"
+      - "tests/test_basketball_licensed_history.py"
+      - ".github/workflows/basketball-licensed-history-pg-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-disposable-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: basketball_synthetic_only
+          POSTGRES_USER: research_test
+          POSTGRES_PASSWORD: ephemeral_synthetic_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U research_test -d basketball_synthetic_only"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      BASKETBALL_TEST_PG_URL: postgresql+psycopg2://research_test:ephemeral_synthetic_ci_password@localhost:5432/basketball_synthetic_only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install existing backend dependencies
+        run: python -m pip install -r requirements.txt pytest
+      - name: Compile private historical importer and admin route
+        run: python -m py_compile basketball/research_licensed_history.py scripts/nba_import_licensed_history.py growth/api.py
+      - name: Run synthetic rights, isolation and replay tests on PostgreSQL 18
+        run: python -m pytest --noconftest tests/test_basketball_licensed_history.py tests/test_basketball_league_source_matrix.py tests/test_basketball_other_league_candidates.py tests/test_basketball_europe_candidates.py -q
