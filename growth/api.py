@@ -841,6 +841,23 @@ def nba_research_model_validation(response: Response):
     return result
 
 
+@router.get("/admin/nba-research/licensed-history-backup-health",
+            dependencies=[Depends(require_admin)])
+def nba_private_licensed_backup_health(response: Response):
+    if not _nba_health_enabled():
+        raise HTTPException(404, "Licensed history unavailable.")
+    from basketball.research_licensed_backup_ack import history_backup_health
+    try:
+        result = history_backup_health()
+    except Exception as exc:
+        logger.warning("Licensed history private backup health unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Licensed history backup health unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.get("/admin/nba-research/licensed-history-readiness",
             dependencies=[Depends(require_admin)])
 def nba_private_licensed_history_readiness(response: Response):
@@ -1157,6 +1174,46 @@ def nba_private_machine_backup(request: Request, response: Response):
     if not _nba_backup_machine_allowed(request):
         raise HTTPException(404, "Not found.")
     return nba_research_export_backup(response)
+
+
+@router.get("/internal/nba-research/backup-licensed")
+def nba_private_machine_backup_licensed(request: Request, response: Response):
+    """Machine-token-only export of four isolated licensed-source tables."""
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    from basketball.research_licensed_backup import build_history_recovery
+    try:
+        result = build_history_recovery()
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("Private licensed history export integrity: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "Licensed history export integrity invalid.") from None
+    except Exception as exc:
+        logger.warning("Private licensed history export unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Licensed history export unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.post("/internal/nba-research/backup-licensed/ack")
+def nba_private_machine_backup_licensed_ack(request: Request,
+                                             body: dict = Body(...)):
+    """Only record validated fresh matching source after private Blob readback."""
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    from basketball.research_licensed_backup_ack import verify_and_record_history_ack
+    try:
+        return verify_and_record_history_ack(body)
+    except ValueError as exc:
+        logger.warning("Private licensed history backup ACK invalid: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "Licensed history ACK validation failed.") from None
+    except Exception as exc:
+        logger.warning("Private licensed history ACK unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Licensed history ACK unavailable.") from None
 
 
 @router.get("/internal/nba-research/backup-full")
