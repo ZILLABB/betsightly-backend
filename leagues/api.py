@@ -653,7 +653,7 @@ def get_bookable_now():
 
 
 @router.get("/manual-bookable-now")
-def get_manual_bookable_now(near_target: bool = False):
+def get_manual_bookable_now(near_target: bool = False, tier: str | None = None):
     """New, separately verified codes for surviving admin-curated picks.
 
     The default call is safe for automatic page recovery and needs only a
@@ -665,6 +665,9 @@ def get_manual_bookable_now(near_target: bool = False):
         from leagues.manual_remaining import (
             build_manual_remainders, qualified_supplemental_candidates)
         candidate_games = None
+        if near_target and tier and tier not in {
+                "banker", "2_odds", "5_odds", "10_odds", "over_1_5"}:
+            raise HTTPException(400, "Unknown prediction tier")
         if near_target:
             # A stale model board must not block otherwise valid reduced
             # tickets. No ad-hoc training or source scraping on public reads.
@@ -675,10 +678,13 @@ def get_manual_bookable_now(near_target: bool = False):
                 candidate_games = []
         from fastapi.responses import JSONResponse
         result = build_manual_remainders(
-            near_target=near_target, candidate_games=candidate_games)
+            near_target=near_target, candidate_games=candidate_games,
+            near_target_tier=tier)
         return JSONResponse(
             {"status": "success", **result},
             headers={"Cache-Control": "private, no-store"})
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Manual remainder lookup failed: %s", type(exc).__name__, exc_info=True)
         raise HTTPException(503, "Current manual rebooking cannot be verified")
