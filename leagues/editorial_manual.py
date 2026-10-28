@@ -219,6 +219,7 @@ def _current_bookable_games(requested: list[tuple[str, str]], board: dict,
         from leagues.live_scores import infer_published_competition_slugs
         from leagues.competition_registry import competition_for
         from leagues.espn_source import ESPN_CLUB_LEAGUES
+        from leagues.sportybet import registry_competition_match
         from services.openligadb_score_source import LEAGUE_SHORTCUTS
         for key in ("sportybet_tournament_id", "sportybet_category_id",
                     "sportybet_category", "sportybet_country_id",
@@ -229,7 +230,7 @@ def _current_bookable_games(requested: list[tuple[str, str]], board: dict,
         category_id = game.get("sportybet_category_id")
         slug = None
         if tournament_id or category_id:
-            identity = sportybet.registry_competition_match(
+            identity = registry_competition_match(
                 league, tournament_id=tournament_id, category_id=category_id)
             if identity.get("status") == "MAPPED_EXACT":
                 slug = identity["league_slug"]
