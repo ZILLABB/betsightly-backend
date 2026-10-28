@@ -58,6 +58,10 @@ def test_cloud_forecast_adds_only_future_games_no_model_rewrite(tmp_path, monkey
                 original["records"][kind])
     again = cloud.forecast_hosted(now=RUN, season_loader=loader)
     assert again["status"] == "no_new_eligible_forecasts"
+    assert again["reason"] == "eligible_forecasts_already_recorded"
+    assert again["readiness"]["upcoming_source_fixtures"] >= 1
+    assert again["readiness"]["moneyline_already_recorded"] >= 1
+    assert again["new_forecasts"]["moneyline"] == 0
 
 
 def test_cloud_forecast_refuses_missing_verified_previous_season(tmp_path, monkeypatch):
