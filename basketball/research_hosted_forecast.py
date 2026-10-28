@@ -89,6 +89,7 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
             "status": "no_upcoming_eligible_source_window",
             "new_forecasts": {}, "archive_digest": _digest(prior),
             "research_only": True, "not_bookable": True,
+            "coverage": coverage,
         }
 
     with TemporaryDirectory(prefix="nba-hosted-forecast-") as folder:
@@ -114,7 +115,7 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
             return {
                 "status": "source_not_fresh", "new_forecasts": {},
                 "archive_digest": _digest(prior), "research_only": True,
-                "not_bookable": True,
+                "not_bookable": True, "coverage": coverage,
             }
         updated = export_bundle(root)
         changed = {
@@ -148,7 +149,7 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
                        else "no_model_eligible_fixture_in_window"),
             "readiness": readiness,
             "archive_digest": _digest(prior), "research_only": True,
-            "not_bookable": True,
+            "not_bookable": True, "coverage": coverage,
         }
     stored = import_bundle(updated)
     reread = hosted_board()
@@ -161,5 +162,5 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
         "research_only": True, "not_bookable": True,
         "advanced_model_recomputed": False,
         "historical_provider_manifest_count": len(manifests),
-        "readiness": readiness,
+        "readiness": readiness, "coverage": coverage,
     }
