@@ -73,3 +73,13 @@ For a reversal: disable VPS writers and confirm they have stopped,
 restore/read-reconcile DB authority, then re-enable the Render workers.
 Switch API routing back independently and confirm score/booking
 idempotency and worker freshness. Retain independent backups.
+
+## Worker thread death supervision
+
+For dedicated VPS roles only, the runner checks its expected background
+thread after a 90-second startup grace period and every 30 seconds thereafter.
+If the thread exits, it exits nonzero and Docker's restart policy restarts
+that service. This does **not** detect a stuck-but-alive thread or guarantee
+publication freshness; add external, database-backed age-of-last-success
+alerts before production acceptance. The existing Render legacy roles
+are intentionally unaffected by this new supervision behavior.

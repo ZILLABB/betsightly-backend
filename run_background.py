@@ -4,6 +4,7 @@ import atexit
 import logging
 import os
 import time
+import threading
 
 
 logging.basicConfig(
@@ -40,6 +41,8 @@ if role not in {
 # belonging to the selected role.
 import main  # noqa: E402
 
+from utils.runtime_supervisor import expected_thread_names, missing_threads  # noqa: E402
+
 from leagues.runtime_heartbeat import (  # noqa: E402
     instance_id,
     mark_stopped,
@@ -69,6 +72,16 @@ ownership = {
 
 identity = instance_id()
 
+# Only new VPS split roles are strictly supervised; legacy Render roles
+# retain their established behavior while migration is staged.
+expected_threads = expected_thread_names(
+    role,
+    ownership,
+    telegram_configured=bool(os.getenv("TELEGRAM_BOT_TOKEN")),
+)
+thread_grace_deadline = time.monotonic() + 90
+
+
 
 def _stop() -> None:
     try:
@@ -89,6 +102,13 @@ atexit.register(
 
 
 while True:
+    if expected_threads and time.monotonic() >= thread_grace_deadline:
+        alive = {t.name for t in threading.enumerate() if t.is_alive()}
+        missing = missing_threads(expected_threads, alive)
+        if missing:
+            logger.critical("Expected background threads exited: %s", missing)
+            raise SystemExit(1)  # Docker restarts the container
+
     try:
         touch(
             role,
