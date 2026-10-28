@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -16,6 +17,27 @@ from sqlalchemy import text
 LOG = logging.getLogger(__name__)
 WAT = timezone(timedelta(hours=1))
 TERMINAL = frozenset({"won", "lost", "void"})
+
+# Full recovery can start at any wall-clock minute. The old minute % 15 == 0
+# condition could permanently skip older legs if polling started off-boundary.
+_ARCHIVE_SLOT_LOCK = threading.Lock()
+_ARCHIVE_SLOT_LAST: int | None = None
+
+
+def _claim_historical_recovery_day(
+    older_days: list[str], now: datetime, *, full_recovery: bool = True
+) -> str | None:
+    global _ARCHIVE_SLOT_LAST
+    if not older_days or not full_recovery:
+        return None
+    slot = int(now.astimezone(timezone.utc).timestamp()) // (15 * 60)
+    with _ARCHIVE_SLOT_LOCK:
+        if slot == _ARCHIVE_SLOT_LAST:
+            return None
+        _ARCHIVE_SLOT_LAST = slot
+    # Rotate one older publication date per 15-minute slot.
+    return older_days[slot % len(older_days)]
+
 
 
 def _kickoff(game: dict):
@@ -167,10 +189,11 @@ def settle_pending_manual(*, allow_fallback=True, now=None, score_collector=None
             for g in (json.loads(raw).get("games") or [])
         )
     })
-    archive_day = None
-    if older_days and current.astimezone(timezone.utc).minute % 15 == 0:
-        slot = int(current.timestamp()) // (15 * 60)
-        archive_day = older_days[slot % len(older_days)]
+    # The one-minute rapid lane must not consume historical free-provider
+    # quota. Recover archived days in the comprehensive pass, once per slot.
+    archive_day = _claim_historical_recovery_day(
+        older_days, current, full_recovery=score_collector is None,
+    )
     rows = [
         item for item in rows
         if str(item[0]) >= earliest or str(item[0]) == archive_day
