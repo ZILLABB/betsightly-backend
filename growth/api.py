@@ -841,6 +841,24 @@ def nba_research_model_validation(response: Response):
     return result
 
 
+@router.get("/admin/nba-research/licensed-history-readiness",
+            dependencies=[Depends(require_admin)])
+def nba_private_licensed_history_readiness(response: Response):
+    """Private, verified database counts, not commercial model approval."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "Basketball private history unavailable.")
+    from basketball.research_licensed_history import history_readiness
+    try:
+        result = history_readiness()
+    except Exception as exc:
+        logger.warning("Basketball private history unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Basketball licensed history unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.get("/admin/nba-research/league-source-matrix",
             dependencies=[Depends(require_admin)])
 def nba_private_league_source_matrix(response: Response):
