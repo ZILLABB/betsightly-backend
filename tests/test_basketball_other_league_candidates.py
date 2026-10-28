@@ -18,7 +18,7 @@ def fixture():
 
 
 def test_candidate_url_is_fixed_espn_host_and_only_whitelisted_leagues():
-    assert len(CANDIDATES) == 3
+    assert len(CANDIDATES) == 4
     for league in CANDIDATES:
         assert source_url(league, "20261027").startswith("https://site.api.espn.com/")
     with pytest.raises(ValueError):
