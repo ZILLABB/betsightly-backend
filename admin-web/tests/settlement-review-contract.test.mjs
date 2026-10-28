@@ -29,5 +29,5 @@ test('source proposals and explicit confirmations use authorized same-origin pro
  assert.match(desk, /confirmed_event_id:confirmation/);
  assert.match(desk, /attest_regulation_90:attested/);
  assert.match(desk, /confirmation!==selected\.event_id/);
- assert.match(desk, /booking codes and model results are changed/);
+ assert.match(desk, /No booking codes or model results are changed/);
 });
