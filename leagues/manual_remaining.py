@@ -88,6 +88,157 @@ def _verified_editorial_source(publication: dict) -> dict | None:
 
 
 
+
+def _verified_new_booking(games: list[dict], board: dict) -> dict | None:
+    """Rebook only exact available legs, with a new or rechecked provider code."""
+    from leagues.booking import create_or_reuse_generated_booking
+    booked = create_or_reuse_generated_booking(
+        games, board, kickoff_buffer=MANUAL_BOOKING_BUFFER)
+    if not (
+        booked.get("status") == "active"
+        and booked.get("booking_status") in {"FULL", "REBUILT_FULL"}
+        and booked.get("readback_validation") == "PASSED"
+        and bool(booked.get("share_code"))
+        and not booked.get("partial")
+        and booked.get("booked_leg_count") == len(games)
+    ):
+        return None
+    from leagues.booking import leg_fingerprint
+    if (booked.get("booking_variant_fingerprint") and
+            booked["booking_variant_fingerprint"] != leg_fingerprint(games)):
+        return None
+    price = booked.get("actual_sportybet_odds")
+    if not isinstance(price, (float, int)) or not 1 < price < float("inf"):
+        return None
+    return booked
+
+
+def _near_target_variant(
+    original: dict, reduced: dict, candidate_games: list[dict], board: dict,
+    *, now: datetime,
+) -> dict | None:
+    """Explicitly requested alternative, never a replacement official slip.
+
+    Prefer previously published surviving legs. Add at most four independently
+    model-qualified future fixtures, one market per fixture, only when a
+    reasonable price close to the original can be achieved. If we cannot
+    verify the whole bookmaker code, we return nothing rather than guessing.
+    """
+    from leagues.booking import _revalidate_games
+    from math import log, prod
+
+    remaining = reduced.get("games") or []
+    if not remaining:
+        return None
+    try:
+        target = float(original.get("total_odds") or
+                       (original.get("booking") or {}).get("actual_sportybet_odds"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not 1 < target <= 50:
+        return None
+
+    priced_remaining = prod(float(game.get("odds") or 0) for game in remaining)
+    if priced_remaining <= 1 or priced_remaining >= target * .85:
+        return None
+
+    used = {str(g.get("sportybet_event_id") or g.get("match_id") or "")
+            for g in remaining}
+    used_teams = {str(g.get(key) or "").strip().casefold()
+                  for g in remaining for key in ("home_team", "away_team")}
+    candidates = []
+    for game in candidate_games[:80]:
+        identity = str(game.get("sportybet_event_id") or game.get("match_id") or "")
+        teams = {str(game.get(key) or "").strip().casefold()
+                 for key in ("home_team", "away_team")}
+        if (not identity or identity in used or
+                teams & used_teams or
+                game_kickoff_lifecycle(game, now, booking_buffer=MANUAL_BOOKING_BUFFER)
+                != "actionable"):
+            continue
+        try:
+            confidence = float(game.get("selection_probability") or
+                               game.get("confidence") or 0)
+        except (ValueError, TypeError, OverflowError):
+            continue
+        if not (0.65 <= confidence <= 1):
+            continue
+        candidates.append(game)
+    if not candidates:
+        return None
+
+    # A single board snapshot supplies both prices and bookmaker identities.
+    # Recheck no more than 60 qualified alternatives to bound provider work.
+    verified, _ = _revalidate_games(candidates[:60], board)
+    ranked = sorted(verified, key=lambda g: (
+        -float(g.get("selection_probability") or g.get("confidence") or 0),
+        str(g.get("match_id") or ""), str(g.get("market") or "")))
+    added = []
+    running = priced_remaining
+    max_additions = max(0, min(4, 20 - len(remaining)))
+    for _ in range(max_additions):
+        current_gap = abs(log(running / target))
+        ranked_choices = []
+        for game in ranked:
+            event = str(game.get("sportybet_event_id") or game.get("match_id") or "")
+            team_names = {str(game.get(key) or "").strip().casefold()
+                          for key in ("home_team", "away_team")}
+            if event in used or team_names & used_teams:
+                continue
+            try:
+                price = float(game.get("odds") or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not 1.05 <= price <= 3.0 or running * price > target * 1.20:
+                continue
+            gap = abs(log(running * price / target))
+            if gap >= current_gap:
+                continue
+            ranked_choices.append((gap, -float(game.get("selection_probability") or
+                                               game.get("confidence") or 0),
+                                   event, game, price, team_names))
+        if not ranked_choices:
+            break
+        _, _, event, best, price, names = min(
+            ranked_choices, key=lambda x: (x[0], x[1], x[2]))
+        used.add(event)
+        used_teams.update(names)
+        added.append({**best, "supplemental_model_selection": True,
+                      "source": "model_qualified_supplement", "editorial_manual": False})
+        running *= price
+        if running >= target * .90:
+            break
+
+    if not added or running < target * .75:
+        return None
+    all_games = list(remaining) + added
+    # One newly validated code for every displayed pick, not an unverified
+    # string of selections and never the old publication's shareCode.
+    booking = _verified_new_booking(all_games, board)
+    if not booking:
+        return None
+    actual = float(booking["actual_sportybet_odds"])
+    if not target * .75 <= actual <= target * 1.20:
+        return None
+    return {
+        "selected": True,
+        "source": "separate_model_augmented_option",
+        "editorial_manual": False,
+        "manual_remainder": False,
+        "near_target_alternative": True,
+        "official_publication": False,
+        "result_scored": False,
+        "games": all_games,
+        "booking": booking,
+        "total_odds": round(actual, 3),
+        "target_original_odds": round(target, 3),
+        "remaining_original_leg_count": len(remaining),
+        "supplemental_leg_count": len(added),
+        "presentation": "accumulator",
+        "risk_level": "Alternative, not original ticket",
+        "reason": "A different ticket combining remaining original selections with separately qualified future fixtures. Original results are unchanged.",
+    }
+
 def eligible_manual_remainder(
     record: dict,
     tier: str,
@@ -100,7 +251,7 @@ def eligible_manual_remainder(
     An accumulator with fewer than two legs left is not portrayed as a
     replacement of a multi-leg tier. Such bets can be explored in Builder.
     """
-    from leagues.booking import _revalidate_games, create_or_reuse_generated_booking
+    from leagues.booking import _revalidate_games
 
     original = _manual_original_legs(record)
     if not original:
@@ -134,17 +285,8 @@ def eligible_manual_remainder(
 
     # Only after pruning exactly to verified legs do we create/reuse a booking.
     # The booking utility enforces precise selection mapping and live readback.
-    new_booking = create_or_reuse_generated_booking(
-        verified, board, kickoff_buffer=MANUAL_BOOKING_BUFFER)
-    valid = (
-        new_booking.get("status") == "active"
-        and new_booking.get("booking_status") in {"FULL", "REBUILT_FULL"}
-        and new_booking.get("readback_validation") == "PASSED"
-        and bool(new_booking.get("share_code"))
-        and not new_booking.get("partial")
-        and new_booking.get("booked_leg_count", len(verified)) == len(verified)
-    )
-    if not valid:
+    new_booking = _verified_new_booking(verified, board)
+    if not new_booking:
         return {
             "selected": False,
             "reason": "A new exact SportyBet code could not be verified.",
@@ -153,9 +295,7 @@ def eligible_manual_remainder(
             "removed_leg_count": len(original) - len(verified),
         }
 
-    actual_odds = new_booking.get("actual_sportybet_odds")
-    if not isinstance(actual_odds, (int, float)) or actual_odds <= 1.0:
-        return {"selected": False, "reason": "Current bookmaker odds could not be confirmed."}
+    actual_odds = new_booking["actual_sportybet_odds"]
 
     return {
         "selected": True,
@@ -184,6 +324,8 @@ def build_manual_remainders(
     now: datetime | None = None,
     records: dict[str, dict] | None = None,
     board: dict | None = None,
+    near_target: bool = False,
+    candidate_games: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Assemble only currently validated manual tickets; do not edit storage.
 
@@ -242,10 +384,19 @@ def build_manual_remainders(
 
     snapshot = board if board is not None else sportybet.fetch_board()
     results: dict[str, dict] = {}
+    alternatives: dict[str, dict] = {}
     for tier, record in candidates.items():
         result = eligible_manual_remainder(record, tier, snapshot, now=current)
         if result.get("selected"):
             results[tier] = result
+            if near_target and candidate_games:
+                # No alternative is manufactured if qualified inventory is
+                # absent; the exact reduced ticket still remains available.
+                original_source = (published or {}).get(tier) or {}
+                variant = _near_target_variant(
+                    original_source, result, candidate_games, snapshot, now=current)
+                if variant:
+                    alternatives[tier] = variant
         else:
             reasons[tier] = result.get("reason") or "No eligible manual selections remain."
 
@@ -255,6 +406,7 @@ def build_manual_remainders(
         "date": date,
         "official_publication_unchanged": True,
         "record_is_separate": True,
+        "near_target_alternatives": alternatives,
         "tier_reasons": reasons,
         **({"reason": "No remaining manual selection set passed live bookmaker verification."}
            if not results else {}),
