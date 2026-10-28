@@ -22,6 +22,10 @@ CANDIDATES = {
         "espn_slug": "womens-college-basketball", "research_state": "source_candidate",
         "period_length_minutes": 10,
     },
+    "nbl_au": {
+        "espn_slug": "nbl", "research_state": "source_candidate",
+        "period_length_minutes": 10,
+    },
 }
 HOST = "https://site.api.espn.com/apis/site/v2/sports/basketball"
 MAX_EVENTS = 100
@@ -84,6 +88,52 @@ def parse_candidate_final(league: str, event: dict):
     }
 
 
+def parse_candidate_fixture(league: str, event: dict):
+    """Identify a scheduled or final event without inventing betting evidence."""
+    if league not in CANDIDATES or not isinstance(event, dict):
+        return None
+    ident = str(event.get("id") or "")
+    if not ident.isdecimal() or len(ident) > 24:
+        return None
+    items = event.get("competitions")
+    if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+        return None
+    pair = items[0].get("competitors")
+    if not isinstance(pair, list) or len(pair) != 2:
+        return None
+    sides = {}
+    for competitor in pair:
+        if not isinstance(competitor, dict) or competitor.get("homeAway") not in ("home", "away"):
+            return None
+        side = competitor["homeAway"]
+        team = competitor.get("team")
+        if side in sides or not isinstance(team, dict):
+            return None
+        team_id = str(team.get("id") or "")
+        if not team_id.isdecimal() or not str(team.get("displayName") or "").strip():
+            return None
+        sides[side] = team_id
+    if set(sides) != {"home", "away"} or sides["home"] == sides["away"]:
+        return None
+    try:
+        tip = datetime.fromisoformat(str(event.get("date") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if tip.tzinfo is None or tip.utcoffset() is None:
+        return None
+    state = (event.get("status") or {}).get("type") or {}
+    if not isinstance(state, dict):
+        return None
+    completed = state.get("completed") is True
+    return {
+        "provider_event_id": ident,
+        "tipoff_utc": tip.astimezone(timezone.utc).isoformat(),
+        "home_id": sides["home"], "away_id": sides["away"],
+        "completed": completed,
+        "research_only": True, "not_bookable": True,
+    }
+
+
 def audit_candidate_payload(league: str, body: dict) -> dict:
     if league not in CANDIDATES or not isinstance(body, dict):
         raise ValueError("INVALID_CANDIDATE_PAYLOAD")
@@ -95,13 +145,24 @@ def audit_candidate_payload(league: str, body: dict) -> dict:
         item = parse_candidate_final(league, event)
         if item is not None:
             finals.append(item)
-    ids = [e["provider_event_id"] for e in finals]
+    fixtures = [parsed for event in events
+                if (parsed := parse_candidate_fixture(league, event)) is not None]
+    ids = [e["provider_event_id"] for e in fixtures]
     if len(set(ids)) != len(ids):
         raise ValueError("DUPLICATED_PROVIDER_GAME")
+    final_ids = [e["provider_event_id"] for e in finals]
+    if len(set(final_ids)) != len(final_ids):
+        raise ValueError("DUPLICATED_PROVIDER_GAME")
+    if any(fid not in set(ids) for fid in final_ids):
+        raise ValueError("CANDIDATE_FINAL_WITHOUT_VERIFIED_FIXTURE")
     return {
         "league": league, "research_only": True, "not_bookable": True,
         "source": "espn_site_scoreboard_candidate",
         "events_observed": len(events), "exact_completed": len(finals),
+        "identity_complete_fixtures": len(fixtures),
+        "scheduled_identity_complete": sum(not f["completed"] for f in fixtures),
+        "identity_incomplete_events": len(events) - len(fixtures),
+        "candidate_fixtures": fixtures,
         "candidate_finals": finals,
         "approved_for_model_training": False,
         "approved_for_non_nba_booking_settlement": False,
