@@ -17,12 +17,14 @@ import threading
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlparse
+from unicodedata import normalize as unicode_normalize
 
 import requests
 
 LOG = logging.getLogger(__name__)
 URL = "https://sportscore.com/api/v1/fixtures/"
 _CACHE: dict[str, tuple[float, list[dict]]] = {}
+_TEAM_CACHE: dict[tuple[str, str], tuple[float, list[dict]]] = {}
 _LOCK = threading.Lock()
 _WAIT_UNTIL = 0.0
 _TTL = 15 * 60
@@ -151,6 +153,63 @@ def fetch_day(day: str) -> list[dict]:
         return []
 
 
+
+def _slug(value: object) -> str:
+    value = unicode_normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    value = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return value[:90] if re.fullmatch(r"[a-z0-9-]{2,90}", value) else ""
+
+
+def fetch_team_day(day: str, team: str) -> list[dict]:
+    """Fetch the documented exact team filter to escape 200-match day caps.
+
+    Never substitute guessed team identity. The returned fixtures still pass
+    the identical competition + teams + kickoff matching as the day feed.
+    """
+    global _WAIT_UNTIL
+    if not re.fullmatch(r"[a-z0-9-]{2,90}", team):
+        return []
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return []
+    key = (day, team)
+    with _LOCK:
+        now = time.monotonic()
+        cached = _TEAM_CACHE.get(key)
+        if cached and cached[0] > now:
+            return list(cached[1])
+        if _WAIT_UNTIL > now:
+            return []
+        _TEAM_CACHE[key] = (now + 90, [])
+    try:
+        resp = requests.get(
+            URL, params={"sport": "football", "date": day, "team": team,
+                         "status": "finished", "limit": 50},
+            headers={"Accept": "application/json",
+                     "User-Agent": "BetSightly-settlement-coverage/1.0"},
+            timeout=12,
+        )
+        if resp.status_code == 429:
+            with _LOCK:
+                _WAIT_UNTIL = max(_WAIT_UNTIL, time.monotonic() + 30 * 60)
+            return []
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        if not isinstance(data, dict) or data.get("date") != day:
+            return []
+        raw = data.get("matches")
+        if not isinstance(raw, list) or len(raw) > 50:
+            return []
+        parsed = [m for row in raw if (m := parse_fixture(row, day)) is not None]
+        with _LOCK:
+            _TEAM_CACHE[key] = (time.monotonic() + _TTL, parsed)
+        return parsed
+    except (requests.RequestException, TypeError, ValueError):
+        return []
+
+
 def candidate_matches(picks: list[dict]) -> list[dict]:
     """Strictly match only candidates to already-saved bookmaker fixtures.
 
@@ -167,6 +226,33 @@ def candidate_matches(picks: list[dict]) -> list[dict]:
     if old:
         recent.append(old[(int(time.time()) // 900) % len(old)])
     rows = [row for day in recent for row in fetch_day(day)]
+    # Daily endpoints are limited to the first 200 fixtures. Up to eight
+    # bounded targeted team/day reads per recovery slot increase coverage
+    # without a broad unauthorised crawl. The feature is explicitly opt-in.
+    if os.getenv("SPORTSCORE_FOCUSED_ENABLED", "false").lower() in ("true", "1", "yes"):
+        queued = []
+        for p in pending:
+            when = _datetime(p.get("kickoff") or p.get("commence_time") or p.get("date"))
+            if not when or when.date().isoformat() not in recent:
+                continue
+            h, a = _norm(p.get("home_team")), _norm(p.get("away_team"))
+            if any(_norm(r["home"]) == h and _norm(r["away"]) == a
+                   and (_datetime(r["kickoff_utc"]) is not None)
+                   and abs((_datetime(r["kickoff_utc"]) - when).total_seconds()) <= 1200
+                   for r in rows):
+                continue
+            team_slug = _slug(p.get("home_team"))
+            key = (when.date().isoformat(), team_slug)
+            if team_slug and key not in queued:
+                queued.append(key)
+        if queued:
+            offset = (int(time.time()) // 900 * 8) % len(queued)
+            rotated = queued[offset:] + queued[:offset]
+            focused = rotated[:8]
+            for day, team in focused:
+                rows.extend(fetch_team_day(day, team))
+            LOG.info("SportScore focused team-lookups=%s uncovered_candidates=%s",
+                     len(focused), len(queued))
     claims = {}
     for p in pending:
         kickoff = _datetime(p.get("kickoff") or p.get("commence_time") or p.get("date"))
