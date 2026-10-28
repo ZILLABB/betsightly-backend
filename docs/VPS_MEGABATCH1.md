@@ -26,7 +26,7 @@ inventory, consistency proof, and approved migration.
 ## Dry-run instructions (no production connection)
 
 1. Make a disposable copy of `.env.vps.example` named `.env.vps`.
-2. Run `docker compose --env-file .env.vps -f compose.vps.yml config --format json > /tmp/betsightly-vps-compose.json`.
+2. Run `docker compose --profile telegram --env-file .env.vps -f compose.vps.yml config --format json > /tmp/betsightly-vps-compose.json`.
 3. Run `python -m scripts.vps.validate_compose /tmp/betsightly-vps-compose.json`.
 4. Run `python -m pytest tests/test_process_roles.py -q`.
 5. Delete the example-derived `.env.vps`. Never deploy the example values.
