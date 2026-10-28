@@ -176,9 +176,18 @@ def _grade_one(record: dict, *, fixture: dict, match: dict,
     changes = 0
     for original_game in original:
         game = dict(original_game)
-        if (str(game.get("sportybet_event_id") or "") == fixture["event_id"]
-                and _identity(game) == fixture and
-                game.get("status", "pending") == "pending"):
+        # A single bookmaker event may appear in more than one manual tier
+        # with DIFFERENT markets (Over 1.5 in 2 Odds, Over 3.5 in 5 Odds).
+        # Score identity is fixture+kickoff+league; market is graded separately
+        # by the shared evaluator against each stored selection.
+        current_identity = _identity(game) if (
+            str(game.get("sportybet_event_id") or "") == fixture["event_id"]
+        ) else {}
+        same_fixture = all(
+            current_identity.get(key) == fixture.get(key)
+            for key in ("event_id", "home", "away", "kickoff", "league")
+        )
+        if same_fixture and game.get("status", "pending") == "pending":
             outcome, detail = _settlement_detail(game, match, now=now)
             if outcome not in ("won", "lost", "void") or not detail.get("settlement_evidence"):
                 raise ValueError("Market cannot be safely graded from the supplied score")
