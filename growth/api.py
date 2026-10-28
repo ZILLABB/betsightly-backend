@@ -59,6 +59,14 @@ def manual_tiers_status():
     }
 
 
+@router.get("/manual-tiers/settlement-review",
+            dependencies=[Depends(require_admin)])
+def get_manual_settlement_review(limit: int = Query(250, ge=1, le=1000)):
+    """Admin-only unresolved fixture queue; never grades a manual ticket."""
+    from leagues.manual_settlement_review import manual_settlement_review
+    return manual_settlement_review(limit=limit)
+
+
 # Private jackpot booking uses the same signed admin cookie as publishing.
 # Neither endpoint is exposed through the public BetSightly site.
 class PrivateJackpotFilters(BaseModel):
