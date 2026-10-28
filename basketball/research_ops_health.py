@@ -126,6 +126,15 @@ def record_run(kind, status, *, detail=None):
             safe["coverage"] = {key: value for key in keys
                                 if type(value := coverage.get(key)) is int
                                 and 0 <= value <= 20000}
+    if kind == "forecast":
+        coverage = (detail or {}).get("coverage")
+        keys = ("next_48h_source_fixtures", "next_48h_missing_archive",
+                "next_48h_missing_original_model", "next_7d_source_fixtures",
+                "next_7d_not_archived")
+        if isinstance(coverage, dict):
+            safe["coverage"] = {key: value for key in keys
+                                if type(value := coverage.get(key)) is int
+                                and 0 <= value <= 20000}
     if kind == "settlement":
         provider = (detail or {}).get("provider_status")
         if provider in ("ok", "partial", "idle"):
