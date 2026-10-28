@@ -1,0 +1,21 @@
+name: NBA private disposable PostgreSQL recovery contract
+"on":
+  pull_request:
+    paths:
+      - "basketball/research_full_recovery_postgres.py"
+      - "tests/test_basketball_full_recovery_postgres.py"
+      - ".github/workflows/nba-disposable-postgres-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  no-source-writes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt pytest
+      - run: python -m pytest --noconftest tests/test_basketball_full_recovery_postgres.py tests/test_basketball_full_recovery.py tests/test_nba_safe_backup_migration.py -q
