@@ -97,6 +97,8 @@ def test_closeout_page_rejects_unauthorized_and_production(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "staging")
     monkeypatch.setenv("NBA_ADMIN_RESEARCH_ENABLED", "true")
     monkeypatch.setenv("DATABASE_URL", "postgresql://fake/isolated_test")
+    monkeypatch.setenv("SECRET_KEY", "private-nba-testing-key-only")
+    monkeypatch.setenv("ADMIN_PASSWORD_HASH", "test-nonsecret-hash")
     app = FastAPI()
     app.include_router(growth.router, prefix="/api/growth")
     client = TestClient(app)
