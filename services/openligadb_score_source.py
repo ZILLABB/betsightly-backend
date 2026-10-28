@@ -24,6 +24,10 @@ LEAGUE_SHORTCUTS = {
     "ger.2": "bl2",
     # Kept for forward compatibility if ger.3 is added to the competition registry.
     "ger.3": "bl3",
+    # OpenLigaDB officially registers these two 2026/27 competition datasets.
+    # Only the 2026 season is enabled; do not guess later years.
+    "uefa.europa": "uel2026",
+    "uefa.europa.conf": "uecl2026",
 }
 _CACHE_TTL = 5 * 60
 _FAILURE_TTL = 2 * 60
@@ -42,6 +46,34 @@ ESPN_TEAM_ALIASES = {
     "1. FC Union Berlin": "Union Berlin",
     "TSG 1899 Hoffenheim": "TSG Hoffenheim",
     "SV Werder Bremen": "Werder Bremen",
+    # Exact team spellings independently verified against 2026 OpenLigaDB
+    # UEFA season fixtures and immutable SportyBet manual receipts.
+    "AFC Bournemouth": "Bournemouth",
+    "Celta Vigo": "Celta",
+    "Juventus Turin": "Juventus",
+    "Dinamo Zagreb": "GNK Dinamo Zagreb",
+    "TSG Hoffenheim": "Hoffenheim",
+    "Lech Poznan": "KKS Lech Poznan",
+    "Levski Sofia": "PFC Levski Sofia",
+    "Omonia Nikosia": "AC Omonia Nicosia",
+    "Stade Rennes": "Rennes",
+    "OFI Kreta": "OFI Crete",
+    "RB Salzburg": "Salzburg",
+    "AC Mailand": "AC Milan",
+    "SC União Torreense": "SCU Torreense",
+    "Union Saint-Gilloise": "Union Gilloise",
+    "Celtic Glasgow": "Celtic",
+    "Lillestrøm SK": "Lillestroem SK",
+    "Olympique Marseille": "Marseille",
+    "Universitatea Craiova": "CS Universitatea Craiova",
+    "Hajduk Split": "HNK Hajduk Split",
+    "Ajax Amsterdam": "Ajax",
+    "KF Egnatia": "KF Egnatia Rrogozhine",
+    "KuPS Kuopio": "Kuopion Palloseura",
+    "Roter Stern Belgrad": "Crvena Zvezda",
+    "Inter Club d'Escaldes": "Inter Club de Escaldes",
+    "AS Monaco": "Monaco",
+    "SC Freiburg": "Freiburg",
 }
 
 
@@ -204,17 +236,20 @@ def openligadb_finals(picks: list[dict]) -> list[dict]:
             target_date = date.fromisoformat(iso_date or "")
         except ValueError:
             continue
-        targets.add((shortcut, _season_for(target_date), target_date.isoformat()))
+        season = _season_for(target_date)
+        if shortcut in {"uel2026", "uecl2026"} and season != 2026:
+            continue
+        targets.add((shortcut, season, target_date.isoformat()))
 
     if not targets:
         return []
-    # Limit work to up to three distinct league-seasons per settlement pass.
-    # Cached, normal Bundesliga + second-division calls are 2 per 30 minutes.
+    # Bound requests to five distinct league-seasons per settlement pass.
+    # UEFA and German datasets are cached; OpenLigaDB permits 60/minute/IP.
     by_season: dict[tuple[str, int], set[str]] = {}
     for shortcut, season, target_date in sorted(targets, reverse=True):
         by_season.setdefault((shortcut, season), set()).add(target_date)
     results: list[dict] = []
-    for (shortcut, season), dates in list(by_season.items())[:3]:
+    for (shortcut, season), dates in list(by_season.items())[:5]:
         for row in _season_finals(shortcut, season):
             if row["date"] in dates:
                 results.append(row)
