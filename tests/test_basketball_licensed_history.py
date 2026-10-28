@@ -64,6 +64,10 @@ def postgres():
         pytest.skip("Disposable Postgres only; never target live Supabase.")
     engine=create_engine(url)
     with engine.begin() as conn:
+        # Supabase has anon/authenticated roles; disposable vanilla PG does
+        # not. Create NOLOGIN simulants so RLS/REVOKE is tested verbatim.
+        conn.exec_driver_sql("CREATE ROLE anon NOLOGIN")
+        conn.exec_driver_sql("CREATE ROLE authenticated NOLOGIN")
         conn.exec_driver_sql("CREATE SCHEMA IF NOT EXISTS nba_research")
         source=(Path(__file__).parents[1]/
                 "sql/nba_private_licensed_history_20261028.sql").read_text()
