@@ -841,6 +841,30 @@ def nba_research_model_validation(response: Response):
     return result
 
 
+@router.get("/admin/nba-research/league-source-matrix",
+            dependencies=[Depends(require_admin)])
+def nba_private_league_source_matrix(response: Response):
+    """All six league candidates, independent rights gates and latest probe counts."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA private research unavailable.")
+    from datetime import datetime, timezone
+    from basketball.research_league_source_catalog import source_matrix
+    from basketball.research_league_source_evidence import latest_probes
+    now = datetime.now(timezone.utc)
+    matrix = source_matrix(day=now.strftime("%Y%m%d"),
+                           start_year=now.year if now.month >= 7 else now.year-1)
+    try:
+        evidence = latest_probes()
+    except Exception as exc:
+        logger.warning("Private source probe metadata unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "League source metadata unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return {**matrix, "latest_source_probe_per_league": evidence,
+            "sources_with_observed_receipts": len(evidence)}
+
+
 @router.get("/admin/nba-research/league-sources",
             dependencies=[Depends(require_admin)])
 def nba_private_league_sources(response: Response, league: str, day: str):
@@ -871,6 +895,14 @@ def nba_private_league_sources(response: Response, league: str, day: str):
     except Exception as exc:
         logger.warning("NBA candidate league probe rejected: %s", type(exc).__name__)
         raise HTTPException(503, "Independent league source unavailable.") from None
+    from basketball.research_league_source_evidence import record_probe
+    try:
+        stored = record_probe(league, day, result)
+        result = {**result, "metadata_recorded": stored["status"]}
+    except Exception as exc:
+        logger.warning("NBA source probe receipt persistence failed: %s",
+                       type(exc).__name__)
+        result = {**result, "metadata_recorded": "unavailable"}
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return result
@@ -891,6 +923,14 @@ def nba_private_europe_source(response: Response, league: str, start_year: int):
         result = probe_season(league, start_year)
     except (ValueError, RuntimeError):
         raise HTTPException(503, "European league source unavailable.") from None
+    from basketball.research_league_source_evidence import record_probe
+    try:
+        stored = record_probe(league, str(start_year), result)
+        result = {**result, "metadata_recorded": stored["status"]}
+    except Exception as exc:
+        logger.warning("NBA Europe source probe receipt persistence failed: %s",
+                       type(exc).__name__)
+        result = {**result, "metadata_recorded": "unavailable"}
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return result
