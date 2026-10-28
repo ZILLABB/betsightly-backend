@@ -1,0 +1,47 @@
+# No registry push, production environment secrets or server access.
+name: VPS candidate Docker image smoke build
+
+on:
+  pull_request:
+    branches: [devil]
+    paths:
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - '.dockerignore'
+      - 'compose.vps.yml'
+      - '.github/workflows/vps-image-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build VPS API/worker image, no registry push
+        run: |
+          set -euo pipefail
+          docker build --progress plain -t betsightly-vps-ci:local -f Dockerfile .
+      - name: Smoke-test Python runtime and worker modules inside image
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint python betsightly-vps-ci:local -c '
+          import sys
+          import fastapi
+          from utils.process_roles import resolve_process_role
+          from utils.vps_cutover import require_writer_activation
+          from utils.worker_freshness import evaluate_worker_freshness
+          from scripts.vps.backup_postgres import run_backup
+          from scripts.vps.restore_drill import restore_drill
+          from scripts.vps.backup_and_upload import main as backup_and_upload
+          assert sys.version_info[:2] == (3, 12)
+          assert resolve_process_role(False, "web") == "web"
+          print("VPS_IMAGE_PYTHON_SMOKE_OK")
+          '
+          docker run --rm --entrypoint sh betsightly-vps-ci:local -c 'test -f /app/run_background.py && test -f /app/scripts/vps/check_daily_publication.py'
+          docker image inspect betsightly-vps-ci:local --format 'Image built (bytes): {{.Size}}'
