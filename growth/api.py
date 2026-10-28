@@ -913,6 +913,29 @@ def nba_research_export_backup(response: Response):
     return result
 
 
+@router.get("/admin/nba-research/forward-scorecard",
+            dependencies=[Depends(require_admin)])
+def nba_private_forward_scorecard(response: Response):
+    """Original before-tipoff NBA performance; no bookmakers or model training."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA scorecard unavailable.")
+    from basketball.research_private_store import SessionLocal, latest_bundle
+    from basketball.research_forward_scorecard import scorecard
+    with SessionLocal() as db:
+        archive = latest_bundle(db)
+        if archive is None:
+            raise HTTPException(404, "NBA research archive unavailable.")
+        try:
+            result = scorecard(archive)
+        except ValueError as exc:
+            logger.warning("NBA forward scorecard validation rejected: %s",
+                           type(exc).__name__)
+            raise HTTPException(409, "NBA forward research integrity blocked.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.get("/admin/nba-research/backup-full",
             dependencies=[Depends(require_admin)])
 def nba_research_export_backup_full(response: Response):
