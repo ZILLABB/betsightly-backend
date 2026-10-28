@@ -1,0 +1,27 @@
+name: Dutch French Championship exact results audit
+on:
+  push:
+    branches: [research/free-fixture-api-20261028]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect completed October fixtures for pending manual tickets
+        run: |
+          python - <<'PY'
+          import json,urllib.request
+          dates={'ned.2':{'2026-10-16','2026-10-19','2026-10-23'},'eng.2':{'2026-10-14','2026-10-17'},'fra.2':{'2026-10-16','2026-10-23'}}
+          for slug,days in dates.items():
+              url=f'https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard?dates=202610&limit=500'
+              req=urllib.request.Request(url,headers={'User-Agent':'BetSightly-final-score-diagnostic/1.0','Accept':'application/json'})
+              with urllib.request.urlopen(req,timeout=20) as r: data=json.load(r)
+              print('COMP',slug,'events',len(data.get('events',[])))
+              for e in data.get('events',[]):
+                  if (e.get('date') or '')[:10] not in days:continue
+                  comp=(e.get('competitions') or [{}])[0]
+                  home=next((x for x in comp.get('competitors',[]) if x.get('homeAway')=='home'),{})
+                  away=next((x for x in comp.get('competitors',[]) if x.get('homeAway')=='away'),{})
+                  status=comp.get('status',{}).get('type',{})
+                  print('FIX',slug,e.get('date'),home.get('team',{}).get('displayName'),home.get('score'),'-',away.get('score'),away.get('team',{}).get('displayName'),'state',status.get('name'),'completed',status.get('completed'))
+          PY
