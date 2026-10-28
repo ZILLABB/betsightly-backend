@@ -101,6 +101,29 @@ until the permitted scope has been confirmed.
 Thank you,
 BetSightly
 
+
+## No-cost, explicitly licensed data candidate (NCAA research)
+
+The 2026 Kaggle **March Machine Learning Mania** competition lists its
+data-access licence as **CC-BY 4.0** and the competition-specific rules
+allow use of competition data for commercial or noncommercial purposes.
+Official source: https://www.kaggle.com/competitions/march-machine-learning-mania-2026/rules
+
+**Do not import yet:** these same terms also restrict transmission,
+duplication and redistribution to people who have not accepted the
+competition rules. Confirm which historical game and tournament files are
+included, what attribution is required, whether BetSightly's betting-related
+model use fits the actual data grant, and whether the connected user
+has accepted the competition agreement. Kaggle membership is not a
+substitute for a stored source licence/provenance record. No Kaggle data
+or account has been downloaded or accessed in this release.
+
+This is the priority **low-cost legal dataset investigation** for NCAA
+men and women. It may solve part of historical research ingestion, but
+it is not a proven full regular-season dataset and is not an official
+bookmaker settlement feed. Keep independent official final-score matching
+as a separate acceptance gate.
+
 ## Release gate
 
 Do not approve any league or turn on commercial ingestion based on
