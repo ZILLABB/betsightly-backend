@@ -157,7 +157,7 @@ def _validate_rows(rows):
 def verify_history_recovery(envelope):
     if not isinstance(envelope, dict) or set(envelope) != {
         "version", "created_at", "tables", "counts", "research_only",
-        "not_bookable", "sha256"
+        "not_bookable", "sha256", "tables_sha256"
     } or envelope["version"] != VERSION or (
         envelope["research_only"] is not True or
         envelope["not_bookable"] is not True
@@ -167,6 +167,9 @@ def verify_history_recovery(envelope):
         raise ValueError("BASKETBALL_BACKUP_TOO_LARGE")
     _time(envelope["created_at"])
     _validate_rows(envelope["tables"])
+    expected_tables = hashlib.sha256(_json(envelope["tables"]).encode("utf-8")).hexdigest()
+    if envelope["tables_sha256"] != expected_tables:
+        raise ValueError("BASKETBALL_BACKUP_TABLE_HASH_MISMATCH")
     counts = {k: len(v) for k,v in envelope["tables"].items()}
     if envelope["counts"] != counts:
         raise ValueError("BASKETBALL_BACKUP_COUNT_MISMATCH")
@@ -201,6 +204,7 @@ def build_history_recovery(*, session_factory=None):
             "created_at":datetime.now(timezone.utc).isoformat(),
             "tables":data,
             "counts":{key:len(row) for key,row in data.items()},
+            "tables_sha256":hashlib.sha256(_json(data).encode("utf-8")).hexdigest(),
             "research_only":True,
             "not_bookable":True,
         }
