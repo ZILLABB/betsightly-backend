@@ -172,3 +172,22 @@ The timer is **only a template**, not enabled by CI. It schedules an
 encrypted backup every night at 02:15 UTC (03:15 Lagos time), with up to
 15 minutes randomized delay. Monitor service failures and verify recovery
 from actual uploaded archives periodically before trusting the system.
+
+## Daily publication result monitor (read-only)
+
+The separate `scripts.vps.check_daily_publication` command checks the
+persisted `daily_runs` row for the current **WAT** publishing day.
+After the 08:00 WAT publication time plus a default 90-minute grace period,
+it requires `status=complete`, a successful `card` step, and no failed
+recorded steps. Before that deadline, it reports a neutral healthy state.
+If incomplete after the deadline, it exits code 2 and prints only sanitized
+JSON. The monitor cannot guarantee the number or quality of published
+tiers and does **not** call prediction APIs or make database writes.
+
+On a dedicated monitoring host:
+`DATABASE_URL=... python -m scripts.vps.check_daily_publication --grace-minutes 90`
+
+Run this separately from the publication process and connect exit code 2
+to a configured alert recipient. Repeated failures should be deduplicated
+by the alert delivery service. Confirm every calendar day is intended to
+publish before enforcing this gate in production.
