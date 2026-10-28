@@ -128,6 +128,37 @@ _VERIFIED_FINALS = (
         "date": "2026-10-27", "home_score": 2, "away_score": 0,
         "evidence_url": "https://www.dfb.de/news/erster-bundesligist-raus-bochum-stuerzt-mainz",
     },
+    # One-time UEFA Conference League reconciliation, matchdays 1 and 2.
+    # Manually reviewed final scores on the official 2026/27 results report.
+    # Exact production SportyBet IDs, both clubs and UTC dates are mandatory.
+    {"sportybet_event_id": "sr:match:74173166", "home": "PFC CSKA Sofia",
+     "away": "Monaco", "date": "2026-10-15",
+     "home_score": 1, "away_score": 2,
+     "evidence_url": "https://www.uefa.com/uefaconferenceleague/news/02a8-2174cb200f25-b94693ddff4e-1000--2026-27-conference-league-all-the-league-phase-fixtures/"},
+    {"sportybet_event_id": "sr:match:74173200", "home": "St. Truidense VV",
+     "away": "FC Iberia 1999", "date": "2026-10-15",
+     "home_score": 2, "away_score": 0,
+     "evidence_url": "https://www.uefa.com/uefaconferenceleague/news/02a8-2174cb200f25-b94693ddff4e-1000--2026-27-conference-league-all-the-league-phase-fixtures/"},
+    {"sportybet_event_id": "sr:match:74173188", "home": "Copenhagen",
+     "away": "Braga", "date": "2026-10-15",
+     "home_score": 3, "away_score": 0,
+     "evidence_url": "https://www.uefa.com/uefaconferenceleague/news/02a8-2174cb200f25-b94693ddff4e-1000--2026-27-conference-league-all-the-league-phase-fixtures/"},
+    {"sportybet_event_id": "sr:match:74173224", "home": "Crvena Zvezda",
+     "away": "Copenhagen", "date": "2026-10-22",
+     "home_score": 2, "away_score": 2,
+     "evidence_url": "https://www.uefa.com/uefaconferenceleague/news/02a8-2174cb200f25-b94693ddff4e-1000--2026-27-conference-league-all-the-league-phase-fixtures/"},
+    {"sportybet_event_id": "sr:match:74173250", "home": "Ajax",
+     "away": "Atalanta", "date": "2026-10-22",
+     "home_score": 2, "away_score": 0,
+     "evidence_url": "https://www.uefa.com/uefaconferenceleague/news/02a8-2174cb200f25-b94693ddff4e-1000--2026-27-conference-league-all-the-league-phase-fixtures/"},
+    {"sportybet_event_id": "sr:match:74173266", "home": "FC Thun",
+     "away": "HNK Hajduk Split", "date": "2026-10-22",
+     "home_score": 0, "away_score": 1,
+     "evidence_url": "https://www.uefa.com/uefaconferenceleague/news/02a8-2174cb200f25-b94693ddff4e-1000--2026-27-conference-league-all-the-league-phase-fixtures/"},
+    {"sportybet_event_id": "sr:match:74173262", "home": "FC Midtjylland",
+     "away": "St. Truidense VV", "date": "2026-10-22",
+     "home_score": 0, "away_score": 1,
+     "evidence_url": "https://www.uefa.com/uefaconferenceleague/news/02a8-2174cb200f25-b94693ddff4e-1000--2026-27-conference-league-all-the-league-phase-fixtures/"},
     # Monday 19 October 2026 — existing admin-curated fixtures.
     # Exact immutable SportyBet IDs from editorial_tier_slips in production.
     # Independent league/club match reports confirm FT regulation scores.
