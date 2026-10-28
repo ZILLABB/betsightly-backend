@@ -1,0 +1,31 @@
+name: Jev - free external source health
+
+on:
+  schedule:
+    # 06:17 WAT daily; GitHub scheduling can be delayed.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jev-openligadb-source-health
+  cancel-in-progress: false
+
+jobs:
+  openligadb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the football production branch read-only
+        uses: actions/checkout@v4
+        with:
+          ref: devil
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check OpenLigaDB access and fixture data without Jev or secrets
+        run: python -m scripts.jev_source_health
