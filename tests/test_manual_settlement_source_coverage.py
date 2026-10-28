@@ -22,8 +22,17 @@ def test_verified_competition_names_are_resolved_without_manual_slug():
 
 
 def test_ambiguous_or_unsupported_manual_league_not_guessed():
-    assert _known_score_slugs([{"league": "Premier League"},
-                               {"league": "Unknown Country Youth Cup"}]) is None
+    assert _known_score_slugs([
+        {"league": "Unknown Country Youth Cup"},
+    ]) == set()
+
+
+def test_one_unmapped_league_does_not_trigger_every_espn_competition():
+    # Keep the verified league and avoid the old 90+ scoreboard sweep.
+    assert _known_score_slugs([
+        {"league": "UEFA Champions League"},
+        {"league": "Unknown Country Youth Cup"},
+    ]) == {"uefa.champions"}
 
 
 def test_manual_receipt_team_alias_settles_only_matching_date_and_orientation():
