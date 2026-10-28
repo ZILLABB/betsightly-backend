@@ -148,8 +148,10 @@ def _ticket_status(legs):
 
 
 def settle_due(*, get=None, force=False):
-    """Bounded one-cycle result reconciliation; safe under repeated calls."""
+    """Reconcile verified NBA, EuroLeague and EuroCup finals, never guesses."""
     from growth import basketball_history as history
+    from growth import basketball_europe_finals as european
+
     start = _now()
     records = history.list_recent(limit=100)["tickets"]
     due = []
@@ -162,37 +164,48 @@ def settle_due(*, get=None, force=False):
         for leg in ticket["legs"]:
             if leg.get("result") in {"won", "lost", "void"}:
                 continue
-            if str(leg.get("competition") or "").upper() != "NBA":
+            competition = str(leg.get("competition") or "").strip().upper()
+            if competition not in {"NBA", "EUROLEAGUE", "EUROCUP"}:
                 continue
             try:
                 scheduled = datetime.fromtimestamp(int(leg["kickoff_ms"]) / 1000, timezone.utc)
-            except (KeyError, TypeError, ValueError):
+            except (KeyError, TypeError, ValueError, OverflowError):
                 continue
             if scheduled + timedelta(minutes=90) <= start:
-                due.append((ticket, leg, scheduled))
+                due.append((ticket, leg, scheduled, competition))
     if not due:
         return {"status": "success", "nba_final_legs": 0,
-                "tickets_updated": 0, "unresolved_leagues": "non-NBA pending"}
-    # Three calendar days around tipoff; ESPN's season day boundary is local.
+                "verified_final_legs": 0, "tickets_updated": 0}
+
+    # The NBA uses ESPN's day-indexed calendar; international results are
+    # retrieved only for the exact competition/season of unresolved legs.
+    nba_due = [(ticket, leg, time) for ticket, leg, time, comp in due if comp == "NBA"]
     days = sorted({(kickoff + timedelta(days=delta)).strftime("%Y%m%d")
-                   for _, _, kickoff in due for delta in (-1, 0, 1)})[:12]
-    results = {}
+                   for _, _, kickoff in nba_due for delta in (-1, 0, 1)})[:12]
+    nba_results = {}
+    european_results = []
     failures = []
     for day in days:
         try:
             for event in _fetch_day(day, get=get):
-                results[event["source_event_id"]] = event
+                nba_results[event["source_event_id"]] = event
         except Exception as exc:
-            failures.append(f"{day}: {type(exc).__name__}")
-    if failures:
-        # A partly fetched date range is NOT sufficient evidence to declare
-        # any game missing, and will not alter prior stored statuses.
-        return {"status": "SCORE_PROVIDER_PARTIAL", "nba_final_legs": 0,
-                "tickets_updated": 0, "failures": failures}
-    finals = list(results.values())
-    touched = 0
-    legs_marked = 0
-    tickets = {t["fingerprint"]: t for t, _, _ in due}
+            failures.append(f"NBA {day}: {type(exc).__name__}")
+    pairs = sorted({(competition, (scheduled.year if scheduled.month >= 7
+                                   else scheduled.year - 1))
+                    for _, _, scheduled, competition in due
+                    if competition in {"EUROLEAGUE", "EUROCUP"}})
+    for competition, season_year in pairs:
+        try:
+            european_results.extend(european.fetch_finals(competition, season_year, get=get))
+        except Exception as exc:
+            failures.append(f"{competition} {season_year}: {type(exc).__name__}")
+
+    # Keep all evidence isolated to the provider/competition. Partial provider
+    # failures may never be construed as absent finals or a lost ticket.
+    nba_finals = list(nba_results.values())
+    touched, legs_marked, nba_marked = 0, 0, 0
+    tickets = {ticket["fingerprint"]: ticket for ticket, _, _, _ in due}
     for ticket in tickets.values():
         changed = False
         updated = []
@@ -200,16 +213,25 @@ def settle_due(*, get=None, force=False):
             if leg.get("result") in {"won", "lost", "void"}:
                 updated.append(leg)
                 continue
-            event = _match(leg, finals)
+            competition = str(leg.get("competition") or "").strip().upper()
+            event = (_match(leg, nba_finals) if competition == "NBA"
+                     else european.match_final(leg, european_results)
+                     if competition in {"EUROLEAGUE", "EUROCUP"} else None)
             newer = settle_leg(leg, event) if event else leg
-            changed |= newer.get("result") != leg.get("result")
-            legs_marked += int(newer.get("result") in {"won", "lost", "void"}
-                               and newer.get("result") != leg.get("result"))
+            marked = (newer.get("result") in {"won", "lost", "void"}
+                      and newer.get("result") != leg.get("result"))
+            changed |= marked
+            legs_marked += int(marked)
+            nba_marked += int(marked and competition == "NBA")
             updated.append(newer)
-        history.update_results(ticket["fingerprint"], updated, _now().isoformat(),
-                               _ticket_status(updated))
+        # Do not update a ticket's audit timestamp if none of its source
+        # providers was successfully observed and it has not changed.
+        if changed or not failures:
+            history.update_results(ticket["fingerprint"], updated, _now().isoformat(),
+                                   _ticket_status(updated))
         touched += int(changed)
-    return {"status": "success", "nba_final_legs": legs_marked,
+    return {"status": "SCORE_PROVIDER_PARTIAL" if failures else "success",
+            "nba_final_legs": nba_marked, "verified_final_legs": legs_marked,
             "tickets_updated": touched,
-            "provider": "ESPN_NBA_FINAL",
-            "non_nba_policy": "pending_without_verified_provider"}
+            "providers": ["ESPN_NBA_FINAL", "EUROLEAGUE_OFFICIAL_FINAL"],
+            "failures": failures}
