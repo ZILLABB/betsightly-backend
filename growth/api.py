@@ -936,6 +936,35 @@ def nba_private_forward_scorecard(response: Response):
     return result
 
 
+@router.get("/admin/nba-research/closeout",
+            dependencies=[Depends(require_admin)])
+def nba_private_closeout_report(response: Response):
+    """Read-only, evidence-based readiness for the NBA research pipeline.
+
+    A successful CI or verified backup never overrides coverage, rights,
+    independent accuracy, market period, or actual-restore release gates.
+    """
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA closeout unavailable.")
+    from basketball.research_closeout import evaluate_closeout
+    from basketball.research_ops_health import read_health
+    from basketball.research_private_store import SessionLocal, latest_bundle
+    try:
+        with SessionLocal() as db:
+            health = read_health(db=db)
+            bundle = latest_bundle(db)
+        result = evaluate_closeout(health, bundle)
+    except ValueError as exc:
+        logger.warning("NBA closeout integrity blocked: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA closeout evidence invalid.") from None
+    except Exception as exc:
+        logger.warning("NBA closeout unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA closeout data unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
 @router.get("/admin/nba-research/backup-full",
             dependencies=[Depends(require_admin)])
 def nba_research_export_backup_full(response: Response):
@@ -1078,7 +1107,12 @@ def nba_private_machine_full_backup_ack(request: Request, body: dict = Body(...)
         logger.warning("NBA V2 offsite receipt rejected: %s", type(exc).__name__)
         raise HTTPException(409, "NBA offsite full recovery receipt invalid.") from None
     record_run("backup", "verified_full_private_blob_readback",
-               detail={"archive_digest": receipt["archive_digest"]})
+               detail={
+                   "archive_digest": receipt["archive_digest"],
+                   "market_receipt_count": receipt["market_receipt_count"],
+                   "job_receipt_count": receipt["job_receipt_count"],
+                   "last_job_id": receipt["last_job_id"],
+               })
     return receipt
 
 

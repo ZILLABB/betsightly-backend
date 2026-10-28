@@ -25,6 +25,9 @@ MAX_HISTORY = 600
 MAX_BACKUP_BYTES = 10_000_000
 MAX_RUNS = 20
 JOB_EXPECTED_INTERVAL_HOURS = 36
+JOB_MAX_AGE_HOURS = {"forecast": 30, "settlement": 16, "market": 36, "backup": 30}
+BACKUP_V2_STATUS = "verified_full_private_blob_readback"
+BACKUP_V1_STATUS = "verified_private_blob_readback"
 JOB_KINDS = ("forecast", "settlement", "market", "backup")
 
 
@@ -54,7 +57,7 @@ def _job_readiness(jobs, *, now: datetime) -> dict:
                                     "archive_capacity_reached"))
         state = (
             "clock_skew" if seconds < -300 else
-            "stale" if seconds > JOB_EXPECTED_INTERVAL_HOURS * 3600 else
+            "stale" if seconds > JOB_MAX_AGE_HOURS[kind] * 3600 else
             "degraded" if degraded else "observed"
         )
         summary[kind] = {
@@ -122,6 +125,10 @@ def record_run(kind, status, *, detail=None):
         if isinstance(failed, list):
             safe["failed_date_count"] = min(len(failed), 12)
     if kind == "backup":
+        for key in ("job_receipt_count", "market_receipt_count", "last_job_id"):
+            value = (detail or {}).get(key)
+            if type(value) is int and 0 <= value <= 10000:
+                safe[key] = value
         digest = (detail or {}).get("archive_digest")
         if isinstance(digest, str) and len(digest) == 64 and all(
                 ch in "0123456789abcdef" for ch in digest):
@@ -161,10 +168,17 @@ def read_health(*, db=None, now: datetime | None = None):
             _verify_receipt(latest_market)
         jobs = db.query(NBAPrivateJobRun).order_by(
             NBAPrivateJobRun.id.desc()).limit(MAX_RUNS).all()
-        backups = [row for row in jobs if row.kind == "backup"
-                   and row.status == "verified_private_blob_readback"]
+        # Backup receipts must NOT be discovered only through the last 20
+        # general jobs: frequent settlement jobs can otherwise hide a valid
+        # backup and incorrectly report no offsite recovery.
+        latest_backup = db.query(NBAPrivateJobRun).filter(
+            NBAPrivateJobRun.kind == "backup",
+            NBAPrivateJobRun.status.in_((BACKUP_V1_STATUS, BACKUP_V2_STATUS))
+        ).order_by(NBAPrivateJobRun.id.desc()).first()
         archive_digest = _digest(archive)
-        latest_backup = backups[0] if backups else None
+        backup_version = ("v2" if latest_backup is not None and
+                          latest_backup.status == BACKUP_V2_STATUS else
+                          "v1" if latest_backup is not None else None)
         backup_summary = json.loads(latest_backup.summary_json) if latest_backup else {}
         backup_age = (
             (_utc_naive(clock) - _utc_naive(latest_backup.recorded_at)).total_seconds()
@@ -181,6 +195,32 @@ def read_health(*, db=None, now: datetime | None = None):
                  _utc_naive(latest_market.recorded_at)
                     <= _utc_naive(latest_backup.recorded_at))
         )
+        latest_job_id = db.query(func.max(NBAPrivateJobRun.id)).scalar() or 0
+        # A V2 receipt is inserted AFTER the downloaded ledger was frozen;
+        # its own audit row is therefore intentionally backed up next time.
+        prev_id = (db.query(func.max(NBAPrivateJobRun.id)).filter(
+            NBAPrivateJobRun.id < latest_backup.id).scalar()
+                   if latest_backup is not None else None)
+        fully_backed_jobs = bool(
+            backup_version == "v2"
+            and type(backup_summary.get("last_job_id")) is int
+            and backup_summary["last_job_id"] == (prev_id or 0)
+            and latest_job_id == latest_backup.id
+        )
+        future = [g for g in archive["fixtures"] if
+                  g["status"] == "scheduled" and
+                  datetime.fromisoformat(g["start_utc"].replace("Z", "+00:00"))
+                  > clock.astimezone(timezone.utc)]
+        money_ids = {r["game_id"] for r in archive["records"]["moneyline"]}
+        score_ids = {r["game_id"] for r in archive["records"]["opening_score"]}
+        completed_model_pairs = sum(
+            str(g["game_id"]) in money_ids and str(g["game_id"]) in score_ids
+            for g in future
+        )
+        remaining = MAX_FIXTURES - board["summary"]["fixtures"]
+        capacity_state = ("exhausted" if remaining <= 0 else
+                          "near_limit" if remaining <= max(30, MAX_FIXTURES // 10)
+                          else "normal")
         return {
             "status": "private_research_health",
             "research_only": True,
@@ -190,7 +230,15 @@ def read_health(*, db=None, now: datetime | None = None):
             "pending_fixtures": board["summary"]["pending_fixtures"],
             "verified_settlements": board["summary"]["verified_settlements"],
             "archive_capacity": MAX_FIXTURES,
-            "remaining_fixture_slots": MAX_FIXTURES - board["summary"]["fixtures"],
+            "remaining_fixture_slots": remaining,
+            "archive_capacity_state": capacity_state,
+            "archive_capacity_requires_scale_plan": capacity_state != "normal",
+            "archive_cohort_coverage": {
+                "future_archived_fixtures": len(future),
+                "future_with_moneyline_and_score": completed_model_pairs,
+                "future_missing_either_model": len(future) - completed_model_pairs,
+                "full_league_schedule_completeness_proven": False,
+            },
             "research_snapshots": snapshot_count,
             "market_snapshots": market_count,
             "last_market_observed_at": (
@@ -203,21 +251,38 @@ def read_health(*, db=None, now: datetime | None = None):
                  "summary": json.loads(item.summary_json)}
                 for item in jobs
             ],
-            "job_readiness": _job_readiness(jobs, now=clock),
+            "job_readiness": _job_readiness(
+                jobs + ([latest_backup] if latest_backup is not None and
+                        all(j.id != latest_backup.id for j in jobs) else []),
+                now=clock,
+            ),
             "database_expiry_declared_at": os.getenv(
                 "NBA_RESEARCH_DATABASE_EXPIRES_AT") or None,
             "backup_policy": "private_vercel_blob_daily_snapshot_with_hash_readback",
-            "automatic_backup_proven": bool(backups),
+            "automatic_backup_proven": latest_backup is not None,
+            "backup_version": backup_version,
             "backup_recent_for_current_archive": recent_archive_backup,
-            "backup_recovery_scope": "research_archive_and_market_receipts_only",
-            "job_audit_history_in_portable_backup": False,
+            "backup_recovery_scope": (
+                "research_archive_market_receipts_and_job_audit_history"
+                if backup_version == "v2" else
+                "research_archive_and_market_receipts_only"
+            ),
+            "job_audit_history_in_portable_backup": backup_version == "v2",
+            "backup_covers_latest_job_history": fully_backed_jobs,
+            "last_backed_job_id": (
+                backup_summary.get("last_job_id") if backup_version == "v2"
+                else None
+            ),
             "backup_covers_current_market_history": bool(
                 latest_backup is not None and
                 (latest_market is None or
                  _utc_naive(latest_market.recorded_at)
                     <= _utc_naive(latest_backup.recorded_at))
             ),
-            "last_backup_audit": backups[0].recorded_at.isoformat() + "Z" if backups else None,
+            "last_backup_audit": (
+                latest_backup.recorded_at.isoformat() + "Z" if latest_backup
+                else None
+            ),
         }
     finally:
         if owned:
