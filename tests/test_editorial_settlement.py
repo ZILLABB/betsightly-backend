@@ -160,3 +160,30 @@ def test_historical_pending_legs_are_not_dropped_from_settlement_queue():
         ).all()
     assert len(rows) == 1
     assert rows[0][0] == "2026-09-01"
+
+
+def test_archived_manual_recovery_rotates_off_boundary_once_per_slot(monkeypatch):
+    """A scheduler started at :07 must still process historical tickets."""
+    from datetime import datetime, timedelta, timezone
+    from leagues import editorial_settlement as es
+
+    monkeypatch.setattr(es, "_ARCHIVE_SLOT_LAST", None)
+    days = ["2026-10-01", "2026-10-02", "2026-10-03"]
+    started = datetime(2026, 10, 28, 8, 7, tzinfo=timezone.utc)
+
+    # The one-minute rapid lane must not consume historical backfill quota.
+    assert es._claim_historical_recovery_day(
+        days, started, full_recovery=False,
+    ) is None
+    first = es._claim_historical_recovery_day(days, started)
+    assert first in days
+    assert es._claim_historical_recovery_day(
+        days, started + timedelta(minutes=3),
+    ) is None
+
+    # Another comprehensive cycle in the next 15-minute slot rotates.
+    later = started + timedelta(minutes=9)
+    expected = days[(int(later.timestamp()) // 900) % len(days)]
+    assert es._claim_historical_recovery_day(days, later) == expected
+    assert es._claim_historical_recovery_day(days, later) is None
+    assert es._claim_historical_recovery_day([], later + timedelta(hours=1)) is None
