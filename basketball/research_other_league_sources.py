@@ -22,6 +22,10 @@ CANDIDATES = {
         "espn_slug": "womens-college-basketball", "research_state": "source_candidate",
         "period_length_minutes": 10,
     },
+    "nbl_au": {
+        "espn_slug": "nbl", "research_state": "source_candidate",
+        "period_length_minutes": 10,
+    },
 }
 HOST = "https://site.api.espn.com/apis/site/v2/sports/basketball"
 MAX_EVENTS = 100
