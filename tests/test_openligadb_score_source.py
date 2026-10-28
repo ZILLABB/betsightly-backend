@@ -215,3 +215,71 @@ def test_german_final_cache_refreshes_within_five_minutes(monkeypatch):
     assert source._season_finals("bl1", 2026)
     assert len(calls) == 2
     source._CACHE.clear()
+
+
+def test_uefa_2026_odbl_final_with_verifiable_90min_and_exact_alias():
+    """Free UEFA source has explicit After90Minutes resultTypeID 2."""
+    match = _match(
+        shortcut="uel2026", home="AFC Bournemouth", away="AC Mailand",
+        kickoff="2026-10-22T19:00:00Z", match_id=87799,
+        results=[{"resultTypeID": 1, "pointsTeam1": 1, "pointsTeam2": 0},
+                 {"resultTypeID": 2, "pointsTeam1": 3, "pointsTeam2": 0}],
+    )
+    parsed = source._normalize_fixture(match, "uel2026", 2026)
+    assert parsed["home"] == "Bournemouth"
+    assert parsed["away"] == "AC Milan"
+    assert parsed["score_90"] == {"home": 3, "away": 0}
+    assert parsed["match_status"] == "FT"
+    # Never trust the 90-minute market if a cup fixture reports ET/PEN.
+    match["matchResults"].append(
+        {"resultTypeID": 3, "pointsTeam1": 4, "pointsTeam2": 0})
+    assert source._normalize_fixture(match, "uel2026", 2026) is None
+
+
+def test_uefa_and_conference_source_exact_label_is_mapped_to_real_shortcuts(monkeypatch):
+    calls = []
+    def season_finals(shortcut, year):
+        calls.append((shortcut, year))
+        return [
+            source._normalize_fixture(
+                _match(shortcut="uel2026", home="AFC Bournemouth",
+                       away="AC Mailand", kickoff="2026-10-22T19:00:00Z",
+                       results=[{"resultTypeID": 2,
+                                 "pointsTeam1": 3, "pointsTeam2": 0}]),
+                "uel2026", 2026)
+        ] if shortcut == "uel2026" else [
+            source._normalize_fixture(
+                _match(shortcut="uecl2026", home="Ajax Amsterdam",
+                       away="Atalanta", kickoff="2026-10-22T19:00:00Z",
+                       results=[{"resultTypeID": 2,
+                                 "pointsTeam1": 2, "pointsTeam2": 0}]),
+                "uecl2026", 2026)
+        ]
+    monkeypatch.setenv("OPENLIGADB_ENABLED", "true")
+    monkeypatch.setattr(source, "_season_finals", season_finals)
+    rows = source.openligadb_finals([
+        {"league": "UEFA Europa League", "home_team": "Bournemouth",
+         "away_team": "AC Milan", "kickoff": "2026-10-22T19:00:00Z"},
+        {"league": "UEFA Conference League", "home_team": "Ajax",
+         "away_team": "Atalanta", "kickoff": "2026-10-22T19:00:00Z"},
+    ])
+    assert set(calls) == {("uecl2026", 2026), ("uel2026", 2026)}
+    assert len(rows) == 2
+    score_map = results_checker._index_free_finals(rows)
+    assert results_checker._lookup_score(
+        score_map, "Bournemouth", "AC Milan", "2026-10-22")["home_score"] == 3
+    assert results_checker._lookup_score(
+        score_map, "Ajax", "Atalanta", "2026-10-22")["home_score"] == 2
+    assert results_checker._lookup_score(
+        score_map, "Bournemouth", "AC Milan", "2026-10-23") is None
+
+
+def test_unverified_uefa_future_season_does_not_query_2026_api(monkeypatch):
+    monkeypatch.setenv("OPENLIGADB_ENABLED", "true")
+    monkeypatch.setattr(
+        source, "_season_finals",
+        lambda *a: (_ for _ in ()).throw(
+            AssertionError("2027 UEFA shortcut not independently registered")))
+    assert source.openligadb_finals([
+        {"league": "UEFA Europa League", "kickoff": "2027-10-22T19:00:00Z"},
+    ]) == []
