@@ -37,6 +37,13 @@ if role not in {
     )
 
 
+# Fail closed *before* importing main: importing main starts background jobs.
+# This requires an explicit operator cutover acknowledgement for VPS roles;
+# it is not evidence that a previous Render worker was actually fenced.
+from utils.vps_cutover import require_writer_activation  # noqa: E402
+
+require_writer_activation(role, os.getenv("BETSIGHTLY_VPS_WRITER_ACTIVATION"))
+
 # Importing main starts only loops
 # belonging to the selected role.
 import main  # noqa: E402

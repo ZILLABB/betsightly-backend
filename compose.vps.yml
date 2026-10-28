@@ -1,7 +1,7 @@
 # BetSightly VPS staging bundle — NOT activated by this commit.
 # Render deployment is unchanged. Reverse proxy should terminate TLS outside
 # this stack and route traffic to 127.0.0.1:8000 after an explicit cutover.
-# Usage: docker compose --env-file .env.vps -f compose.vps.yml up -d
+# Default up starts *only* the API; writers require an explicit profile.
 x-app-common: &app
   build:
     context: .
@@ -41,6 +41,7 @@ services:
 
   publication:
     <<: *app
+    profiles: [writers]
     command: ["python", "-m", "run_background"]
     environment:
       ENVIRONMENT: production
@@ -54,6 +55,7 @@ services:
 
   settlement:
     <<: *app
+    profiles: [writers]
     command: ["python", "-m", "run_background"]
     environment:
       ENVIRONMENT: production

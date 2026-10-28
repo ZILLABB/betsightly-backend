@@ -20,6 +20,10 @@ ROLES = {
 
 def verify(compose):
     services = compose.get("services") or {}
+    for name in ("publication", "settlement"):
+        assert "writers" in (services.get(name, {}).get("profiles") or []), (
+            f"{name} must be explicitly opt-in via the writers profile"
+        )
     for name, role in ROLES.items():
         assert name in services, f"missing {name}"
         service = services[name]
@@ -53,7 +57,11 @@ def verify(compose):
     assert "telegram" in (services["telegram"].get("profiles") or []), (
         "telegram must be explicitly enabled when credentials are configured"
     )
-    print("VPS_COMPOSE_CONTRACT_OK: isolated API, publication, settlement, Telegram")
+    for name in ("publication", "settlement", "telegram"):
+        assert services[name]["environment"].get("BETSIGHTLY_VPS_WRITER_ACTIVATION") == "disabled", (
+            "example environment must not pre-authorize writers"
+        )
+    print("VPS_COMPOSE_CONTRACT_OK: opt-in isolated API, publication, settlement, Telegram")
 
 
 def main():

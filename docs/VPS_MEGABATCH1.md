@@ -26,7 +26,7 @@ inventory, consistency proof, and approved migration.
 ## Dry-run instructions (no production connection)
 
 1. Make a disposable copy of `.env.vps.example` named `.env.vps`.
-2. Run `docker compose --profile telegram --env-file .env.vps -f compose.vps.yml config --format json > /tmp/betsightly-vps-compose.json`.
+2. Run `docker compose --profile writers --profile telegram --env-file .env.vps -f compose.vps.yml config --format json > /tmp/betsightly-vps-compose.json`.
 3. Run `python -m scripts.vps.validate_compose /tmp/betsightly-vps-compose.json`.
 4. Run `python -m pytest tests/test_process_roles.py -q`.
 5. Delete the example-derived `.env.vps`. Never deploy the example values.
@@ -46,6 +46,10 @@ must be configured separately. Never expose PostgreSQL or Redis to 0.0.0.0/0.
   secret manager (file permissions 0600), and validate trusted origins.
 - Confirm roles and image match the approved production commit, CI is green,
   and the production stateful artifacts and caches have been audited.
+- Default `docker compose up` includes **API only**; writer profiles are opt-in.
+- The process also refuses to start dedicated VPS writers without explicit
+  `BETSIGHTLY_VPS_WRITER_ACTIVATION=render-fenced-and-approved`. This is
+  a human authorization gate, not a technical proof of fencing.
 - **Do not connect publication, settlement or Telegram to the existing
   production database while Render's corresponding roles are active.**
   For staging, use isolated PostgreSQL and disable external writes/notifications.
@@ -53,6 +57,10 @@ must be configured separately. Never expose PostgreSQL or Redis to 0.0.0.0/0.
   for API-only validation against a disposable database.
 - The `telegram` service needs `--profile telegram` and must not be started
   until Render's polling owner is fenced and bot credentials are present.
+- Before any activation, independently verify the legacy Render `all` role
+  is stopped: the Render Gunicorn application does **not** publish heartbeats
+  through `run_background.py`, so the new heartbeat monitor **cannot**
+  reliably detect its presence or guarantee absence of dual-writers.
 - On cutover, stop old writers or fence their leases, perform final sync,
   change API traffic only after health and integrity checks pass.
 
@@ -93,7 +101,9 @@ capability ownership. A **separate**, read-only monitoring process can run:
 
 Add `--require-telegram` only if the optional Telegram profile is enabled.
 A healthy exit code is **0**; missing/duplicate/stale/overlapping ownership or
-monitoring failure returns **2** and sanitized JSON. Run this on a schedule
+monitoring failure returns **2** and sanitized JSON. The check observes
+**only reporting workers**; it cannot detect an uninstrumented legacy Render
+API process that still runs a scheduler or the actual success of each job. Run this on a schedule
 outside the application/worker containers and wire the nonzero exit to an alert.
 It requires the proper application database and Python dependencies.
 It refuses SQLite and does not create or modify tables. Never point this
