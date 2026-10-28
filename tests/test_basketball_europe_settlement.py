@@ -67,6 +67,8 @@ def test_fixture_result_winner_and_overtime_totals_unchanged():
 
 
 def test_eight_leg_wzyhhv_research_example_settles_from_unique_official_european_finals(monkeypatch):
+    monkeypatch.setenv("EUROPE_BASKETBALL_SETTLEMENT_RIGHTS_APPROVED", "true")
+    monkeypatch.setenv("EUROPE_BASKETBALL_FINALS_ACCEPTED", "true")
     # Scores are the archived public game results; this is synthetic ledger
     # data only and never writes to a real private booking database.
     fixtures = [
@@ -127,7 +129,30 @@ def test_eight_leg_wzyhhv_research_example_settles_from_unique_official_european
     assert {l["score_source"] for l in writes[0][1]} == {europe.SOURCE}
 
 
+def test_rights_gate_blocks_unlicensed_european_requests(monkeypatch):
+    selection = leg(90, "Euroleague", "Hapoel Tel-Aviv", "Anadolu Efes SK",
+                    "219", "4", "", "2026-10-28T18:00:00Z")
+    ticket = {"fingerprint": "gate", "status": "active",
+              "last_checked_at": None, "legs": [selection]}
+    writes = []
+    monkeypatch.delenv("EUROPE_BASKETBALL_SETTLEMENT_RIGHTS_APPROVED", raising=False)
+    monkeypatch.delenv("EUROPE_BASKETBALL_FINALS_ACCEPTED", raising=False)
+    monkeypatch.setattr(history, "list_recent", lambda limit: {"tickets": [ticket]})
+    monkeypatch.setattr(history, "update_results", lambda *args: writes.append(args))
+    monkeypatch.setattr(bs, "_now", lambda: datetime(2026, 10, 29, 1, tzinfo=timezone.utc))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("No request without rights and source acceptance")
+
+    result = bs.settle_due(get=forbidden, force=True)
+    assert result["status"] == "SCORE_PROVIDER_PARTIAL"
+    assert "EUROPE_SETTLEMENT_NOT_AUTHORIZED_OR_ACCEPTED" in result["failures"]
+    assert result["verified_final_legs"] == 0 and not writes
+
+
 def test_provider_failure_is_not_a_zero_score_and_never_writes_fabricated_result(monkeypatch):
+    monkeypatch.setenv("EUROPE_BASKETBALL_SETTLEMENT_RIGHTS_APPROVED", "true")
+    monkeypatch.setenv("EUROPE_BASKETBALL_FINALS_ACCEPTED", "true")
     selection = leg(90, "Euroleague", "Hapoel Tel-Aviv", "Anadolu Efes SK",
                     "219", "4", "", "2026-10-28T18:00:00Z")
     ticket = {"fingerprint": "safe", "status": "active",
