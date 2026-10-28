@@ -404,9 +404,10 @@ def preview(tier: str, lines: str, *, board=None, now=None,
             "league": g["league"],
             "reason": "NO_VERIFIED_SETTLEMENT_COMPETITION",
             "message": (
-                "No unique verified ESPN scoreboard competition mapping. "
-                "This selection may remain pending until a licensed or "
-                "independently verified 90-minute final is available."
+                "No registered automatic final-score source for this "
+                "bookmaker competition identity. A verified booking code "
+                "does not guarantee automatic settlement; independent "
+                "90-minute result evidence may be needed."
             ),
         }
         for g in games if not g.get("score_competition_mapped")
