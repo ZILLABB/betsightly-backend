@@ -83,3 +83,37 @@ that service. This does **not** detect a stuck-but-alive thread or guarantee
 publication freshness; add external, database-backed age-of-last-success
 alerts before production acceptance. The existing Render legacy roles
 are intentionally unaffected by this new supervision behavior.
+
+## Database heartbeat and ownership monitoring
+
+The existing `runtime_process_heartbeats` table already records role and
+capability ownership. A **separate**, read-only monitoring process can run:
+
+`DATABASE_URL=... python -m scripts.vps.check_worker_freshness --stale-seconds 120`
+
+Add `--require-telegram` only if the optional Telegram profile is enabled.
+A healthy exit code is **0**; missing/duplicate/stale/overlapping ownership or
+monitoring failure returns **2** and sanitized JSON. Run this on a schedule
+outside the application/worker containers and wire the nonzero exit to an alert.
+It requires the proper application database and Python dependencies.
+It refuses SQLite and does not create or modify tables. Never point this
+at the Render production database alongside active VPS writers.
+A fresh heartbeat only proves the worker loop is running; it does **not**
+prove the last successful fixture update, publication or settlement.
+End-to-end job-success freshness alerts remain a separate acceptance gate.
+
+## Database backup preparation (no automatic production backup enabled)
+
+`DATABASE_URL=... python -m scripts.vps.backup_postgres --output-dir /srv/betsightly-backups`
+
+Requires PostgreSQL client tools `pg_dump` and `pg_restore`, and a suitable
+`pg_dump` version (18+ for football PostgreSQL 18). Creates a private
+custom-format dump and SHA-256 manifest; uses PostgreSQL connection variables
+to keep the password out of process arguments. The connection defaults to TLS
+`sslmode=require` unless `verify-ca` or `verify-full` is specified.
+The manifest status `archive_verified_not_restore_tested` is deliberate:
+`pg_restore --list` is **not** a full restore test. Verify the checksum,
+copy to encrypted off-host storage, then restore to an independent
+**empty disposable** database and compare row counts/check constraints before
+trusting it. Do not use `--clean` against a production database. No automated
+production cron, cloud backup upload or restore has been activated.
