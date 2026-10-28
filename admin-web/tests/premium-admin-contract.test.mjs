@@ -25,7 +25,9 @@ test('overview does not fabricate trends or backend claims', () => {
 
 test('manual publishing requires review and remains blocked after uncertain save', () => {
   assert.match(app, /<AdminActionDialog open=\{publishReview\}/);
-  assert.match(app, /disabled=\{!ready\|\|uncertain\}/);
+  assert.match(app, /disabled=\{!ready\|\|!preview\?\.data\?\.publish_ready\|\|uncertain\}/);
+  assert.match(app, /manual_review_override:manualReview/);
+  assert.match(app, /if\(!preview\.data\.publish_ready\)throw Error/);
   assert.match(app, /if\(uncertain\)throw Error/);
   assert.match(app, /bs_admin_uncertain/);
   assert.match(app, /persisted\.share_code===result\.share_code/);
