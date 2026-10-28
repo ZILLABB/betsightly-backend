@@ -368,6 +368,7 @@ def build_manual_remainders(
     board: dict | None = None,
     near_target: bool = False,
     candidate_games: list[dict] | None = None,
+    near_target_tier: str | None = None,
 ) -> dict[str, Any]:
     """Assemble only currently validated manual tickets; do not edit storage.
 
@@ -431,7 +432,8 @@ def build_manual_remainders(
         result = eligible_manual_remainder(record, tier, snapshot, now=current)
         if result.get("selected"):
             results[tier] = result
-            if near_target and candidate_games:
+            if near_target and candidate_games and (
+                    near_target_tier is None or tier == near_target_tier):
                 # No alternative is manufactured if qualified inventory is
                 # absent; the exact reduced ticket still remains available.
                 original_source = (published or {}).get(tier) or {}
