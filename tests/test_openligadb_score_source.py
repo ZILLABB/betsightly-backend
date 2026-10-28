@@ -283,3 +283,44 @@ def test_unverified_uefa_future_season_does_not_query_2026_api(monkeypatch):
     assert source.openligadb_finals([
         {"league": "UEFA Europa League", "kickoff": "2027-10-22T19:00:00Z"},
     ]) == []
+
+
+def test_2026_3liga_exact_label_and_verified_name_mapping(monkeypatch):
+    seen = []
+    def reader(shortcut, year):
+        seen.append((shortcut, year))
+        return [
+            source._normalize_fixture(
+                _match(shortcut="bl3", home="Hansa Rostock",
+                       away="SV Meppen", kickoff="2026-10-13T17:00:00Z",
+                       results=[{"resultTypeID": 2,
+                                 "pointsTeam1": 0, "pointsTeam2": 2}]),
+                "bl3", 2026),
+            source._normalize_fixture(
+                _match(shortcut="bl3", home="SV Wehen Wiesbaden",
+                       away="Alemannia Aachen",
+                       kickoff="2026-10-14T17:00:00Z", match_id=9910,
+                       results=[{"resultTypeID": 2,
+                                 "pointsTeam1": 3, "pointsTeam2": 0}]),
+                "bl3", 2026),
+        ]
+    monkeypatch.setenv("OPENLIGADB_ENABLED", "true")
+    monkeypatch.setattr(source, "_season_finals", reader)
+    rows = source.openligadb_finals([
+        {"league": "3. Liga", "home_team": "Hansa Rostock",
+         "away_team": "SV Meppen 1912",
+         "kickoff": "2026-10-13T17:00:00Z"},
+        {"league": "3. Liga", "home_team": "SV Wehen Wiesbaden",
+         "away_team": "Alemannia Aachen",
+         "kickoff": "2026-10-14T17:00:00Z"},
+    ])
+    assert seen == [("bl3", 2026)]
+    assert len(rows) == 2
+    indexed = results_checker._index_free_finals(rows)
+    assert results_checker._lookup_score(
+        indexed, "Hansa Rostock", "SV Meppen 1912", "2026-10-13")["away_score"] == 2
+    assert results_checker._lookup_score(
+        indexed, "SV Wehen Wiesbaden", "Alemannia Aachen",
+        "2026-10-14")["home_score"] == 3
+    assert results_checker._lookup_score(
+        indexed, "Hansa Rostock", "SV Meppen 1912", "2026-10-14") is None
