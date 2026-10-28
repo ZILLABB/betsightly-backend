@@ -74,6 +74,13 @@ ESPN_TEAM_ALIASES = {
     "Inter Club d'Escaldes": "Inter Club de Escaldes",
     "AS Monaco": "Monaco",
     "SC Freiburg": "Freiburg",
+    # 2026/27 3. Liga: verified exact OpenLigaDB names versus immutable
+    # SportyBet 13/14 October receipts. Not generic fuzzy suffix removal.
+    "SV Meppen": "SV Meppen 1912",
+    "Fortuna Köln": "Fortuna Cologne",
+    "Viktoria Köln": "FC Viktoria Cologne",
+    "SG Sonnenhof Großaspach": "SG Sonnenhof Grossaspach",
+    "SV Waldhof Mannheim": "SV Waldhof Mannheim 07",
 }
 
 
@@ -218,6 +225,10 @@ def openligadb_finals(picks: list[dict]) -> list[dict]:
     targets: set[tuple[str, int, str]] = set()
     for pick in picks:
         slug = str(pick.get("league_slug") or "")
+        if not slug and str(pick.get("league") or "").strip() == "3. Liga":
+            # The exact German division name is registered as bl3 for 2026/27.
+            # Do not infer country from "Premier League" or other shared names.
+            slug = "ger.3"
         if not slug:
             # Editorial SportyBet slips often retain only the league label.
             # Resolve an exact, unique registered competition name; never
