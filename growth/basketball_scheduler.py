@@ -1,8 +1,8 @@
-"""Periodic, fail-closed reconciliation of saved NBA basketball bookmaker codes.
+"""Periodic, fail-closed reconciliation of saved basketball bookmaker codes.
 
 Runs inside BetSightly's existing *scheduler-owned* 15-minute tick. Never
 requests a new booking code, opens a bet, changes a model, or touches
-research-only forecasts. Per-leg settling is governed by verified ESPN finals.
+research-only forecasts. Per-leg settling is governed by verified NBA/European final-score evidence.
 """
 from __future__ import annotations
 
@@ -40,12 +40,13 @@ def tick(*, settle=None, recorder=None) -> dict:
         logger.warning("Basketball settlement provider incomplete: %s",
                        str(result.get("status", "unknown"))[:80])
         return finish({"status": "unavailable", "reason": str(result.get("status"))[:80]})
-    count = result.get("nba_final_legs", 0)
+    count = result.get("verified_final_legs", result.get("nba_final_legs", 0))
     changed = result.get("tickets_updated", 0)
     if type(count) is not int or type(changed) is not int or count < 0 or changed < 0:
         return finish({"status": "unavailable", "reason": "invalid_counts"})
     if changed:
-        logger.info("Verified NBA booking settlement: %d tickets; %d legs",
+        logger.info("Verified basketball booking settlement: %d tickets; %d legs",
                     changed, count)
-    return finish({"status": "success", "nba_final_legs": count,
+    return finish({"status": "success", "verified_final_legs": count,
+                   "nba_final_legs": result.get("nba_final_legs", count),
                    "tickets_updated": changed})
