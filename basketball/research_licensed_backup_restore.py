@@ -56,7 +56,7 @@ def restore_licensed_history_empty_postgres(
                     continue
                 sql=text(
                     "INSERT INTO nba_research." + table +
-                    " (" + ",".join(columns) + ") VALUES (" +
+                    " (" + ",".join(columns) + ") OVERRIDING SYSTEM VALUE VALUES (" +
                     ",".join(":"+col for col in columns) + ")"
                 )
                 conn.execute(sql,data)
