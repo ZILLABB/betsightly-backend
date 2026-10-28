@@ -59,7 +59,10 @@ def source_url(league: str, season: int, matchday: int) -> str:
 
 def _read_json(url: str) -> Any:
     """HTTP GET with a bounded response, timeout and redirects disabled."""
-    if not url.startswith(f"{SOURCE_ORIGIN}/getmatchdata/"):
+    allowed_matchdata = url.startswith(f"{SOURCE_ORIGIN}/getmatchdata/")
+    allowed_group = any(url == f"{SOURCE_ORIGIN}/getcurrentgroup/{league}"
+                        for league in ALLOWED_LEAGUES)
+    if not (allowed_matchdata or allowed_group):
         raise ValueError("unapproved API URL")
     req = Request(url, headers={
         "Accept": "application/json",
@@ -238,3 +241,54 @@ def fetch_matchday(
         while len(_CACHE) > 32:
             _CACHE.pop(next(iter(_CACHE)))
     return {**result, "cache_hit": False, "publication_changed": False}
+
+
+def _season_start(now: datetime) -> int:
+    """German league season starts in the second half of a calendar year."""
+    current = _utc(now)
+    if current is None:
+        raise ValueError("Current time requires UTC offset")
+    return current.year if current.month >= 7 else current.year - 1
+
+
+def fetch_current_matchday(league: str, *,
+                           environ: dict[str, str] | None = None,
+                           now: datetime | None = None) -> dict[str, Any]:
+    """Keyless opt-in current-group lookup; never guesses a fixture or score.
+
+    Current-group endpoint tells us groupOrderID, but not verified team or
+    odds identities. Actual fixture IDs are only accepted from the matchday
+    API and remain separately matched to ESPN in Batch 3.
+    """
+    if league not in ALLOWED_LEAGUES:
+        raise ValueError("Unsupported competition")
+    if not enabled(environ):
+        return {"status": "disabled", "network_called": False,
+                "source_id": SOURCE_ID, "publication_changed": False}
+    current = _utc(now or datetime.now(timezone.utc))
+    if current is None:
+        raise ValueError("Current time requires UTC offset")
+    url = f"{SOURCE_ORIGIN}/getcurrentgroup/{league}"
+    try:
+        group = _read_json(url)
+        if not isinstance(group, dict):
+            raise ValueError("Invalid group")
+        matchday = group.get("groupOrderID")
+        if type(matchday) is not int or not 1 <= matchday <= 46:
+            raise ValueError("Invalid current group")
+        season = _season_start(current)
+        result = fetch_matchday(league, season, matchday,
+                                environ=environ, now=current)
+        return {**result, "discovery_source_url": url,
+                "auto_discovered_group": matchday,
+                "auto_discovered_season": season}
+    except HTTPError as exc:
+        return {"status": "rate_limited" if exc.code == 429 else "unavailable",
+                "source_id": SOURCE_ID, "reason": "group_http_error",
+                "publication_changed": False}
+    except (URLError, TimeoutError, OSError, ValueError,
+            json.JSONDecodeError) as exc:
+        logger.warning("OpenLigaDB current group unavailable: %s",
+                       type(exc).__name__)
+        return {"status": "unavailable", "source_id": SOURCE_ID,
+                "reason": type(exc).__name__, "publication_changed": False}
