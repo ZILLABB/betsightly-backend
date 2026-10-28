@@ -82,3 +82,14 @@ comparison **is not** a consistent backup snapshot when production can
 still write. Fence all writers and capture the final backup watermark
 before treating parity as migration acceptance. Count equality also
 cannot independently prove row contents or constraint equivalence.
+
+## Fail-closed VPS database startup
+
+All VPS services set `BETSIGHTLY_VPS_REQUIRE_DB=true` to require valid
+PostgreSQL configuration with `sslmode=require` or stronger, and a
+successful read-only `SELECT 1` connection **before** the app initializes
+and potentially creates tables. `main.py` raises a sanitized startup
+error if this fails. The live Render service does not set this flag.
+Never connect the staging API to the existing production database; the
+app's normal `init_db()` can perform schema initialization, even for web
+role. A production-data staging drill must use an isolated restored target.

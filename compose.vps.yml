@@ -27,6 +27,7 @@ services:
       DEBUG: "False"
       ENABLE_BACKGROUND_JOBS: "false"
       BETSIGHTLY_PROCESS_ROLE: web
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
     ports:
       - "127.0.0.1:18080:8000"
     cpus: 2.0
@@ -49,6 +50,7 @@ services:
       DEBUG: "False"
       ENABLE_BACKGROUND_JOBS: "true"
       BETSIGHTLY_PROCESS_ROLE: publication
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
     cpus: 2.0
     mem_limit: 4g
     volumes:
@@ -63,6 +65,7 @@ services:
       DEBUG: "False"
       ENABLE_BACKGROUND_JOBS: "true"
       BETSIGHTLY_PROCESS_ROLE: settlement
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
     cpus: 2.0
     mem_limit: 3g
     volumes:
@@ -77,6 +80,7 @@ services:
       DEBUG: "False"
       ENABLE_BACKGROUND_JOBS: "true"
       BETSIGHTLY_PROCESS_ROLE: telegram
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
     cpus: 0.5
     mem_limit: 1g
     volumes:

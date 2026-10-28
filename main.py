@@ -112,6 +112,14 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 
+# VPS is opt-in and deliberately fail-closed: we must not advertise a
+# healthy API with an unreachable or placeholder production database.
+# Existing Render deployments do not set this flag and remain unchanged.
+if os.getenv("BETSIGHTLY_VPS_REQUIRE_DB", "").strip().lower() in {"true", "1"}:
+    from database import engine as _vps_db_engine
+    from utils.vps_startup import verify_vps_database
+    verify_vps_database(os.getenv("DATABASE_URL", ""), _vps_db_engine)
+
 # Initialize database (skip for Railway deployment if no DATABASE_URL)
 try:
     database_url = os.getenv("DATABASE_URL")
