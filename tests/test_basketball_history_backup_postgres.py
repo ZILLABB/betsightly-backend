@@ -42,22 +42,7 @@ def pg():
         conn.exec_driver_sql("CREATE SCHEMA nba_research")
         for name in ("sql/nba_private_licensed_history_20261028.sql",
                      "sql/nba_private_licensed_backup_receipts_20261028.sql",
-                     "sql/nba_private_six_league_source_probes_test.sql"):
-            if name.endswith("source_probes_test.sql"):
-                conn.exec_driver_sql("""
-                    CREATE TABLE nba_research.nba_league_source_probes(
-                        id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                        league text NOT NULL,provider text NOT NULL,
-                        scope_key text NOT NULL, recorded_at timestamptz NOT NULL,
-                        http_status integer NOT NULL,events_observed integer NOT NULL,
-                        identity_complete integer NOT NULL,
-                        parsed_final_count integer NOT NULL,
-                        source_page_complete boolean NOT NULL,
-                        commercial_use_cleared boolean NOT NULL,
-                        source_probe_only boolean NOT NULL
-                    )
-                """)
-                continue
+                     "sql/nba_private_six_league_source_probes_20261028.sql"):
             for sql in (ROOT/name).read_text().split(";"):
                 if sql.strip():
                     conn.exec_driver_sql(sql)
