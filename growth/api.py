@@ -807,6 +807,21 @@ async def growth_status(admin: str = Depends(require_admin)):
     return {"status": "success", **status()}
 
 
+@router.get("/jev-research/status", dependencies=[Depends(require_admin)])
+def jev_research_admin_status():
+    """Session-protected aggregate research diagnostics; zero billable calls."""
+    from growth.jev_admin_status import research_status
+    return research_status()
+
+
+@router.get("/jev-research/desk", response_class=HTMLResponse,
+            dependencies=[Depends(require_admin)])
+def jev_research_admin_desk():
+    """Protected Jev operator page; never initiates network or publication."""
+    from growth.jev_admin_status import render_desk, research_status
+    return HTMLResponse(render_desk(research_status()), headers=_ADMIN_HEADERS)
+
+
 @router.get("/market-readiness", dependencies=[Depends(require_admin)])
 def growth_market_readiness():
     """Read-only evidence and rejection diagnostics, never a prediction trigger."""
