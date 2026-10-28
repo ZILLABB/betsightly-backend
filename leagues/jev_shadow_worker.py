@@ -98,29 +98,44 @@ def run_staging_once(*, environ=None, now=None):
         return {"status": allowed["status"], "publication_changed": False,
                 "source_calls": 0, "jev_calls": 0}
     sources = configured_sources(env.get("BETSIGHTLY_JEV_SOURCE_MATCHDAYS", ""))
-    if not sources:
+    discover = str(env.get("BETSIGHTLY_JEV_SOURCE_AUTODISCOVER", "")).lower() in {
+        "1", "true", "yes",
+    }
+    if not sources and not discover:
         return {"status": "no_source_matchdays_configured",
                 "publication_changed": False, "source_calls": 0, "jev_calls": 0}
     from leagues.engine import prepared_board
-    from leagues.external_openligadb import fetch_matchday
+    from leagues.external_openligadb import fetch_matchday, fetch_current_matchday
     current = now or datetime.now(timezone.utc)
     picks, _, board = prepared_board(2)
     if not board.get("ready") or board.get("stale"):
         return {"status": "prepared_board_not_ready",
                 "publication_changed": False, "source_calls": 0, "jev_calls": 0}
     snapshots = []
-    for league, season, matchday in sources:
-        reply = fetch_matchday(league, season, matchday, environ=env, now=current)
-        if reply.get("status") == "ok":
-            snapshots.append(reply)
+    source_calls = 0
+    if sources:
+        for league, season, matchday in sources:
+            reply = fetch_matchday(league, season, matchday,
+                                   environ=env, now=current)
+            source_calls += 1
+            if reply.get("status") == "ok":
+                snapshots.append(reply)
+    elif discover:
+        # Never broaden this into arbitrary leagues: only two recognized
+        # ESPN league identity mappings are accepted by source matcher.
+        for league in ("bl1", "bl2"):
+            reply = fetch_current_matchday(league, environ=env, now=current)
+            source_calls += 2  # one current-group and one matchday at most
+            if reply.get("status") == "ok":
+                snapshots.append(reply)
     if not snapshots:
         return {"status": "no_valid_source_snapshots",
                 "publication_changed": False,
-                "source_calls": len(sources), "jev_calls": 0}
+                "source_calls": source_calls, "jev_calls": 0}
     outcome = run_shadow_batch(
         picks, snapshots, as_of=current, environ=env,
     )
-    return {**outcome, "source_calls": len(sources)}
+    return {**outcome, "source_calls": source_calls}
 
 
 def scheduler_shadow_tick(*, environ=None):
