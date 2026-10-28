@@ -26,11 +26,13 @@ role = os.getenv(
 if role not in {
     "worker",
     "scheduler",
+    "publication",
+    "settlement",
     "telegram",
 }:
     raise SystemExit(
         "Set BETSIGHTLY_PROCESS_ROLE="
-        "worker, scheduler or telegram"
+        "worker, scheduler, publication, settlement or telegram"
     )
 
 
