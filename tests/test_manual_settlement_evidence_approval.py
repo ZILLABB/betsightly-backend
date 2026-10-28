@@ -141,6 +141,39 @@ def test_proposal_does_not_settle_or_expose_booking_and_approval_is_exact(monkey
     assert again["status"] == "ALREADY_APPROVED"
 
 
+
+
+def test_same_bookmaker_event_with_different_tier_market_grades_separately(monkeypatch):
+    engine = _db(monkeypatch)
+    with engine.begin() as conn:
+        raw = conn.execute(text(
+            "SELECT detail FROM editorial_tier_slips WHERE tier='5_odds'")).scalar()
+        other = json.loads(raw)
+        other["games"][0]["market"] = "over_3_5"
+        conn.execute(text(
+            "UPDATE editorial_tier_slips SET detail=:payload WHERE tier='5_odds'"
+        ), {"payload": json.dumps(other)})
+    proposed = _propose()  # Original 2 Odds market is Over 1.5.
+    approved = evidence.approve_evidence(
+        review_id=proposed["review_id"],
+        confirmed_event_id="sr:match:800",
+        attest_regulation_90=True, actor="admin")
+    assert approved["legs_updated"] == 2
+    with engine.connect() as conn:
+        results = {
+            tier: json.loads(raw)
+            for tier, raw in conn.execute(text(
+                "SELECT tier,detail FROM editorial_tier_slips")).all()
+        }
+    assert results["2_odds"]["games"][0]["status"] == "won"
+    assert results["5_odds"]["games"][0]["status"] == "lost"
+    assert results["5_odds"]["result_status"] == "lost"
+    assert results["2_odds"]["booking"]["share_code"] == "CODE-2"
+    assert results["5_odds"]["booking"]["share_code"] == "CODE-5"
+    assert results["2_odds"]["games"][1]["status"] == "pending"
+    assert results["5_odds"]["games"][1]["status"] == "pending"
+
+
 def test_bad_source_and_terminal_event_cannot_be_reviewed(monkeypatch):
     engine = _db(monkeypatch)
     with pytest.raises(ValueError, match="public official HTTPS"):
