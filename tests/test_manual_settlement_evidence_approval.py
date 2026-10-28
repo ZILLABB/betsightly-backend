@@ -150,7 +150,7 @@ def test_bad_source_and_terminal_event_cannot_be_reviewed(monkeypatch):
             evidence_url="http://127.0.0.1/internal",
             evidence_note="This is a detailed note for checking the correct fixture and full-time score at 90 minutes.",
             actor="admin")
-    with pytest.raises(ValueError, match="90-minute"):
+    with pytest.raises(ValueError, match="45–1000"):
         evidence.propose_evidence(
             publish_date="2026-10-13",tier="2_odds",event_id="sr:match:800",
             home_score=1,away_score=0,
