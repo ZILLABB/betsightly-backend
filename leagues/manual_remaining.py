@@ -113,6 +113,47 @@ def _verified_new_booking(games: list[dict], board: dict) -> dict | None:
     return booked
 
 
+
+def qualified_supplemental_candidates(
+    picks: list[dict], *, now: datetime | None = None,
+) -> list[dict]:
+    """Bounded, trusted model opinions, never scraped arbitrary high odds.
+
+    Called only for the visitor's explicit 'closer odds' request. Eligible
+    fixtures belong to today in WAT and are still outside the 10m cutoff.
+    """
+    from leagues.picks import to_game
+    from leagues.publication_policy import filter_official_candidates
+    from leagues.availability import parse_kickoff
+    from leagues.selection_quality import selection_probability
+
+    at = now or datetime.now(timezone.utc)
+    approved, _ = filter_official_candidates(picks, "5_odds")
+    by_fixture: dict[str, dict] = {}
+    for pick in approved:
+        if not pick.get("bookable") or not pick.get("match_id"):
+            continue
+        kickoff = parse_kickoff((pick.get("_fixture") or {}).get("commence_time"))
+        if (kickoff is None or kickoff <= at + MANUAL_BOOKING_BUFFER
+                or kickoff.astimezone(_WAT).date() != at.astimezone(_WAT).date()):
+            continue
+        try:
+            if float(selection_probability(pick)) < .65:
+                continue
+            game = to_game(pick)
+        except (KeyError, ValueError, TypeError, OverflowError):
+            continue
+        match_id = str(pick["match_id"])
+        previous = by_fixture.get(match_id)
+        if previous is None or (float(game.get("selection_probability") or
+                                     game.get("confidence") or 0) >
+                                float(previous.get("selection_probability") or
+                                      previous.get("confidence") or 0)):
+            by_fixture[match_id] = game
+    return sorted(by_fixture.values(), key=lambda g: (
+        -float(g.get("selection_probability") or g.get("confidence") or 0),
+        str(g.get("match_id") or "")))[:60]
+
 def _near_target_variant(
     original: dict, reduced: dict, candidate_games: list[dict], board: dict,
     *, now: datetime,
@@ -248,8 +289,8 @@ def eligible_manual_remainder(
 ) -> dict:
     """Pure selection + one booking call for an eligible manual ticket.
 
-    An accumulator with fewer than two legs left is not portrayed as a
-    replacement of a multi-leg tier. Such bets can be explored in Builder.
+    One surviving leg is a separately labelled single, not a replacement
+    for the original 2/5/10-odds accumulator. No surviving legs means no code.
     """
     from leagues.booking import _revalidate_games
 
@@ -257,7 +298,7 @@ def eligible_manual_remainder(
     if not original:
         return {"selected": False, "reason": "No verified manual publication for this tier."}
 
-    min_remaining = 1 if tier == "banker" else 2
+    min_remaining = 1
     timed = [g for g in original if game_kickoff_lifecycle(
         g, now, booking_buffer=MANUAL_BOOKING_BUFFER) == "actionable"]
     rejected_at_kickoff = len(original) - len(timed)
@@ -307,7 +348,8 @@ def eligible_manual_remainder(
         "games": verified,
         "total_odds": round(float(actual_odds), 3),
         "risk_level": "Manual remainder",
-        "presentation": "accumulator",
+        "presentation": "single" if len(verified) == 1 else "accumulator",
+        "single_remainder": len(verified) == 1 and tier != "banker",
         "booking": new_booking,
         "original_leg_count": len(original),
         "remaining_leg_count": len(verified),
