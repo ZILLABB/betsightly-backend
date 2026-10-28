@@ -91,6 +91,7 @@ def test_full_backup_route_never_public(monkeypatch):
     monkeypatch.setenv("NBA_ADMIN_RESEARCH_ENABLED", "true")
     monkeypatch.setenv("NBA_BACKUP_PRIVATE_ENABLED", "true")
     monkeypatch.setenv("NBA_BACKUP_JOB_TOKEN", token)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example/private_staging")
     app = FastAPI()
     app.include_router(api.router, prefix="/api/growth")
     client = TestClient(app)
