@@ -5,6 +5,8 @@ on:
     branches: [devil]
     paths:
       - 'compose.vps.yml'
+      - 'compose.coolify.yml'
+      - 'scripts/vps/validate_coolify_compose.py'
       - '.env.vps.example'
       - 'utils/process_roles.py'
       - 'run_background.py'
@@ -59,3 +61,14 @@ jobs:
           docker compose --profile writers --profile telegram --env-file .env.vps -f compose.vps.yml config --format json > /tmp/betsightly-vps-compose.json
           python -m scripts.vps.validate_compose /tmp/betsightly-vps-compose.json
           rm -f .env.vps
+      - name: Check Git-backed Coolify Compose has no published host ports
+        env:
+          DATABASE_URL: postgresql://ci:ci@db.internal.example/betsightly?sslmode=require
+          SECRET_KEY: synthetic-ci-only
+          API_KEY: synthetic-ci-only
+          ALLOWED_ORIGINS: https://stage.betsightly.invalid
+          ALLOWED_HOSTS: stage.betsightly.invalid
+          BETSIGHTLY_VPS_WRITER_ACTIVATION: disabled
+        run: |
+          docker compose --profile writers --profile telegram -f compose.coolify.yml config --format json > /tmp/betsightly-coolify.json
+          python -m scripts.vps.validate_coolify_compose /tmp/betsightly-coolify.json
