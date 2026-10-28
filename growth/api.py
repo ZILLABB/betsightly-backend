@@ -70,6 +70,47 @@ def get_manual_settlement_review(limit: int = Query(250, ge=1, le=1000)):
     return manual_settlement_review(limit=limit)
 
 
+class ManualSettlementEvidenceProposal(BaseModel):
+    publish_date: str = Field(pattern=r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$")
+    tier: str = Field(min_length=2, max_length=30)
+    event_id: str = Field(min_length=3, max_length=100)
+    home_score: int = Field(ge=0, le=30)
+    away_score: int = Field(ge=0, le=30)
+    evidence_url: str = Field(min_length=12, max_length=700)
+    evidence_note: str = Field(min_length=45, max_length=1000)
+
+
+class ManualSettlementEvidenceApproval(BaseModel):
+    review_id: str = Field(min_length=36, max_length=36)
+    confirmed_event_id: str = Field(min_length=3, max_length=100)
+    attest_regulation_90: bool = False
+
+
+@router.post("/manual-tiers/settlement-review/propose")
+def propose_manual_settlement_evidence(
+    body: ManualSettlementEvidenceProposal,
+    actor: str = Depends(require_admin),
+):
+    from leagues.manual_settlement_evidence import propose_evidence
+    try:
+        return propose_evidence(**body.model_dump(), actor=actor)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/manual-tiers/settlement-review/approve")
+def approve_manual_settlement_evidence(
+    body: ManualSettlementEvidenceApproval,
+    actor: str = Depends(require_admin),
+):
+    from leagues.manual_settlement_evidence import approve_evidence
+    try:
+        return approve_evidence(**body.model_dump(), actor=actor)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+
 # Private jackpot booking uses the same signed admin cookie as publishing.
 # Neither endpoint is exposed through the public BetSightly site.
 class PrivateJackpotFilters(BaseModel):
