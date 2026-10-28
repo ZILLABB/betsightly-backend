@@ -102,7 +102,7 @@ jobs:
           assert values == [(1, "WON"), (2, "LOST"), (3, "PENDING")], values
           print("POSTGRES18_RESTORE_PROOF_OK: 3 source rows match restored rows")
           PY
-      - name: Failure gate: refuse restore into nonempty database
+      - name: "Failure gate: refuse restore into nonempty database"
         env:
           RESTORE_DATABASE_URL: postgresql://ci_betsightly:only_test_fixture_pw@127.0.0.1:55432/betsightly_restore_fixture1234?sslmode=require
         run: |
