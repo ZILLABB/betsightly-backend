@@ -1,0 +1,36 @@
+name: Free national league result contract
+on:
+  push:
+    branches: [research/free-fixture-api-20261028]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Read registered free sources without changing settlements
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          def get(url):
+              req=urllib.request.Request(url,headers={'Accept':'application/json','User-Agent':'BetSightly-permitted-free-score-audit/1.0'})
+              with urllib.request.urlopen(req,timeout=18) as r: return json.load(r)
+          try:
+              data=get('https://api.openligadb.de/getavailableleagues/2026')
+              print('OPENLIGADB_REGISTERED',len(data))
+              for x in data:
+                  text=json.dumps({k:v for k,v in x.items() if isinstance(v,(str,int))},ensure_ascii=False)
+                  if any(k in text.lower() for k in ('niederland','nederland','erste divisie','japan','j2','ligue 2','superettan','portugal','estland','cyprus','schweden')):
+                      print('LEAGUE',text[:350])
+          except Exception as e: print('OPENLIGA_ERROR',type(e).__name__,str(e)[:100])
+          for slug in ('ned.2','jpn.2','jpn.3','fra.2','eng.2','tur.2','cyp.1'):
+              try:
+                  data=get('https://site.api.espn.com/apis/site/v2/sports/soccer/'+slug+'/scoreboard?dates=202610&limit=500')
+                  events=data.get('events',[])
+                  complete=[x for x in events if (x.get('competitions') or [{}])[0].get('status',{}).get('type',{}).get('completed')]
+                  print('ESPN',slug,'events',len(events),'completed',len(complete))
+                  for x in complete[:3]:
+                      comp=(x.get('competitions') or [{}])[0]
+                      names=[t.get('team',{}).get('displayName') for t in comp.get('competitors',[])]
+                      print('ESPN_SAMPLE',slug,x.get('date'),names)
+              except Exception as e: print('ESPN_ERROR',slug,type(e).__name__,str(e)[:140])
+          PY
