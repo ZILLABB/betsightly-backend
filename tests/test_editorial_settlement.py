@@ -223,3 +223,41 @@ def test_oct27_official_finals_recover_manual_2_5_10_odds_without_guessing():
         assert graded["games"][0]["settlement_evidence"]["provider"] == "verified-official-fixture-report"
         assert incident_finals([{**game, "away_team": "Different FC"}]) == []
         assert incident_finals([{**game, "kickoff": "2026-10-26T16:00:00Z"}]) == []
+
+
+def test_oct15_oct22_official_conference_finals_recover_only_matching_receipts():
+    from services.verified_incident_finals import incident_finals
+    from leagues.results_checker import _index_free_finals
+    records = [
+        ("sr:match:74173166", "PFC CSKA Sofia", "Monaco",
+         "2026-10-15T16:45:00Z", "away_or_draw", "won"),
+        ("sr:match:74173200", "St. Truidense VV", "FC Iberia 1999",
+         "2026-10-15T19:00:00Z", "over_1_5", "won"),
+        ("sr:match:74173188", "Copenhagen", "Braga",
+         "2026-10-15T19:00:00Z", "over_1_5", "won"),
+        ("sr:match:74173224", "Crvena Zvezda", "Copenhagen",
+         "2026-10-22T16:45:00Z", "over_2_5", "won"),
+        ("sr:match:74173250", "Ajax", "Atalanta",
+         "2026-10-22T19:00:00Z", "over_2_5", "lost"),
+        ("sr:match:74173266", "FC Thun", "HNK Hajduk Split",
+         "2026-10-22T19:00:00Z", "over_2_5", "lost"),
+        ("sr:match:74173262", "FC Midtjylland", "St. Truidense VV",
+         "2026-10-22T19:00:00Z", "over_1_5", "lost"),
+    ]
+    for eid, home, away, kickoff, market, expected in records:
+        game = {"sportybet_event_id": eid, "home_team": home,
+                "away_team": away, "kickoff": kickoff,
+                "market": market, "status": "pending"}
+        evidence = incident_finals([game])
+        assert len(evidence) == 1
+        assert evidence[0]["evidence_url"].startswith("https://www.uefa.com/")
+        slip = {"games": [game], "booking": {"share_code": "IMMUTABLE"}}
+        outcome = grade_manual_slip(
+            slip, _index_free_finals(evidence),
+            now=datetime(2026, 10, 28, 8, tzinfo=timezone.utc),
+        )
+        assert outcome["result_status"] == expected
+        assert outcome["booking"] == slip["booking"]
+        assert incident_finals([{**game, "sportybet_event_id": "sr:match:wrong"}]) == []
+        assert incident_finals([{**game, "away_team": "Another Club"}]) == []
+        assert incident_finals([{**game, "kickoff": "2026-10-23T19:00:00Z"}]) == []
