@@ -8,6 +8,7 @@ score provider is added for their league.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -195,11 +196,19 @@ def settle_due(*, get=None, force=False):
                                    else scheduled.year - 1))
                     for _, _, scheduled, competition in due
                     if competition in {"EUROLEAGUE", "EUROCUP"}})
-    for competition, season_year in pairs:
-        try:
-            european_results.extend(european.fetch_finals(competition, season_year, get=get))
-        except Exception as exc:
-            failures.append(f"{competition} {season_year}: {type(exc).__name__}")
+    # Public JSON availability is NOT permission for commercial settlement.
+    # The research audit explicitly flags this feed unapproved for sportsbook
+    # use. Two independent approvals are required before the first request.
+    rights_approved = os.getenv("EUROPE_BASKETBALL_SETTLEMENT_RIGHTS_APPROVED") == "true"
+    provider_accepted = os.getenv("EUROPE_BASKETBALL_FINALS_ACCEPTED") == "true"
+    if pairs and not (rights_approved and provider_accepted):
+        failures.append("EUROPE_SETTLEMENT_NOT_AUTHORIZED_OR_ACCEPTED")
+    else:
+        for competition, season_year in pairs:
+            try:
+                european_results.extend(european.fetch_finals(competition, season_year, get=get))
+            except Exception as exc:
+                failures.append(f"{competition} {season_year}: {type(exc).__name__}")
 
     # Keep all evidence isolated to the provider/competition. Partial provider
     # failures may never be construed as absent finals or a lost ticket.
