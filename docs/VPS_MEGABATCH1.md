@@ -117,3 +117,22 @@ copy to encrypted off-host storage, then restore to an independent
 **empty disposable** database and compare row counts/check constraints before
 trusting it. Do not use `--clean` against a production database. No automated
 production cron, cloud backup upload or restore has been activated.
+
+## Guarded database restore rehearsal
+
+Provision an **existing, empty, isolated** PostgreSQL database named
+`betsightly_restore_<8+ lowercase characters or digits>`, outside the
+production application. Use a different database than `source_database`
+in the manifest and set `RESTORE_DATABASE_URL` to this disposable target.
+It must use TLS and a separate restricted credential.
+
+`RESTORE_DATABASE_URL=... python -m scripts.vps.restore_drill --archive /srv/betsightly-backups/ARCHIVE.dump --manifest /srv/betsightly-backups/ARCHIVE.json`
+
+The script checks the archive SHA-256, file length, manifest identity,
+target database name and empty schema before it will restore.
+It intentionally refuses database creation/deletion, `--clean`, and
+existing user tables, and performs a single-transaction pg_restore.
+A successful restore confirms that the archive can be loaded into the
+disposable database; **it does not prove application-level row counts,
+booking consistency or settlement correctness**. These must be compared
+against source snapshots separately before production cutover.
