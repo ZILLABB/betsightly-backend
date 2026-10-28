@@ -653,16 +653,38 @@ def get_bookable_now():
 
 
 @router.get("/manual-bookable-now")
-def get_manual_bookable_now():
-    """Opt-in new codes for remaining admin-curated picks, not official results.
+def get_manual_bookable_now(near_target: bool = False, tier: str | None = None):
+    """New, separately verified codes for surviving admin-curated picks.
 
-    The original manual publication and stored code never change. The newly
-    booked subset requires an entirely new full SportyBet share code after
-    checking current kickoff times, mapping, prices and exact readback.
+    The default call is safe for automatic page recovery and needs only a
+    SportyBet board. Expanding toward the original odds is a *different*
+    opt-in wager. Only that explicit call reads already-prepared, model-gated
+    candidate fixtures; neither call alters the frozen publication/results.
     """
     try:
-        from leagues.manual_remaining import build_manual_remainders
-        return {"status": "success", **build_manual_remainders()}
+        from leagues.manual_remaining import (
+            build_manual_remainders, qualified_supplemental_candidates)
+        candidate_games = None
+        if near_target and tier and tier not in {
+                "banker", "2_odds", "5_odds", "10_odds", "over_1_5"}:
+            raise HTTPException(400, "Unknown prediction tier")
+        if near_target:
+            # A stale model board must not block otherwise valid reduced
+            # tickets. No ad-hoc training or source scraping on public reads.
+            try:
+                picks, _, _ = _public_prepared_board(2)
+                candidate_games = qualified_supplemental_candidates(picks)
+            except HTTPException:
+                candidate_games = []
+        from fastapi.responses import JSONResponse
+        result = build_manual_remainders(
+            near_target=near_target, candidate_games=candidate_games,
+            near_target_tier=tier)
+        return JSONResponse(
+            {"status": "success", **result},
+            headers={"Cache-Control": "private, no-store"})
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Manual remainder lookup failed: %s", type(exc).__name__, exc_info=True)
         raise HTTPException(503, "Current manual rebooking cannot be verified")

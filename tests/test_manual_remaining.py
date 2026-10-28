@@ -64,13 +64,16 @@ def test_started_manual_leg_is_pruned_and_new_code_matches_only_survivors(monkey
     assert record["share_code"] == "ORIGINAL"
 
 
-def test_near_kickoff_is_also_removed_and_too_few_survivors_never_book(monkeypatch):
+def test_near_kickoff_is_removed_and_a_single_survivor_can_be_rebooked(monkeypatch):
     seen = _mock_live_booking(monkeypatch)
     record = _verified_record([_leg(1, -1), _leg(2, .15), _leg(3, 2)])
     output = M.eligible_manual_remainder(record, "10_odds", {}, now=NOW)
-    assert output["selected"] is False
+    assert output["selected"] is True
     assert output["remaining_leg_count"] == 1
-    assert seen == []
+    assert output["single_remainder"] is True
+    assert output["presentation"] == "single"
+    assert seen == [["fixture-3"]]
+    assert record["share_code"] == "ORIGINAL"
 
 
 def test_unverified_old_manual_source_is_not_treated_as_an_admin_ticket(monkeypatch):
@@ -313,3 +316,87 @@ def test_reduced_ticket_failure_describes_why_without_overwriting_original(monke
     assert "Too few" in result["tier_reasons"]["5_odds"]
     assert result["official_publication_unchanged"] is True
     assert published["booking"]["share_code"] == "MANUAL10"
+
+
+def test_near_target_is_opt_in_and_adds_only_verified_future_fixtures(monkeypatch):
+    from math import prod
+    from leagues import editorial_manual, sportybet
+
+    original = [_leg(1, -2), _leg(2, 3), _leg(3, 4)]
+    published = _editorial_publication(original)
+    published["total_odds"] = 5.1
+    monkeypatch.setattr(editorial_manual, "list_published",
+                        lambda day: {"5_odds": published})
+    monkeypatch.setattr(B, "bookings_for", lambda day: {})
+    monkeypatch.setattr(B, "booking_editions_for", lambda day, tier: [])
+    monkeypatch.setattr(sportybet, "fetch_board", lambda: {})
+
+    booked = []
+    def verified(games, board):
+        return ([{**g, "odds": 1.48, "bookable": True} for g in games], [])
+    def book(games, board, **kwargs):
+        booked.append([g["match_id"] for g in games])
+        return {
+            "status": "active", "booking_status": "FULL",
+            "readback_validation": "PASSED", "share_code": "NEWEXACT",
+            "booked_leg_count": len(games), "partial": False,
+            "actual_sportybet_odds": prod(float(g["odds"]) for g in games),
+        }
+    monkeypatch.setattr(B, "_revalidate_games", verified)
+    monkeypatch.setattr(B, "create_or_reuse_generated_booking", book)
+
+    candidates = [_leg(100, 5), _leg(101, 6), _leg(102, -5)]
+    for game in candidates:
+        game["confidence"] = 0.85
+        game["selection_probability"] = 0.85
+        game["editorial_manual"] = False
+
+    ordinary = M.build_manual_remainders(
+        now=NOW, board={}, near_target=False, candidate_games=candidates)
+    assert ordinary["near_target_alternatives"] == {}
+    assert booked == [["fixture-2", "fixture-3"]]
+
+    results = M.build_manual_remainders(
+        now=NOW, board={}, near_target=True, candidate_games=candidates)
+    near = results["near_target_alternatives"]["5_odds"]
+    assert near["official_publication"] is False
+    assert near["result_scored"] is False
+    assert near["near_target_alternative"] is True
+    assert near["supplemental_leg_count"] == 2
+    assert near["remaining_original_leg_count"] == 2
+    assert len(near["games"]) == 4
+    assert near["booking"]["share_code"] == "NEWEXACT"
+    assert set(booked[-1]) == {"fixture-2", "fixture-3", "fixture-100", "fixture-101"}
+    assert original[0]["match_id"] == "fixture-1"
+    assert published["booking"]["share_code"] == "MANUAL10"
+
+
+def test_closer_odds_never_adds_started_or_reuses_fixture_or_guesses_unverified_code(monkeypatch):
+    original = {"total_odds": 4.7}
+    reduced = {"games": [_leg(1, 3), _leg(2, 4)]}
+    candidates = [
+        {**_leg(1, 5), "confidence": 0.95}, # same fixture, different kickoff
+        {**_leg(5, -1), "confidence": 0.95}, # started
+        {**_leg(3, 5), "confidence": 0.80},
+        {**_leg(4, 6), "confidence": 0.82},
+    ]
+    # A denied bookmaker call must not be turned into a copied old share code.
+    monkeypatch.setattr(B, "_revalidate_games",
+                        lambda games, board: (games, []))
+    monkeypatch.setattr(B, "create_or_reuse_generated_booking",
+                        lambda games, board, **kwargs: {
+                            "status": "active", "booking_status": "PARTIAL",
+                            "readback_validation": "PASSED", "share_code": "BADCODE",
+                            "booked_leg_count": len(games), "actual_sportybet_odds": 5.0,
+                        })
+    result = M._near_target_variant(original, reduced, candidates, {}, now=NOW)
+    assert result is None
+
+
+def test_missing_original_total_never_mints_near_target_wager(monkeypatch):
+    monkeypatch.setattr(B, "_revalidate_games",
+                        lambda games, board: (_ for _ in ()).throw(
+                            AssertionError("Should not reach bookmaker")))
+    assert M._near_target_variant(
+        {}, {"games": [_leg(1, 2)]},
+        [_leg(2, 5)], {}, now=NOW) is None
