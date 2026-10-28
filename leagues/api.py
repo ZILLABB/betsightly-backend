@@ -1542,6 +1542,35 @@ def _public_prepared_board(horizon: int) -> tuple[list[dict], list[dict], dict]:
     })
 
 
+@router.get("/jev-shadow/status", dependencies=[Depends(require_api_key)])
+def private_jev_shadow_status():
+    """Protected research telemetry. No secrets, prompt text or raw evidence.
+
+    This read-only admin endpoint cannot start Jev calls, create a research
+    table, change bets or promote a research judgment to publication.
+    """
+    from leagues.jev_shadow_decision import runtime_status
+    from leagues.jev_shadow_ledger import summary
+    from basketball.jev_research_evidence import basketball_research_status
+
+    try:
+        audits = summary()
+    except Exception as exc:
+        logger.warning("Jev audit status unavailable: %s", type(exc).__name__)
+        audits = {"status": "unavailable", "total": None}
+    return {
+        "status": "success",
+        "provider": runtime_status(),
+        "audits": audits,
+        "basketball": basketball_research_status(),
+        "shadow_only": True,
+        "publication_authority": False,
+        "bookmaker_codes_changed": False,
+        "settlements_changed": False,
+        "controlled_publication_gating_enabled": False,
+    }
+
+
 @router.get("/recommendations")
 def get_fixture_recommendations(date: str | None = None,
                                       days_ahead: int = 3):
