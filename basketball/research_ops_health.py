@@ -99,6 +99,21 @@ def record_run(kind, status, *, detail=None):
         value = (detail or {}).get(key)
         if isinstance(value, (int, dict)) and not isinstance(value, bool):
             safe[key] = value
+    if kind == "forecast":
+        reason = (detail or {}).get("reason")
+        if reason in ("eligible_forecasts_already_recorded",
+                      "no_model_eligible_fixture_in_window"):
+            safe["reason"] = reason
+        readiness = (detail or {}).get("readiness")
+        allowed = ("moneyline_eligible", "moneyline_already_recorded",
+                   "original_score_eligible", "original_score_already_recorded",
+                   "upcoming_source_fixtures")
+        if isinstance(readiness, dict):
+            safe["readiness"] = {
+                key: value for key in allowed
+                if (type(value := readiness.get(key)) is int
+                    and 0 <= value <= 10000)
+            }
     if kind == "settlement":
         provider = (detail or {}).get("provider_status")
         if provider in ("ok", "partial", "idle"):
@@ -161,6 +176,10 @@ def read_health(*, db=None, now: datetime | None = None):
             latest_backup is not None and backup_age is not None
             and 0 <= backup_age <= JOB_EXPECTED_INTERVAL_HOURS * 3600
             and backup_summary.get("archive_digest") == archive_digest
+            # Snapshot digest alone does not cover later market receipts.
+            and (latest_market is None or
+                 _utc_naive(latest_market.recorded_at)
+                    <= _utc_naive(latest_backup.recorded_at))
         )
         return {
             "status": "private_research_health",
@@ -190,6 +209,14 @@ def read_health(*, db=None, now: datetime | None = None):
             "backup_policy": "private_vercel_blob_daily_snapshot_with_hash_readback",
             "automatic_backup_proven": bool(backups),
             "backup_recent_for_current_archive": recent_archive_backup,
+            "backup_recovery_scope": "research_archive_and_market_receipts_only",
+            "job_audit_history_in_portable_backup": False,
+            "backup_covers_current_market_history": bool(
+                latest_backup is not None and
+                (latest_market is None or
+                 _utc_naive(latest_market.recorded_at)
+                    <= _utc_naive(latest_backup.recorded_at))
+            ),
             "last_backup_audit": backups[0].recorded_at.isoformat() + "Z" if backups else None,
         }
     finally:
