@@ -216,3 +216,100 @@ def test_create_booking_accepts_explicit_ten_minute_override(monkeypatch):
     )
     assert ten["status"] == "kickoff_buffer"
     assert "10 minutes" in ten["reason"]
+
+
+def _editorial_publication(legs: list[dict], *, code: str = "MANUAL10") -> dict:
+    """The real editorial_tier_slips shape, not a tier_bookings row."""
+    from leagues.booking import leg_fingerprint
+    fingerprint = leg_fingerprint(legs)
+    return {
+        "editorial_manual": True,
+        "source": "admin_curated",
+        "games": [dict(g) for g in legs],
+        "booking": {
+            "status": "active",
+            "booking_status": "FULL",
+            "share_code": code,
+            "readback_validation": "PASSED",
+            "partial": False,
+            "original_leg_count": len(legs),
+            "booked_leg_count": len(legs),
+            "leg_fingerprint": fingerprint,
+            "booking_variant_fingerprint": fingerprint,
+            "original_legs": [dict(g) for g in legs],
+            "final_booked_legs": [dict(g) for g in legs],
+        },
+    }
+
+
+def test_real_editorial_publication_is_primary_manual_rebooking_source(monkeypatch):
+    from leagues import editorial_manual, sportybet
+    seen = _mock_live_booking(monkeypatch)
+    original = [_leg(1, -2), _leg(2, 3), _leg(3, 4)]
+    published = _editorial_publication(original)
+    monkeypatch.setattr(editorial_manual, "list_published",
+                        lambda date: {"10_odds": published})
+    # The legacy tier store has an unrelated automated ticket under same key.
+    monkeypatch.setattr(B, "bookings_for", lambda day: {
+        "10_odds": _verified_record([_leg(8, 2), _leg(9, 3)])})
+    def legacy_editions(day, tier):
+        if tier == "10_odds":
+            raise AssertionError("Must not use legacy edition for the published tier")
+        return []
+    monkeypatch.setattr(B, "booking_editions_for", legacy_editions)
+    monkeypatch.setattr(sportybet, "fetch_board", lambda: {})
+    result = M.build_manual_remainders(now=NOW)
+    assert result["available"] is True
+    assert result["tiers"]["10_odds"]["remaining_leg_count"] == 2
+    assert result["tiers"]["10_odds"]["removed_leg_count"] == 1
+    assert result["tiers"]["10_odds"]["booking"]["share_code"] == "NEWCODE"
+    assert seen == [["fixture-2", "fixture-3"]]
+    assert published["booking"]["share_code"] == "MANUAL10"
+    assert len(published["games"]) == 3
+
+
+def test_bad_editorial_fingerprint_never_falls_back_to_unrelated_booking(monkeypatch):
+    from leagues import editorial_manual, sportybet
+    seen = _mock_live_booking(monkeypatch)
+    published = _editorial_publication([_leg(1, 2), _leg(2, 3)])
+    published["games"][0]["market"] = "over_2_5"
+    monkeypatch.setattr(editorial_manual, "list_published",
+                        lambda day: {"5_odds": published})
+    monkeypatch.setattr(B, "bookings_for", lambda date: {
+        "5_odds": _verified_record([_leg(3, 4), _leg(4, 5)])})
+    monkeypatch.setattr(sportybet, "fetch_board",
+                        lambda: (_ for _ in ()).throw(AssertionError("No bookmaker call")))
+    result = M.build_manual_remainders(now=NOW)
+    assert result["available"] is False
+    assert result["tiers"] == {}
+    assert "exact booking verification" in result["tier_reasons"]["5_odds"]
+    assert seen == []
+
+
+def test_editorial_source_rejects_partial_or_missing_readback():
+    from copy import deepcopy
+    original = _editorial_publication([_leg(1, 2), _leg(2, 3)])
+    for field, value in (
+        ("readback_validation", "FAILED"),
+        ("booked_leg_count", 1),
+        ("booking_status", "PARTIAL"),
+        ("share_code", None),
+    ):
+        altered = deepcopy(original)
+        altered["booking"][field] = value
+        assert M._verified_editorial_source(altered) is None
+
+
+def test_reduced_ticket_failure_describes_why_without_overwriting_original(monkeypatch):
+    from leagues import editorial_manual, sportybet
+    original = [_leg(1, -2), _leg(2, .15)]
+    published = _editorial_publication(original)
+    monkeypatch.setattr(editorial_manual, "list_published",
+                        lambda date: {"5_odds": published})
+    monkeypatch.setattr(B, "bookings_for", lambda day: {})
+    monkeypatch.setattr(sportybet, "fetch_board", lambda: {})
+    result = M.build_manual_remainders(now=NOW)
+    assert result["available"] is False
+    assert "Too few" in result["tier_reasons"]["5_odds"]
+    assert result["official_publication_unchanged"] is True
+    assert published["booking"]["share_code"] == "MANUAL10"

@@ -41,6 +41,53 @@ def _manual_original_legs(record: dict) -> list[dict]:
     return legs
 
 
+
+def _verified_editorial_source(publication: dict) -> dict | None:
+    """Convert the immutable admin publication into an eligible source.
+
+    Admin tickets are saved in editorial_tier_slips, NOT tier_bookings.
+    Never guess that a category's ordinary morning booking represents this
+    manual publication. Prove exact booked identities and counts before
+    copying its verified legs into the separate rebooking flow.
+    """
+    if not isinstance(publication, dict) or publication.get("editorial_manual") is not True:
+        return None
+    games = publication.get("games")
+    booking = publication.get("booking")
+    if not isinstance(games, list) or not games or not isinstance(booking, dict):
+        return None
+    if not all(isinstance(g, dict) and g.get("editorial_manual") is True for g in games):
+        return None
+    if (booking.get("status") != "active" or
+            booking.get("readback_validation") != "PASSED" or
+            booking.get("booking_status") != "FULL" or
+            booking.get("partial") or not booking.get("share_code")):
+        return None
+
+    from leagues.booking import leg_fingerprint
+    expected = leg_fingerprint(games)
+    originals = booking.get("original_legs")
+    final = booking.get("final_booked_legs")
+    if (not isinstance(originals, list) or not isinstance(final, list)
+            or len(originals) != len(games) or len(final) != len(games)):
+        return None
+    if not (expected == leg_fingerprint(originals) == leg_fingerprint(final)
+            == booking.get("leg_fingerprint")
+            == booking.get("booking_variant_fingerprint")):
+        return None
+    try:
+        if (int(booking.get("original_leg_count") or 0) != len(games) or
+                int(booking.get("booked_leg_count") or 0) != len(games)):
+            return None
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+    # Never mutate the archived publication or its booking. The new code
+    # belongs exclusively to the reduced set and a separate generated ledger.
+    return {**booking, "original_legs": list(games)}
+
+
+
 def eligible_manual_remainder(
     record: dict,
     tier: str,
@@ -152,8 +199,28 @@ def build_manual_remainders(
     current = current.astimezone(timezone.utc)
     date = _wat_day(current)
     source = records if records is not None else bookings_for(date)
+    # Admin publications are not stored by the ordinary engine booking job.
+    # Read the separate, immutable publication first; old tier bookings are
+    # only a compatibility fallback for legacy verified manual data.
+    published = {}
+    if records is None:
+        from leagues.editorial_manual import list_published
+        published = list_published(date)
+
     candidates: dict[str, dict] = {}
+    reasons: dict[str, str] = {}
     for tier in _MANUAL_TIERS:
+        editorial = (published or {}).get(tier)
+        if editorial is not None:
+            verified_source = _verified_editorial_source(editorial)
+            if verified_source is None:
+                reasons[tier] = "The saved manual ticket failed exact booking verification."
+                # A contradictory editorial record cannot be replaced by an
+                # unrelated automatic booking stored under the same tier key.
+                continue
+            candidates[tier] = verified_source
+            continue
+
         current_record = (source or {}).get(tier)
         if isinstance(current_record, dict) and _manual_original_legs(current_record):
             candidates[tier] = current_record
@@ -161,17 +228,17 @@ def build_manual_remainders(
         if records is not None:
             # Explicit fixture-injection tests must not touch the live DB.
             continue
-        # A tier's current booking can be marked unavailable as soon as its
-        # FIRST leg starts, while a later manual leg is still actionable.
-        # The append-only validated booking edition retains the original
-        # manual selections. Never trust an edition without its passed readback.
+        # Legacy manual editions may survive a newer unavailable booking.
+        # Reject engine-only editions, partial readbacks and unnamed sources.
         for edition in reversed(booking_editions_for(date, tier)):
             if isinstance(edition, dict) and _manual_original_legs(edition):
                 candidates[tier] = edition
                 break
     if not candidates:
         return {"available": False, "tiers": {}, "date": date,
-                "official_publication_unchanged": True}
+                "official_publication_unchanged": True,
+                "record_is_separate": True, "tier_reasons": reasons,
+                "reason": "No independently verified manual ticket is available for rebooking."}
 
     snapshot = board if board is not None else sportybet.fetch_board()
     results: dict[str, dict] = {}
@@ -179,6 +246,8 @@ def build_manual_remainders(
         result = eligible_manual_remainder(record, tier, snapshot, now=current)
         if result.get("selected"):
             results[tier] = result
+        else:
+            reasons[tier] = result.get("reason") or "No eligible manual selections remain."
 
     return {
         "available": bool(results),
@@ -186,4 +255,7 @@ def build_manual_remainders(
         "date": date,
         "official_publication_unchanged": True,
         "record_is_separate": True,
+        "tier_reasons": reasons,
+        **({"reason": "No remaining manual selection set passed live bookmaker verification."}
+           if not results else {}),
     }
