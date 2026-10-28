@@ -173,3 +173,46 @@ def test_evidence_routes_require_admin():
                      f"/manual-tiers/settlement-review/{suffix}")
         assert require_admin in [dep.call for dep in route.dependant.dependencies]
         assert "POST" in route.methods
+
+
+def test_admin_desk_is_session_protected_and_uses_safe_dom_rendering():
+    from growth.admin_auth import require_admin
+    from growth.manual_review_desk import page
+    route = next(r for r in router.routes
+                 if getattr(r, "path", "") ==
+                 "/manual-tiers/settlement-review/desk")
+    assert require_admin in [dep.call for dep in route.dependant.dependencies]
+    markup = page()
+    assert "Settlement Evidence Desk" in markup
+    assert "base+'/propose'" in markup and "base+'/approve'" in markup
+    assert "textContent" in markup and "replaceChildren" in markup
+    assert 'innerHTML' not in markup
+    assert "event_id" in markup and "attest_regulation_90" in markup
+
+
+def test_strict_preview_gate_blocks_unsupported_before_booker(monkeypatch):
+    from leagues import sportybet, booking
+    monkeypatch.setenv("MANUAL_SETTLEMENT_GATE_STRICT", "true")
+    monkeypatch.setattr(sportybet,"fetch_board",lambda **kw: {"sports":[]})
+    monkeypatch.setattr(editor,"preview",lambda *a,**kw: {
+        "publish_ready":False,"settlement_publication_policy":{
+            "reason":"No verified automatic settlement source for this ticket",
+        },
+    })
+    monkeypatch.setattr(booking,"create_booking",lambda *a,**kw:
+                        (_ for _ in ()).throw(AssertionError("MUST NOT BOOK")))
+    with pytest.raises(ValueError,match="No verified automatic settlement source"):
+        editor.publish("2_odds","sr:match:100,over_1_5")
+
+
+def test_reviewed_score_never_automatically_approves_without_explicit_action(monkeypatch):
+    engine = _db(monkeypatch)
+    proposal = _propose()
+    with engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT COUNT(*) FROM manual_settlement_review_audit "
+            "WHERE stage='approved'")).scalar() == 0
+        assert json.loads(conn.execute(text(
+            "SELECT detail FROM editorial_tier_slips WHERE tier='2_odds'"
+        )).scalar())["games"][0]["status"] == "pending"
+    assert proposal["booking_unchanged"] is True
