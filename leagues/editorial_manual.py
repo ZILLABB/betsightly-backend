@@ -216,16 +216,43 @@ def _current_bookable_games(requested: list[tuple[str, str]], board: dict,
             "model_probability_available": False,
             "model_sources": ["Admin curated · bookmaker verified"],
         }
-        # Record the supported ESPN competition at publication, when the
-        # bookmaker's league label resolves to exactly one VERIFIED slug.
-        # Unknown/ambiguous competitions are flagged, never guessed.
         from leagues.live_scores import infer_published_competition_slugs
-        matched, unmapped = infer_published_competition_slugs([game])
-        if unmapped == 0 and len(matched) == 1:
-            game["league_slug"] = next(iter(matched))
-            game["score_competition_mapped"] = True
+        from leagues.competition_registry import competition_for
+        from leagues.espn_source import ESPN_CLUB_LEAGUES
+        from services.openligadb_score_source import LEAGUE_SHORTCUTS
+        for key in ("sportybet_tournament_id", "sportybet_category_id",
+                    "sportybet_category", "sportybet_country_id",
+                    "sportybet_country"):
+            if entry.get(key) is not None:
+                game[key] = str(entry[key])[:128]
+        tournament_id = game.get("sportybet_tournament_id")
+        category_id = game.get("sportybet_category_id")
+        slug = None
+        if tournament_id or category_id:
+            identity = sportybet.registry_competition_match(
+                league, tournament_id=tournament_id, category_id=category_id)
+            if identity.get("status") == "MAPPED_EXACT":
+                slug = identity["league_slug"]
+                game["competition_identity_basis"] = "sportybet_provider_ids"
+            else:
+                game["competition_identity_basis"] = "unknown_provider_ids"
         else:
-            game["score_competition_mapped"] = False
+            matched, unresolved = infer_published_competition_slugs([game])
+            if unresolved == 0 and len(matched) == 1:
+                slug = next(iter(matched))
+                game["competition_identity_basis"] = "exact_league_name"
+        if slug:
+            game["league_slug"] = slug
+            registered = competition_for(slug)
+            if registered and registered.country:
+                game["competition_country"] = registered.country
+        game["settlement_source_candidates"] = [
+            provider for provider, supported in (
+                ("espn", bool(slug in ESPN_CLUB_LEAGUES)),
+                ("openligadb", bool(slug in LEAGUE_SHORTCUTS)),
+            ) if supported
+        ]
+        game["score_competition_mapped"] = bool(game["settlement_source_candidates"])
         games.append(game)
     return games
 
