@@ -26,7 +26,7 @@ _CACHE: dict[str, tuple[float, list[dict]]] = {}
 _LOCK = threading.Lock()
 _WAIT_UNTIL = 0.0
 _TTL = 15 * 60
-_CUP = re.compile(r"\\b(cup|pokal|copa|trophy|knockout|playoff|play-off|champions league|europa league)\\b", re.I)
+_CUP = re.compile(r"\b(cup|pokal|copa|trophy|knockout|playoff|play-off|champions league|europa league)\b", re.I)
 
 
 def _datetime(value: object) -> datetime | None:
