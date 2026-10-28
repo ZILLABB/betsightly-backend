@@ -106,6 +106,28 @@ _VERIFIED_FINALS = (
             ("sr:match:74165974", "Sporting", "LASK Linz", 2, 3),
         )
     ),
+    # Tuesday 27 October 2026 — verified from actual club/federation
+    # reports, mapped to immutable production editorial SportyBet event IDs.
+    # These one-time receipts repair the current manual backlog; they do not
+    # imply that future matches in these leagues have automatic coverage.
+    {
+        "sportybet_event_id": "sr:match:68214868",
+        "home": "FCI Levadia Tallinn", "away": "Tartu JK Tammeka",
+        "date": "2026-10-27", "home_score": 2, "away_score": 1,
+        "evidence_url": "https://fcilevadia.ee/event/tallinna-fci-levadia-vs-tartu-jk-tammeka-44942/",
+    },
+    {
+        "sportybet_event_id": "sr:match:74374528",
+        "home": "SV 07 Elversberg", "away": "Darmstadt",
+        "date": "2026-10-27", "home_score": 0, "away_score": 2,
+        "evidence_url": "https://sv07elversberg.de/trotz-vieler-und-guter-chancen-sve-verliert-pokal-fight-gegen-darmstadt/",
+    },
+    {
+        "sportybet_event_id": "sr:match:74374512",
+        "home": "Bochum", "away": "Mainz",
+        "date": "2026-10-27", "home_score": 2, "away_score": 0,
+        "evidence_url": "https://www.dfb.de/news/erster-bundesligist-raus-bochum-stuerzt-mainz",
+    },
     # Monday 19 October 2026 — existing admin-curated fixtures.
     # Exact immutable SportyBet IDs from editorial_tier_slips in production.
     # Independent league/club match reports confirm FT regulation scores.
