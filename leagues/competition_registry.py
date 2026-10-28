@@ -64,6 +64,7 @@ _DOMESTIC_LEAGUES = [
     _league("fra.2", "Ligue 2", "Europe", "France", 70),
     _league("por.1", "Primeira Liga", "Europe", "Portugal", 75),
     _league("ned.1", "Eredivisie", "Europe", "Netherlands", 75),
+    _league("ned.2", "Eerste Divisie", "Europe", "Netherlands", 60),
     _league("bel.1", "Belgian Pro League", "Europe", "Belgium", 70),
     _league("tur.1", "Süper Lig", "Europe", "Turkey", 70),
     _league("sui.1", "Swiss Super League", "Europe", "Switzerland"),

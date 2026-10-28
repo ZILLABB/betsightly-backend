@@ -924,6 +924,18 @@ _SETTLEMENT_TEAM_ALIASES = {
     "internazionale milano": "inter",
     "inter milan": "inter",
     "real betis balompie": "betis",
+    # Exact score-provider spellings reviewed against 16/19/23 October
+    # Dutch Eerste Divisie, French Ligue 2 and English Championship finals.
+    # Never remove reserve/youth qualifiers or infer a competition from teams.
+    "vitesse arnhem": "vitesse",
+    "jong az alkmaar": "jong az",
+    "norwich": "norwich city",
+    "west ham": "west ham united",
+    "dijon": "dijon fco",
+    "reims": "stade de reims",
+    "ea guingamp": "guingamp",
+    "stade lavallois mfc": "stade laval",
+    "nancy lorraine": "as nancy lorraine",
 }
 
 
