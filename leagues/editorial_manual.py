@@ -363,10 +363,66 @@ def _official_display_conflict(card: dict, tier: str, replacement: bool) -> bool
     return bool((card.get(tier) or {}).get("selected")) and not replacement
 
 
+def _settlement_publication_policy(
+    games: list[dict], *, manual_review_override: bool = False,
+    manual_review_reason: str = "",
+) -> dict:
+    """Explicit, fail-closed final-score coverage gate.
+
+    This gate is staged behind a production flag to keep existing manual
+    workflows running during a controlled rollout. Once enabled, missing
+    score coverage cannot silently reach create_booking(). A signed-in admin
+    may explicitly accept manual evidence review with a recorded reason.
+    """
+    import os
+
+    strict = os.getenv("MANUAL_SETTLEMENT_GATE_STRICT", "false").lower() in (
+        "true", "1", "yes",
+    )
+    uncovered = [
+        str(g.get("sportybet_event_id") or g.get("match_id") or "")
+        for g in games
+        if (not g.get("sportybet_event_id")
+            or not g.get("kickoff")
+            or not g.get("score_competition_mapped")
+            or not g.get("settlement_source_candidates"))
+    ]
+    reason = (manual_review_reason or "").strip()
+    if manual_review_override and (len(reason) < 25 or len(reason) > 500):
+        return {
+            "allowed": False, "strict": strict, "mode": "BLOCKED",
+            "uncovered_event_ids": uncovered,
+            "reason": "Explicit manual review requires a 25–500 character evidence plan.",
+        }
+    if strict and uncovered and not manual_review_override:
+        return {
+            "allowed": False, "strict": True, "mode": "BLOCKED",
+            "uncovered_event_ids": uncovered,
+            "reason": (
+                "No verified automatic settlement source for SportyBet event(s): "
+                + ", ".join(uncovered[:12])
+                + ". Replace unsupported games or explicitly accept a manual "
+                  "evidence-review plan before booking."
+            ),
+        }
+    return {
+        "allowed": True, "strict": strict,
+        "mode": ("EXPLICIT_MANUAL_REVIEW"
+                 if uncovered and manual_review_override else
+                 "AUTO_SOURCE_REGISTERED" if not uncovered
+                 else "LEGACY_WARN_ONLY"),
+        "uncovered_event_ids": uncovered,
+        "review_reason": reason if uncovered and manual_review_override else None,
+        "reason": None,
+    }
+
+
 def preview(tier: str, lines: str, *, board=None, now=None,
             replace_official_over: bool = False,
             replace_official_display: bool = False,
-            inspection_only: bool = False) -> dict:
+            inspection_only: bool = False,
+            manual_review_override: bool = False,
+            manual_review_reason: str = "") -> dict:
     """Price-check selections without writing or booking; enforce publication gates except in read-only inspection."""
     from leagues import sportybet
     from leagues.picks_db import load_card
@@ -415,12 +471,17 @@ def preview(tier: str, lines: str, *, board=None, now=None,
     ]
     total = round(prod(g["odds"] for g in games), 3)
     check_tier_target(tier, total, len(games))
+    coverage_policy = _settlement_publication_policy(
+        games, manual_review_override=manual_review_override,
+        manual_review_reason=manual_review_reason,
+    )
     return {
         "status": "INSPECTION_ONLY" if inspection_only else "PREVIEW",
         "date": day, "tier": tier,
         "games": games, "total_odds": total,
         "booking_code_created": False, "research_only": bool(inspection_only),
-        "publish_ready": not inspection_only,
+        "publish_ready": not inspection_only and coverage_policy["allowed"],
+        "settlement_publication_policy": coverage_policy,
         "editorial_manual": True,
         "replaces_official_display": bool(replacement) if not inspection_only else False,
         "original_official_record_preserved": True,
@@ -437,7 +498,9 @@ def publish(tier: str, lines: str, *,
             replace_official_over: bool = False,
             replace_official_display: bool = False,
             strict_no_overlap: bool = False,
-            min_publish_odds: float | None = None) -> dict:
+            min_publish_odds: float | None = None,
+            manual_review_override: bool = False,
+            manual_review_reason: str = "") -> dict:
     """Full bookmaker readback first, then atomic one-way publication."""
     from leagues import sportybet
     from leagues.booking import create_booking, bookings_for
@@ -456,7 +519,11 @@ def publish(tier: str, lines: str, *,
         tier, lines, board=board,
         replace_official_over=replace_official_over,
         replace_official_display=replace_official_display,
+        manual_review_override=manual_review_override,
+        manual_review_reason=manual_review_reason,
     )
+    if not inspected["publish_ready"]:
+        raise ValueError(inspected["settlement_publication_policy"]["reason"])
     day, games = inspected["date"], inspected["games"]
     # Fresh booking-time repricing and kickoff validation.
     revised = _current_bookable_games(parse_input(lines, tier), board, date=day)
@@ -468,6 +535,19 @@ def publish(tier: str, lines: str, *,
         raise ValueError("Fixture already published in another tier; nothing published")
     odds = round(prod(g["odds"] for g in revised), 3)
     check_tier_target(tier, odds, len(revised))
+    # Revalidate AFTER fresh repricing, before any irreversible SportyBet
+    # booking. A preview's previous coverage cannot authorize a new board.
+    source_policy = _settlement_publication_policy(
+        revised, manual_review_override=manual_review_override,
+        manual_review_reason=manual_review_reason,
+    )
+    if not source_policy["allowed"]:
+        raise ValueError(source_policy["reason"])
+    if source_policy["mode"] == "EXPLICIT_MANUAL_REVIEW":
+        for game in revised:
+            if not game.get("score_competition_mapped"):
+                game["settlement_mode"] = "MANUAL_EVIDENCE_REQUIRED"
+                game["manual_review_reason"] = source_policy["review_reason"]
     booked = create_booking(
         revised, board, booking_status="FULL",
         original_games=revised, predicted_odds=odds,
@@ -498,6 +578,7 @@ def publish(tier: str, lines: str, *,
         "cross_tier_warnings": cross_tier_warnings,
         "settlement_source_warnings": inspected.get("settlement_source_warnings") or [],
         "settlement_source_coverage": inspected.get("settlement_source_coverage") or {},
+        "settlement_publication_policy": source_policy,
     }
     with _engine().begin() as conn:
         _ensure(conn)
