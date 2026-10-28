@@ -146,3 +146,29 @@ A successful restore confirms that the archive can be loaded into the
 disposable database; **it does not prove application-level row counts,
 booking consistency or settlement correctness**. These must be compared
 against source snapshots separately before production cutover.
+
+## Optional encrypted off-site storage (NOT activated)
+
+The `scripts.vps.backup_and_upload` command first creates a private
+PostgreSQL archive using `pg_dump`, validates the local SHA-256 manifest,
+then uploads both archive and manifest to an **operator-supplied**
+S3-compatible bucket with `aws s3 cp --sse AES256`. It performs
+remote `head-object` checks for size, metadata digest and SSE encryption.
+It never deletes or prunes remote backups. A verified HEAD is not a
+restore test and does not establish multi-region availability.
+
+Only install `deploy/vps/betsightly-backup.service` and
+`deploy/vps/betsightly-backup.timer` after provisioning. The VPS must
+have the PostgreSQL 18 client, AWS CLI v2, Python app dependencies,
+a restricted `betsightly` system user, an off-host private bucket with
+versioning and lifecycle retention, and a locked-down
+`/etc/betsightly/backup.env` (mode 0600). Required environment variables:
+`DATABASE_URL`, `AWS_S3_BACKUP_BUCKET`, `AWS_S3_BACKUP_PREFIX`,
+AWS CLI identity credentials and optional `AWS_S3_ENDPOINT_URL` (HTTPS
+only, never userinfo). Only use backup credentials with write+head
+permissions for the chosen bucket prefix; object deletion is not needed.
+
+The timer is **only a template**, not enabled by CI. It schedules an
+encrypted backup every night at 02:15 UTC (03:15 Lagos time), with up to
+15 minutes randomized delay. Monitor service failures and verify recovery
+from actual uploaded archives periodically before trusting the system.

@@ -1,0 +1,12 @@
+# NOT activated until a tested database restore and approved S3 destination.
+[Unit]
+Description=Nightly BetSightly PostgreSQL offsite backup
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=betsightly-backup.service
+
+[Install]
+WantedBy=timers.target
