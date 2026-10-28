@@ -70,6 +70,13 @@ def get_manual_settlement_review(limit: int = Query(250, ge=1, le=1000)):
     return manual_settlement_review(limit=limit)
 
 
+@router.get("/manual-tiers/settlement-review/desk",
+            dependencies=[Depends(require_admin)], response_class=HTMLResponse)
+def manual_settlement_review_desk():
+    from growth.manual_review_desk import page
+    return HTMLResponse(page(), headers={"Cache-Control": "no-store"})
+
+
 class ManualSettlementEvidenceProposal(BaseModel):
     publish_date: str = Field(pattern=r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$")
     tier: str = Field(min_length=2, max_length=30)
