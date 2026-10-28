@@ -648,3 +648,68 @@ def test_manual_booker_uses_single_fresh_board_for_preview_and_repricing(monkeyp
         editor.publish("2_odds", "52588,home_win",
                        replace_official_display=True)
     assert len(calls) == 1
+
+
+def test_curated_manual_preserves_verified_country_tournament_identity(monkeypatch):
+    from leagues import sportybet
+    now = datetime(2026, 10, 13, 9, tzinfo=timezone.utc)
+    board = fake_board(now)
+    entry = board["sports"][0]
+    entry.update({
+        "competition": "Premier League",
+        "sportybet_tournament_id": "sr:tournament:17",
+        "sportybet_category_id": "sr:category:1",
+        "sportybet_category": "England",
+        "sportybet_country": "England",
+    })
+    monkeypatch.setattr(sportybet, "availability_for",
+                        lambda *args, **kwargs: {
+                            "sportybet_available": True, "sportybet_odds": 1.3})
+    row = editor._current_bookable_games(
+        [("52587", "home_win")], board, now=now, date="2026-10-13")[0]
+    assert row["sportybet_event_id"] == "52587"
+    assert row["league"] == "Premier League"
+    assert row["league_slug"] == "eng.1"
+    assert row["competition_country"] == "England"
+    assert row["sportybet_tournament_id"] == "sr:tournament:17"
+    assert row["sportybet_category_id"] == "sr:category:1"
+    assert row["sportybet_country"] == "England"
+    assert row["competition_identity_basis"] == "sportybet_provider_ids"
+    assert row["settlement_source_candidates"] == ["espn"]
+    assert row["score_competition_mapped"] is True
+
+
+def test_manual_unknown_country_identity_never_falls_back_to_english_league(monkeypatch):
+    from leagues import sportybet
+    now = datetime(2026, 10, 13, 9, tzinfo=timezone.utc)
+    board = fake_board(now)
+    board["sports"][0].update({
+        "competition": "Premier League",
+        "sportybet_tournament_id": "sr:tournament:999999",
+        "sportybet_category_id": "sr:category:123456",
+        "sportybet_country": "Singapore",
+    })
+    monkeypatch.setattr(sportybet, "availability_for",
+                        lambda *args, **kwargs: {
+                            "sportybet_available": True, "sportybet_odds": 1.3})
+    row = editor._current_bookable_games(
+        [("52587", "home_win")], board, now=now, date="2026-10-13")[0]
+    assert row["sportybet_country"] == "Singapore"
+    assert row["competition_identity_basis"] == "unknown_provider_ids"
+    assert row.get("league_slug") is None
+    assert row["score_competition_mapped"] is False
+    assert row["settlement_source_candidates"] == []
+
+
+def test_manual_league_name_without_identity_only_accepts_unique_known_competition(monkeypatch):
+    from leagues import sportybet
+    now = datetime(2026, 10, 13, 9, tzinfo=timezone.utc)
+    board = fake_board(now)
+    board["sports"][0]["competition"] = "UEFA Europa League"
+    monkeypatch.setattr(sportybet, "availability_for",
+                        lambda *args, **kwargs: {
+                            "sportybet_available": True, "sportybet_odds": 1.3})
+    row = editor._current_bookable_games(
+        [("52587", "home_win")], board, now=now, date="2026-10-13")[0]
+    assert row["league_slug"] == "uefa.europa"
+    assert set(row["settlement_source_candidates"]) == {"espn", "openligadb"}
