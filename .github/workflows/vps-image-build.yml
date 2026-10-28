@@ -27,6 +27,76 @@ jobs:
         run: |
           set -euo pipefail
           docker build --progress plain -t betsightly-vps-ci:local -f Dockerfile .
+      - name: Verify dedicated VPS writers refuse implicit activation
+        run: |
+          set -euo pipefail
+          for role in publication settlement telegram; do
+            if docker run --rm \
+              -e BETSIGHTLY_PROCESS_ROLE="$role" \
+              -e BETSIGHTLY_VPS_WRITER_ACTIVATION=disabled \
+              --entrypoint python betsightly-vps-ci:local -m run_background \
+              > "$RUNNER_TEMP/writer-denied.log" 2>&1; then
+              echo "::error::unapproved VPS writer role started: $role"
+              exit 1
+            fi
+            grep -q "VPS role activation refused" "$RUNNER_TEMP/writer-denied.log"
+          done
+          echo "VPS_WRITER_ACTIVATION_GUARD_OK"
+
+      - name: Start isolated API container and verify HTTP runtime
+        run: |
+          set -euo pipefail
+          docker run -d --name betsightly-api-smoke \
+            -p 127.0.0.1:18888:8000 \
+            -e ENVIRONMENT=development \
+            -e DEBUG=False \
+            -e ENABLE_BACKGROUND_JOBS=false \
+            -e BETSIGHTLY_PROCESS_ROLE=web \
+            betsightly-vps-ci:local
+          ok=0
+          for i in $(seq 1 90); do
+            if curl --fail --silent --show-error --max-time 5 \
+              http://127.0.0.1:18888/api/health/live \
+              > "$RUNNER_TEMP/api-liveness.json" 2>/dev/null; then
+              ok=1
+              break
+            fi
+            if ! docker inspect --format '{{.State.Running}}' betsightly-api-smoke | grep -q true; then
+              docker logs betsightly-api-smoke --tail 40 || true
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$ok" -ne 1 ]; then
+            docker logs betsightly-api-smoke --tail 60 || true
+            echo "::error::API failed liveness smoke"
+            exit 1
+          fi
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          d = json.loads(Path(os.environ["RUNNER_TEMP"], "api-liveness.json").read_text())
+          assert d["status"] == "alive", d
+          print("VPS_API_LIVENESS_SMOKE_OK")
+          PY
+          curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:18888/api/health/ \
+            > "$RUNNER_TEMP/api-health.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          d = json.loads(Path(os.environ["RUNNER_TEMP"], "api-health.json").read_text())
+          role = (d.get("runtime") or {}).get("role")
+          enabled = (d.get("runtime") or {}).get("background_jobs")
+          assert d["status"] == "healthy"
+          assert role == "web" and enabled is False, (role, enabled)
+          print("VPS_API_NO_BACKGROUND_JOBS_OK")
+          PY
+
+      - name: Stop isolated smoke container
+        if: always()
+        run: docker rm -f betsightly-api-smoke >/dev/null 2>&1 || true
+
       - name: Smoke-test Python runtime and worker modules inside image
         run: |
           set -euo pipefail
