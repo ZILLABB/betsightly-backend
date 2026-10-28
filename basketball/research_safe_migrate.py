@@ -21,7 +21,7 @@ from basketball.research_restore_drill import verify_portable_backup
 from basketball.research_private_store import import_bundle, latest_bundle
 from basketball.research_market_store import NBAMarketObservation
 
-MAX_BACKUP_FILE = 10_000_000
+MAX_BACKUP_FILE = 30_000_000
 
 
 def load_checked_backup(path: str | Path):
