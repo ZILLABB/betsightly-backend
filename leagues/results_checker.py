@@ -647,6 +647,18 @@ def _collect_scores_for_picks(
         ])
         merge(_index_free_finals(sportsdb), "thesportsdb")
 
+    # Free, commercially usable SportScore candidate feed. The response
+    # does not explicitly guarantee 90-minute scores (notably in cups), so
+    # this is a shadow coverage probe ONLY. Never merge into verified finals
+    # or affect any model/manual settlement until two-source proof is present.
+    unresolved = missing()
+    if allow_fallback and unresolved:
+        try:
+            from services.sportscore_score_source import candidate_matches
+            candidate_matches(unresolved)
+        except Exception as exc:
+            logger.warning("SportScore free shadow unavailable: %s", type(exc).__name__)
+
     # LiveScore consumer observations are strictly display-only unless
     # commercial automated-settlement rights and 90-minute field semantics
     # have been explicitly confirmed by the operator.
