@@ -67,3 +67,18 @@ destination. Do not send `DATABASE_URL` or access keys through chat/PRs.
 - Production-data restore and exact source snapshot comparison
 - Render legacy worker fencing (its heartbeat might not be instrumented)
 - Private NBA research migration route and scheduler validation
+
+## Automated parity gate
+
+`scripts/vps/check_restore_parity.py` compares the names and exact row
+counts for public PostgreSQL tables in two **read-only transactions** and
+fails on missing/extra tables or any count mismatch. It requires
+`SOURCE_DATABASE_URL` and `RESTORE_DATABASE_URL` (private environment
+variables, never committed), and a disposable target database name.
+
+The synthetic PostgreSQL 18 restore CI verifies that equal source/target
+data passes and a deliberate source-only new row fails. A live parity
+comparison **is not** a consistent backup snapshot when production can
+still write. Fence all writers and capture the final backup watermark
+before treating parity as migration acceptance. Count equality also
+cannot independently prove row contents or constraint equivalence.

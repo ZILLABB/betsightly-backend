@@ -10,6 +10,8 @@ on:
       - 'utils/vps_backup.py'
       - 'utils/vps_restore.py'
       - '.github/workflows/vps-postgres-integration.yml'
+      - 'scripts/vps/check_restore_parity.py'
+      - 'utils/vps_parity.py'
   workflow_dispatch:
 
 permissions:
@@ -101,6 +103,36 @@ jobs:
               values = conn.execute(text("SELECT id, result FROM settlement_fixture ORDER BY id")).all()
           assert values == [(1, "WON"), (2, "LOST"), (3, "PENDING")], values
           print("POSTGRES18_RESTORE_PROOF_OK: 3 source rows match restored rows")
+          PY
+      - name: Verify exact restored schema/table counts and reject drift
+        env:
+          SOURCE_DATABASE_URL: postgresql://ci_betsightly:only_test_fixture_pw@127.0.0.1:55432/betsightly_ci_source?sslmode=require
+          RESTORE_DATABASE_URL: postgresql://ci_betsightly:only_test_fixture_pw@127.0.0.1:55432/betsightly_restore_fixture1234?sslmode=require
+        run: |
+          set -euo pipefail
+          python -m scripts.vps.check_restore_parity > "$RUNNER_TEMP/parity-result.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          r = json.loads(Path(os.environ["RUNNER_TEMP"], "parity-result.json").read_text())
+          assert r["healthy"] is True
+          assert r["source_table_count"] == r["restored_table_count"]
+          print("STAGING_EXACT_ROW_PARITY_OK", r["source_table_count"])
+          PY
+          docker exec betsightly-vps-postgres-ci psql \
+            -U ci_betsightly -d betsightly_ci_source -v ON_ERROR_STOP=1 \
+            -c "INSERT INTO settlement_fixture VALUES (4,'PENDING');"
+          if python -m scripts.vps.check_restore_parity > "$RUNNER_TEMP/drift.json"; then
+            echo "::error::unreconciled source mutation unexpectedly passed parity"
+            exit 1
+          fi
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          r = json.loads(Path(os.environ["RUNNER_TEMP"], "drift.json").read_text())
+          assert not r["healthy"]
+          assert "settlement_fixture" in r["mismatched_rows"]
+          print("STAGING_ROW_DRIFT_REJECTED")
           PY
       - name: "Failure gate: refuse restore into nonempty database"
         env:
