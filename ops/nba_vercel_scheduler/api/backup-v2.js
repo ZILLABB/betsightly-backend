@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     });
     if (!upstream.ok) return res.status(502).json({status:'export_not_verified'});
     const raw = Buffer.from(await upstream.arrayBuffer());
-    if (raw.byteLength < 128 || raw.byteLength > 10_000_000)
+    if (raw.byteLength < 128 || raw.byteLength > 30_000_000)
       return res.status(502).json({status:'export_size_invalid'});
     const data = JSON.parse(raw.toString('utf8'));
     if (data.version !== 'betsightly-nba-private-full-recovery-v2' ||
