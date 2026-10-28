@@ -39,7 +39,8 @@ def tick(*, settle=None, recorder=None) -> dict:
     if result.get("status") != "success":
         logger.warning("Basketball settlement provider incomplete: %s",
                        str(result.get("status", "unknown"))[:80])
-        return finish({"status": "unavailable", "reason": str(result.get("status"))[:80]})
+        issue = (result.get("failures") or [result.get("status", "unknown")])[0]
+        return finish({"status": "unavailable", "reason": str(issue)[:80]})
     count = result.get("verified_final_legs", result.get("nba_final_legs", 0))
     changed = result.get("tickets_updated", 0)
     if type(count) is not int or type(changed) is not int or count < 0 or changed < 0:
