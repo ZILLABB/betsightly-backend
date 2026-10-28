@@ -32,6 +32,10 @@ def restore_full_v2_empty_postgres(envelope, target_url, *,
                                    engine_factory=create_engine):
     # All checks happen before opening a connection or creating any table.
     verify_full_recovery(envelope)
+    # Both source identities must be supplied explicitly; missing source
+    # could make a production host appear disposable.
+    if not active_primary_url or not original_render_url:
+        raise ValueError("NBA_V2_RESTORE_SOURCE_IDENTITY_REQUIRED")
     target = isolated_target_is_safe(target_url, active_primary_url)
     isolated_target_is_safe(target_url, original_render_url)
     # Stronger than distinct credentials: a target on the same Postgres host
