@@ -27,3 +27,11 @@ def test_failures_are_reported_not_silently_accepted():
     assert result["status"] == "degraded"
     assert result["checks"][1]["reason"] == "TimeoutError"
     assert result["independent_settlement_verified"] is False
+
+
+def test_empty_provider_board_is_reported_as_degraded():
+    def empty(league, **kwargs):
+        return {"status": "ok", "fixtures": [], "evidence": []}
+    result = probe_sources(now=NOW, fetcher=empty)
+    assert result["status"] == "degraded"
+    assert all(item["status"] == "empty" for item in result["checks"])
