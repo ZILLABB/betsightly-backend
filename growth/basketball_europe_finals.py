@@ -17,8 +17,8 @@ SOURCE = "EUROLEAGUE_OFFICIAL_FINAL"
 # Explicit, competition-specific names; never use a fuzzy similarity threshold
 # to decide a real-money ticket. Sponsorship aliases are deliberately bounded.
 _ALIASES = {
-    "hapoelibi telaviv": "hapoeltelaviv",
-    "hapoelshlomo telaviv": "hapoeltelaviv",
+    "hapoelibitelaviv": "hapoeltelaviv",
+    "hapoelshlomotelaviv": "hapoeltelaviv",
     "hapoeltelaviv": "hapoeltelaviv",
     "anadoluefesistanbul": "anadoluefes",
     "anadoluefessk": "anadoluefes",
@@ -42,6 +42,7 @@ _ALIASES = {
     "napolibasket": "napolibasket",
     "slaskwroclaw": "slaskwroclaw",
     "tofasbursa": "tofasbursa",
+    "tofasskbursa": "tofasbursa",
     "derthonabasket": "derthonabasket",
     "rostockseawolves": "rostockseawolves",
 }
