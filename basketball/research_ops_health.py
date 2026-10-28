@@ -251,7 +251,11 @@ def read_health(*, db=None, now: datetime | None = None):
                  "summary": json.loads(item.summary_json)}
                 for item in jobs
             ],
-            "job_readiness": _job_readiness(jobs, now=clock),
+            "job_readiness": _job_readiness(
+                jobs + ([latest_backup] if latest_backup is not None and
+                        all(j.id != latest_backup.id for j in jobs) else []),
+                now=clock,
+            ),
             "database_expiry_declared_at": os.getenv(
                 "NBA_RESEARCH_DATABASE_EXPIRES_AT") or None,
             "backup_policy": "private_vercel_blob_daily_snapshot_with_hash_readback",
