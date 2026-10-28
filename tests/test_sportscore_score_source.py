@@ -80,3 +80,42 @@ def test_live_fetch_is_cached_bounded_and_never_relies_on_html(monkeypatch):
     assert calls[0][0] == "https://sportscore.com/api/v1/fixtures/"
     assert calls[0][1]["params"]["limit"] == 200
     source._CACHE.clear()
+
+
+def test_filtered_fetch_recovers_a_capped_day_with_few_requests(monkeypatch):
+    source._TEAM_CACHE.clear()
+    monkeypatch.setattr(source, "_WAIT_UNTIL", 0.0)
+    seen = []
+    class Response:
+        status_code = 200
+        def json(self):
+            return {"date": "2026-10-27", "count": 1,
+                    "matches": [fixture()]}
+    def fake(url, **kw):
+        seen.append(kw["params"])
+        return Response()
+    monkeypatch.setattr(source.requests, "get", fake)
+    assert len(source.fetch_team_day("2026-10-27", "bolivar")) == 1
+    assert len(source.fetch_team_day("2026-10-27", "bolivar")) == 1
+    assert len(seen) == 1
+    assert seen[0]["team"] == "bolivar" and seen[0]["limit"] == 50
+    assert source.fetch_team_day("2026-10-27", "https://bad-site") == []
+    source._TEAM_CACHE.clear()
+
+
+def test_filtered_candidates_keep_exact_identity_and_are_never_final(monkeypatch):
+    monkeypatch.setenv("SPORTSCORE_SHADOW_ENABLED", "true")
+    monkeypatch.setenv("SPORTSCORE_FOCUSED_ENABLED", "true")
+    monkeypatch.setattr(source, "fetch_day", lambda day: [])
+    lookup = []
+    monkeypatch.setattr(source, "fetch_team_day",
+                        lambda day, team: lookup.append((day, team)) or
+                        [source.parse_fixture(fixture(), "2026-10-27")])
+    p = {"sportybet_event_id": "sr:match:500",
+         "home_team": "Bolivar", "away_team": "Universitario De Vinto",
+         "league": "Bolivian Primera Division",
+         "kickoff": "2026-10-27T00:00:00Z", "status": "pending"}
+    rows = source.candidate_matches([p])
+    assert len(rows) == 1 and rows[0]["score_90"] is None
+    assert lookup == [("2026-10-27", "bolivar")]
+    assert source.candidate_matches([{**p, "away_team": "Other FC"}]) == []
