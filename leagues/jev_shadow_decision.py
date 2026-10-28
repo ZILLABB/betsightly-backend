@@ -118,9 +118,9 @@ def parse_response(body, envelope):
     if not isinstance(choice, dict) or not isinstance(review, dict):
         raise ValueError("missing typed answers")
     category = choice.get("choice")
-    if choice.get("type") != "choice" or category not in _CATEGORIES:
+    if choice.get("type", "choice") != "choice" or category not in _CATEGORIES:
         raise ValueError("unknown Jev category")
-    if review.get("type") != "boolean":
+    if review.get("type", "boolean") != "boolean":
         raise ValueError("unknown boolean shape")
     probability = _finite_probability(review.get("probability"))
     confidence = choice.get("confidence")
