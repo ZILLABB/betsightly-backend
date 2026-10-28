@@ -1037,6 +1037,28 @@ def nba_private_machine_backup_full(request: Request, response: Response):
     return nba_research_export_backup_full(response)
 
 
+@router.post("/internal/nba-research/backup-full/ack")
+def nba_private_machine_full_backup_ack(request: Request, body: dict = Body(...)):
+    """V2 receipt only after offsite private Blob raw-byte readback.
+
+    The signed current archive, market count and complete job ledger must
+    still match the archived copy. The acknowledgement itself adds a new
+    audit entry, so the *next* V2 backup will include that receipt.
+    """
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    from basketball.research_full_recovery_ack import verify_v2_backup_ack
+    from basketball.research_ops_health import record_run
+    try:
+        receipt = verify_v2_backup_ack(body)
+    except ValueError as exc:
+        logger.warning("NBA V2 offsite receipt rejected: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA offsite full recovery receipt invalid.") from None
+    record_run("backup", "verified_full_private_blob_readback",
+               detail={"archive_digest": receipt["archive_digest"]})
+    return receipt
+
+
 @router.post("/internal/nba-research/backup/ack")
 def nba_private_machine_backup_ack(request: Request, body: dict = Body(...)):
     """Write a limited audit only after cloud storage confirms hash readback."""
