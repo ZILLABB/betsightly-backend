@@ -52,6 +52,9 @@ def runtime_status(environ=None):
         return {**base, "status": "api_calls_disabled", "network_allowed": False}
     if not base["configured"]:
         return {**base, "network_allowed": False}
+    if role != "staging":
+        return {**base, "status": "staging_role_required",
+                "network_allowed": False}
     return {**base, "status": "shadow_network_eligible",
             "network_allowed": True, "daily_worker_cap": MAX_CALLS_PER_DAY}
 
@@ -118,11 +121,18 @@ def parse_response(body, envelope):
     if not isinstance(choice, dict) or not isinstance(review, dict):
         raise ValueError("missing typed answers")
     category = choice.get("choice")
-    if choice.get("type") != "choice" or category not in _CATEGORIES:
+    if choice.get("type", "choice") != "choice" or category not in _CATEGORIES:
         raise ValueError("unknown Jev category")
-    if review.get("type") != "boolean":
+    if review.get("type", "boolean") != "boolean":
         raise ValueError("unknown boolean shape")
     probability = _finite_probability(review.get("probability"))
+    options = choice.get("probabilities")
+    if options is not None:
+        if not isinstance(options, dict) or set(options) != _CATEGORIES:
+            raise ValueError("incomplete choice distribution")
+        values = [_finite_probability(options[key]) for key in sorted(_CATEGORIES)]
+        if abs(sum(values) - 1) > .02:
+            raise ValueError("unnormalized choice distribution")
     confidence = choice.get("confidence")
     if confidence is not None:
         confidence = _finite_probability(confidence)
@@ -166,6 +176,14 @@ def evaluate_shadow(envelope, *, environ=None, transport=None,
     if not readiness["network_allowed"]:
         return {"status": readiness["status"], "shadow_only": True,
                 "publication_authority": False, "network_called": False}
+    # Only real billable Gateway calls require the external provider's spend
+    # budget to be pre-approved. Offline injected transports stay testable.
+    if transport is None and str(env.get("BETSIGHTLY_JEV_PROVIDER_BUDGET_APPROVED", "")).lower() not in {
+        "1", "true", "yes",
+    }:
+        return {"status": "provider_budget_not_approved",
+                "shadow_only": True, "publication_authority": False,
+                "network_called": False}
     try:
         payload = build_request(envelope)
     except (ValueError, TypeError, OverflowError) as exc:
