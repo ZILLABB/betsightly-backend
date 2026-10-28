@@ -187,3 +187,39 @@ def test_archived_manual_recovery_rotates_off_boundary_once_per_slot(monkeypatch
     assert es._claim_historical_recovery_day(days, later) == expected
     assert es._claim_historical_recovery_day(days, later) is None
     assert es._claim_historical_recovery_day([], later + timedelta(hours=1)) is None
+
+
+def test_oct27_official_finals_recover_manual_2_5_10_odds_without_guessing():
+    """Exact stored event ID, both teams and UTC kickoff gate every receipt."""
+    from services.verified_incident_finals import incident_finals
+    from leagues.results_checker import _index_free_finals
+
+    fixtures = [
+        ("sr:match:68214868", "FCI Levadia Tallinn", "Tartu JK Tammeka",
+         "home_win", (2, 1), "won"),
+        ("sr:match:74374528", "SV 07 Elversberg", "Darmstadt",
+         "over_2_5", (0, 2), "lost"),
+        ("sr:match:74374512", "Bochum", "Mainz",
+         "over_2_5", (2, 0), "lost"),
+    ]
+    for event_id, home, away, market, scores_expected, verdict in fixtures:
+        game = {
+            "sportybet_event_id": event_id, "match_id": "sportybet:" + event_id,
+            "home_team": home, "away_team": away,
+            "market": market, "kickoff": "2026-10-27T16:00:00+00:00",
+            "status": "pending",
+        }
+        observed = incident_finals([game])
+        assert len(observed) == 1
+        assert (observed[0]["home_score"], observed[0]["away_score"]) == scores_expected
+        record = {"games": [game], "result_status": "pending",
+                  "booking": {"share_code": "PRESERVED"}}
+        graded = grade_manual_slip(
+            record, _index_free_finals(observed),
+            now=datetime(2026, 10, 28, 7, tzinfo=timezone.utc),
+        )
+        assert graded["result_status"] == verdict
+        assert graded["booking"] == record["booking"]
+        assert graded["games"][0]["settlement_evidence"]["provider"] == "verified-official-fixture-report"
+        assert incident_finals([{**game, "away_team": "Different FC"}]) == []
+        assert incident_finals([{**game, "kickoff": "2026-10-26T16:00:00Z"}]) == []
