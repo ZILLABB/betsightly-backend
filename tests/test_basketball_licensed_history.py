@@ -160,7 +160,7 @@ def test_postgres_expired_rights_and_league_isolation(postgres):
         assert {row[0]:row[1] for row in counts}=={"ncaa_men":1,"wnba":1}
         rls=conn.execute(text("""
             SELECT relname,relrowsecurity FROM pg_class WHERE relnamespace=
-            'nba_research'::regnamespace AND relname LIKE 'basketball_%'
+            'nba_research'::regnamespace AND relkind='r' AND relname LIKE 'basketball_%'
         """)).all()
         assert len(rls)==3 and all(row[1] for row in rls)
         access=conn.execute(text("""
