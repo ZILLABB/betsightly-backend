@@ -251,3 +251,52 @@ def test_nba_job_receipts_redact_provider_failures_and_preserve_digest(tmp_path,
         assert settlement["failed_date_count"] == 1
         assert "NEVER_EXPORT_THIS" not in rows[1].summary_json
         assert "private provider error" not in rows[1].summary_json
+
+
+def test_recent_archive_backup_is_stale_after_newer_market_receipt(tmp_path, monkeypatch):
+    archive, factory = prepare(tmp_path, monkeypatch)
+    with factory() as db:
+        ops._session_tables(db)
+        stamp = NOW.replace(tzinfo=None)
+        db.add(ops.NBAPrivateJobRun(
+            kind="backup", status="verified_private_blob_readback",
+            summary_json=_json({"archive_digest": _digest(archive)}),
+            recorded_at=stamp - timedelta(minutes=5),
+        ))
+        market = {"observed_at": NOW.isoformat(), "fixtures": [],
+                  "research_only": True}
+        market["digest"] = hashlib.sha256(_json(market).encode()).hexdigest()
+        db.add(NBAMarketObservation(
+            digest=market["digest"], payload_json=_json(market),
+            recorded_at=stamp,
+        ))
+        db.commit()
+        report = ops.read_health(db=db, now=NOW)
+        assert report["backup_recent_for_current_archive"] is False
+        assert report["backup_covers_current_market_history"] is False
+        assert report["job_audit_history_in_portable_backup"] is False
+        assert report["backup_recovery_scope"] == (
+            "research_archive_and_market_receipts_only")
+
+
+def test_forecast_reason_is_only_safe_bounded_metadata(tmp_path, monkeypatch):
+    _, factory = prepare(tmp_path, monkeypatch)
+    ops.record_run("forecast", "no_new_eligible_forecasts", detail={
+        "reason": "eligible_forecasts_already_recorded",
+        "readiness": {
+            "moneyline_eligible": 12,
+            "moneyline_already_recorded": 12,
+            "original_score_eligible": 12,
+            "original_score_already_recorded": 12,
+            "upcoming_source_fixtures": 12,
+            "private_token": "do-not-log",
+        },
+        "private_token": "do-not-log",
+    })
+    with factory() as db:
+        row = db.query(ops.NBAPrivateJobRun).order_by(
+            ops.NBAPrivateJobRun.id.desc()).first()
+        payload = json.loads(row.summary_json)
+        assert payload["reason"] == "eligible_forecasts_already_recorded"
+        assert payload["readiness"]["moneyline_already_recorded"] == 12
+        assert "private_token" not in row.summary_json
