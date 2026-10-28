@@ -266,3 +266,41 @@ def test_scoreboard_lookup_is_rate_limited_without_weakening_final_verification(
     monkeypatch.setattr(live.time, "monotonic", lambda: 1000. + 481)
     third = live.collect_verified_manual_links([game], now=at)
     assert len(third) == 1 and len(calls) == 2
+
+
+def test_unqualified_manual_premier_league_does_not_claim_england():
+    """Legacy receipts have wrong eng.1 slugs for five unrelated countries."""
+    from leagues.live_scores import infer_published_competition_slugs
+    overseas = [
+        ("Geylang International FC", "Hougang United FC"),
+        ("FC Ararat-Armenia", "FC Noah Yerevan"),
+        ("Maccabi Haifa FC", "Hapoel Be'er Sheva FC"),
+        ("Arnett Gardens FC", "Molynes"),
+        ("SC Villa", "Blacks Power FC"),
+    ]
+    for home, away in overseas:
+        old_manual = {"home_team": home, "away_team": away,
+                      "league": "Premier League",
+                      "league_slug": "eng.1", "editorial_manual": True}
+        slugs, missing = infer_published_competition_slugs([old_manual])
+        assert slugs == set() and missing == 1
+
+    # Even UK teams using this same GENERIC bookmaker label need documented
+    # country provenance before an automatic ESPN competition assertion.
+    slugs, missing = infer_published_competition_slugs([{
+        "home_team": "Liverpool", "away_team": "Brighton",
+        "league": "Premier League", "editorial_manual": True,
+    }])
+    assert slugs == set() and missing == 1
+    assert infer_published_competition_slugs([{
+        "home_team": "Liverpool", "away_team": "Brighton",
+        "league": "English Premier League", "editorial_manual": True,
+    }]) == ({"eng.1"}, 0)
+
+
+def test_official_model_existing_league_slug_unchanged():
+    from leagues.live_scores import infer_published_competition_slugs
+    assert infer_published_competition_slugs([{
+        "league": "Premier League", "league_slug": "eng.1",
+        "home_team": "Liverpool", "away_team": "Brighton",
+    }]) == ({"eng.1"}, 0)
