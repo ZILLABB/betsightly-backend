@@ -34,5 +34,5 @@ jobs:
         run: |
           cp .env.vps.example .env.vps
           docker compose --env-file .env.vps -f compose.vps.yml config --format json > /tmp/betsightly-vps-compose.json
-          python scripts/vps/validate_compose.py /tmp/betsightly-vps-compose.json
+          python -m scripts.vps.validate_compose /tmp/betsightly-vps-compose.json
           rm -f .env.vps
