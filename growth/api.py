@@ -70,6 +70,13 @@ def get_manual_settlement_review(limit: int = Query(250, ge=1, le=1000)):
     return manual_settlement_review(limit=limit)
 
 
+@router.get("/manual-tiers/settlement-review/access", response_class=HTMLResponse)
+def manual_settlement_review_access():
+    """Public login shell only; protected data remains behind require_admin."""
+    from growth.manual_review_desk import access_page
+    return HTMLResponse(access_page(), headers={"Cache-Control": "no-store"})
+
+
 @router.get("/manual-tiers/settlement-review/desk",
             dependencies=[Depends(require_admin)], response_class=HTMLResponse)
 def manual_settlement_review_desk():

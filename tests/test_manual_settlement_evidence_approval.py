@@ -216,3 +216,46 @@ def test_reviewed_score_never_automatically_approves_without_explicit_action(mon
             "SELECT detail FROM editorial_tier_slips WHERE tier='2_odds'"
         )).scalar())["games"][0]["status"] == "pending"
     assert proposal["booking_unchanged"] is True
+
+
+def test_standalone_review_login_shell_is_public_but_cannot_read_results():
+    """Render access form can sign in while every result route stays private."""
+    from growth.manual_review_desk import access_page
+    from growth.admin_auth import require_admin
+
+    login = next(r for r in router.routes
+                 if getattr(r, "path", "") ==
+                 "/manual-tiers/settlement-review/access")
+    protected = next(r for r in router.routes
+                     if getattr(r, "path", "") ==
+                     "/manual-tiers/settlement-review/desk")
+    assert "GET" in login.methods
+    assert require_admin not in [d.call for d in login.dependant.dependencies]
+    assert require_admin in [d.call for d in protected.dependant.dependencies]
+    for suffix in ("propose", "approve"):
+        mutation = next(r for r in router.routes
+                        if getattr(r, "path", "") ==
+                        "/manual-tiers/settlement-review/" + suffix)
+        assert "POST" in mutation.methods
+        assert require_admin in [d.call for d in mutation.dependant.dependencies]
+
+    markup = access_page()
+    assert 'type="password"' in markup
+    assert "credentials:'same-origin'" in markup
+    assert "/api/growth/admin/login" in markup
+    assert "/api/growth/manual-tiers/settlement-review/desk" in markup
+    assert "HttpOnly" in markup and "SameSite=Strict" in markup
+    assert "No booking codes" not in markup
+    assert "<script src=" not in markup
+    assert "localStorage" not in markup
+    assert "sessionStorage" not in markup
+
+
+def test_protected_review_desk_does_not_embed_credentials_or_ticket_data():
+    from growth.manual_review_desk import page
+    markup = page()
+    assert "innerHTML" not in markup
+    assert "textContent" in markup
+    assert "credentials:'same-origin'" in markup
+    assert "/propose" in markup and "/approve" in markup
+    assert 'type="password"' not in markup

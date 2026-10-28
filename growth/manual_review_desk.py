@@ -162,3 +162,51 @@ textarea{resize:vertical;min-height:100px}label{display:block;margin:13px 0 6px;
 })();
 </script>
 </body></html>'''
+
+
+def access_page() -> str:
+    """Login hand-off: password stays inside the existing Render auth service."""
+    return r'''<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>BetSightly · Protected Evidence Desk</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{background:radial-gradient(circle at 90% 10%,#164961,#071825 65%);min-height:100vh;display:grid;place-items:center;margin:0;color:#ecf5fa;font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif}
+main{background:#102d43;border:1px solid #386078;box-shadow:0 20px 60px #03111b90;border-radius:17px;padding:32px;max-width:430px;width:calc(100% - 30px)}
+.tag{font-size:12px;letter-spacing:2px;color:#81cbe2;font-weight:800}
+h1{line-height:1.16;letter-spacing:-.6px;font-size:28px;margin:10px 0 8px}
+p{color:#bad0dc}label{display:block;margin:20px 0 7px;font-weight:700}
+input{background:#092238;border:1px solid #5687a0;border-radius:9px;color:white;font:inherit;padding:13px;width:100%}
+button{background:#2380a7;border:1px solid #3299c1;border-radius:9px;padding:13px 16px;color:#fff;font-weight:800;font:inherit;cursor:pointer;width:100%;margin-top:15px}
+button:disabled{opacity:.55;cursor:wait}#msg{min-height:24px;color:#f2a9a9;margin-top:14px;font-size:13px}
+small{color:#98b8cb}
+</style></head><body><main>
+<div class="tag">BET SIGHTLY / PROTECTED OPERATIONS</div>
+<h1>Settlement Evidence Desk</h1>
+<p>Sign in using the existing BetSightly administrator password. The password is submitted directly to the protected Render backend; it is not stored or shown in this page.</p>
+<form id="f">
+<label for="password">Administrator password</label>
+<input id="password" type="password" autocomplete="current-password" required autofocus>
+<button type="submit" id="submit">Secure sign in</button>
+</form><div id="msg" role="alert" aria-live="polite"></div>
+<small>Signed session · HttpOnly · Secure · SameSite=Strict</small>
+</main><script>
+document.getElementById('f').addEventListener('submit',async event=>{
+  event.preventDefault();
+  const button=document.getElementById('submit'),status=document.getElementById('msg');
+  const password=document.getElementById('password').value;
+  button.disabled=true;status.textContent='Verifying administrator session…';
+  try{
+    const result=await fetch('/api/growth/admin/login',{
+      method:'POST',credentials:'same-origin',cache:'no-store',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+    if(!result.ok){
+      let error={};try{error=await result.json()}catch{}
+      throw Error(typeof error.detail==='string'?error.detail:'Administrator login failed');
+    }
+    document.getElementById('password').value='';
+    location.assign('/api/growth/manual-tiers/settlement-review/desk');
+  }catch(error){status.textContent=error.message||'Sign-in failed';button.disabled=false;}
+});
+</script></body></html>'''
