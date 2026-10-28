@@ -186,6 +186,23 @@ def read_health(*, db=None, now: datetime | None = None):
             _verify_receipt(latest_market)
         jobs = db.query(NBAPrivateJobRun).order_by(
             NBAPrivateJobRun.id.desc()).limit(MAX_RUNS).all()
+        # Never derive scheduled-job readiness from just the last 20
+        # display rows: busy settlement windows can displace older forecast
+        # or backup receipts even though those jobs really ran.
+        latest_by_kind = [
+            db.query(NBAPrivateJobRun).filter(
+                NBAPrivateJobRun.kind == kind).order_by(
+                    NBAPrivateJobRun.id.desc()).first()
+            for kind in JOB_KINDS
+        ]
+        latest_by_kind = [item for item in latest_by_kind if item is not None]
+        last_forecast = next((j for j in latest_by_kind
+                              if j.kind == "forecast"), None)
+        forecast_details = (json.loads(last_forecast.summary_json)
+                            if last_forecast is not None else {})
+        last_source_coverage = forecast_details.get("coverage")
+        if not isinstance(last_source_coverage, dict):
+            last_source_coverage = None
         # Backup receipts must NOT be discovered only through the last 20
         # general jobs: frequent settlement jobs can otherwise hide a valid
         # backup and incorrectly report no offsite recovery.
@@ -269,11 +286,8 @@ def read_health(*, db=None, now: datetime | None = None):
                  "summary": json.loads(item.summary_json)}
                 for item in jobs
             ],
-            "job_readiness": _job_readiness(
-                jobs + ([latest_backup] if latest_backup is not None and
-                        all(j.id != latest_backup.id for j in jobs) else []),
-                now=clock,
-            ),
+            "job_readiness": _job_readiness(latest_by_kind, now=clock),
+            "latest_forecast_source_coverage": last_source_coverage,
             "database_expiry_declared_at": os.getenv(
                 "NBA_RESEARCH_DATABASE_EXPIRES_AT") or None,
             "backup_policy": "private_vercel_blob_daily_snapshot_with_hash_readback",
