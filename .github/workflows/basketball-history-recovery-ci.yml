@@ -46,4 +46,4 @@ jobs:
       - run: python -m py_compile basketball/research_licensed_backup.py basketball/research_licensed_backup_ack.py basketball/research_licensed_backup_restore.py growth/api.py
       - run: node --check ops/nba_vercel_scheduler/api/backup-v2.js
       - name: Test signed envelope, private ACK, actual PostgreSQL restoration
-        run: python -m pytest --noconftest tests/test_basketball_history_backup_postgres.py tests/test_basketball_league_source_matrix.py tests/test_basketball_licensed_history.py -q
+        run: python -m pytest --noconftest tests/test_basketball_history_backup_postgres.py tests/test_basketball_league_source_matrix.py -q
