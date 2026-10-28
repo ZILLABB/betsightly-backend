@@ -159,6 +159,20 @@ _VERIFIED_FINALS = (
      "away": "St. Truidense VV", "date": "2026-10-22",
      "home_score": 0, "away_score": 1,
      "evidence_url": "https://www.uefa.com/uefaconferenceleague/news/02a8-2174cb200f25-b94693ddff4e-1000--2026-27-conference-league-all-the-league-phase-fixtures/"},
+    # English Premier League 25 October — official club match reports.
+    # Do not use a generic league slug as a substitute for bookmaker identity.
+    {
+        "sportybet_event_id": "sr:match:72221346",
+        "home": "Liverpool", "away": "Brighton",
+        "date": "2026-10-25", "home_score": 2, "away_score": 0,
+        "evidence_url": "https://www.liverpoolfc.com/matches/mens-team/results/2026/premier-league",
+    },
+    {
+        "sportybet_event_id": "sr:match:72221348",
+        "home": "Man Utd", "away": "Bournemouth",
+        "date": "2026-10-25", "home_score": 0, "away_score": 3,
+        "evidence_url": "https://www.manutd.com/en/news/report-united-0-bournemouth-3-on-25-october-2026",
+    },
     # Monday 19 October 2026 — existing admin-curated fixtures.
     # Exact immutable SportyBet IDs from editorial_tier_slips in production.
     # Independent league/club match reports confirm FT regulation scores.
