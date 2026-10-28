@@ -21,8 +21,8 @@ from basketball.research_private_store import (
 from basketball.research_market_store import NBAMarketObservation
 from basketball.research_market_presentation import present_market_snapshot
 
-MAX_HISTORY = 600
-MAX_BACKUP_BYTES = 10_000_000
+MAX_HISTORY = 1200
+MAX_BACKUP_BYTES = 28_000_000
 MAX_RUNS = 20
 JOB_EXPECTED_INTERVAL_HOURS = 36
 JOB_MAX_AGE_HOURS = {"forecast": 30, "settlement": 16, "market": 36, "backup": 30}

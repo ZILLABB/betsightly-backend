@@ -23,7 +23,7 @@ from basketball.research_restore_drill import verify_portable_backup
 
 VERSION = "betsightly-nba-private-full-recovery-v2"
 MAX_JOB_ROWS = 10000
-MAX_RECOVERY_BYTES = 10_000_000
+MAX_RECOVERY_BYTES = 30_000_000
 ALLOWED_SUMMARY_KEYS = frozenset({
     "outcome", "new_finals", "fixture_count", "fixture_matches",
     "new_forecasts", "provider_status", "failed_date_count", "archive_digest",
