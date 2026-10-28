@@ -118,10 +118,27 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
         }
         if len(updated["fixtures"]) > MAX_FIXTURES:
             raise ValueError("NBA_ARCHIVE_CAPACITY_REACHED_WITHOUT_OVERWRITE")
+        # Observability only: do not loosen the signed, pre-tipoff model gates.
+        # A zero-new run can mean every eligible fixture already has a frozen
+        # forecast rather than a provider or model failure.
+        readiness = {
+            "moneyline_eligible": money.get("eligible_future", 0),
+            "moneyline_already_recorded": money.get("already_recorded", 0),
+            "original_score_eligible": score.get("eligible", 0),
+            "original_score_already_recorded": score.get("already_recorded", 0),
+            "upcoming_source_fixtures": len(upcoming),
+        }
 
     if _digest(updated) == _digest(prior):
+        already = (
+            readiness["moneyline_eligible"] > 0
+            or readiness["original_score_eligible"] > 0
+        )
         return {
             "status": "no_new_eligible_forecasts", "new_forecasts": changed,
+            "reason": ("eligible_forecasts_already_recorded" if already
+                       else "no_model_eligible_fixture_in_window"),
+            "readiness": readiness,
             "archive_digest": _digest(prior), "research_only": True,
             "not_bookable": True,
         }
@@ -136,4 +153,5 @@ def forecast_hosted(*, now=None, season_loader=None, session_factory=None):
         "research_only": True, "not_bookable": True,
         "advanced_model_recomputed": False,
         "historical_provider_manifest_count": len(manifests),
+        "readiness": readiness,
     }
