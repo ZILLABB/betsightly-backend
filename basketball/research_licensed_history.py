@@ -62,8 +62,9 @@ def validate_history_batch(league, provider, season_code, games):
         ):
             raise ValueError("BASKETBALL_HISTORY_TIPOFF_INVALID")
         state = game["status"]
-        if state not in ("scheduled", "final", "canceled"):
-            raise ValueError("BASKETBALL_HISTORY_STATUS_INVALID")
+        if state != "final":
+            # Immutable historic training evidence, never a live scoreboard.
+            raise ValueError("BASKETBALL_HISTORY_NONFINAL_WITHHELD")
         hs, az = game["home_score"], game["away_score"]
         if state == "final":
             if (type(hs) is not int or type(az) is not int or
@@ -144,11 +145,14 @@ def import_licensed_history(league, provider, season_code, games, *,
                      for row in rows]
             db.execute(_INSERT_ROW,batch)
             stored=db.execute(text("""
-                SELECT COUNT(*) count FROM nba_research.basketball_licensed_games
-                WHERE import_id=:import_id
-            """),{"import_id":created}).scalar()
-            if stored != len(rows):
-                raise ValueError("BASKETBALL_HISTORY_READBACK_COUNT_MISMATCH")
+                SELECT provider_event_id,row_sha256
+                FROM nba_research.basketball_licensed_games
+                WHERE import_id=:import_id ORDER BY provider_event_id
+            """),{"import_id":created}).mappings().all()
+            expected=[(row["provider_event_id"],row["row_sha256"]) for row in rows]
+            actual=[(row["provider_event_id"],row["row_sha256"]) for row in stored]
+            if actual != expected:
+                raise ValueError("BASKETBALL_HISTORY_READBACK_HASH_MISMATCH")
             db.commit()
             return {"status":"licensed_history_saved","league":league,
                     "count":len(rows),"manifest_sha256":digest,
