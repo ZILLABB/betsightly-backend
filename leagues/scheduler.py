@@ -394,6 +394,29 @@ def run_daily_job(force: bool = False, publish: bool = True,
 
     _step(report, "weekly_board", _prepare_weekly_board, run_date)
 
+    # Jev shadow evidence is never a publication requirement. On a dedicated
+    # staging environment the optional research worker runs independently
+    # *before* the card step without delaying or rewriting the official card.
+    # Production is unconditionally blocked by scheduler_shadow_tick.
+    if (os.getenv("ENVIRONMENT", "").strip().lower() == "staging"
+            and os.getenv("BETSIGHTLY_JEV_WORKER_ENABLED", "").strip().lower()
+            in {"1", "yes", "true"}):
+        def _jev_shadow_background():
+            try:
+                from leagues.jev_shadow_worker import scheduler_shadow_tick
+                result = scheduler_shadow_tick()
+                logger.info("Jev shadow tick status=%s",
+                            result.get("status"))
+            except Exception as exc:
+                logger.warning("Jev shadow tick not available: %s",
+                               type(exc).__name__)
+        threading.Thread(target=_jev_shadow_background, daemon=True,
+                         name="jev-shadow-stage").start()
+        report["steps"]["jev_shadow"] = {
+            "status": "queued_nonblocking", "shadow_only": True,
+            "publication_changed": False,
+        }
+
     # 2. Build and lock the card. First write wins, so calling this again
     #    later in the day returns the same card rather than replacing it.
     def _publish_card():
