@@ -42,6 +42,9 @@ class ManualTierRequest(BaseModel):
     # Explicit replacement for a selected 2/5/10 Odds or Over Goals tier.
     # No Rollover or Banker override. Model records remain immutable.
     replace_official_display: bool = False
+    # Explicitly accept responsibility for an unsupported score source.
+    manual_review_override: bool = False
+    manual_review_reason: str = Field(default="", max_length=500)
 
 
 @router.get("/manual-tiers", dependencies=[Depends(require_admin)])
@@ -299,6 +302,8 @@ def preview_manual_tier(body: ManualTierRequest):
             body.tier, body.lines,
             replace_official_over=body.replace_official_over,
             replace_official_display=body.replace_official_display,
+            manual_review_override=body.manual_review_override,
+            manual_review_reason=body.manual_review_reason,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
@@ -326,6 +331,8 @@ def publish_manual_tier(body: ManualTierRequest):
             body.tier, body.lines,
             replace_official_over=body.replace_official_over,
             replace_official_display=body.replace_official_display,
+            manual_review_override=body.manual_review_override,
+            manual_review_reason=body.manual_review_reason,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
@@ -335,6 +342,8 @@ class ManualExistingCodePublishRequest(BaseModel):
     tier: str = Field(min_length=3, max_length=20)
     code: str = Field(min_length=4, max_length=32)
     replace_official_display: bool = False
+    manual_review_override: bool = False
+    manual_review_reason: str = Field(default="", max_length=500)
 
 
 @router.post("/manual-tiers/publish-imported", dependencies=[Depends(require_admin)])
@@ -358,6 +367,8 @@ def publish_imported_manual_code(body: ManualExistingCodePublishRequest):
         result = publish(
             body.tier, imported["lines"],
             replace_official_display=body.replace_official_display,
+            manual_review_override=body.manual_review_override,
+            manual_review_reason=body.manual_review_reason,
         )
         return {
             **result, "imported_share_code": body.code,
