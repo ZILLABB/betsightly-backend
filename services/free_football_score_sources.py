@@ -152,7 +152,11 @@ def _fd_match(match: dict) -> dict | None:
 
 def football_data_finals(start: str, end: str) -> list[dict]:
     """Use one request for all free-plan competitions in a short date window."""
-    token = os.getenv("FOOTBALL_DATA_ORG_TOKEN", "").strip()
+    # The production Render Blueprint and fixture service use FOOTBALL_DATA_KEY.
+    # Earlier settlement code read only FOOTBALL_DATA_ORG_TOKEN, silently
+    # disabling this free fallback even when the existing key was configured.
+    token = (os.getenv("FOOTBALL_DATA_KEY", "").strip()
+             or os.getenv("FOOTBALL_DATA_ORG_TOKEN", "").strip())
     if not token or not _valid_window(start, end, max_days=7):
         return []
     key = ("football-data.org", start, end)

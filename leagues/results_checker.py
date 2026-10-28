@@ -515,23 +515,26 @@ def _collect_espn_scores_ranged(
     return finished
 
 
-def _known_score_slugs(picks: list[dict]) -> set[str] | None:
-    """Resolve manual SportyBet competition labels via verified ESPN metadata.
+def _known_score_slugs(picks: list[dict]) -> set[str]:
+    """Query only unambiguously mapped ESPN competitions for manual receipts.
 
-    Manual bookmaker receipts use a human league name, not an ESPN slug.
-    Previously one missing league_slug forced a 90+ competition sweep every
-    pass and left ordinary manual fixtures unmatched. Reuse the existing
-    strict, unique-name competition resolver rather than guessing by country.
-
-    If ANY competition cannot be unambiguously mapped, preserve the wider
-    fallback sweep for that batch: never omit a potential verified final.
+    One unknown SportyBet league previously triggered a 90+ competition
+    scoreboard sweep, obscuring failures and delaying even supported matches.
+    We must not infer the league from generic team names or silently spend
+    unlimited requests. Unsupported picks continue through the free-source
+    fallback and remain pending if no verified final exists.
     """
     from leagues.live_scores import infer_published_competition_slugs
 
     known = set(ESPN_LEAGUE_SLUGS.values())
     inferred, unresolved = infer_published_competition_slugs(picks)
     usable = inferred & known
-    return usable if usable and unresolved == 0 else None
+    if unresolved:
+        logger.info(
+            "Manual score coverage: supported ESPN slugs=%s unmapped_games=%s",
+            len(usable), unresolved,
+        )
+    return usable
 
 
 

@@ -139,3 +139,31 @@ def test_api_football_disabled_in_production(monkeypatch):
                         lambda: (_ for _ in ()).throw(
                             AssertionError("no legacy quota should be spent")))
     assert gateway.api_football_get("fixtures") is None
+
+
+def test_production_football_data_key_enables_free_score_fallback(monkeypatch):
+    """Match the existing Render Blueprint variable, not a phantom key name."""
+    source._CACHE.clear()
+    source._COOLDOWN.clear()
+    source._MIN_INTERVAL.clear()
+    monkeypatch.delenv("FOOTBALL_DATA_ORG_TOKEN", raising=False)
+    monkeypatch.setenv("FOOTBALL_DATA_KEY", "render-configured-free-token")
+    seen = []
+
+    class Response:
+        status_code = 200
+        headers = {}
+        def json(self):
+            return {"matches": [_sample_fdo()]}
+
+    def request(url, **kwargs):
+        seen.append(kwargs["headers"]["X-Auth-Token"])
+        return Response()
+
+    monkeypatch.setattr(source.requests, "get", request)
+    result = source.football_data_finals("2026-10-09", "2026-10-09")
+    assert len(result) == 1
+    assert seen == ["render-configured-free-token"]
+    source._CACHE.clear()
+    source._COOLDOWN.clear()
+    source._MIN_INTERVAL.clear()
