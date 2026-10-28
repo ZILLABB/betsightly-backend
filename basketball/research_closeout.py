@@ -40,12 +40,7 @@ def evaluate_closeout(health: dict, archive: dict) -> dict:
         # V2 acknowledges itself AFTER saving the prior job history.
         service_blockers.append("post_backup_audit_rows_not_yet_offsite")
 
-    recent_coverage = next((
-        j["summary"]["coverage"] for j in health.get("jobs", [])
-        if j.get("kind")=="forecast"
-        and isinstance(j.get("summary"),dict)
-        and isinstance(j["summary"].get("coverage"),dict)
-    ), None)
+    recent_coverage = health.get("latest_forecast_source_coverage")
     if recent_coverage is None:
         service_blockers.append("source_schedule_coverage_not_yet_audited")
     elif recent_coverage.get("next_48h_missing_original_model",0)>0:
