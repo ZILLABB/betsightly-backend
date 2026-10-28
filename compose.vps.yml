@@ -1,6 +1,7 @@
 # BetSightly VPS staging bundle — NOT activated by this commit.
 # Render deployment is unchanged. Reverse proxy should terminate TLS outside
-# this stack and route traffic to 127.0.0.1:8000 after an explicit cutover.
+# this stack and route traffic to 127.0.0.1:18080 after an explicit cutover.
+# Port 8000 on host is reserved for Coolify's dashboard; never bind API there.
 # Default up starts *only* the API; writers require an explicit profile.
 x-app-common: &app
   build:
@@ -27,7 +28,7 @@ services:
       ENABLE_BACKGROUND_JOBS: "false"
       BETSIGHTLY_PROCESS_ROLE: web
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:18080:8000"
     cpus: 2.0
     mem_limit: 3g
     healthcheck:

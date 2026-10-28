@@ -34,7 +34,7 @@ inventory, consistency proof, and approved migration.
    `docker compose --env-file .env.vps -f compose.vps.yml build`.
 
 Docker Compose is deliberately **not** auto-deployed from this PR.
-The API binds to **127.0.0.1:8000**, and no database is deployed inside
+The API binds to **127.0.0.1:18080**, and no database is deployed inside
 the stack. TLS ingress and an approved secure remote PostgreSQL connection
 must be configured separately. Never expose PostgreSQL or Redis to 0.0.0.0/0.
 
@@ -191,3 +191,11 @@ Run this separately from the publication process and connect exit code 2
 to a configured alert recipient. Repeated failures should be deduplicated
 by the alert delivery service. Confirm every calendar day is intended to
 publish before enforcing this gate in production.
+
+## Coolify port isolation (2026-10-28)
+
+Self-hosted Coolify opens its dashboard on host port **8000**. BetSightly
+binds the container's internal port 8000 to loopback **127.0.0.1:18080**
+in this candidate Compose file, preventing host port conflicts. A production
+reverse proxy must deliberately route the public HTTPS API domain to the
+service's internal address. Expose only 80/443 publicly; never expose 18080.

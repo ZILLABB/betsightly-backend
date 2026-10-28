@@ -54,6 +54,10 @@ def verify(compose):
     assert ports and all(p.get("host_ip") == "127.0.0.1" for p in ports), (
         "API must remain loopback-bound until TLS proxy is installed"
     )
+    assert len(ports) == 1 and ports[0].get("published") == "18080", (
+        "host 8000 is reserved for Coolify; VPS API must bind 18080 only"
+    )
+    assert str(ports[0].get("target")) == "8000", "container still serves on port 8000"
     assert "telegram" in (services["telegram"].get("profiles") or []), (
         "telegram must be explicitly enabled when credentials are configured"
     )
