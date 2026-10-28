@@ -1,0 +1,40 @@
+name: NBA disposable PostgreSQL end-to-end restore (synthetic only)
+"on":
+  pull_request:
+    paths:
+      - "basketball/research_full_recovery_postgres.py"
+      - "basketball/research_full_recovery.py"
+      - "tests/test_nba_full_recovery_postgres_integration.py"
+      - ".github/workflows/nba-real-pg-restore-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-postgresql-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: nba_disposable_restore
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic_test_only
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nba_disposable_restore"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      NBA_DISPOSABLE_POSTGRES_TEST_URL: postgresql+psycopg://postgres:synthetic_test_only@localhost:55432/nba_disposable_restore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated test dependencies
+        run: python -m pip install -r requirements.txt pytest "psycopg[binary]"
+      - name: Restore V2 into actual empty PostgreSQL and prove readback
+        run: python -m pytest --noconftest tests/test_nba_full_recovery_postgres_integration.py tests/test_basketball_full_recovery_postgres.py -q -rs

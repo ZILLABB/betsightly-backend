@@ -879,3 +879,828 @@ async def growth_add_referral(admin: str = Depends(require_admin),
                                   campaign="creator", ref=code)}
     finally:
         db.close()
+
+
+@router.get("/admin/nba-research", dependencies=[Depends(require_admin)])
+def nba_admin_research(response: Response):
+    """Private read-only DB snapshot; do not silently invent empty fixtures."""
+    import os
+    if os.getenv("NBA_ADMIN_RESEARCH_ENABLED", "").lower() not in (
+        "1", "true", "yes", "on"
+    ):
+        raise HTTPException(404, "Private NBA research is disabled.")
+    from basketball.research_private_store import hosted_board
+    try:
+        result = hosted_board()
+    except (ValueError, KeyError, OSError, TypeError) as exc:
+        logger.warning("NBA stored research validation failed: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "NBA stored research integrity invalid.") from exc
+    except Exception as exc:
+        logger.warning("NBA research storage unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "NBA private research database unavailable.") from exc
+    if result is None:
+        raise HTTPException(503, "No verified NBA research archive has been imported.")
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+def _nba_market_stage_enabled():
+    import os
+    return (
+        os.getenv("ENVIRONMENT", "").lower() == "staging"
+        and os.getenv("NBA_ADMIN_RESEARCH_ENABLED", "").lower() in
+        ("1", "true", "yes", "on")
+        and os.getenv("NBA_ADMIN_RESEARCH_MARKETS_ENABLED", "").lower() in
+        ("1", "true", "yes", "on")
+        and os.getenv("DATABASE_URL", "").startswith(
+            ("postgresql://", "postgres://", "postgresql+psycopg://")
+        )
+    )
+
+
+@router.get("/admin/nba-research/markets",
+            dependencies=[Depends(require_admin)])
+def nba_admin_market_research(response: Response):
+    """Read signed, private exact NBA bookmaker line observations."""
+    if not _nba_market_stage_enabled():
+        raise HTTPException(404, "Private NBA market research disabled.")
+    from basketball.research_market_store import read_observations
+    try:
+        result = read_observations()
+    except ValueError as exc:
+        logger.warning("NBA market snapshot integrity failed: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA market observation integrity invalid.") from exc
+    except Exception as exc:
+        logger.warning("NBA market snapshots unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA market observations unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.post("/admin/nba-research/markets/refresh",
+             dependencies=[Depends(require_admin)])
+def nba_admin_market_refresh(response: Response):
+    """Opt-in, read-only SportyBet crawl; persists ONLY private quoted prices."""
+    if not _nba_market_stage_enabled():
+        raise HTTPException(404, "Private NBA market research disabled.")
+    from basketball.research_market_store import capture_observations
+    try:
+        result = capture_observations()
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("NBA market source rejected: %s", type(exc).__name__)
+        raise HTTPException(409, "No complete verified NBA bookmaker market snapshot.") from exc
+    except Exception as exc:
+        logger.warning("NBA market source unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA bookmaker market source unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+def _nba_health_enabled():
+    import os
+    return (
+        os.getenv("ENVIRONMENT", "").lower() == "staging"
+        and os.getenv("NBA_ADMIN_RESEARCH_ENABLED", "").lower()
+        in ("1", "true", "yes", "on")
+        and os.getenv("DATABASE_URL", "").startswith(
+            ("postgresql://", "postgres://", "postgresql+psycopg://")
+        )
+    )
+
+
+@router.get("/admin/nba-research/health",
+            dependencies=[Depends(require_admin)])
+def nba_research_private_health(response: Response):
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA private operations unavailable.")
+    from basketball.research_ops_health import read_health
+    try:
+        result = read_health()
+    except ValueError as exc:
+        raise HTTPException(409, "NBA operations integrity failed.") from exc
+    except Exception as exc:
+        logger.warning("NBA operations read failed: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA operations currently unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return result
+
+
+@router.get("/admin/nba-research/validation",
+            dependencies=[Depends(require_admin)])
+def nba_research_model_validation(response: Response):
+    """Private read-only model evaluation; never an automatic release gate override."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA model validation unavailable.")
+    from basketball.research_private_store import SessionLocal, latest_bundle
+    from basketball.research_release_gates import grade_models
+    db = SessionLocal()
+    try:
+        archive = latest_bundle(db)
+        if archive is None:
+            raise ValueError("NBA_MODEL_ARCHIVE_NOT_FOUND")
+        result = grade_models(archive)
+    except ValueError as exc:
+        logger.warning("NBA model validation rejected: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA model validation evidence rejected.") from None
+    except Exception as exc:
+        logger.warning("NBA model validation unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA model validation unavailable.") from None
+    finally:
+        db.close()
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.get("/admin/nba-research/licensed-history-backup-health",
+            dependencies=[Depends(require_admin)])
+def nba_private_licensed_backup_health(response: Response):
+    if not _nba_health_enabled():
+        raise HTTPException(404, "Licensed history unavailable.")
+    from basketball.research_licensed_backup_ack import history_backup_health
+    try:
+        result = history_backup_health()
+    except Exception as exc:
+        logger.warning("Licensed history private backup health unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Licensed history backup health unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.get("/admin/nba-research/licensed-history-readiness",
+            dependencies=[Depends(require_admin)])
+def nba_private_licensed_history_readiness(response: Response):
+    """Private, verified database counts, not commercial model approval."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "Basketball private history unavailable.")
+    from basketball.research_licensed_history import history_readiness
+    try:
+        result = history_readiness()
+    except Exception as exc:
+        logger.warning("Basketball private history unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Basketball licensed history unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.get("/admin/nba-research/league-source-matrix",
+            dependencies=[Depends(require_admin)])
+def nba_private_league_source_matrix(response: Response):
+    """All six league candidates, independent rights gates and latest probe counts."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA private research unavailable.")
+    from datetime import datetime, timezone
+    from basketball.research_league_source_catalog import source_matrix
+    from basketball.research_league_source_evidence import latest_probes
+    now = datetime.now(timezone.utc)
+    matrix = source_matrix(day=now.strftime("%Y%m%d"),
+                           start_year=now.year if now.month >= 7 else now.year-1)
+    try:
+        evidence = latest_probes()
+    except Exception as exc:
+        logger.warning("Private source probe metadata unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "League source metadata unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return {**matrix, "latest_source_probe_per_league": evidence,
+            "sources_with_observed_receipts": len(evidence)}
+
+
+@router.get("/admin/nba-research/league-sources",
+            dependencies=[Depends(require_admin)])
+def nba_private_league_sources(response: Response, league: str, day: str):
+    """Bounded operator-only independent non-NBA final-score source probe.
+
+    Does not train NBA models, alter NBA archives or settle bookmaker tickets.
+    Restricted to one verified historical UTC calendar day and known leagues.
+    """
+    from datetime import date, datetime, timezone, timedelta
+    from basketball.research_other_league_sources import (
+        CANDIDATES, probe_candidate_source,
+    )
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA private research unavailable.")
+    if league not in CANDIDATES or len(day) != 8 or not day.isdecimal():
+        raise HTTPException(422, "League or date unsupported.")
+    try:
+        requested = date(int(day[:4]), int(day[4:6]), int(day[6:]))
+    except ValueError:
+        raise HTTPException(422, "Invalid calendar date.") from None
+    today = datetime.now(timezone.utc).date()
+    if requested > today or requested < today - timedelta(days=370):
+        raise HTTPException(422, "Historical source date outside permitted range.")
+    try:
+        result = probe_candidate_source(league, day)
+    except (ValueError, RuntimeError):
+        raise HTTPException(503, "Independent league source unavailable.") from None
+    except Exception as exc:
+        logger.warning("NBA candidate league probe rejected: %s", type(exc).__name__)
+        raise HTTPException(503, "Independent league source unavailable.") from None
+    from basketball.research_league_source_evidence import record_probe
+    try:
+        stored = record_probe(league, day, result)
+        result = {**result, "metadata_recorded": stored["status"]}
+    except Exception as exc:
+        logger.warning("NBA source probe receipt persistence failed: %s",
+                       type(exc).__name__)
+        result = {**result, "metadata_recorded": "unavailable"}
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.get("/admin/nba-research/europe-sources",
+            dependencies=[Depends(require_admin)])
+def nba_private_europe_source(response: Response, league: str, start_year: int):
+    """One bounded EuroLeague/EuroCup season source probe, research-only."""
+    from datetime import datetime, timezone
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA private research unavailable.")
+    if league not in ("euroleague", "eurocup") or not (
+        2000 <= start_year <= datetime.now(timezone.utc).year):
+        raise HTTPException(422, "League or season not supported.")
+    from basketball.research_europe_sources import probe_season
+    try:
+        result = probe_season(league, start_year)
+    except (ValueError, RuntimeError):
+        raise HTTPException(503, "European league source unavailable.") from None
+    from basketball.research_league_source_evidence import record_probe
+    try:
+        stored = record_probe(league, str(start_year), result)
+        result = {**result, "metadata_recorded": stored["status"]}
+    except Exception as exc:
+        logger.warning("NBA Europe source probe receipt persistence failed: %s",
+                       type(exc).__name__)
+        result = {**result, "metadata_recorded": "unavailable"}
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.get("/admin/nba-research/history",
+            dependencies=[Depends(require_admin)])
+def nba_research_market_history(response: Response):
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA private research unavailable.")
+    from basketball.research_ops_health import frozen_market_history
+    try:
+        result = frozen_market_history()
+    except ValueError as exc:
+        raise HTTPException(409, "NBA market history integrity failed.") from exc
+    except Exception as exc:
+        logger.warning("NBA market history unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA private market history unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return result
+
+
+@router.get("/admin/nba-research/backup",
+            dependencies=[Depends(require_admin)])
+def nba_research_export_backup(response: Response):
+    """Full signed NBA archive and market evidence. Manual export only."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA research backup unavailable.")
+    from basketball.research_ops_health import export_verified_backup
+    try:
+        result = export_verified_backup()
+    except ValueError as exc:
+        logger.warning("NBA backup integrity/size blocked: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA complete export unavailable; never download partial evidence.") from exc
+    except Exception as exc:
+        logger.warning("NBA backup unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA private backup unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.get("/admin/nba-research/forward-scorecard",
+            dependencies=[Depends(require_admin)])
+def nba_private_forward_scorecard(response: Response):
+    """Original before-tipoff NBA performance; no bookmakers or model training."""
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA scorecard unavailable.")
+    from basketball.research_private_store import SessionLocal, latest_bundle
+    from basketball.research_forward_scorecard import scorecard
+    with SessionLocal() as db:
+        archive = latest_bundle(db)
+        if archive is None:
+            raise HTTPException(404, "NBA research archive unavailable.")
+        try:
+            result = scorecard(archive)
+        except ValueError as exc:
+            logger.warning("NBA forward scorecard validation rejected: %s",
+                           type(exc).__name__)
+            raise HTTPException(409, "NBA forward research integrity blocked.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.get("/admin/nba-research/closeout",
+            dependencies=[Depends(require_admin)])
+def nba_private_closeout_report(response: Response):
+    """Read-only, evidence-based readiness for the NBA research pipeline.
+
+    A successful CI or verified backup never overrides coverage, rights,
+    independent accuracy, market period, or actual-restore release gates.
+    """
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA closeout unavailable.")
+    from basketball.research_closeout import evaluate_closeout
+    from basketball.research_ops_health import read_health
+    from basketball.research_private_store import SessionLocal, latest_bundle
+    try:
+        with SessionLocal() as db:
+            health = read_health(db=db)
+            bundle = latest_bundle(db)
+        result = evaluate_closeout(health, bundle)
+    except ValueError as exc:
+        logger.warning("NBA closeout integrity blocked: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA closeout evidence invalid.") from None
+    except Exception as exc:
+        logger.warning("NBA closeout unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA closeout data unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.get("/admin/nba-research/backup-full",
+            dependencies=[Depends(require_admin)])
+def nba_research_export_backup_full(response: Response):
+    """V2 private recovery: signed archive, market receipts and job history.
+
+    Separate from the existing v1 Vercel cron route; cannot overwrite live
+    Supabase or original Render data and never enables public publication.
+    """
+    if not _nba_health_enabled():
+        raise HTTPException(404, "NBA full recovery unavailable.")
+    from basketball.research_full_recovery import build_full_recovery
+    try:
+        bundle = build_full_recovery()
+    except ValueError as exc:
+        logger.warning("NBA full recovery integrity blocked: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "Complete NBA recovery unavailable.") from None
+    except Exception as exc:
+        logger.warning("NBA full recovery unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "NBA recovery source unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return bundle
+
+
+@router.post("/admin/nba-research/forecast",
+             dependencies=[Depends(require_admin)])
+def nba_admin_forecast_research(response: Response):
+    """Research-only signed NBA pregame capture; never publishes a public tip."""
+    import os
+    enabled = lambda key: os.getenv(key, "").lower() in ("1", "true", "yes", "on")
+    if (os.getenv("ENVIRONMENT", "").lower() != "staging"
+        or not enabled("NBA_ADMIN_RESEARCH_ENABLED")
+        or not enabled("NBA_ADMIN_RESEARCH_FORECAST_ENABLED")
+        or not os.getenv("DATABASE_URL", "").startswith((
+            "postgresql://", "postgres://", "postgresql+psycopg://"
+        ))):
+        raise HTTPException(404, "NBA cloud forecast research is disabled.")
+    from basketball.research_hosted_forecast import forecast_hosted
+    try:
+        result = forecast_hosted()
+    except ValueError as exc:
+        logger.warning("NBA forecast source validation rejected: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "NBA cloud forecasts withheld by source validation.") from exc
+    except Exception as exc:
+        logger.warning("NBA forecast source unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "NBA cloud forecast input unavailable.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.post("/admin/nba-research/settle", dependencies=[Depends(require_admin)])
+def nba_admin_research_settle(response: Response):
+    """Explicit staging-only verified NBA scoreboard settlement.
+
+    Never publishes football, changes forecasts, or creates betting codes.
+    Keep disabled until its separate stage flag is set after tests.
+    """
+    import os
+    enabled = lambda key: os.getenv(key, "").lower() in ("1", "true", "yes", "on")
+    if (os.getenv("ENVIRONMENT", "").lower() != "staging" or
+        not enabled("NBA_ADMIN_RESEARCH_ENABLED") or
+        not enabled("NBA_ADMIN_RESEARCH_SETTLE_ENABLED") or
+        not os.getenv("DATABASE_URL", "").startswith(("postgresql://", "postgres://",
+                                                       "postgresql+psycopg://"))):
+        raise HTTPException(404, "Hosted NBA settlement disabled.")
+    from basketball.research_hosted_settlement import settle_hosted
+    try:
+        result = settle_hosted()
+    except ValueError as exc:
+        logger.warning("NBA hosted settlement validation rejected: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "NBA evidence integrity prevented settlement.") from exc
+    except Exception as exc:
+        logger.warning("NBA hosted settlement unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "NBA score verification unavailable. No result confirmed.") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+def _record_nba_machine_job(kind: str, status: str, result=None):
+    """Record only non-sensitive outcomes after a validated cron invocation."""
+    try:
+        from basketball.research_ops_health import record_run
+        record_run(kind, status, detail=result)
+    except Exception as exc:
+        logger.warning("NBA run audit unavailable: %s", type(exc).__name__)
+
+
+def _nba_backup_machine_allowed(request: Request) -> bool:
+    import hmac
+    import os
+    secret = os.getenv("NBA_BACKUP_JOB_TOKEN", "")
+    received = request.headers.get("x-betsightly-nba-backup-token", "")
+    return (
+        _nba_health_enabled()
+        and os.getenv("NBA_BACKUP_PRIVATE_ENABLED", "").lower()
+        in ("1", "true", "yes", "on")
+        and len(secret) >= 48 and bool(received)
+        and hmac.compare_digest(secret, received)
+    )
+
+
+@router.get("/internal/nba-research/backup")
+def nba_private_machine_backup(request: Request, response: Response):
+    """Never serves private research without the dedicated scheduler token."""
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    return nba_research_export_backup(response)
+
+
+@router.get("/internal/nba-research/backup-licensed")
+def nba_private_machine_backup_licensed(request: Request, response: Response):
+    """Machine-token-only export of four isolated licensed-source tables."""
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    from basketball.research_licensed_backup import build_history_recovery
+    try:
+        result = build_history_recovery()
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("Private licensed history export integrity: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "Licensed history export integrity invalid.") from None
+    except Exception as exc:
+        logger.warning("Private licensed history export unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Licensed history export unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return result
+
+
+@router.post("/internal/nba-research/backup-licensed/ack")
+def nba_private_machine_backup_licensed_ack(request: Request,
+                                             body: dict = Body(...)):
+    """Only record validated fresh matching source after private Blob readback."""
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    from basketball.research_licensed_backup_ack import verify_and_record_history_ack
+    try:
+        return verify_and_record_history_ack(body)
+    except ValueError as exc:
+        logger.warning("Private licensed history backup ACK invalid: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "Licensed history ACK validation failed.") from None
+    except Exception as exc:
+        logger.warning("Private licensed history ACK unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Licensed history ACK unavailable.") from None
+
+
+@router.get("/internal/nba-research/backup-full")
+def nba_private_machine_backup_full(request: Request, response: Response):
+    """Private token only; V1 backup endpoint and existing cron are unchanged."""
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    return nba_research_export_backup_full(response)
+
+
+@router.post("/internal/nba-research/backup-full/ack")
+def nba_private_machine_full_backup_ack(request: Request, body: dict = Body(...)):
+    """V2 receipt only after offsite private Blob raw-byte readback.
+
+    The signed current archive, market count and complete job ledger must
+    still match the archived copy. The acknowledgement itself adds a new
+    audit entry, so the *next* V2 backup will include that receipt.
+    """
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    from basketball.research_full_recovery_ack import verify_v2_backup_ack
+    from basketball.research_ops_health import record_run
+    try:
+        receipt = verify_v2_backup_ack(body)
+    except ValueError as exc:
+        logger.warning("NBA V2 offsite receipt rejected: %s", type(exc).__name__)
+        raise HTTPException(409, "NBA offsite full recovery receipt invalid.") from None
+    record_run("backup", "verified_full_private_blob_readback",
+               detail={
+                   "archive_digest": receipt["archive_digest"],
+                   "market_receipt_count": receipt["market_receipt_count"],
+                   "job_receipt_count": receipt["job_receipt_count"],
+                   "last_job_id": receipt["last_job_id"],
+               })
+    return receipt
+
+
+@router.post("/internal/nba-research/backup/ack")
+def nba_private_machine_backup_ack(request: Request, body: dict = Body(...)):
+    """Write a limited audit only after cloud storage confirms hash readback."""
+    if not _nba_backup_machine_allowed(request):
+        raise HTTPException(404, "Not found.")
+    import re
+    digest = body.get("archive_digest")
+    signed = body.get("backup_sha256")
+    if (body.get("verified") is not True
+        or body.get("store") != "private_vercel_blob"
+        or not isinstance(digest, str) or not isinstance(signed, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        or not re.fullmatch(r"[0-9a-f]{64}", signed)):
+        raise HTTPException(409, "Offsite backup receipt invalid.")
+    from basketball.research_private_store import hosted_board
+    latest = hosted_board()
+    if latest is None or latest.get("archive_digest") != digest:
+        raise HTTPException(409, "Offsite backup is not current.")
+    from basketball.research_ops_health import record_run
+    try:
+        record_run("backup", "verified_private_blob_readback",
+                   detail={"archive_digest": digest})
+    except Exception as exc:
+        logger.warning("NBA offsite receipt audit unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Backup receipt audit unavailable.") from exc
+    return {"status": "verified_private_blob_readback",
+            "archive_digest": digest, "research_only": True,
+            "not_bookable": True}
+
+
+@router.post("/internal/nba-research/markets/refresh")
+def nba_private_market_cron_refresh(request: Request, response: Response):
+    """Machine-only, private NBA bookmaker market snapshot, no bets or tips.
+
+    Uses independent least-privilege secret and all existing research/DB
+    feature gates, not an interactive administrator cookie.
+    """
+    import hmac
+    import os
+    expected = os.getenv("NBA_MARKET_JOB_TOKEN", "")
+    presented = request.headers.get("x-betsightly-nba-market-token", "")
+    if (os.getenv("ENVIRONMENT", "").lower() != "staging"
+        or len(expected) < 48 or not presented
+        or not hmac.compare_digest(expected, presented)):
+        raise HTTPException(404, "Not found.")
+    try:
+        result = nba_admin_market_refresh(response)
+    except HTTPException as exc:
+        _record_nba_machine_job("market", "http_" + str(exc.status_code))
+        raise
+    _record_nba_machine_job("market", str(result.get("status", "unknown")), result)
+    return result
+
+
+@router.post("/internal/nba-research/forecast")
+def nba_private_cron_forecast(request: Request, response: Response):
+    """Machine-only NBA forecast trigger, isolated from interactive admin auth.
+
+    Separate least-privilege secret, only for verified staging PostgreSQL.
+    Invokes existing signed pregame forecast path with no caller parameters.
+    """
+    import hmac
+    import os
+    configured = os.getenv("NBA_FORECAST_JOB_TOKEN", "")
+    incoming = request.headers.get("x-betsightly-nba-forecast-token", "")
+    if (os.getenv("ENVIRONMENT", "").lower() != "staging"
+        or len(configured) < 48 or not incoming
+        or not hmac.compare_digest(configured, incoming)):
+        raise HTTPException(404, "Not found.")
+    try:
+        result = nba_admin_forecast_research(response)
+    except HTTPException as exc:
+        _record_nba_machine_job("forecast", "http_" + str(exc.status_code))
+        raise
+    _record_nba_machine_job("forecast", str(result.get("status", "unknown")), result)
+    return result
+
+
+@router.post("/internal/nba-research/github-oidc-migration")
+def nba_private_oidc_migration(request: Request, response: Response,
+                               body: dict = Body(...)):
+    """Only the separately signed NBA staging migration workflow may invoke.
+
+    Target is provided ONLY by the staging service environment, never caller
+    input. Source remains unchanged and football databases are inaccessible.
+    """
+    import os
+    from basketball.research_oidc import verify_github_job
+    from basketball.research_safe_migrate import (
+        probe_empty_target, restore_into_empty_target,
+    )
+    # Deliberately conceal the endpoint from callers while reporting only
+    # the guard category to private server logs (never bearer/claims/secrets).
+    if not _nba_health_enabled():
+        logger.warning("nba_migration_gate_denied reason=staging_disabled")
+        raise HTTPException(404, "Not found.")
+    if os.getenv("NBA_PRIVATE_MIGRATION_ENABLED") != "1":
+        logger.warning("nba_migration_gate_denied reason=migration_disabled")
+        raise HTTPException(404, "Not found.")
+    if os.getenv("NBA_RESTORE_REQUIRE_PRIVATE_SCHEMA") != "1":
+        logger.warning("nba_migration_gate_denied reason=private_schema_required")
+        raise HTTPException(404, "Not found.")
+    mode = body.get("mode")
+    auth = request.headers.get("authorization", "")
+    if mode not in ("probe", "restore", "compare", "history"):
+        logger.warning("nba_migration_gate_denied reason=invalid_mode")
+        raise HTTPException(404, "Not found.")
+    if not auth.startswith("Bearer ") or len(auth) > 10020:
+        logger.warning("nba_migration_gate_denied reason=invalid_auth_header")
+        raise HTTPException(404, "Not found.")
+    try:
+        verify_github_job(auth[7:], "migration")
+    except ValueError:
+        logger.warning("nba_migration_gate_denied reason=identity_rejected")
+        raise HTTPException(404, "Not found.") from None
+    source = os.getenv("DATABASE_URL", "")
+    target = os.getenv("NBA_RESTORE_TARGET_DATABASE_URL", "")
+    if not target:
+        raise HTTPException(503, "Isolated recovery target unavailable.")
+    try:
+        if mode == "probe":
+            receipt = probe_empty_target(target, source_url=source)
+        elif mode == "compare":
+            from basketball.research_target_readback import compare_live_source_to_target
+            receipt = compare_live_source_to_target(target, source_url=source)
+        elif mode == "history":
+            from basketball.research_target_readback import mirror_verified_job_history
+            receipt = mirror_verified_job_history(target, source_url=source)
+        else:
+            from basketball.research_ops_health import export_verified_backup
+            from basketball.research_restore_drill import verify_portable_backup
+            backup = export_verified_backup()
+            proof = verify_portable_backup(backup)
+            if proof.get("restore_drill_passed") is not True:
+                raise ValueError("NBA_SOURCE_BACKUP_DRILL_FAILED")
+            receipt = restore_into_empty_target(
+                backup, target, source_url=source
+            )
+            if receipt.get("archive_sha256") != backup["archive_digest"]:
+                raise ValueError("NBA_TARGET_ARCHIVE_MISMATCH")
+            _record_nba_machine_job("backup", "verified_secondary_restore",
+                                    {"archive_digest": backup["archive_digest"]})
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("NBA isolated target migration denied: %s",
+                       type(exc).__name__)
+        raise HTTPException(409, "Isolated NBA restore refused.") from None
+    except Exception as exc:
+        logger.warning("NBA isolated target connectivity unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "Isolated NBA migration unavailable.") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    return {**receipt, "job": "migration", "research_only": True,
+            "not_bookable": True}
+
+
+@router.post("/internal/nba-research/github-oidc")
+def nba_private_github_oidc_job(request: Request, response: Response,
+                                 body: dict = Body(...)):
+    """Staging-only, GitHub-signed scheduler identity; no new bearer secrets.
+
+    Only Actions launched from the default dev branch and the exact named
+    workflows can invoke their matching private jobs. This is not a public
+    bookmaker service and does not accept caller-provided fixtures or picks.
+    """
+    import os
+    from basketball.research_oidc import verify_github_job
+
+    if not _nba_health_enabled():
+        raise HTTPException(404, "Not found.")
+    job = body.get("job")
+    auth = request.headers.get("authorization", "")
+    if (not isinstance(job, str) or job not in ("settlement", "forecast", "market")
+            or not auth.startswith("Bearer ") or len(auth) > 10_020):
+        raise HTTPException(404, "Not found.")
+    try:
+        verify_github_job(auth[7:], job)
+    except ValueError:
+        # Do not disclose whether the repo, token, event, or job was wrong.
+        raise HTTPException(404, "Not found.") from None
+    try:
+        if job == "settlement":
+            result = nba_admin_research_settle(response)
+            if result.get("provider_status") not in (None, "ok", "idle") or result.get("failed_dates"):
+                _record_nba_machine_job("settlement", "provider_partial", result)
+                raise HTTPException(503, "NBA score source partially unavailable.")
+        elif job == "forecast":
+            result = nba_admin_forecast_research(response)
+            if result.get("status") not in (
+                "archived_before_tipoff", "no_new_eligible_forecasts",
+                "no_upcoming_eligible_source_window",
+            ):
+                raise HTTPException(503, "NBA pregame source unavailable.")
+        else:
+            result = nba_admin_market_refresh(response)
+            if result.get("status") not in ("saved", "already_saved"):
+                raise HTTPException(503, "NBA market evidence incomplete.")
+        if result.get("research_only") is not True or result.get("not_bookable") is not True:
+            raise HTTPException(503, "NBA staging isolation validation failed.")
+    except HTTPException as exc:
+        if not (job == "settlement" and exc.status_code == 503
+                and "partially" in str(exc.detail)):
+            _record_nba_machine_job(job, "http_" + str(exc.status_code))
+        raise
+    # Preserve signed source evidence in the archive; expose only bounded
+    # operational metadata to the short-lived authenticated scheduler.
+    _record_nba_machine_job(job, str(result.get("status", "unknown")), result)
+    response.headers["Cache-Control"] = "private, no-store"
+    return {
+        "status": result.get("status"),
+        "job": job,
+        "research_only": True,
+        "not_bookable": True,
+        "archive_digest": result.get("archive_digest"),
+        "market_digest": result.get("digest"),
+        "new_finals": result.get("new_finals", 0),
+        "new_forecasts": result.get("new_forecasts", {}),
+        "new_settlements": result.get("new_settlements", {}),
+        "failed_dates": result.get("failed_dates", []),
+    }
+
+
+@router.post("/internal/nba-research/settle")
+def nba_private_cron_settle(request: Request, response: Response):
+    """Machine-only staging settlement; requires dedicated 256-bit token.
+
+    Distinct from interactive administrator cookies and disabled in production.
+    Never accepts user-supplied fixtures, outcomes, model parameters or stakes.
+    """
+    import hmac
+    import os
+    configured = os.getenv("NBA_SETTLEMENT_JOB_TOKEN", "")
+    incoming = request.headers.get("x-betsightly-nba-settle-token", "")
+    if (os.getenv("ENVIRONMENT", "").lower() != "staging" or
+        len(configured) < 32 or not incoming or
+        not hmac.compare_digest(configured, incoming)):
+        raise HTTPException(404, "Not found.")
+    try:
+        result = nba_admin_research_settle(response)
+    except HTTPException as exc:
+        _record_nba_machine_job("settlement", "http_" + str(exc.status_code))
+        raise
+    # The verifier may persist genuine signed finals while another provider
+    # date failed. Never acknowledge that mixed result as a successful cron
+    # run: the scheduler must report a retryable failure, while committed
+    # verified evidence stays immutable and available on the next attempt.
+    if (result.get("provider_status") not in (None, "ok", "idle")
+            or result.get("failed_dates")):
+        _record_nba_machine_job("settlement", "provider_partial", result)
+        raise HTTPException(503, "NBA scoreboard verification incomplete.")
+    _record_nba_machine_job("settlement", str(result.get("status", "unknown")), result)
+    return result
+
+
+@router.post("/admin/nba-research/import", dependencies=[Depends(require_admin)])
+def nba_admin_research_import(request: Request, body: dict = Body(...)):
+    """Explicit private import, never a public prediction or betting action."""
+    import os
+    def enabled(key):
+        return os.getenv(key, "").lower() in ("1", "true", "yes", "on")
+    if not (enabled("NBA_ADMIN_RESEARCH_ENABLED") and
+            enabled("NBA_ADMIN_RESEARCH_IMPORT_ENABLED")):
+        raise HTTPException(404, "Private NBA evidence importing is disabled.")
+    length = request.headers.get("content-length")
+    if length and (not length.isdigit() or int(length) > 2_860_000):
+        raise HTTPException(413, "NBA research archive exceeds upload limit.")
+    from basketball.research_private_store import import_bundle
+    try:
+        return import_bundle(body)
+    except ValueError as exc:
+        if "overwrite or delete" in str(exc) or "cannot be rewritten" in str(exc):
+            raise HTTPException(409, str(exc)) from exc
+        raise HTTPException(422, "NBA research archive failed integrity checks.") from exc
+    except Exception as exc:
+        logger.warning("NBA private import unavailable: %s",
+                       type(exc).__name__)
+        raise HTTPException(503, "NBA archive storage unavailable.") from exc

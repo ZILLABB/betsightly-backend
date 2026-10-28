@@ -1,0 +1,7 @@
+# Private NBA research extensions for the Windows Python venv.
+# tzdata is required because Windows does not normally ship IANA timezone
+# files used by zoneinfo.ZoneInfo("America/New_York") and NBA injury reports.
+# Keep the existing research venv and base model dependencies intact.
+pyarrow>=20,<27
+pdfplumber>=0.11,<0.13
+tzdata>=2025.2,<2028

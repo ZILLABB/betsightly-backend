@@ -1,0 +1,30 @@
+name: Basketball six-league source integrity and rights CI
+"on":
+  pull_request:
+    paths:
+      - "basketball/research_other_league_sources.py"
+      - "basketball/research_league_source_catalog.py"
+      - "basketball/research_league_source_evidence.py"
+      - "growth/api.py"
+      - "tests/test_basketball_other_league_candidates.py"
+      - "tests/test_basketball_league_source_matrix.py"
+      - "docs/basketball/LEAGUE_SOURCE_ACCEPTANCE.md"
+      - ".github/workflows/basketball-league-source-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  six-league-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated existing dependencies
+        run: python -m pip install -r requirements.txt pytest
+      - name: Compile private endpoint and adapters
+        run: python -m py_compile basketball/research_other_league_sources.py basketball/research_league_source_catalog.py basketball/research_league_source_evidence.py growth/api.py
+      - name: Candidate fixture, metadata and rights regression
+        run: python -m pytest --noconftest tests/test_basketball_league_source_matrix.py tests/test_basketball_other_league_candidates.py tests/test_basketball_europe_candidates.py tests/test_nba_five_stream_gates.py tests/test_nba_closeout_health_v2.py -q

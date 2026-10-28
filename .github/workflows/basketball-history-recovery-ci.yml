@@ -1,0 +1,49 @@
+name: Basketball private licensed-history offsite recovery acceptance
+"on":
+  pull_request:
+    paths:
+      - "basketball/research_licensed_backup.py"
+      - "basketball/research_licensed_backup_ack.py"
+      - "basketball/research_licensed_backup_restore.py"
+      - "ops/nba_vercel_scheduler/api/backup-v2.js"
+      - "growth/api.py"
+      - "sql/nba_private_licensed_backup_receipts_20261028.sql"
+      - "sql/nba_private_six_league_source_probes_20261028.sql"
+      - "tests/test_basketball_history_backup_postgres.py"
+      - ".github/workflows/basketball-history-recovery-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-history-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: basketball_recovery_synthetic
+          POSTGRES_USER: research_test
+          POSTGRES_PASSWORD: synthetic_only_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U research_test -d basketball_recovery_synthetic"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      BASKETBALL_TEST_PG_URL: postgresql+psycopg2://research_test:synthetic_only_ci_password@localhost:5432/basketball_recovery_synthetic
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: python -m pip install -r requirements.txt pytest
+      - run: python -m py_compile basketball/research_licensed_backup.py basketball/research_licensed_backup_ack.py basketball/research_licensed_backup_restore.py growth/api.py
+      - run: node --check ops/nba_vercel_scheduler/api/backup-v2.js
+      - name: Test signed envelope, private ACK, actual PostgreSQL restoration
+        run: python -m pytest --noconftest tests/test_basketball_history_backup_postgres.py tests/test_basketball_league_source_matrix.py -q
