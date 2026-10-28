@@ -524,6 +524,27 @@ def booking_lifecycle(record: dict | None, games: list,
     checked = dict(record)
 
     def invalid(status: str, category: str, reason: str) -> dict:
+        # Only after an originally complete, readback-verified booking has
+        # passed the SAME displayed-leg fingerprint gate may its now-expired
+        # code be shown as an archival reference. No actionable share_code or
+        # share_url is exposed once any fixture starts or the code expires.
+        historical_code = None
+        if status in {"started", "kickoff_buffer", "expired"}:
+            try:
+                exact_identity = (
+                    record.get("status") == "active"
+                    and record.get("readback_validation") == "PASSED"
+                    and record.get("booking_status") == "FULL"
+                    and not record.get("partial")
+                    and record.get("leg_fingerprint") == leg_fingerprint(games)
+                    and record.get("booking_variant_fingerprint") == leg_fingerprint(games)
+                    and int(record.get("booked_leg_count") or 0) == len(games)
+                    and int(record.get("original_leg_count") or 0) == len(games)
+                )
+            except (TypeError, ValueError, OverflowError):
+                exact_identity = False
+            if exact_identity and isinstance(record.get("share_code"), str):
+                historical_code = record["share_code"]
         checked.update({
             "status": status,
             "lifecycle_status": status,
@@ -532,6 +553,7 @@ def booking_lifecycle(record: dict | None, games: list,
             "actionable": False,
             "share_code": None,
             "share_url": None,
+            "historical_share_code": historical_code,
         })
         return checked
 
