@@ -985,6 +985,24 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         official_source, used=_used_products, market_cap=MARKET_CAP,
         tier_market_caps={"10_odds": OFFICIAL_TEN_MARKET_CAP},
     )
+    # Cups are already enabled in the registry; these are precisely the
+    # filters that shrink a busy knockout calendar to a thin official bench.
+    # Record actual stages rather than blaming a missing fixture or blindly
+    # relaxing confidence. This is read-only and preserves every saved pick.
+    from leagues.cup_supply_diagnostics import domestic_cup_supply
+    cup_coverage = domestic_cup_supply(
+        all_picks, day_picks, official_source, official_rejections,
+    )
+    portfolio_diagnostics["cup_supply_diagnostics"] = cup_coverage
+    logger.info(
+        "cup_supply date=%s future_fixtures=%s daily_fixtures=%s "
+        "official_cup_legs=%s competitions=%s",
+        publish_date, cup_coverage["total_future_cup_fixtures"],
+        cup_coverage["total_day_cup_fixtures"],
+        cup_coverage["total_official_cup_legs"],
+        cup_coverage["competitions"],
+    )
+
     # Aggregate gate failures before any policy changes. One candidate may
     # trigger multiple reasons, so the totals are not a rejection percentage.
     # These diagnostics contain no fixture identity, betting code or key.
