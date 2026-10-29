@@ -76,8 +76,10 @@ def _independently_supported_cup_for_long_tier(pick: dict, product: str) -> bool
     if meta is None or meta.competition_type != "DOMESTIC_CUP":
         return False
     try:
-        history = int(pick.get("competition_historical_sample") or
-                      _fixture(pick).get("competition_historical_sample") or 0)
+        history_value = pick.get("competition_historical_sample")
+        if history_value is None:
+            history_value = _fixture(pick).get("competition_historical_sample")
+        history = int(history_value or 0)
         market_settled = int(pick.get("calibration_sample") or 0)
         lower = float((pick.get("trust") or {}).get("lower_reliability_bound") or 0)
     except (ValueError, TypeError):
