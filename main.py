@@ -650,7 +650,11 @@ def _start_daily_generation_loop():
                     )
             except Exception as e:
                 logger.error(f"Daily generation loop iteration failed: {e}")
-            _time.sleep(900)
+            # Normal recovery polling is 15 minutes, but never sleep across
+            # the daily 08:00 WAT publication boundary. GitHub Actions can
+            # run late; this local fallback is deliberately clock-aligned.
+            from leagues.daily_schedule_clock import seconds_until_next_check
+            _time.sleep(seconds_until_next_check(datetime.now(_tz.utc)))
 
     threading.Thread(target=_run, daemon=True, name="daily-generation").start()
     logger.info("Daily generation loop started (15 min checks, publishes 08:00 WAT)")
