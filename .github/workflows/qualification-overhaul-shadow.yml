@@ -28,4 +28,4 @@ jobs:
         run: |
           python -m compileall -q leagues/qualification_overhaul_shadow.py scripts/audit_qualification_overhaul.py scripts/export_qualification_snapshot_evidence.py
       - name: Run shadow adversarial tests
-        run: python -m pytest -q tests/test_qualification_overhaul_shadow.py
+        run: python -m pytest --noconftest -q tests/test_qualification_overhaul_shadow.py
