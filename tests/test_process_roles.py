@@ -79,3 +79,28 @@ def test_invalid_role_fails_closed():
             True,
             "invalid",
         )
+
+def test_vps_split_roles_are_independent():
+    expected = {
+        "web": (False, False, False),
+        "publication": (True, False, False),
+        "settlement": (False, True, False),
+        "telegram": (False, False, True),
+    }
+    for role, (scheduler, settlement, telegram) in expected.items():
+        resolved = resolve_process_role(True, role)
+        assert resolved == role
+        assert role_ownership(resolved, True) == {
+            "scheduler": scheduler,
+            "settlement": settlement,
+            "telegram": telegram,
+        }
+
+
+def test_split_role_can_be_fully_disabled():
+    for role in ("publication", "settlement", "telegram"):
+        assert role_ownership(role, False) == {
+            "scheduler": False,
+            "settlement": False,
+            "telegram": False,
+        }

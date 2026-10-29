@@ -7,6 +7,8 @@ VALID_PROCESS_ROLES = frozenset({
     "web",
     "worker",
     "scheduler",
+    "publication",
+    "settlement",
     "telegram",
     "all",
 })
@@ -54,6 +56,20 @@ def role_ownership(
             "scheduler": True,
             "settlement": True,
             "telegram": True,
+        }
+
+    if role == "publication":
+        return {
+            "scheduler": True,
+            "settlement": False,
+            "telegram": False,
+        }
+
+    if role == "settlement":
+        return {
+            "scheduler": False,
+            "settlement": True,
+            "telegram": False,
         }
 
     if role == "scheduler":

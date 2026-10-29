@@ -1,0 +1,106 @@
+# Git-backed Coolify recipe. NO published host ports; HTTPS via Coolify proxy
+# Routes to API service's internal container port 8000. Writers are opt-in.
+x-app-common: &app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: betsightly-backend:vps-candidate
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 60s
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 256
+
+x-secrets: &secrets
+  DATABASE_URL: ${DATABASE_URL:?Set_private_PostgreSQL_18_URL_in_Coolify}
+  SECRET_KEY: ${SECRET_KEY:?Set_SECRET_KEY_in_Coolify}
+  API_KEY: ${API_KEY:?Set_API_KEY_in_Coolify}
+  ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?Set_ALLOWED_ORIGINS_in_Coolify}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set_ALLOWED_HOSTS_in_Coolify}
+  API_FOOTBALL_API_KEY: ${API_FOOTBALL_API_KEY:-}
+  FOOTBALL_DATA_KEY: ${FOOTBALL_DATA_KEY:-}
+  ODDS_API_KEY: ${ODDS_API_KEY:-}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+  TELEGRAM_GROUP_ID: ${TELEGRAM_GROUP_ID:-}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  BETSIGHTLY_VPS_WRITER_ACTIVATION: ${BETSIGHTLY_VPS_WRITER_ACTIVATION:-disabled}
+
+services:
+  api:
+    <<: *app
+    environment:
+      <<: *secrets
+      ENVIRONMENT: production
+      DEBUG: "False"
+      ENABLE_BACKGROUND_JOBS: "false"
+      BETSIGHTLY_PROCESS_ROLE: web
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
+    cpus: 2.0
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).read()"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 120s
+    volumes:
+      - api_cache:/app/cache
+
+  publication:
+    <<: *app
+    profiles: [writers]
+    command: ["python", "-m", "run_background"]
+    environment:
+      <<: *secrets
+      ENVIRONMENT: production
+      DEBUG: "False"
+      ENABLE_BACKGROUND_JOBS: "true"
+      BETSIGHTLY_PROCESS_ROLE: publication
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
+    cpus: 2.0
+    mem_limit: 4g
+    volumes:
+      - publication_cache:/app/cache
+
+  settlement:
+    <<: *app
+    profiles: [writers]
+    command: ["python", "-m", "run_background"]
+    environment:
+      <<: *secrets
+      ENVIRONMENT: production
+      DEBUG: "False"
+      ENABLE_BACKGROUND_JOBS: "true"
+      BETSIGHTLY_PROCESS_ROLE: settlement
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
+    cpus: 2.0
+    mem_limit: 3g
+    volumes:
+      - settlement_cache:/app/cache
+
+  telegram:
+    <<: *app
+    profiles: [telegram]
+    command: ["python", "-m", "run_background"]
+    environment:
+      <<: *secrets
+      ENVIRONMENT: production
+      DEBUG: "False"
+      ENABLE_BACKGROUND_JOBS: "true"
+      BETSIGHTLY_PROCESS_ROLE: telegram
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
+    cpus: 0.5
+    mem_limit: 1g
+    volumes:
+      - telegram_cache:/app/cache
+
+volumes:
+  api_cache:
+  publication_cache:
+  settlement_cache:
+  telegram_cache:

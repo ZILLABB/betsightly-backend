@@ -1,0 +1,153 @@
+# Disposable PostgreSQL 18 restoration proof. Never uses Render secrets or DB.
+name: VPS PostgreSQL backup/restore integration
+
+on:
+  pull_request:
+    branches: [devil]
+    paths:
+      - 'scripts/vps/backup_postgres.py'
+      - 'scripts/vps/restore_drill.py'
+      - 'utils/vps_backup.py'
+      - 'utils/vps_restore.py'
+      - '.github/workflows/vps-postgres-integration.yml'
+      - 'scripts/vps/check_restore_parity.py'
+      - 'utils/vps_parity.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Install PostgreSQL 18 client and Python database dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client-18
+          python -m pip install 'SQLAlchemy==2.0.23' 'psycopg2-binary==2.9.9'
+          pg_dump --version
+          pg_restore --version
+      - name: Start disposable TLS-enabled PostgreSQL 18
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/betsightly-pg-certs"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj "/CN=localhost" \
+            -keyout "$RUNNER_TEMP/betsightly-pg-certs/server.key" \
+            -out "$RUNNER_TEMP/betsightly-pg-certs/server.crt" >/dev/null 2>&1
+          PG_UID="$(docker run --rm --entrypoint id postgres:18 -u postgres)"
+          sudo chown -R "$PG_UID":"$PG_UID" "$RUNNER_TEMP/betsightly-pg-certs"
+          sudo chmod 700 "$RUNNER_TEMP/betsightly-pg-certs"
+          sudo chmod 600 "$RUNNER_TEMP/betsightly-pg-certs/server.key"
+          sudo chmod 644 "$RUNNER_TEMP/betsightly-pg-certs/server.crt"
+          docker run -d --name betsightly-vps-postgres-ci \
+            --pull always \
+            -e POSTGRES_USER=ci_betsightly \
+            -e POSTGRES_PASSWORD=only_test_fixture_pw \
+            -e POSTGRES_DB=betsightly_ci_source \
+            -p 127.0.0.1:55432:5432 \
+            -v "$RUNNER_TEMP/betsightly-pg-certs:/certs:ro" \
+            postgres:18 -c ssl=on \
+              -c ssl_cert_file=/certs/server.crt \
+              -c ssl_key_file=/certs/server.key
+          ready=0
+          for attempt in $(seq 1 45); do
+            if docker exec betsightly-vps-postgres-ci pg_isready -U ci_betsightly -d betsightly_ci_source >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          docker exec betsightly-vps-postgres-ci psql -v ON_ERROR_STOP=1 -U ci_betsightly -d betsightly_ci_source \
+            -c "CREATE TABLE settlement_fixture(id integer PRIMARY KEY, result text NOT NULL);" \
+            -c "INSERT INTO settlement_fixture VALUES (1,'WON'),(2,'LOST'),(3,'PENDING');"
+          docker exec betsightly-vps-postgres-ci psql -v ON_ERROR_STOP=1 -U ci_betsightly -d postgres \
+            -c 'CREATE DATABASE betsightly_restore_fixture1234;'
+      - name: Backup and restore into disposable empty database
+        env:
+          DATABASE_URL: postgresql://ci_betsightly:only_test_fixture_pw@127.0.0.1:55432/betsightly_ci_source?sslmode=require
+          RESTORE_DATABASE_URL: postgresql://ci_betsightly:only_test_fixture_pw@127.0.0.1:55432/betsightly_restore_fixture1234?sslmode=require
+        run: |
+          set -euo pipefail
+          python -m scripts.vps.backup_postgres --output-dir "$RUNNER_TEMP/betsightly-backup" > "$RUNNER_TEMP/backup-result.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          d = json.loads(Path(os.environ["RUNNER_TEMP"], "backup-result.json").read_text())
+          assert d["status"] == "archive_verified_not_restore_tested"
+          assert d["size_bytes"] > 0
+          Path(os.environ["RUNNER_TEMP"], "archive-name.txt").write_text(d["archive_name"])
+          PY
+          ARCHIVE_NAME="$(cat "$RUNNER_TEMP/archive-name.txt")"
+          python -m scripts.vps.restore_drill \
+            --archive "$RUNNER_TEMP/betsightly-backup/$ARCHIVE_NAME" \
+            --manifest "$RUNNER_TEMP/betsightly-backup/${ARCHIVE_NAME%.dump}.json" \
+            > "$RUNNER_TEMP/restore-result.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from sqlalchemy import create_engine, text
+          result = json.loads(Path(os.environ["RUNNER_TEMP"], "restore-result.json").read_text())
+          assert result["status"] == "restored_to_disposable_database"
+          engine = create_engine(os.environ["RESTORE_DATABASE_URL"])
+          with engine.connect() as conn:
+              values = conn.execute(text("SELECT id, result FROM settlement_fixture ORDER BY id")).all()
+          assert values == [(1, "WON"), (2, "LOST"), (3, "PENDING")], values
+          print("POSTGRES18_RESTORE_PROOF_OK: 3 source rows match restored rows")
+          PY
+      - name: Verify exact restored schema/table counts and reject drift
+        env:
+          SOURCE_DATABASE_URL: postgresql://ci_betsightly:only_test_fixture_pw@127.0.0.1:55432/betsightly_ci_source?sslmode=require
+          RESTORE_DATABASE_URL: postgresql://ci_betsightly:only_test_fixture_pw@127.0.0.1:55432/betsightly_restore_fixture1234?sslmode=require
+        run: |
+          set -euo pipefail
+          python -m scripts.vps.check_restore_parity > "$RUNNER_TEMP/parity-result.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          r = json.loads(Path(os.environ["RUNNER_TEMP"], "parity-result.json").read_text())
+          assert r["healthy"] is True
+          assert r["source_table_count"] == r["restored_table_count"]
+          print("STAGING_EXACT_ROW_PARITY_OK", r["source_table_count"])
+          PY
+          docker exec betsightly-vps-postgres-ci psql \
+            -U ci_betsightly -d betsightly_ci_source -v ON_ERROR_STOP=1 \
+            -c "INSERT INTO settlement_fixture VALUES (4,'PENDING');"
+          if python -m scripts.vps.check_restore_parity > "$RUNNER_TEMP/drift.json"; then
+            echo "::error::unreconciled source mutation unexpectedly passed parity"
+            exit 1
+          fi
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          r = json.loads(Path(os.environ["RUNNER_TEMP"], "drift.json").read_text())
+          assert not r["healthy"]
+          assert "settlement_fixture" in r["mismatched_rows"]
+          print("STAGING_ROW_DRIFT_REJECTED")
+          PY
+      - name: "Failure gate: refuse restore into nonempty database"
+        env:
+          RESTORE_DATABASE_URL: postgresql://ci_betsightly:only_test_fixture_pw@127.0.0.1:55432/betsightly_restore_fixture1234?sslmode=require
+        run: |
+          set -euo pipefail
+          ARCHIVE_NAME="$(cat "$RUNNER_TEMP/archive-name.txt")"
+          if python -m scripts.vps.restore_drill \
+              --archive "$RUNNER_TEMP/betsightly-backup/$ARCHIVE_NAME" \
+              --manifest "$RUNNER_TEMP/betsightly-backup/${ARCHIVE_NAME%.dump}.json"; then
+            echo "::error::restore drill incorrectly accepted a nonempty database"
+            exit 1
+          fi
+          echo "NONEMPTY_RESTORE_BLOCKED"
+      - name: Dispose synthetic database
+        if: always()
+        run: |
+          docker rm -f betsightly-vps-postgres-ci >/dev/null 2>&1 || true

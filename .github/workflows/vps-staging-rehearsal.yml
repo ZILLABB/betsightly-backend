@@ -1,0 +1,148 @@
+# Synthetic-only, ephemeral Docker/PG acceptance. No real Render secrets or DB.
+name: VPS isolated staging runtime and recovery rehearsal
+
+on:
+  pull_request:
+    branches: [devil]
+    paths:
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'database.py'
+      - 'main.py'
+      - 'utils/process_roles.py'
+      - '.github/workflows/vps-staging-rehearsal.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  staging-rehearsal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Start isolated throwaway PostgreSQL 18
+        run: |
+          set -euo pipefail
+          docker network create betsightly-staging-ci-net
+          docker run -d --name betsightly-staging-pg \
+            --network betsightly-staging-ci-net \
+            -e POSTGRES_DB=betsightly_staging_fixture \
+            -e POSTGRES_USER=ci_betsightly \
+            -e POSTGRES_PASSWORD=synthetic_only_not_production \
+            postgres:18
+          ok=0
+          for i in $(seq 1 60); do
+            if docker exec betsightly-staging-pg pg_isready -U ci_betsightly \
+                -d betsightly_staging_fixture >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ok" -eq 1
+          docker exec betsightly-staging-pg psql \
+            -U ci_betsightly -d betsightly_staging_fixture -v ON_ERROR_STOP=1 \
+            -c "CREATE TABLE restore_acceptance_probe (id integer PRIMARY KEY, fixture_status text NOT NULL);" \
+            -c "INSERT INTO restore_acceptance_probe VALUES (1,'WON'),(2,'LOST'),(3,'PENDING');"
+          echo "STAGING_POSTGRES18_FIXTURE_OK"
+      - name: Build local application image
+        run: docker build -q -t betsightly-vps-staging:ci -f Dockerfile .
+      - name: Start API with its own PostgreSQL and no job owners
+        run: |
+          set -euo pipefail
+          docker run -d --name betsightly-staging-api \
+            --network betsightly-staging-ci-net \
+            --restart unless-stopped \
+            -p 127.0.0.1:18889:8000 \
+            -e DATABASE_URL=postgresql://ci_betsightly:synthetic_only_not_production@betsightly-staging-pg:5432/betsightly_staging_fixture \
+            -e ENVIRONMENT=development \
+            -e DEBUG=False \
+            -e ENABLE_BACKGROUND_JOBS=false \
+            -e BETSIGHTLY_PROCESS_ROLE=web \
+            betsightly-vps-staging:ci
+          ok=0
+          for i in $(seq 1 90); do
+            if curl --fail --silent --max-time 5 \
+              http://127.0.0.1:18889/api/health/live \
+              > "$RUNNER_TEMP/staging-live.json" 2>/dev/null; then
+              ok=1
+              break
+            fi
+            if ! test "$(docker inspect --format '{{.State.Running}}' betsightly-staging-api)" = "true"; then
+              echo "::error::Staging API stopped unexpectedly"
+              docker logs betsightly-staging-api --tail 60 || true
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::Staging API did not pass liveness"
+            docker logs betsightly-staging-api --tail 60 || true
+            exit 1
+          fi
+          curl --fail --silent --max-time 10 \
+            http://127.0.0.1:18889/api/health/ \
+            > "$RUNNER_TEMP/staging-health.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          health = json.loads(Path(os.environ["RUNNER_TEMP"], "staging-health.json").read_text())
+          assert health["status"] == "healthy"
+          assert health["runtime"]["role"] == "web"
+          assert health["runtime"]["background_jobs"] is False
+          print("STAGING_API_WEB_ONLY_OK")
+          PY
+      - name: Validate persistent synthetic fixtures via application connection
+        run: |
+          set -euo pipefail
+          docker exec betsightly-staging-api python -c \
+            "from sqlalchemy import text; from database import engine; c=engine.connect(); values=c.execute(text('SELECT fixture_status FROM restore_acceptance_probe ORDER BY id')).scalars().all(); c.close(); assert values == ['WON','LOST','PENDING'], values; print('STAGING_DB_READBACK_OK')"
+      - name: Test API restart and preserve database source-of-truth
+        run: |
+          set -euo pipefail
+          docker restart betsightly-staging-api >/dev/null
+          ok=0
+          for i in $(seq 1 90); do
+            if curl --fail --silent --max-time 5 \
+              http://127.0.0.1:18889/api/health/live >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ok" -eq 1
+          docker exec betsightly-staging-api python -c \
+            "from sqlalchemy import text; from database import engine; c=engine.connect(); count=c.execute(text('SELECT count(*) FROM restore_acceptance_probe')).scalar(); c.close(); assert count==3, count; print('STAGING_APP_RESTART_DATA_OK')"
+      - name: Test database outage recognition and recovery
+        run: |
+          set -euo pipefail
+          docker stop betsightly-staging-pg >/dev/null
+          # The web liveness route does not establish DB availability.
+          if docker exec betsightly-staging-api python -c \
+              "from sqlalchemy import text; from database import engine; engine.connect().execute(text('SELECT 1'))" \
+              > /dev/null 2>&1; then
+            echo "::error::DB outage unexpectedly passed a database query"
+            exit 1
+          fi
+          docker start betsightly-staging-pg >/dev/null
+          ok=0
+          for i in $(seq 1 60); do
+            if docker exec betsightly-staging-pg pg_isready -U ci_betsightly \
+              -d betsightly_staging_fixture >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ok" -eq 1
+          docker exec betsightly-staging-api python -c \
+            "from sqlalchemy import text; from database import engine; c=engine.connect(); count=c.execute(text('SELECT count(*) FROM restore_acceptance_probe')).scalar(); c.close(); assert count==3, count; print('STAGING_DATABASE_RECOVERY_OK')"
+      - name: Remove disposable staging resources
+        if: always()
+        run: |
+          docker rm -f betsightly-staging-api betsightly-staging-pg >/dev/null 2>&1 || true
+          docker network rm betsightly-staging-ci-net >/dev/null 2>&1 || true

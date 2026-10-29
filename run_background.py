@@ -4,6 +4,7 @@ import atexit
 import logging
 import os
 import time
+import threading
 
 
 logging.basicConfig(
@@ -26,17 +27,28 @@ role = os.getenv(
 if role not in {
     "worker",
     "scheduler",
+    "publication",
+    "settlement",
     "telegram",
 }:
     raise SystemExit(
         "Set BETSIGHTLY_PROCESS_ROLE="
-        "worker, scheduler or telegram"
+        "worker, scheduler, publication, settlement or telegram"
     )
 
+
+# Fail closed *before* importing main: importing main starts background jobs.
+# This requires an explicit operator cutover acknowledgement for VPS roles;
+# it is not evidence that a previous Render worker was actually fenced.
+from utils.vps_cutover import require_writer_activation  # noqa: E402
+
+require_writer_activation(role, os.getenv("BETSIGHTLY_VPS_WRITER_ACTIVATION"))
 
 # Importing main starts only loops
 # belonging to the selected role.
 import main  # noqa: E402
+
+from utils.runtime_supervisor import expected_thread_names, missing_threads  # noqa: E402
 
 from leagues.runtime_heartbeat import (  # noqa: E402
     instance_id,
@@ -67,6 +79,16 @@ ownership = {
 
 identity = instance_id()
 
+# Only new VPS split roles are strictly supervised; legacy Render roles
+# retain their established behavior while migration is staged.
+expected_threads = expected_thread_names(
+    role,
+    ownership,
+    telegram_configured=bool(os.getenv("TELEGRAM_BOT_TOKEN")),
+)
+thread_grace_deadline = time.monotonic() + 90
+
+
 
 def _stop() -> None:
     try:
@@ -87,6 +109,13 @@ atexit.register(
 
 
 while True:
+    if expected_threads and time.monotonic() >= thread_grace_deadline:
+        alive = {t.name for t in threading.enumerate() if t.is_alive()}
+        missing = missing_threads(expected_threads, alive)
+        if missing:
+            logger.critical("Expected background threads exited: %s", missing)
+            raise SystemExit(1)  # Docker restarts the container
+
     try:
         touch(
             role,

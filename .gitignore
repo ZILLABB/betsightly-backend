@@ -81,3 +81,8 @@ leagues/data/odds_budget.json
 data/historical/raw/
 data/historical/normalized/
 leagues/data/history_months/
+
+# VPS deployment secrets (never commit)
+.env.vps
+.env.vps.*
+!.env.vps.example

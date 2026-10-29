@@ -1,0 +1,21 @@
+# NOT installed by this PR. Review service account/paths and add real secrets
+# only on the provisioned VPS after offsite storage acceptance.
+[Unit]
+Description=BetSightly PostgreSQL encrypted offsite backup
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=betsightly
+Group=betsightly
+WorkingDirectory=/opt/betsightly/backend
+EnvironmentFile=/etc/betsightly/backup.env
+ExecStart=/opt/betsightly/backend/.venv/bin/python -m scripts.vps.backup_and_upload --output-dir /var/lib/betsightly/backups
+UMask=0077
+TimeoutStartSec=1600
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/betsightly/backups

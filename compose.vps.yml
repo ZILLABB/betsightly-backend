@@ -1,0 +1,93 @@
+# BetSightly VPS staging bundle — NOT activated by this commit.
+# Render deployment is unchanged. Reverse proxy should terminate TLS outside
+# this stack and route traffic to 127.0.0.1:18080 after an explicit cutover.
+# Port 8000 on host is reserved for Coolify's dashboard; never bind API there.
+# Default up starts *only* the API; writers require an explicit profile.
+x-app-common: &app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: betsightly-backend:vps-candidate
+  env_file:
+    - .env.vps
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 60s
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 256
+
+services:
+  api:
+    <<: *app
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "False"
+      ENABLE_BACKGROUND_JOBS: "false"
+      BETSIGHTLY_PROCESS_ROLE: web
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
+    ports:
+      - "127.0.0.1:18080:8000"
+    cpus: 2.0
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).read()"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 120s
+    volumes:
+      - api_cache:/app/cache
+
+  publication:
+    <<: *app
+    profiles: [writers]
+    command: ["python", "-m", "run_background"]
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "False"
+      ENABLE_BACKGROUND_JOBS: "true"
+      BETSIGHTLY_PROCESS_ROLE: publication
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
+    cpus: 2.0
+    mem_limit: 4g
+    volumes:
+      - publication_cache:/app/cache
+
+  settlement:
+    <<: *app
+    profiles: [writers]
+    command: ["python", "-m", "run_background"]
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "False"
+      ENABLE_BACKGROUND_JOBS: "true"
+      BETSIGHTLY_PROCESS_ROLE: settlement
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
+    cpus: 2.0
+    mem_limit: 3g
+    volumes:
+      - settlement_cache:/app/cache
+
+  telegram:
+    <<: *app
+    profiles: [telegram]
+    command: ["python", "-m", "run_background"]
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "False"
+      ENABLE_BACKGROUND_JOBS: "true"
+      BETSIGHTLY_PROCESS_ROLE: telegram
+      BETSIGHTLY_VPS_REQUIRE_DB: "true"
+    cpus: 0.5
+    mem_limit: 1g
+    volumes:
+      - telegram_cache:/app/cache
+
+volumes:
+  api_cache:
+  publication_cache:
+  settlement_cache:
+  telegram_cache:
