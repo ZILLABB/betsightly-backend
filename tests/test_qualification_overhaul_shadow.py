@@ -159,3 +159,15 @@ def test_queue_audit_never_changes_pending_to_won_or_lost():
     assert result["unmapped_or_unknown"] == 2
     assert result["truncated"] is True
     assert result["mode"] == "READ_ONLY_NO_SETTLEMENT"
+
+
+def test_unverified_bookmaker_prices_never_enter_value_cohort():
+    snapshot, final = _inputs()
+    snapshot["candidates"][0]["odds_source"] = "estimated"
+    rows = score_complete_forecast_pool([snapshot], [final])["observations"]
+    assert len(rows) == 1  # forecasts still contribute to calibration
+    assert rows[0]["odds"] is None  # but not to price-based admission claims
+
+    snapshot["candidates"][0]["odds_source"] = "OtherBookmaker"
+    rows = score_complete_forecast_pool([snapshot], [final])["observations"]
+    assert rows[0]["odds"] is None
