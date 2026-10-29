@@ -179,7 +179,7 @@ def score_complete_forecast_pool(snapshots: list[dict],
             "bookmaker_probability": _probability(
                 candidate.get("bookmaker_implied_probability")),
             "lower_bound": _probability(candidate.get("lower_reliability_bound")),
-            "odds": odds if candidate.get("odds_source") not in (None, "estimated") else None,
+            "odds": odds if str(candidate.get("odds_source") or "").casefold() == "sportybet" else None,
             "bookable": candidate.get("bookable") is True,
             "originally_official_eligible": candidate.get("safe_tier_eligible") is True,
             "trust_grade": candidate.get("trust_grade"),
