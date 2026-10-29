@@ -73,6 +73,7 @@ def test_post_kickoff_and_unverified_scores_are_never_learned_as_truth():
 def test_kickoff_move_and_cross_league_finals_are_not_reassigned():
     first, final = _inputs()
     final["kickoff"] = "2026-10-27T18:00:00Z"
+    final["verified_at"] = "2026-10-27T20:30:00Z"
     assert score_complete_forecast_pool([first], [final])["pending_or_excluded"]["kickoff_identity_mismatch"] == 1
     final["kickoff"] = "2026-10-26T18:00:00Z"
     final["league_slug"] = "eng.fa_cup"
