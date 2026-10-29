@@ -451,6 +451,11 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     official_source, official_rejections = filter_official_candidates(
         day_picks, "5_odds"
     )
+    # 2 Odds must never inherit the developing-cup allowance available to
+    # the longer products. Evaluate its own strict publication contract.
+    two_source, two_rejections = filter_official_candidates(
+        day_picks, "2_odds"
+    )
     banker_source, banker_rejections = filter_official_candidates(
         day_picks, "banker"
     )
@@ -473,7 +478,7 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         banker_source, canonicalize=False
     )
     independent_two, two_why = _select_tier(
-        official_source, 2.0, 4, FLOOR, MIN_SLIP_MODEL_RETURN,
+        two_source, 2.0, 4, FLOOR, MIN_SLIP_MODEL_RETURN,
         band_low=0.92, canonicalize=False)
     independent_five, five_why = _select_tier(
         official_source, 5.0, OFFICIAL_FIVE_MAX_LEGS, FLOOR, MIN_SLIP_MODEL_RETURN,
@@ -508,6 +513,7 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     "minimum_model_return": MIN_SLIP_MODEL_RETURN,
     "rejections": {
         "official": rejection_summary(official_rejections),
+        "2_odds": rejection_summary(two_rejections),
         "banker": rejection_summary(banker_rejections),
         "over_1_5": rejection_summary(over_rejections),
         "rollover": rejection_summary(rollover_rejections),
@@ -657,7 +663,7 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
     }
     source_by_product = {
         "banker": banker_source,
-        "2_odds": official_source,
+        "2_odds": two_source,
         "5_odds": official_source,
         "10_odds": official_source,
     }
