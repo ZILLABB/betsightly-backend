@@ -209,6 +209,12 @@ def _metrics(rows: list[dict], variant: str) -> dict:
                 for r, p in zip(rows, probabilities)) / n
     # Observed return is descriptive only, NOT proof of attainable ROI.
     priced = [r for r in rows if r.get("bookable") and r.get("odds")]
+    # A priced observational cohort is not an actual placed ticket. DNB has
+    # draw/push payoff and must not be evaluated with this binary win formula.
+    value_candidates = [
+        r for r in priced if not r["market"].startswith("dnb_")
+        and r[variant] * r["odds"] >= 1.0
+    ]
     return {
         "n": n, "brier": round(brier, 6), "log_loss": round(loss, 6),
         "hit_rate": round(sum(r["outcome"] for r in rows) / n, 6),
@@ -216,6 +222,13 @@ def _metrics(rows: list[dict], variant: str) -> dict:
         "observed_return": (round(sum(r["outcome"] * r["odds"]
                                       for r in priced) / len(priced), 6)
                             if priced else None),
+        "positive_value_candidate_n": len(value_candidates),
+        "value_candidate_observed_return": (
+            round(sum(r["outcome"] * r["odds"]
+                      for r in value_candidates) / len(value_candidates), 6)
+            if value_candidates else None
+        ),
+        "not_actual_stakes_or_booked_codes": True,
     }
 
 
