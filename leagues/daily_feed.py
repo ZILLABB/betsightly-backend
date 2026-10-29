@@ -985,6 +985,24 @@ def build_daily_accumulators(force: bool = False, *, preview: dict | None = None
         official_source, used=_used_products, market_cap=MARKET_CAP,
         tier_market_caps={"10_odds": OFFICIAL_TEN_MARKET_CAP},
     )
+    # Aggregate gate failures before any policy changes. One candidate may
+    # trigger multiple reasons, so the totals are not a rejection percentage.
+    # These diagnostics contain no fixture identity, betting code or key.
+    logger.info(
+        "publication_gate date=%s canonical_candidates=%s "
+        "official_qualified=%s official_rejected=%s "
+        "official_reasons=%s banker_qualified=%s banker_reasons=%s "
+        "over_qualified=%s over_reasons=%s",
+        publish_date,
+        len(day_picks),
+        len(official_source),
+        len(official_rejections),
+        rejection_summary(official_rejections),
+        len(banker_source),
+        rejection_summary(banker_rejections),
+        len(over_source),
+        rejection_summary(over_rejections),
+    )
     logger.info(
         "tier_supply date=%s qualified=%s distinct=%s groups=%s "
         "5x_block=%s 10x_block=%s remaining=%s",
