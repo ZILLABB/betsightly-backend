@@ -58,6 +58,45 @@ def _is_friendly(pick: dict) -> bool:
     )
 
 
+def _independently_supported_cup_for_long_tier(pick: dict, product: str) -> bool:
+    """Narrow exception to the *competition-size* part of the safety gate.
+
+    Long tiers can use a cup with less than 20 historical competition
+    observations only when its OWN market has 25+ settled calibration legs and
+    the independently assessed trust evidence is supported, high-grade, and
+    has a credible reliability lower bound. This does not relax bookmaker,
+    price, probability or market-trust requirements. The safe tier remains
+    unchanged for Banker, 2 Odds, Rollover and Over singles.
+    """
+    if product not in {"5_odds", "10_odds"} or _competition_type(pick) != "DOMESTIC_CUP":
+        return False
+    from leagues.competition_registry import competition_for
+    from leagues.picks import MIN_EVIDENCE_LEGS
+    meta = competition_for(_league_slug(pick))
+    if meta is None or meta.competition_type != "DOMESTIC_CUP":
+        return False
+    try:
+        history = int(pick.get("competition_historical_sample") or
+                      _fixture(pick).get("competition_historical_sample") or 0)
+        market_settled = int(pick.get("calibration_sample") or 0)
+        lower = float((pick.get("trust") or {}).get("lower_reliability_bound") or 0)
+    except (ValueError, TypeError):
+        return False
+    if not (0 < history < 20 and market_settled >= MIN_EVIDENCE_LEGS
+            and lower >= 0.60 and lower <= 1.0):
+        return False
+    trust = pick.get("trust") or {}
+    return (
+        trust.get("accepted") is True
+        and trust.get("trust_grade") in {"A", "B"}
+        and trust.get("evidence_state") in {"SUPPORTED", "PROVEN"}
+        and pick.get("market_trust_state") == "TRUSTED"
+        and pick.get("base_rate_source") != "global_default"
+        and bool(pick.get("odds_are_real"))
+        and bool(pick.get("bookable"))
+    )
+
+
 def evaluate_leg(pick: dict, product: str) -> dict:
     """Return the single authoritative publication decision for one leg."""
     reasons: list[str] = []
@@ -78,7 +117,8 @@ def evaluate_leg(pick: dict, product: str) -> dict:
 
     if not pick.get("market_floor_eligible", True):
         reasons.append("BELOW_MARKET_PUBLICATION_FLOOR")
-    if not pick.get("safe_tier_eligible", False):
+    if (not pick.get("safe_tier_eligible", False)
+            and not _independently_supported_cup_for_long_tier(pick, product)):
         reasons.append("INSUFFICIENT_SETTLED_EVIDENCE")
     if trust.get("accepted") is False:
         reasons.append("LEG_TRUST_REJECTED")
