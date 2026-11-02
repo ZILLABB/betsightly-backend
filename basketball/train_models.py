@@ -138,6 +138,12 @@ def train_basketball_models(data_path: str, retrain: bool = False) -> dict:
     Returns:
         Training results dictionary
     """
+    # Legacy training used fabricated games and random historical features.
+    # Do not let setup scripts create deceptively valid-looking model files.
+    raise RuntimeError(
+        "Legacy basketball training disabled: synthetic data and random features. "
+        "Use python -m basketball.research_cli train with verified NBA results."
+    )
     logger.info("Starting basketball model training...")
     
     # Initialize components
