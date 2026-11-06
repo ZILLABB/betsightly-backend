@@ -363,6 +363,11 @@ def _manual_rollover_publish_db(monkeypatch, prior_status=None):
         "prediction": "Over 1.5", "prediction_type": "goals",
         "kickoff": "2026-10-14T19:00:00+00:00",
         "league": "Test League", "odds": 2.4,
+        # Lifecycle tests exercise the booking and rollover paths with a
+        # source-covered fixture; the separate coverage-gate tests exercise
+        # unsupported/override behavior.
+        "score_competition_mapped": True,
+        "settlement_source_candidates": ["espn"],
     }]
     monkeypatch.setattr(editor, "_engine", lambda: engine)
     monkeypatch.setattr(editor, "preview", lambda *args, **kwargs: {
