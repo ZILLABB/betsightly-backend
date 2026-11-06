@@ -218,13 +218,54 @@ def _market_metrics(rows):
             "bookmaker_lines": False, "betting_roi": None}
 
 
+def _input_snapshot(path: Path) -> dict:
+    """Read-only source identity; file times alone do NOT prove pregame capture."""
+    resolved = path.resolve()
+    result = {"path": str(resolved), "exists": resolved.is_file(),
+              "size_bytes": None, "last_modified_utc": None, "sha256": None}
+    if not result["exists"]:
+        return result
+    stat = resolved.stat()
+    result["size_bytes"] = stat.st_size
+    result["last_modified_utc"] = datetime.fromtimestamp(
+        stat.st_mtime, timezone.utc).isoformat()
+    if stat.st_size <= 25_000_000:
+        digest = hashlib.sha256()
+        with resolved.open("rb") as stream:
+            for part in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(part)
+        result["sha256"] = digest.hexdigest()
+    return result
+
+
 def wave2_report(home: str | Path, *, now: datetime | None = None):
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("timezone-aware clock required")
     now = now.astimezone(timezone.utc)
-    root = Path(home)
+    root = Path(home).resolve()
+    source_inputs = {
+        "shadow_forecasts": _input_snapshot(root / "advanced" / "shadow_2027.jsonl"),
+        "shadow_settlements": _input_snapshot(
+            root / "advanced" / "shadow_settlements_2027.json"),
+        "verified_fixtures": _input_snapshot(root / "nba_games.jsonl"),
+    }
+    source_status = (
+        "shadow_forecast_file_missing"
+        if not source_inputs["shadow_forecasts"]["exists"] else
+        "shadow_forecast_file_empty"
+        if source_inputs["shadow_forecasts"]["size_bytes"] == 0 else
+        "shadow_forecast_file_present"
+    )
     base = {"phase": "wave2_private_advanced_forward_evaluation",
+            "research_home": str(root),
+            "source_inputs": source_inputs,
+            "source_status": source_status,
+            "input_snapshot_note": (
+                "File hashes and modification times identify this run's inputs; "
+                "they cannot prove historical file creation time or pregame capture. "
+                "No absent shadow records are reconstructed from other ledgers."
+            ),
             "generated_at": now.isoformat(), "research_only": True,
             "local_only": True, "no_writes": True,
             "public_publishing_enabled": False,
