@@ -78,7 +78,7 @@ def favorite_confidence_report(validated_rows: list[dict]) -> dict:
         if selected:
             weighted_absolute_gap += len(selected) / n * abs(stats["calibration_gap"])
         bands.append({"lower": low, "upper": high, **stats,
-                      "descriptive_only": len(selected) < MIN_BAND_REVIEW})
+                      "descriptive_only": n < MIN_OVERALL_REVIEW or len(selected) < MIN_BAND_REVIEW})
 
     high = [item for item in observations if item["confidence"] >= 0.70]
     losses = sorted((item for item in observations if not item["correct"]),
@@ -89,7 +89,7 @@ def favorite_confidence_report(validated_rows: list[dict]) -> dict:
         "pending_excluded": len(validated_rows) - n,
         "overall_predicted_winner": _summary(observations),
         "high_confidence_70pct_plus": {**_summary(high),
-                                      "descriptive_only": len(high) < MIN_BAND_REVIEW},
+                                      "descriptive_only": n < MIN_OVERALL_REVIEW or len(high) < MIN_BAND_REVIEW},
         "bands": bands,
         "largest_confidence_misses": [
             {"game_id": item["game_id"],
