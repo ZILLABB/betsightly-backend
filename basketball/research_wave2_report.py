@@ -13,6 +13,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from basketball.research_wave2_feature_snapshot import validate_feature_snapshot
+
 MODEL = "nba-advanced-shadow-2026-v1"
 MIN_REVIEW = 100
 LINES = {"total_points": (220.5, 225.5, 230.5),
@@ -88,6 +90,7 @@ def _forecast_rows(path):
                     "matched_v1_total_points", "matched_v1_home_margin"):
             if row.get(key) is not None:
                 _numeric(row[key])
+        validate_feature_snapshot(row)
         grid = row.get("market_probabilities")
         if grid is not None:
             if not isinstance(grid, dict):
