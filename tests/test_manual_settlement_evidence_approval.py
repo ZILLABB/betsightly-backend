@@ -35,11 +35,34 @@ def test_strict_coverage_gate_blocks_unsupported_fixture(monkeypatch):
     assert editor._settlement_publication_policy(known)["mode"] == "AUTO_SOURCE_REGISTERED"
 
 
-def test_gate_is_staged_behind_explicit_release_flag(monkeypatch):
+def test_missing_gate_setting_fails_closed_and_explicit_rollback_is_visible(monkeypatch):
     monkeypatch.delenv("MANUAL_SETTLEMENT_GATE_STRICT", raising=False)
     unsupported = [{"sportybet_event_id":"x", "kickoff":"2026-10-28T16:00:00Z"}]
     policy = editor._settlement_publication_policy(unsupported)
-    assert policy["allowed"] and policy["mode"] == "LEGACY_WARN_ONLY"
+    assert not policy["allowed"] and policy["mode"] == "BLOCKED"
+    monkeypatch.setenv("MANUAL_SETTLEMENT_GATE_STRICT", "false")
+    rollback = editor._settlement_publication_policy(unsupported)
+    assert rollback["allowed"] and rollback["mode"] == "LEGACY_WARN_ONLY"
+    monkeypatch.setenv("MANUAL_SETTLEMENT_GATE_STRICT", "true")
+    known = [{**unsupported[0], "score_competition_mapped": True,
+              "settlement_source_candidates": ["espn"]}]
+    assert editor._settlement_publication_policy(known)["allowed"] is True
+
+
+def test_review_override_never_bypasses_missing_event_id_or_kickoff(monkeypatch):
+    monkeypatch.setenv("MANUAL_SETTLEMENT_GATE_STRICT", "true")
+    for invalid in (
+        {"sportybet_event_id": "", "kickoff": "2026-10-28T16:00:00Z"},
+        {"sportybet_event_id": "sr:match:88", "kickoff": ""},
+    ):
+        policy = editor._settlement_publication_policy(
+            [{**invalid, "score_competition_mapped": False,
+              "settlement_source_candidates": []}],
+            manual_review_override=True,
+            manual_review_reason="I will independently verify the official score at 90 minutes.",
+        )
+        assert not policy["allowed"] and policy["mode"] == "BLOCKED"
+        assert "identity" in policy["reason"].lower()
 
 
 def _ticket(share_code, event_status="pending"):

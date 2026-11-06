@@ -367,17 +367,18 @@ def _settlement_publication_policy(
     games: list[dict], *, manual_review_override: bool = False,
     manual_review_reason: str = "",
 ) -> dict:
-    """Explicit, fail-closed final-score coverage gate.
+    """Fail-closed final-score coverage gate.
 
-    This gate is staged behind a production flag to keep existing manual
-    workflows running during a controlled rollout. Once enabled, missing
-    score coverage cannot silently reach create_booking(). A signed-in admin
-    may explicitly accept manual evidence review with a recorded reason.
+    Enabled by default, even when a new deployment omits the environment
+    variable. Only an explicit false/0/no configuration permits legacy
+    warn-only behavior during an audited emergency rollback.
+    An authenticated admin can explicitly accept manual evidence review
+    with a recorded plan and manual-only settlement classification.
     """
     import os
 
-    strict = os.getenv("MANUAL_SETTLEMENT_GATE_STRICT", "false").lower() in (
-        "true", "1", "yes",
+    strict = os.getenv("MANUAL_SETTLEMENT_GATE_STRICT", "true").lower() not in (
+        "false", "0", "no",
     )
     uncovered = [
         str(g.get("sportybet_event_id") or g.get("match_id") or "")
@@ -387,6 +388,21 @@ def _settlement_publication_policy(
             or not g.get("score_competition_mapped")
             or not g.get("settlement_source_candidates"))
     ]
+    # A manual review is only an exception for absent AUTOMATIC sources.
+    # The review desk itself requires an exact event identity and UTC kickoff;
+    # allowing an override without either would create an irrecoverable ticket.
+    invalid_identity = [
+        str(g.get("sportybet_event_id") or g.get("match_id") or "<missing>")
+        for g in games if not g.get("sportybet_event_id") or not g.get("kickoff")
+    ]
+    if invalid_identity:
+        return {
+            "allowed": False, "strict": strict, "mode": "BLOCKED",
+            "uncovered_event_ids": uncovered,
+            "reason": ("Missing immutable SportyBet event ID or UTC kickoff for "
+                       + ", ".join(invalid_identity[:12])
+                       + ". Manual evidence review cannot bypass identity."),
+        }
     reason = (manual_review_reason or "").strip()
     if manual_review_override and (len(reason) < 25 or len(reason) > 500):
         return {
