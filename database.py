@@ -4,7 +4,8 @@ Database configuration for the application.
 
 import json
 import logging
-from sqlalchemy import create_engine
+import os
+from sqlalchemy import create_engine, event
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.orm import declarative_base, sessionmaker
 from dotenv import load_dotenv
@@ -26,7 +27,30 @@ DATABASE_URL = settings.database.URL
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# Private NBA database mode is stage-only. Never accept this config on
+# football production, and never switch the connection globally for a shared
+# PostgreSQL pool. Supabase's session pooler permits per-session search_path.
+_NBA_PRIVATE = os.getenv("NBA_PRIVATE_DATABASE_ONLY") == "1"
+if _NBA_PRIVATE and os.getenv("ENVIRONMENT") != "staging":
+    raise RuntimeError("NBA_PRIVATE_DATABASE_REQUIRES_STAGING")
+# Explicit, reversible cutover. Keep the original DATABASE_URL private and
+# untouched for immediate rollback; ONLY isolated NBA staging can opt in.
+if os.getenv("NBA_USE_RESTORE_TARGET_AS_PRIMARY") == "1":
+    if not _NBA_PRIVATE:
+        raise RuntimeError("NBA_PRIMARY_CUTOVER_REQUIRES_PRIVATE_MODE")
+    candidate = os.getenv("NBA_RESTORE_TARGET_DATABASE_URL", "")
+    if not candidate.startswith(("postgresql://", "postgres://")):
+        raise RuntimeError("NBA_PRIMARY_CUTOVER_TARGET_UNCONFIGURED")
+    from sqlalchemy.engine import make_url
+    if make_url(candidate).host == make_url(DATABASE_URL).host:
+        raise RuntimeError("NBA_PRIMARY_CUTOVER_REFUSES_SOURCE_HOST")
+    DATABASE_URL = candidate
+    logger.info("NBA staging using isolated recovered database")
+
+
 # Determine if we're using SQLite or PostgreSQL
+if DATABASE_URL.startswith("sqlite") and _NBA_PRIVATE:
+    raise RuntimeError("NBA_PRIVATE_DATABASE_REQUIRES_POSTGRES")
 if DATABASE_URL.startswith("sqlite"):
     DB_FILE = DATABASE_URL.replace("sqlite:///", "")
     logger.info(f"Using SQLite database: {DB_FILE}")
@@ -37,10 +61,18 @@ else:
     logger.info("Using PostgreSQL database")
     engine = create_engine(
         DATABASE_URL,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=2 if _NBA_PRIVATE else 5,
+        max_overflow=2 if _NBA_PRIVATE else 10,
         pool_pre_ping=True,  # Auto-reconnect on stale connections
     )
+    if _NBA_PRIVATE:
+        @event.listens_for(engine, "connect")
+        def _pin_nba_private_schema(dbapi_connection, connection_record):
+            # Fixed, privately owned schema only. Executed on every new
+            # Supavisor session-pool connection; no global role alteration.
+            with dbapi_connection.cursor() as cursor:
+                cursor.execute("SET search_path TO nba_research")
+        logger.info("NBA staging database pool pinned to private schema")
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

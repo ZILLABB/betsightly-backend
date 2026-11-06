@@ -44,6 +44,8 @@ class BasketballFeatureEngineer:
         logger.info("Basketball Feature Engineer initialized")
     
     def engineer_features(self, games_df: pd.DataFrame, team_stats: Dict = None) -> pd.DataFrame:
+        raise RuntimeError("Legacy NBA code generates synthetic training inputs; use "
+                           "python -m basketball.research_cli instead.")
         """
         Engineer features for basketball games.
         

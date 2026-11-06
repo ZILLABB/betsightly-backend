@@ -1,0 +1,86 @@
+name: NBA Windows scheduler script syntax (private)
+
+on:
+  pull_request:
+    paths:
+      - "scripts/nba_task_reliability.ps1"
+      - "scripts/nba_paper_research.ps1"
+      - "scripts/nba_score_check.ps1"
+      - "scripts/nba_pregame_check.ps1"
+      - "scripts/nba_task_attempt.ps1"
+      - "basketball/research_injury_reports.py"
+      - "basketball/requirements-windows-research.txt"
+      - ".github/workflows/nba-windows-task-syntax.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-script-syntax:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify IANA Eastern Time on native Windows Python
+        shell: powershell
+        run: |
+          python -m pip install -r basketball/requirements-windows-research.txt
+          python -c "from zoneinfo import ZoneInfo; from datetime import datetime; assert datetime(2026,7,1,tzinfo=ZoneInfo('America/New_York')).utcoffset().total_seconds() == -14400; assert datetime(2026,12,1,tzinfo=ZoneInfo('America/New_York')).utcoffset().total_seconds() == -18000; print('ET daylight saving and standard time supported')"
+      - name: Parse all scheduled task scripts in Windows PowerShell
+        shell: powershell
+        run: |
+          $paths = @(
+              "scripts/nba_task_reliability.ps1",
+              "scripts/nba_paper_research.ps1",
+              "scripts/nba_score_check.ps1",
+              "scripts/nba_pregame_check.ps1",
+              "scripts/nba_task_attempt.ps1"
+          )
+          foreach ($path in $paths) {
+              $tokens = $null
+              $issues = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseFile(
+                  (Resolve-Path $path).Path, [ref]$tokens, [ref]$issues
+              )
+              if ($issues.Count -gt 0) {
+                  $issues | Format-List
+                  throw "Invalid scheduled task PowerShell: $path"
+              }
+              Write-Host "PowerShell syntax OK: $path"
+          }
+      - name: Test durable structured busy/failure Windows receipts
+        shell: powershell
+        run: |
+          . .\scripts\nba_task_attempt.ps1
+          $temp = Join-Path $env:RUNNER_TEMP "private-nba-scheduled-attempt"
+          New-Item -ItemType Directory -Force -Path $temp | Out-Null
+          Write-NbaScheduledAttempt -ResearchFolder $temp -Mode score `
+            -StartedAt ([DateTime]::UtcNow.AddMinutes(-1).ToString("o")) `
+            -Status busy -ExitCode 0
+          $receipt = Get-Content (Join-Path $temp "scheduled_score_attempt.json") -Raw |
+            ConvertFrom-Json
+          if ($receipt.status -ne "busy" -or $receipt.process_exit_code -ne 0) {
+              throw "Task busy status was falsely marked as completed work"
+          }
+          Write-NbaScheduledAttempt -ResearchFolder $temp -Mode pregame `
+            -StartedAt ([DateTime]::UtcNow.AddMinutes(-1).ToString("o")) `
+            -Status failed -ExitCode 1
+          $failed = Get-Content (Join-Path $temp "scheduled_pregame_attempt.json") -Raw |
+            ConvertFrom-Json
+          if ($failed.status -ne "failed" -or $failed.process_exit_code -ne 1) {
+              throw "Real scheduled pregame failure not captured"
+          }
+      - name: Assert opt-in repair has no default task mutations
+        shell: powershell
+        run: |
+          $source = Get-Content "scripts/nba_task_reliability.ps1" -Raw
+          if ($source -notmatch 'if \(\$Repair\)' -or
+              $source -notmatch 'Export-ScheduledTask' -or
+              $source -notmatch 'Set-ScheduledTask') {
+              throw "Scheduler diagnostic lacks guarded, backed-up task repair"
+          }
+          Write-Host "Repair requires explicit switch and exports backups first."

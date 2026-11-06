@@ -1,0 +1,138 @@
+name: NBA Stage 3B-C Advanced Source Acceptance (private)
+
+# Research-only: temporary authenticated? NO. Provider assets are keyless.
+# No deployed services, raw data artifacts, model publications, or bookmaker odds.
+on:
+  pull_request:
+    paths:
+      - "basketball/research_advanced_data.py"
+      - "basketball/research_advanced_features.py"
+      - "basketball/research_advanced_model.py"
+      - "basketball/research_injury_reports.py"
+      - "basketball/research_cli.py"
+      - ".github/workflows/nba-stage3bc-sources.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  temporary-real-source-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install research-only parquet and offline ML libraries
+        run: python -m pip install pyarrow scikit-learn==1.8.0 joblib pdfplumber
+      - name: Download authentic NBA schedules for 2024-2026
+        run: |
+          python -m basketball.research_cli fetch-public --seasons 2024 2025 2026
+      - name: Strictly validate released ESPN team and player box scores
+        run: |
+          python -m basketball.research_cli fetch-advanced --seasons 2024 2025 2026 > /tmp/nba-advanced-ingest.json
+          python - <<'PY'
+          import json
+          result=json.load(open('/tmp/nba-advanced-ingest.json'))
+          for item in result['source_coverage']:
+              print('Verified asset:',item['season'],item['kind'],
+                    'rows:',item['accepted_rows'],
+                    'game coverage:',item['fixture_coverage'])
+          assert result['files_written']==6
+          assert result['public_publishing_enabled'] is False
+          PY
+      - name: Inspect pregame-only feature coverage
+        run: |
+          python -m basketball.research_cli advanced-report > /tmp/nba-advanced-coverage.json
+          python - <<'PY'
+          import json
+          result=json.load(open('/tmp/nba-advanced-coverage.json'))
+          print('Advanced pregame:',result['pregame_feature_readiness']['status'])
+          print('Advanced eligible:',result['pregame_feature_readiness'].get('advanced_eligible_rows'))
+          assert result['team_seasons']==3
+          assert result['player_seasons']==3
+          PY
+      - name: Fit development-only 2026 validation candidate
+        run: |
+          python -m basketball.research_cli advanced-build > /tmp/nba-advanced-candidate.json
+          python - <<'PY'
+          import json
+          v=json.load(open('/tmp/nba-advanced-candidate.json'))
+          print('Advanced candidate:',v['status'])
+          print('Train/valid:',v.get('training_games'),v.get('validation_games'))
+          if v['status']=='development_only':
+              print('Matched v1 Brier:',v['matched_model_comparison']['matched_v1_features']['validation_2026']['brier'])
+              print('Advanced Brier:',v['matched_model_comparison']['advanced_candidate']['validation_2026']['brier'])
+          assert v.get('public_publishing_enabled',False) is False
+          assert v.get('pass_to_public_model',False) is False
+          PY
+      - name: Verify Stage 4 paired residual probability schema (no bookmaker lines)
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from basketball.research_markets_v4 import market_grid
+          import joblib
+          root=Path("data/basketball/research/advanced/shadow_model.joblib")
+          assert root.is_file(), "Private candidate is not trained"
+          bundle=joblib.load(root)
+          residuals=bundle["market_residuals"]
+          output=market_grid(expected_total=225.0,expected_margin=2.0,
+                             residuals=residuals)
+          print("Paired validation residual samples:",len(residuals))
+          print("Research families:",list(output["markets"]))
+          print("First half:",output["markets_blocked"]["first_half_total_points"])
+          assert len(residuals)>=100
+          assert output["no_bookmaker_odds"] is True
+          assert output["public_publishing_enabled"] is False
+          PY
+      - name: Stage 4 source and market readiness audit (read-only)
+        run: |
+          python -m basketball.research_cli stage4-report > /tmp/nba-stage4-report.json
+          python - <<'PY'
+          import json
+          r=json.load(open("/tmp/nba-stage4-report.json"))
+          print("Verified 2027 assets:",r["current_2027_verified_assets"])
+          print("Blocked research requirements:",r["blockers"])
+          print("Shadow forecasts:",r["probability_markets"]["forecast_count"])
+          assert r["deployable_to_public"] is False
+          assert r["market_support"]["first_half"] is False
+          PY
+      - name: Probe 2027 current-season advanced data without overriding historical models
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from basketball.research_public_data import fetch_public_seasons
+          from basketball.research_data import read_games, write_games
+          from basketball.research_current_advanced_v4 import refresh_current_advanced
+          from basketball.research_stage4_operations import stage4_report
+          root=Path("data/basketball/research")
+          try:
+              current,manifest=fetch_public_seasons([2027])
+              older=read_games(root/"nba_games.jsonl")
+              write_games(older+current,root/"nba_games.jsonl")
+              result=refresh_current_advanced(root,season=2027)
+              print("Current 2027 advanced status:",result["status"])
+              for kind,asset in result["assets"].items():
+                  print("2027",kind,asset["status"],asset.get("fixture_coverage"))
+              ready=stage4_report(root)
+              print("2027 missing verified kinds:",ready["current_2027_missing_assets"])
+              print("Injury model feature allowed:",ready["market_support"]["injury_adjusted_predictions"])
+              assert ready["deployable_to_public"] is False
+          except (RuntimeError,ValueError,OSError) as error:
+              # Never claim verified source availability when not checked.
+              print("Current 2027 source probe blocked:",type(error).__name__)
+          PY
+      - name: Probe official injury PDF snapshot (advisory source availability)
+        continue-on-error: true
+        run: |
+          python -m basketball.research_cli capture-injury > /tmp/nba-official-injury.json
+          python -m basketball.research_cli injury-status
+      - name: Remove private downloaded source data and artifacts
+        if: always()
+        run: rm -rf data/basketball/research /tmp/nba-advanced-*.json

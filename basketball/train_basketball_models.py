@@ -27,6 +27,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def download_nba_data():
+    raise RuntimeError("Legacy NBA code generates synthetic training inputs; use "
+                       "python -m basketball.research_cli instead.")
     """Download real NBA data from free sources."""
     print("🏀 DOWNLOADING REAL NBA DATA")
     print("=" * 40)
@@ -106,6 +108,8 @@ def download_nba_data():
         return create_synthetic_data()
 
 def create_synthetic_data():
+    raise RuntimeError("Legacy NBA code generates synthetic training inputs; use "
+                       "python -m basketball.research_cli instead.")
     """Create synthetic NBA data for training if real data unavailable."""
     print("🎲 Creating synthetic NBA training data...")
     
@@ -279,6 +283,8 @@ def transform_nba_data_to_games(raw_df: pd.DataFrame) -> pd.DataFrame:
     return games_df
 
 def train_basketball_models(data_file: str):
+    raise RuntimeError("Legacy NBA code generates synthetic training inputs; use "
+                       "python -m basketball.research_cli instead.")
     """Train basketball prediction models."""
     print("\n🤖 TRAINING BASKETBALL MODELS")
     print("=" * 40)

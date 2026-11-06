@@ -1,0 +1,30 @@
+name: NBA full research recovery v2 contract (private)
+"on":
+  pull_request:
+    paths:
+      - "basketball/research_full_recovery.py"
+      - "basketball/research_hosted_forecast.py"
+      - "basketball/research_ops_health.py"
+      - "growth/api.py"
+      - "tests/test_basketball_full_recovery.py"
+      - "tests/test_basketball_hosted_forecast.py"
+      - "tests/test_basketball_ops_health.py"
+      - ".github/workflows/nba-full-recovery-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-export-and-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install offline test requirements
+        run: python -m pip install -r requirements.txt pytest
+      - name: Compile private recovery and forecast modules
+        run: python -m py_compile basketball/research_full_recovery.py basketball/research_hosted_forecast.py basketball/research_ops_health.py
+      - name: Validate new V2 full-recovery drill and existing V1 backup safety
+        run: python -m pytest --noconftest tests/test_basketball_full_recovery.py tests/test_basketball_ops_health.py tests/test_basketball_hosted_forecast.py -q

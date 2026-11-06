@@ -206,6 +206,8 @@ class NBADataFetcher:
             return pd.DataFrame()
     
     def download_historical_data(self, save_path: str = None) -> str:
+        raise RuntimeError("Legacy NBA code generates synthetic training inputs; use "
+                           "python -m basketball.research_cli instead.")
         """
         Download historical NBA data from Kaggle or other free sources.
         

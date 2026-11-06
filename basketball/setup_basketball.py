@@ -258,6 +258,8 @@ def print_setup_summary():
     print(f"\n{'='*60}")
 
 def main():
+    raise RuntimeError("Legacy NBA code generates synthetic training inputs; use "
+                       "python -m basketball.research_cli instead.")
     """Main setup function."""
     parser = argparse.ArgumentParser(description="Setup basketball prediction pipeline")
     parser.add_argument(

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 import threading
 
-from api.api import api_router
+# Import the football router only on non-NBA runtimes.
 from database import get_db, init_db, log_pool_exception, log_pool_status
 from utils.config import settings
 from utils.error_handling import setup_exception_handlers
@@ -115,7 +115,12 @@ logging.getLogger("telegram").setLevel(logging.WARNING)
 # Initialize database (skip for Railway deployment if no DATABASE_URL)
 try:
     database_url = os.getenv("DATABASE_URL")
-    if database_url:
+    if (os.getenv("ENVIRONMENT") == "staging"
+            and os.getenv("NBA_PRIVATE_DATABASE_ONLY") == "1"):
+        # Dedicated isolated NBA archive. The football Base contains customer
+        # and ticket tables; never materialise those on the new private schema.
+        logger.info("Private NBA research mode: football DB initialization skipped")
+    elif database_url:
         init_db()
         logger.info("Database initialized successfully")
     else:
@@ -205,73 +210,93 @@ logger.info(f"CORS allows: {_allowed_origins} + betsightly-frontend*.vercel.app"
 # Phase 5: Re-enable exception handlers
 setup_exception_handlers(app)
 
-# Include API router
-app.include_router(api_router, prefix="/api")
-
-# Multi-league prediction engine endpoints
-try:
-    from leagues.api import router as leagues_router
-    app.include_router(leagues_router, prefix="/api/leagues")
-    # Back-compat alias for older frontend builds that call /api/worldcup/*
-    app.include_router(leagues_router, prefix="/api/worldcup", include_in_schema=False)
-    logger.info("Leagues API endpoints registered")
-except ImportError as e:
-    logger.warning(f"Leagues module not available: {e}")
-
-# Growth Engine — marketing content generation and distribution.
-# Mounted outside api_router because its public half (the tracking beacon and
-# the crawler-facing /p/{slug} pages) must not sit behind the API key, while
-# its admin half carries its own cookie auth rather than the shared key.
-try:
-    from growth.api import router as growth_router, public_router as growth_public
-    from growth.models import ensure_tables as _growth_ensure_tables
-
-    app.include_router(growth_router, prefix="/api/growth")
-    app.include_router(growth_public, prefix="/api/growth")
-    # Share links need to be short and clean, so /p/{slug} is also served at
-    # the root — a URL posted to social is read by people, not just crawlers.
-    app.include_router(growth_public, prefix="", include_in_schema=False)
-    _growth_ensure_tables()
-    logger.info("Growth Engine endpoints registered")
-except Exception as e:
-    logger.warning(f"Growth Engine not available: {e}")
-
-# Ensure rollover-chain table exists in PostgreSQL
-try:
-    from leagues.rollover_db import ensure_table as _rollover_ensure_table
-    _rollover_ensure_table()
-    from leagues.picks_db import (
-        ensure_table as _slips_ensure_table,
-        ensure_card_table as _cards_ensure_table,
-    )
-    _slips_ensure_table()
-    _cards_ensure_table()
-    from leagues.builder_revisions import ensure_tables as _builder_revision_tables
-    _builder_revision_tables()
-
-    from leagues.decision_archive import ensure_tables as _decision_archive_tables
-    _decision_archive_tables()
-
-    from leagues.builder_runs import ensure_table as _builder_runs_ensure_table
-    _builder_runs_ensure_table()
-
-    from leagues.ticket_history import ensure_tables as _ticket_history_ensure_tables
-    _ticket_history_ensure_tables()
-
-    from leagues.shared_history_store import ensure_table as _shared_history_ensure_table
-    _shared_history_ensure_table()
-
-    from leagues.prepared_board_store import ensure_table as _prepared_board_ensure_table
-    _prepared_board_ensure_table()
-
-    # Additive, append-only Phase 9 bookmaker price evidence table.
-    # No historical odds are backfilled or mislabeled as closing prices.
-    from leagues.odds_history_warehouse import ensure_tables as _odds_history_tables
-    _odds_history_tables()
-
-    logger.info("Runtime data tables verified")
-except Exception as e:
-    logger.warning(f"Could not ensure runtime data tables: {e}")
+# NBA staging is an isolated research API. Never import or initialize
+# football publishing, customer tracking, booking or results tables here.
+_NBA_STAGE_ISOLATED = (
+    os.getenv("ENVIRONMENT") == "staging"
+    and os.getenv("NBA_PRIVATE_DATABASE_ONLY") == "1"
+)
+if _NBA_STAGE_ISOLATED:
+    from fastapi import APIRouter
+    from growth.api import router as growth_router
+    nba_router = APIRouter()
+    auth_paths = {"/admin/config", "/admin/login", "/admin/logout", "/admin/me"}
+    for route in growth_router.routes:
+        if (route.path in auth_paths or
+                route.path.startswith("/admin/nba-research") or
+                route.path.startswith("/internal/nba-research")):
+            nba_router.routes.append(route)
+    app.include_router(nba_router, prefix="/api/growth")
+    logger.info("Private NBA research routes only; football table setup omitted")
+else:
+    # Football router is loaded only outside isolated NBA staging.
+    from api.api import api_router
+    app.include_router(api_router, prefix="/api")
+    
+    # Multi-league prediction engine endpoints
+    try:
+        from leagues.api import router as leagues_router
+        app.include_router(leagues_router, prefix="/api/leagues")
+        # Back-compat alias for older frontend builds that call /api/worldcup/*
+        app.include_router(leagues_router, prefix="/api/worldcup", include_in_schema=False)
+        logger.info("Leagues API endpoints registered")
+    except ImportError as e:
+        logger.warning(f"Leagues module not available: {e}")
+    
+    # Growth Engine — marketing content generation and distribution.
+    # Mounted outside api_router because its public half (the tracking beacon and
+    # the crawler-facing /p/{slug} pages) must not sit behind the API key, while
+    # its admin half carries its own cookie auth rather than the shared key.
+    try:
+        from growth.api import router as growth_router, public_router as growth_public
+        from growth.models import ensure_tables as _growth_ensure_tables
+    
+        app.include_router(growth_router, prefix="/api/growth")
+        app.include_router(growth_public, prefix="/api/growth")
+        # Share links need to be short and clean, so /p/{slug} is also served at
+        # the root — a URL posted to social is read by people, not just crawlers.
+        app.include_router(growth_public, prefix="", include_in_schema=False)
+        _growth_ensure_tables()
+        logger.info("Growth Engine endpoints registered")
+    except Exception as e:
+        logger.warning(f"Growth Engine not available: {e}")
+    
+    # Ensure rollover-chain table exists in PostgreSQL
+    try:
+        from leagues.rollover_db import ensure_table as _rollover_ensure_table
+        _rollover_ensure_table()
+        from leagues.picks_db import (
+            ensure_table as _slips_ensure_table,
+            ensure_card_table as _cards_ensure_table,
+        )
+        _slips_ensure_table()
+        _cards_ensure_table()
+        from leagues.builder_revisions import ensure_tables as _builder_revision_tables
+        _builder_revision_tables()
+    
+        from leagues.decision_archive import ensure_tables as _decision_archive_tables
+        _decision_archive_tables()
+    
+        from leagues.builder_runs import ensure_table as _builder_runs_ensure_table
+        _builder_runs_ensure_table()
+    
+        from leagues.ticket_history import ensure_tables as _ticket_history_ensure_tables
+        _ticket_history_ensure_tables()
+    
+        from leagues.shared_history_store import ensure_table as _shared_history_ensure_table
+        _shared_history_ensure_table()
+    
+        from leagues.prepared_board_store import ensure_table as _prepared_board_ensure_table
+        _prepared_board_ensure_table()
+    
+        # Additive, append-only Phase 9 bookmaker price evidence table.
+        # No historical odds are backfilled or mislabeled as closing prices.
+        from leagues.odds_history_warehouse import ensure_tables as _odds_history_tables
+        _odds_history_tables()
+    
+        logger.info("Runtime data tables verified")
+    except Exception as e:
+        logger.warning(f"Could not ensure runtime data tables: {e}")
 
 def _start_current_results_checker(start=None):
     """Start the authoritative leagues settlement loop."""

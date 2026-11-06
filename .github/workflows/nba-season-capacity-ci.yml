@@ -1,0 +1,30 @@
+name: NBA full-season private archive and backup capacity CI
+"on":
+  pull_request:
+    paths:
+      - "basketball/research_private_bundle.py"
+      - "basketball/research_ops_health.py"
+      - "basketball/research_full_recovery.py"
+      - "basketball/research_safe_migrate.py"
+      - "ops/nba_vercel_scheduler/api/backup-v2.js"
+      - "tests/test_nba_full_season_capacity.py"
+      - ".github/workflows/nba-season-capacity-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  season-recovery-bounds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: python -m pip install -r requirements.txt pytest
+      - run: node --check ops/nba_vercel_scheduler/api/backup-v2.js
+      - name: Full season capacity and backward-compatible backup tests
+        run: python -m pytest --noconftest tests/test_nba_full_season_capacity.py tests/test_basketball_private_archive.py tests/test_basketball_ops_health.py tests/test_basketball_full_recovery.py tests/test_basketball_full_recovery_postgres.py -q
