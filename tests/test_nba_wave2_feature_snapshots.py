@@ -69,12 +69,17 @@ def test_snapshots_signed_validated_and_conservative_legacy_read(tmp_path):
     report = wave2_report(tmp_path, now=NOW)
     assert report["status"] == "awaiting_verified_finals"
     assert report["forecast_count"] == 1
+    assert report["feature_snapshot_coverage"]["forecasts_with_frozen_pregame_features"] == 1
+    assert report["feature_snapshot_coverage"]["pending_with_frozen_pregame_features"] == 1
     assert report["integrity"]["original_hashes_checked"] == 1
     original = path.read_bytes()
     legacy = dict(item)
     legacy.pop("pregame_feature_snapshot")
     _write_signed(tmp_path, legacy)
     assert len(_forecast_rows(path)) == 1
+    old_report = wave2_report(tmp_path, now=NOW)
+    assert old_report["feature_snapshot_coverage"]["legacy_forecasts_without_frozen_features"] == 1
+    assert old_report["feature_snapshot_coverage"]["forecasts_with_frozen_pregame_features"] == 0
     assert path.read_bytes() != original
     assert validate_feature_snapshot(legacy) is False
 
