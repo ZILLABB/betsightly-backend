@@ -62,7 +62,7 @@ def test_missing_projections_are_not_fabricated():
 
 
 def test_absolute_error_summary_and_percentiles():
-    rows = [row(i, .8, 1, home=110, away=110, total=220+i, margin=0)
+    rows = [row(i, .8, 1, home=110, away=100, total=210+i, margin=10)
             for i in range(10)]
     result = paper_quality_diagnostics(rows)
     m = result["score_projections"]["total_points"]
