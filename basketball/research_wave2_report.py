@@ -319,6 +319,15 @@ def wave2_report(home: str | Path, *, now: datetime | None = None):
         return {**base, "status": "integrity_failed", "metrics_withheld": True,
                 "reason": str(exc)[:110], "settled_count": None}
     scored.sort(key=lambda x: (_time(x[0]["start_utc"]), str(x[0]["game_id"])))
+    from basketball.research_wave2_diagnostics import (
+        paired_uncertainty, bias_and_segments,
+        archived_original_v1_comparison, evidence_progress,
+    )
+    paired_uncertainty_result = paired_uncertainty(scored)
+    bias_segments_result = bias_and_segments(scored)
+    original_v1_result = archived_original_v1_comparison(root, scored)
+    forward_progress = evidence_progress(
+        len(scored), len(forecasts), len(pending))
     paired = [(row, int(h > a)) for row, h, a in scored]
     calibration = []
     for i in range(5):
@@ -348,6 +357,10 @@ def wave2_report(home: str | Path, *, now: datetime | None = None):
             "last_30_settled": _paired(paired[-30:]),
             "candidate_calibration": calibration,
             "point_projection_errors": _score_errors(scored),
+            "paired_uncertainty": paired_uncertainty_result,
+            "bias_and_error_segments": bias_segments_result,
+            "original_main_v1_comparison": original_v1_result,
+            "forward_evidence_progress": forward_progress,
             "market_evaluation": _market_metrics(scored),
             "limitations": (
                 "Matched-v1 is same-cohort reduced-feature comparator, not deployed v1. "
