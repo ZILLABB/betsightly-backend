@@ -388,6 +388,21 @@ def _settlement_publication_policy(
             or not g.get("score_competition_mapped")
             or not g.get("settlement_source_candidates"))
     ]
+    # A manual review is only an exception for absent AUTOMATIC sources.
+    # The review desk itself requires an exact event identity and UTC kickoff;
+    # allowing an override without either would create an irrecoverable ticket.
+    invalid_identity = [
+        str(g.get("sportybet_event_id") or g.get("match_id") or "<missing>")
+        for g in games if not g.get("sportybet_event_id") or not g.get("kickoff")
+    ]
+    if invalid_identity:
+        return {
+            "allowed": False, "strict": strict, "mode": "BLOCKED",
+            "uncovered_event_ids": uncovered,
+            "reason": ("Missing immutable SportyBet event ID or UTC kickoff for "
+                       + ", ".join(invalid_identity[:12])
+                       + ". Manual evidence review cannot bypass identity."),
+        }
     reason = (manual_review_reason or "").strip()
     if manual_review_override and (len(reason) < 25 or len(reason) > 500):
         return {
