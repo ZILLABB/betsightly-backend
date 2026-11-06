@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from basketball.research_store import _utc
+from basketball.research_favorite_confidence import favorite_confidence_report
 
 BUCKET_EDGES = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
 MIN_REVIEW_GAMES = 100
@@ -258,6 +259,7 @@ def prospective_report(db_path: str | Path) -> dict:
         ),
         "overall": overall,
         "calibration": _calibration(settled),
+        "predicted_winner_confidence": favorite_confidence_report(rows),
         "score_projection_errors": _score_errors(settled),
         "rolling_settled": {
             "last_30": _prob_metrics(settled[-30:]),
