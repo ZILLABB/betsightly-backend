@@ -98,7 +98,7 @@ def shared_input_error_audit(scored, final_lookup: dict):
             "score_errors": _scores(row, home, away),
             "source_feature_schema": row.get("source_feature_schema"),
             "pregame_feature_values_in_original_archive": (
-                "features" in row or "input_features" in row
+                isinstance(row.get("pregame_feature_snapshot"), dict)
             ),
         }
 
@@ -192,7 +192,13 @@ def shared_input_error_audit(scored, final_lookup: dict):
             "original_pregame_feature_vector_archived_games": sum(
                 item["pregame_feature_values_in_original_archive"]
                 for item in pairs.values()),
-            "frozen_as_of_feature_reconstruction": "not_supported",
+            "frozen_as_of_feature_reconstruction": "not_supported_for_legacy_records",
+            "new_snapshot_feature_vectors_available": sum(
+                item["pregame_feature_values_in_original_archive"]
+                for item in pairs.values()),
+            "legacy_settled_games_without_feature_vectors": sum(
+                not item["pregame_feature_values_in_original_archive"]
+                for item in pairs.values()),
             "injury_inputs_in_frozen_model": False,
         },
         "identities_checked_upstream": True,
@@ -204,8 +210,9 @@ def shared_input_error_audit(scored, final_lookup: dict):
         "interpretation": (
             "Same-direction errors imply similar residuals, not a proven "
             "defect in pace, efficiency, rest, injuries or data identity. "
-            "The original shadow records do not contain frozen pre-tipoff "
-            "feature values. Current fixture/boxscore files cannot reproduce "
-            "their historical availability or exact inputs."
+            "Legacy shadow records do not contain frozen pre-tipoff feature "
+            "values. Only new signed forecasts may include exact frozen "
+            "model inputs. Current fixture/boxscore files cannot reproduce "
+            "historical availability or exact inputs for legacy forecasts."
         ),
     }

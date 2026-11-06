@@ -262,6 +262,12 @@ def run_shadow(home:Path|str,*,now:datetime|None=None)->dict:
         )+__import__("datetime").timedelta(days=3):
             continue
         x=np.asarray([row["features"]],dtype=float)
+        from basketball.research_wave2_feature_snapshot import create_feature_snapshot
+        pregame_snapshot=create_feature_snapshot(
+            vector=x[0].tolist(),
+            captured_at=instant.isoformat(),
+            tipoff_at=game["start_utc"],
+        )
         prob=float(bundle["candidate"].predict_proba(x)[:,1][0])
         reference=float(bundle["matched_v1"].predict_proba(x[:,:14])[:,1][0])
         score_models=bundle.get("score_models") or {}
@@ -285,6 +291,7 @@ def run_shadow(home:Path|str,*,now:datetime|None=None)->dict:
             "candidate_home_win_probability":round(prob,5),
             "matched_v1_home_win_probability":round(reference,5),
             "source_feature_schema":VERSION,
+            "pregame_feature_snapshot":pregame_snapshot,
             "market_probabilities":research_markets,
             "candidate_total_points":expected("total_points","advanced_candidate"),
             "candidate_home_margin":expected("home_margin","advanced_candidate"),

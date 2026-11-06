@@ -13,6 +13,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from basketball.research_wave2_feature_snapshot import validate_feature_snapshot
+
 MODEL = "nba-advanced-shadow-2026-v1"
 MIN_REVIEW = 100
 LINES = {"total_points": (220.5, 225.5, 230.5),
@@ -88,6 +90,7 @@ def _forecast_rows(path):
                     "matched_v1_total_points", "matched_v1_home_margin"):
             if row.get(key) is not None:
                 _numeric(row[key])
+        validate_feature_snapshot(row)
         grid = row.get("market_probabilities")
         if grid is not None:
             if not isinstance(grid, dict):
@@ -328,6 +331,20 @@ def wave2_report(home: str | Path, *, now: datetime | None = None):
     original_v1_result = archived_original_v1_comparison(root, scored)
     forward_progress = evidence_progress(
         len(scored), len(forecasts), len(pending))
+    snapshot_count = sum(
+        "pregame_feature_snapshot" in row for row in forecasts)
+    snapshot_coverage = {
+        "forecast_records": len(forecasts),
+        "forecasts_with_frozen_pregame_features": snapshot_count,
+        "legacy_forecasts_without_frozen_features": len(forecasts)-snapshot_count,
+        "settled_with_frozen_pregame_features": sum(
+            "pregame_feature_snapshot" in row for row, _, _ in scored),
+        "pending_with_frozen_pregame_features": sum(
+            "pregame_feature_snapshot" in row for row in forecasts
+            if str(row["game_id"]) in pending),
+        "never_reconstruct_old_feature_vectors": True,
+        "model_inputs_signed_with_forecast_row": True,
+    }
     from basketball.research_wave2_common_errors import shared_input_error_audit
     shared_errors = shared_input_error_audit(scored, finals)
     paired = [(row, int(h > a)) for row, h, a in scored]
@@ -363,6 +380,7 @@ def wave2_report(home: str | Path, *, now: datetime | None = None):
             "bias_and_error_segments": bias_segments_result,
             "original_main_v1_comparison": original_v1_result,
             "forward_evidence_progress": forward_progress,
+            "feature_snapshot_coverage": snapshot_coverage,
             "shared_input_error_audit": shared_errors,
             "market_evaluation": _market_metrics(scored),
             "limitations": (
