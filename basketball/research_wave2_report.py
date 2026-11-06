@@ -328,6 +328,8 @@ def wave2_report(home: str | Path, *, now: datetime | None = None):
     original_v1_result = archived_original_v1_comparison(root, scored)
     forward_progress = evidence_progress(
         len(scored), len(forecasts), len(pending))
+    from basketball.research_wave2_common_errors import shared_input_error_audit
+    shared_errors = shared_input_error_audit(scored, finals)
     paired = [(row, int(h > a)) for row, h, a in scored]
     calibration = []
     for i in range(5):
@@ -361,6 +363,7 @@ def wave2_report(home: str | Path, *, now: datetime | None = None):
             "bias_and_error_segments": bias_segments_result,
             "original_main_v1_comparison": original_v1_result,
             "forward_evidence_progress": forward_progress,
+            "shared_input_error_audit": shared_errors,
             "market_evaluation": _market_metrics(scored),
             "limitations": (
                 "Matched-v1 is same-cohort reduced-feature comparator, not deployed v1. "
