@@ -202,3 +202,79 @@ def test_original_v1_tamper_blocks_baseline_not_shadow(tmp_path):
     assert report["status"] == "descriptive_only"
     assert report["original_main_v1_comparison"]["status"] == "main_v1_integrity_failed"
     assert "moneyline" not in report["original_main_v1_comparison"]
+
+
+
+def test_shared_score_errors_identify_common_large_and_wrong_sign_misses():
+    from basketball.research_wave2_common_errors import shared_input_error_audit
+    rows = []
+    finals = {}
+    examples = [
+        ("401909285", "2026-10-30", 112, 95,
+         235.274, 230.0, -10.411, -10.269),
+        ("401909910", "2026-11-02", 100, 93,
+         223.146, 220.0, 8.0, 6.0),
+        ("401909911", "2026-11-02", 100, 97,
+         226.352, 218.0, 5.0, 4.0),
+    ]
+    for gid, day, home, away, ct, bt, cm, bm in examples:
+        item = {
+            **_row(int(gid), day, candidate=.67, v1=.63),
+            "candidate_total_points":ct, "matched_v1_total_points":bt,
+            "candidate_home_margin":cm, "matched_v1_home_margin":bm,
+            "source_feature_schema":"nba-advanced-boxscore-shadow-v1",
+        }
+        rows.append((item,home,away))
+        finals[gid] = {
+            "game_id":gid, "home_name":"Example Home",
+            "away_name":"Example Away",
+            "home_id":"1", "away_id":"2",
+        }
+    report = shared_input_error_audit(rows, finals)
+    assert report["verified_settled_games"] == 3
+    assert report["target_metrics"]["total_points"][
+        "both_models_absolute_error_at_least_20_games"] == 3
+    assert report["target_metrics"]["home_margin"][
+        "both_models_wrong_home_margin_sign_games"] == 1
+    assert report["target_metrics"]["home_margin"][
+        "both_models_absolute_error_at_least_20_games"] == 1
+    assert report["target_metrics"]["total_points"][
+        "both_models_error_same_direction_games"] == 3
+    assert report["target_metrics"]["home_margin"]["signed_error_correlation"] is not None
+    assert all(x["status"] == "verified_settled"
+               for x in report["priority_fixture_audit"])
+    target = report["priority_fixture_audit"][0]
+    assert target["game_id"] == "401909285"
+    assert target["home_team"] == "Example Home"
+    assert target["score_errors"]["home_margin"]["candidate_error"] == -27.411
+    assert target["score_errors"]["home_margin"]["matched_v1_error"] == -27.269
+    assert report["feature_contract"]["v1_feature_count"] == 14
+    assert report["feature_contract"]["advanced_additional_feature_count"] == 16
+    assert report["feature_contract"]["matched_v1_uses_first_14_features"] is True
+    assert report["feature_contract"]["original_pregame_feature_vector_archived_games"] == 0
+    assert report["no_causal_feature_attribution"] is True
+    assert report["large_error_threshold_is_not_a_prediction_filter"] is True
+
+
+def test_empty_common_error_audit_does_not_invent_games_or_inputs():
+    from basketball.research_wave2_common_errors import shared_input_error_audit
+    report = shared_input_error_audit([], {})
+    assert report["status"] == "awaiting_verified_finals"
+    assert report["target_metrics"]["total_points"]["candidate_mae"] is None
+    assert report["target_metrics"]["home_margin"]["signed_error_correlation"] is None
+    assert all(x["status"] == "not_in_verified_settled_cohort"
+               for x in report["priority_fixture_audit"])
+    assert report["no_writes"] is True
+
+
+def test_verified_wave2_report_includes_common_error_audit(tmp_path):
+    _save_valid_synthetic_archive(tmp_path)
+    r = wave2_report(tmp_path, now=NOW)
+    assert r["status"] == "descriptive_only"
+    detail = r["shared_input_error_audit"]
+    assert detail["verified_settled_games"] == 1
+    assert detail["target_metrics"]["total_points"]["paired_games"] == 1
+    assert detail["target_metrics"]["home_margin"]["paired_games"] == 1
+    assert detail["feature_contract"]["original_pregame_feature_vector_archived_games"] == 0
+    assert detail["identities_checked_upstream"] is True
+    assert detail["no_writes"] is True
