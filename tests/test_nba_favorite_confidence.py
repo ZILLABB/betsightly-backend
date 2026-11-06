@@ -54,6 +54,19 @@ def test_small_cohorts_never_claim_calibrated():
     assert r["no_writes"] is True
 
 
+def test_22_high_confidence_games_remain_descriptive_under_100_total():
+    # This mirrors the live 45-settlement cohort: 22 favorites >= 70%
+    # do not satisfy the overall 100-game review gate.
+    high = [record(i, 0.78535, int(i < 16)) for i in range(22)]
+    low = [record(i + 22, 0.65, int(i < 12)) for i in range(23)]
+    r = favorite_confidence_report(high + low)
+    assert r["status"] == "descriptive_only"
+    assert r["high_confidence_70pct_plus"]["count"] == 22
+    assert r["high_confidence_70pct_plus"]["descriptive_only"] is True
+    assert r["bands"][2]["descriptive_only"] is True
+    assert r["favorite_ece"] is None
+
+
 def test_empty_cohort_is_safe():
     r = favorite_confidence_report([])
     assert r["settled_forecasts_evaluated"] == 0
