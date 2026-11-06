@@ -49,6 +49,22 @@ def test_missing_gate_setting_fails_closed_and_explicit_rollback_is_visible(monk
     assert editor._settlement_publication_policy(known)["allowed"] is True
 
 
+def test_review_override_never_bypasses_missing_event_id_or_kickoff(monkeypatch):
+    monkeypatch.setenv("MANUAL_SETTLEMENT_GATE_STRICT", "true")
+    for invalid in (
+        {"sportybet_event_id": "", "kickoff": "2026-10-28T16:00:00Z"},
+        {"sportybet_event_id": "sr:match:88", "kickoff": ""},
+    ):
+        policy = editor._settlement_publication_policy(
+            [{**invalid, "score_competition_mapped": False,
+              "settlement_source_candidates": []}],
+            manual_review_override=True,
+            manual_review_reason="I will independently verify the official score at 90 minutes.",
+        )
+        assert not policy["allowed"] and policy["mode"] == "BLOCKED"
+        assert "identity" in policy["reason"].lower()
+
+
 def _ticket(share_code, event_status="pending"):
     return {
         "result_status": "pending",
