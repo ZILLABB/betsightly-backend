@@ -146,7 +146,10 @@ def audit(home, *, now=None):
         if (gid in verified or gid not in seen or game is None or
             game["status"] != "final" or
             row.get("source") not in APPROVED_RESEARCH_SOURCES or
-            row.get("source") != game.get("source") or
+            (row.get("source") != game.get("source") and not (
+                row.get("source") == "espn:nba:scoreboard:v1" and
+                game.get("source") == "sportsdataverse:espn_nba_schedules:v1"
+            )) or
             not final_at or
             final_at <= _timestamp(game.get("start_utc")) or
             row.get("home_score") != game.get("home_score") or
